@@ -100,14 +100,44 @@ export const useChatStore = defineStore('chat', () => {
     await runRound(assistant, content)
   }
 
+  const isBusy = computed(() =>
+    messages.value.some(
+      (message) => message.status === 'pending' || message.status === 'streaming',
+    ),
+  )
+
+  function cancelMessage(localId: string): void {
+    // 真正中断底层流，不只是 UI 上隐藏——否则后端会继续跑完并计费。
+    controllers.get(localId)?.abort()
+  }
+
+  async function retryMessage(localId: string): Promise<void> {
+    const assistant = messages.value.find((message) => message.localId === localId)
+    if (!assistant || assistant.role !== 'assistant') return
+
+    const questionIndex = messages.value.findIndex((message) => message.localId === localId) - 1
+    const question = messages.value[questionIndex]
+    if (!question) return
+
+    // 复用原 clientRequestId：后端据此可能直接返回已完成结果，避免重复计费（§5.9）。
+    assistant.status = 'pending'
+    assistant.errorMessage = undefined
+    assistant.steps = []
+
+    await runRound(assistant, question.text)
+  }
+
   return {
     messages,
     sessionId,
     selectedRoundId,
     isEmptyConversation,
+    isBusy,
     assistantRounds,
     currentAnswer,
     submitMessage,
+    retryMessage,
+    cancelMessage,
     selectRound,
     reset,
   }

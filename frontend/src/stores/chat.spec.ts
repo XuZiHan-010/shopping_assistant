@@ -75,3 +75,71 @@ describe('useChatStore', () => {
     expect(store.currentAnswer?.mode).toBe('METRIC')
   })
 })
+
+describe('取消与重试', () => {
+  it('取消会中断底层流并置为 cancelled，不是 error', async () => {
+    setChatTransport(createMockTransport({ chunkSizes: [1], stepDelayMs: 5 }))
+    const store = useChatStore()
+
+    const pending = store.submitMessage('昨天总 GMV 是多少？')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    store.cancelMessage(store.messages[1].localId)
+    await pending
+
+    expect(store.messages[1].status).toBe('cancelled')
+    expect(store.messages[1].errorMessage).toContain('已取消')
+  })
+
+  it('重试复用原 clientRequestId', async () => {
+    setChatTransport(createMockTransport({ chunkSizes: [1], stepDelayMs: 5 }))
+    const store = useChatStore()
+
+    const pending = store.submitMessage('你好')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    store.cancelMessage(store.messages[1].localId)
+    await pending
+    const original = store.messages[1].clientRequestId
+
+    setChatTransport(createMockTransport({ chunkSizes: [16], stepDelayMs: 0 }))
+    await store.retryMessage(store.messages[1].localId)
+
+    expect(store.messages[1].clientRequestId).toBe(original)
+    expect(store.messages[1].status).toBe('complete')
+    expect(store.messages).toHaveLength(2)
+  })
+
+  it('流没有 done 也没有 error 时落到 error，不停在 streaming', async () => {
+    setChatTransport(async () => {
+      const bytes = new TextEncoder().encode(
+        'event: step\ndata: {"label":"正在识别问题","node":"classify"}\n\n',
+      )
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(bytes)
+            controller.close()
+          },
+        }),
+      )
+    })
+    const store = useChatStore()
+
+    await store.submitMessage('你好')
+
+    expect(store.messages[1].status).toBe('error')
+    expect(store.messages[1].errorMessage).toContain('中断')
+  })
+
+  it('重试不累加阶段标签，而是重新开始计数', async () => {
+    setChatTransport(createMockTransport({ chunkSizes: [16], stepDelayMs: 0 }))
+    const store = useChatStore()
+    await store.submitMessage('你好')
+    const firstRun = store.messages[1].steps.length
+
+    await store.retryMessage(store.messages[1].localId)
+
+    expect(firstRun).toBeGreaterThan(0)
+    // 若 retryMessage 忘了清空 steps，这里会是 firstRun * 2。
+    expect(store.messages[1].steps).toHaveLength(firstRun)
+  })
+})
