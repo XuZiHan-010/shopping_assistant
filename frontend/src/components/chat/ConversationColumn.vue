@@ -1,11 +1,41 @@
 <script setup lang="ts">
 import { Sparkles } from '@lucide/vue'
+import { onUnmounted, ref } from 'vue'
+
+import { MOCK_QUICK_QUESTIONS } from '@/api/mock/scenarios'
+import { useChatStore } from '@/stores/chat'
 
 import ChatComposer from './ChatComposer.vue'
+import ChatMessage from './ChatMessage.vue'
 
-const emit = defineEmits<{
-  submit: [message: string]
-}>()
+const chatStore = useChatStore()
+
+// 重试点击过快（上一轮还没跑完就再点一次）时，retryMessage 会返回 false 而不是
+// 抛异常——这里必须把「本次点击被拒绝」的信息传给用户，否则点了没反应会显得像
+// UI 卡死。用一条短暂的 aria-live 提示承接，几秒后自动消失。
+const retryNotice = ref('')
+let retryNoticeTimer: ReturnType<typeof setTimeout> | undefined
+
+function showRetryNotice(text: string): void {
+  retryNotice.value = text
+  clearTimeout(retryNoticeTimer)
+  retryNoticeTimer = setTimeout(() => {
+    retryNotice.value = ''
+  }, 3000)
+}
+
+function ask(text: string): void {
+  void chatStore.submitMessage(text)
+}
+
+async function retry(localId: string): Promise<void> {
+  const started = await chatStore.retryMessage(localId)
+  if (!started) {
+    showRetryNotice('上一轮回答仍在处理中，请稍候再试。')
+  }
+}
+
+onUnmounted(() => clearTimeout(retryNoticeTimer))
 </script>
 
 <template>
@@ -18,12 +48,34 @@ const emit = defineEmits<{
           <p>可以查询经营指标、查看业务明细，也可以结合数据给出分析与建议。</p>
         </div>
       </section>
-      <section class="empty-card">
+
+      <section v-if="chatStore.isEmptyConversation" class="empty-card">
         <span>开始一段新会话</span>
         <p>输入经营问题后，这里会呈现分析过程、结论和行动建议。</p>
+        <ul class="quick-questions">
+          <li v-for="question in MOCK_QUICK_QUESTIONS" :key="question">
+            <button type="button" data-testid="quick-question" @click="ask(question)">
+              {{ question }}
+            </button>
+          </li>
+        </ul>
       </section>
+
+      <template v-else>
+        <ChatMessage
+          v-for="message in chatStore.messages"
+          :key="message.localId"
+          :message="message"
+          @retry="retry"
+          @cancel="chatStore.cancelMessage"
+          @select="chatStore.selectRound"
+        />
+      </template>
     </div>
-    <ChatComposer @submit="emit('submit', $event)" />
+    <p v-if="retryNotice" class="retry-notice" role="status" aria-live="polite">
+      {{ retryNotice }}
+    </p>
+    <ChatComposer @submit="ask" />
   </main>
 </template>
 
@@ -107,5 +159,40 @@ const emit = defineEmits<{
   color: var(--color-text-secondary);
   font-size: var(--font-size-control);
   font-weight: var(--font-weight-emphasis);
+}
+
+.quick-questions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2);
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.quick-questions button {
+  padding: var(--space-1-5) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  color: var(--color-text-secondary);
+  background: var(--color-surface);
+  font-size: var(--font-size-caption);
+  transition: var(--transition-interactive);
+}
+
+.quick-questions button:hover {
+  border-color: #cdd7fd;
+  color: var(--color-primary);
+  background: var(--color-primary-soft);
+}
+
+.retry-notice {
+  flex: none;
+  margin: 0;
+  padding: var(--space-1) var(--space-3);
+  color: var(--color-danger-text);
+  font-size: var(--font-size-caption);
+  text-align: center;
 }
 </style>
