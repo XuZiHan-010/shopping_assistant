@@ -49,8 +49,8 @@ describe('createMockTransport', () => {
     )
 
     const payload = await response.json()
-    expect(payload.items).toEqual(MOCK_MERCHANTS)
-    expect(payload.items.length).toBeGreaterThanOrEqual(2)
+    expect(payload.merchants).toEqual(MOCK_MERCHANTS)
+    expect(payload.merchants.length).toBeGreaterThanOrEqual(2)
   })
 
   it('已中止的 signal 会让请求以 AbortError 拒绝', async () => {
