@@ -3,6 +3,9 @@ import { BookOpen, MessageSquarePlus, PanelLeft } from '@lucide/vue'
 import { ref } from 'vue'
 
 import ConversationColumn from '@/components/chat/ConversationColumn.vue'
+import MetricChartPanel from '@/components/insights/MetricChartPanel.vue'
+import MetricDefinitionPanel from '@/components/insights/MetricDefinitionPanel.vue'
+import RecommendationPanel from '@/components/insights/RecommendationPanel.vue'
 import MerchantSwitcher from '@/components/layout/MerchantSwitcher.vue'
 import { useChatStore } from '@/stores/chat'
 
@@ -70,10 +73,8 @@ function startNewConversation(): void {
         data-testid="workspace-column"
         aria-label="指标与洞察"
       >
-        <div class="side-empty">
-          <span>指标洞察</span>
-          <p>发起指标类问题后，这里会显示指标口径和图表。</p>
-        </div>
+        <MetricDefinitionPanel :answer="chatStore.currentAnswer" />
+        <MetricChartPanel :answer="chatStore.currentAnswer" />
       </aside>
 
       <ConversationColumn id="main-content" data-testid="workspace-column" />
@@ -83,10 +84,7 @@ function startNewConversation(): void {
         data-testid="workspace-column"
         aria-label="行动建议"
       >
-        <div class="side-empty">
-          <span>行动建议</span>
-          <p>基于经营数据的建议和后续问题会显示在这里。</p>
-        </div>
+        <RecommendationPanel :answer="chatStore.currentAnswer" @ask="chatStore.submitMessage" />
       </aside>
     </section>
   </div>
@@ -225,6 +223,9 @@ function startNewConversation(): void {
 
 .workspace-side {
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
   overflow: auto;
   scrollbar-color: #cbd4e2 transparent;
   scrollbar-width: thin;
@@ -240,34 +241,6 @@ function startNewConversation(): void {
 
 .workspace-grid > :nth-child(2) {
   grid-area: chat;
-}
-
-.side-empty {
-  min-height: 150px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: var(--space-5);
-  border: 1px dashed #dbe2ed;
-  border-radius: 11px;
-  color: var(--color-text-muted);
-  background: rgba(250, 251, 254, 0.82);
-  text-align: center;
-}
-
-.side-empty span {
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-control);
-  font-weight: var(--font-weight-emphasis);
-}
-
-.side-empty p {
-  max-width: 210px;
-  margin: var(--space-2) 0 0;
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-caption);
-  line-height: var(--line-height-body);
 }
 
 @media (max-width: 1240px) {
