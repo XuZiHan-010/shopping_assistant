@@ -88,6 +88,9 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  // 与 retryMessage 不同，submitMessage 每次都用 newMessage() 生成全新的
+  // localId，controllers 里不会出现 key 覆盖，天然不存在同类重入问题——不需要
+  // 额外的守卫。
   async function submitMessage(text: string): Promise<void> {
     const content = text.trim()
     if (!content) return
@@ -111,13 +114,28 @@ export const useChatStore = defineStore('chat', () => {
     controllers.get(localId)?.abort()
   }
 
-  async function retryMessage(localId: string): Promise<void> {
+  /**
+   * 返回是否真的启动了新一轮，而不是静默吞掉——重入保护如果不给调用方任何
+   * 反馈，UI（未来的重试按钮）就无从知道这次点击是不是白点了。
+   */
+  async function retryMessage(localId: string): Promise<boolean> {
     const assistant = messages.value.find((message) => message.localId === localId)
-    if (!assistant || assistant.role !== 'assistant') return
+    if (!assistant || assistant.role !== 'assistant') return false
 
+    // 重入保护：retryMessage 复用 assistant.localId 作为 controllers 的 key（与
+    // 首次 submitMessage 时的 runRound 相同）。若上一轮还在 pending/streaming，
+    // 这里再跑一次会用同一个 key 覆盖 controllers 里的旧 AbortController；旧那
+    // 轮结束时的 finally 又会把新 controller 一并 delete 掉——此后 cancelMessage
+    // 就静默失效了（用户以为取消了，请求其实还在跑、还在计费）。所以必须在还
+    // 没跑之前就拦下来，而不是靠调用方（UI）自觉。
+    if (assistant.status === 'pending' || assistant.status === 'streaming') return false
+
+    // messages 只由 submitMessage 成对 push（user 紧跟 assistant），没有其他地方
+    // 会往中间插入或删除消息，所以「assistant 的前一条就是对应的 user 消息」这
+    // 个假设目前总成立。
     const questionIndex = messages.value.findIndex((message) => message.localId === localId) - 1
     const question = messages.value[questionIndex]
-    if (!question) return
+    if (!question) return false
 
     // 复用原 clientRequestId：后端据此可能直接返回已完成结果，避免重复计费（§5.9）。
     assistant.status = 'pending'
@@ -125,6 +143,7 @@ export const useChatStore = defineStore('chat', () => {
     assistant.steps = []
 
     await runRound(assistant, question.text)
+    return true
   }
 
   return {

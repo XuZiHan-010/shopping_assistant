@@ -142,4 +142,30 @@ describe('取消与重试', () => {
     // 若 retryMessage 忘了清空 steps，这里会是 firstRun * 2。
     expect(store.messages[1].steps).toHaveLength(firstRun)
   })
+
+  it('第一轮仍在进行时调用 retryMessage 不会启动第二轮，取消依然生效', async () => {
+    // 复现审查发现的问题：如果 retryMessage 在第一轮还没结束时又跑一次 runRound，
+    // 会用同一个 assistant.localId 覆盖 controllers 里的 AbortController；第一轮
+    // 结束时的 finally 再把它 delete 掉，之后 cancelMessage 就静默失效——用户以为
+    // 取消了，请求其实还在跑、还在计费。这里断言：进行中调用 retryMessage 会被
+    // 拒绝（返回 false），且原有的取消路径不受影响，最终仍能落到 cancelled。
+    setChatTransport(createMockTransport({ chunkSizes: [1], stepDelayMs: 5 }))
+    const store = useChatStore()
+
+    const pending = store.submitMessage('你好')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    const localId = store.messages[1].localId
+    expect(store.messages[1].status).not.toBe('complete')
+
+    const started = await store.retryMessage(localId)
+    expect(started).toBe(false)
+
+    store.cancelMessage(localId)
+    await pending
+
+    expect(store.messages[1].status).toBe('cancelled')
+    // 没有因为重入而多产生一轮对话。
+    expect(store.messages).toHaveLength(2)
+  })
 })
