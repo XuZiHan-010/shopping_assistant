@@ -1,0 +1,52 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: borough_test
+      POSTGRES_USER: borough
+      POSTGRES_PASSWORD: borough_local
+    ports:
+      - "55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U borough -d borough_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - borough_postgres_data:/var/lib/postgresql/data
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      APP_ENV: development
+      APP_VERSION: 0.1.0
+      DATABASE_URL: postgresql+psycopg://borough:borough_local@postgres:5432/borough_test
+      FRONTEND_ORIGIN: http://localhost:5173
+      BUSINESS_TIMEZONE: Asia/Shanghai
+      DEMO_MERCHANT_TOKENS: >-
+        {"merchant-100-token":"00000000-0000-0000-0000-000000000001",
+        "merchant-101-token":"00000000-0000-0000-0000-000000000002",
+        "merchant-102-token":"00000000-0000-0000-0000-000000000003"}
+      DEMO_MERCHANTS_ENDPOINT_ENABLED: "true"
+      PORT: "8000"
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  borough_postgres_data:

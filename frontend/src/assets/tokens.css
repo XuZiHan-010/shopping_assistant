@@ -1,0 +1,53 @@
+:root {
+  font-family: Inter, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  color: #182033;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+
+  --color-primary: #4f6ef7;
+  --color-primary-strong: #3f5bd8;
+  --color-primary-soft: #eef2ff;
+  --color-teal: #18a999;
+  --color-surface: rgba(255, 255, 255, 0.94);
+  --color-surface-muted: #f7f9fc;
+  --color-border: #e1e7f0;
+  --color-border-strong: #d6deea;
+  --color-text: #182033;
+  --color-text-secondary: #596579;
+  --color-text-muted: #8a95a7;
+  --color-danger-surface: #fdecea;
+  --color-danger-text: #611a15;
+
+  --space-0-5: 0.125rem;
+  --space-1: 0.25rem;
+  --space-1-5: 0.375rem;
+  --space-2: 0.5rem;
+  --space-2-5: 0.625rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+
+  --font-size-caption: 0.6875rem;
+  --font-size-body: 0.75rem;
+  --font-size-control: 0.8125rem;
+  --font-size-section-title: 1rem;
+  --font-size-page-title: 1.1875rem;
+  --line-height-body: 1.5;
+  --font-weight-control: 680;
+  --font-weight-emphasis: 750;
+  --font-weight-title: 780;
+
+  --control-height: 2.25rem;
+  --transition-colors: color 180ms ease, background-color 180ms ease, border-color 180ms ease;
+  --transition-interactive:
+    color 180ms ease, background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease,
+    transform 180ms ease;
+
+  --radius-small: 9px;
+  --radius-control: 10px;
+  --radius-card: 13px;
+  --radius-column: 18px;
+  --shadow-card: 0 12px 34px rgba(37, 52, 82, 0.08);
+  --shadow-control: 0 5px 16px rgba(37, 52, 82, 0.05);
+}

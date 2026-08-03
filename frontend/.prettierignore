@@ -1,0 +1,9 @@
+dist
+node_modules
+playwright-report
+test-results
+package-lock.json
+
+# OpenAPI 机器产物：由 npm run codegen 生成，禁止手改也不做格式化，
+# 否则 codegen:check 会因为格式差异永远失败。
+src/api/generated.ts

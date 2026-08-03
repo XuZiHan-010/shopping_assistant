@@ -1,0 +1,17 @@
+{
+  // 测试专用工程：它能看到仓库根的 docs/fixtures，而应用构建看不到。
+  // 刻意**不**被 tsconfig.json 引用——否则 `vue-tsc -b` 会在 Docker 构建里
+  // 一并检查它，又回到 TS2307。由 `npm run typecheck` 单独覆盖。
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.vitest.tsbuildinfo",
+    "types": ["vite/client", "node"],
+    "paths": {
+      "@/*": ["./src/*"],
+      "@fixtures/*": ["../docs/fixtures/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.vue", "env.d.ts"],
+  "exclude": []
+}

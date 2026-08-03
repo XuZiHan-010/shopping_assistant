@@ -1,0 +1,50 @@
+{
+  "analysis_sources": [
+    "NONE"
+  ],
+  "answer": "我无法执行修改、删除或影响订单和商品数据的操作，只能帮你查询和分析。你可以换成查看类问题再问一次。",
+  "answer_mode": "INVALID",
+  "category": "UNKNOWN",
+  "created_at": "2026-07-28T12:00:00Z",
+  "data_rows": null,
+  "degraded": false,
+  "degraded_reason": null,
+  "export": null,
+  "id": "6ae74465-a63a-5ba3-b74f-1d53cdca52aa",
+  "metric_code": null,
+  "metric_definition": null,
+  "metric_display_name": null,
+  "metric_owner": null,
+  "metric_source": null,
+  "metric_status": null,
+  "metric_unit": null,
+  "quality_attempts": 0,
+  "quality_notes": [],
+  "quality_status": "NOT_RUN",
+  "query_plan": null,
+  "recommendations": null,
+  "session_id": "0797fb52-910e-52c9-81af-36f08f5056f0",
+  "suggestion_alternates": [],
+  "suggestions": [
+    "我想查看保证金",
+    "最近7天咨询工单量",
+    "我要货品上架，具体规则有吗？"
+  ],
+  "thinking_steps": [
+    {
+      "label": "识别商家与业务意图",
+      "node": "classify"
+    },
+    {
+      "label": "整理演示规则说明",
+      "node": "compose"
+    },
+    {
+      "label": "整理结论与可执行建议",
+      "node": "suggest_questions"
+    }
+  ],
+  "total_rows": null,
+  "truncated": null,
+  "visualization": null
+}

@@ -1,0 +1,36 @@
+# 前端静态镜像。
+#
+# 只服务静态文件，**不代理 /api**：网络拓扑是「Backend 公开 + 严格 CORS」
+# （AGENTS.md §十四），前端通过 VITE_API_BASE_URL 直连后端，不引入反向代理容器。
+# 因此 src/api/client.ts 也刻意不提供同源 /api 回退——漏配变量必须响亮失败，
+# 而不是静默打到这台静态服务器上拿 404。
+
+:{$PORT:80} {
+	root * /srv
+	encode gzip
+
+	# 健康检查走独立静态文件，不参与 SPA 回退。
+	handle /health.html {
+		file_server
+	}
+
+	# /api 明确 404，不落进下面的 SPA 回退。
+	# 否则前端一旦误用同源路径，会拿到 200 + index.html，然后在把 HTML 当 JSON
+	# 解析时报出一个跟根因毫无关系的错误。这里让它响亮地失败。
+	handle /api/* {
+		respond "此处不提供 API，请检查 VITE_API_BASE_URL 配置" 404
+	}
+
+	# 带指纹的构建产物可长期缓存；index.html 必须每次校验，
+	# 否则用户会拿着旧 HTML 去请求已不存在的 chunk。
+	handle /assets/* {
+		header Cache-Control "public, max-age=31536000, immutable"
+		file_server
+	}
+
+	handle {
+		header Cache-Control "no-cache"
+		try_files {path} /index.html
+		file_server
+	}
+}

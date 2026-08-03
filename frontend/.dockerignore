@@ -1,0 +1,10 @@
+node_modules
+dist
+playwright-report
+test-results
+e2e
+*.log
+
+# 环境变量一律由部署平台注入，不进镜像。
+.env
+.env.*

@@ -1,0 +1,151 @@
+{
+  "analysis_sources": [
+    "FALLBACK"
+  ],
+  "answer": "昨天总 GMV 为 ¥256,920，较前一天增长 6.3%。最近 7 天 GMV 整体呈上升趋势，其中周末增长最明显；成交订单 1,284 单，客单价约 ¥200.09。",
+  "answer_mode": "METRIC",
+  "category": "TRADE",
+  "created_at": "2026-07-28T12:00:00Z",
+  "data_rows": [
+    {
+      "date": "07-22",
+      "value": 186420
+    },
+    {
+      "date": "07-23",
+      "value": 203510
+    },
+    {
+      "date": "07-24",
+      "value": 198760
+    },
+    {
+      "date": "07-25",
+      "value": 228390
+    },
+    {
+      "date": "07-26",
+      "value": 219850
+    },
+    {
+      "date": "07-27",
+      "value": 241680
+    },
+    {
+      "date": "07-28",
+      "value": 256920
+    }
+  ],
+  "degraded": true,
+  "degraded_reason": "当前为演示规则结果，未查询经营数据库",
+  "export": null,
+  "id": "b24375c9-1f09-5951-bbc4-09c4f4338ffc",
+  "metric_code": "gmv",
+  "metric_definition": "统计周期内已提交订单的商品金额合计，不扣除退款金额。",
+  "metric_display_name": "总 GMV 金额",
+  "metric_owner": "交易数据组",
+  "metric_source": "指标平台",
+  "metric_status": "UNVERIFIED",
+  "metric_unit": "元",
+  "quality_attempts": 0,
+  "quality_notes": [
+    "当前回答使用演示规则，不代表真实经营数据分析。"
+  ],
+  "quality_status": "DEGRADED",
+  "query_plan": {
+    "summary": "演示查询计划，未执行数据库查询。"
+  },
+  "recommendations": [
+    {
+      "action": "保持高转化商品库存，并为前 20 个热销 SKU 设置库存预警。",
+      "evidence": "GMV 连续两日增长，昨天达到近 7 日最高值。",
+      "title": "承接增长流量"
+    },
+    {
+      "action": "对比渠道、券活动与客单价，沉淀下一周期促销方案。",
+      "evidence": "周末 GMV 增幅高于工作日，存在可复用的流量窗口。",
+      "title": "复盘周末转化"
+    }
+  ],
+  "session_id": "308e4a2d-aa71-5719-bfc7-d9a28ef5373b",
+  "suggestion_alternates": [
+    [
+      "我想查看保证金",
+      "最近7天咨询工单量",
+      "我要货品上架，具体规则有吗？"
+    ],
+    [
+      "昨天总 GMV 是多少？",
+      "最近7天退货量趋势",
+      "查看优惠券明细"
+    ],
+    [
+      "查看商品上架明细",
+      "昨天退款金额是多少？",
+      "我的商家手机号是多少？"
+    ]
+  ],
+  "suggestions": [
+    "昨天成交订单有多少？",
+    "按品类拆分昨天 GMV",
+    "查看最近7天客单价趋势"
+  ],
+  "thinking_steps": [
+    {
+      "label": "识别商家与业务意图",
+      "node": "classify"
+    },
+    {
+      "label": "读取业务口径并整理演示数据",
+      "node": "compose"
+    },
+    {
+      "label": "整理结论与可执行建议",
+      "node": "suggest_questions"
+    }
+  ],
+  "total_rows": 7,
+  "truncated": false,
+  "visualization": {
+    "allowed_types": [
+      "line",
+      "bar"
+    ],
+    "data": [
+      {
+        "date": "07-22",
+        "value": 186420
+      },
+      {
+        "date": "07-23",
+        "value": 203510
+      },
+      {
+        "date": "07-24",
+        "value": 198760
+      },
+      {
+        "date": "07-25",
+        "value": 228390
+      },
+      {
+        "date": "07-26",
+        "value": 219850
+      },
+      {
+        "date": "07-27",
+        "value": 241680
+      },
+      {
+        "date": "07-28",
+        "value": 256920
+      }
+    ],
+    "dimension_key": "date",
+    "enabled": true,
+    "metric_key": "value",
+    "title": "总 GMV 金额演示趋势",
+    "type": "line",
+    "unit": "元"
+  }
+}

@@ -1,0 +1,27 @@
+"""Alembic 使用的完整 ORM 元数据。"""
+
+from app.models import (
+    Answer,
+    AuditLog,
+    Conversation,
+    Feedback,
+    KnowledgeDocument,
+    LlmUsage,
+    Merchant,
+    Message,
+    MetricDefinition,
+)
+from app.models.base import Base
+
+__all__ = [
+    "Answer",
+    "AuditLog",
+    "Base",
+    "Conversation",
+    "Feedback",
+    "KnowledgeDocument",
+    "LlmUsage",
+    "Merchant",
+    "Message",
+    "MetricDefinition",
+]

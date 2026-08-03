@@ -1,0 +1,213 @@
+/**
+ * Adapter 契约测试。
+ *
+ * 载荷全部来自 `docs/fixtures/chat/`——那是后端从真实 `FakeAgent` 导出的输出。
+ * 不在这里自造载荷：类型只保证字段名，保证不了语义组合，自造等于自己批改自己的
+ * 作业（见 `scripts/export_chat_fixtures.py` 的说明）。
+ */
+import chatGreeting from '@fixtures/chat/chat-greeting.json'
+import invalidRefused from '@fixtures/chat/invalid-refused.json'
+import metricGmv from '@fixtures/chat/metric-gmv.json'
+import metricOrderDetail from '@fixtures/chat/metric-order-detail.json'
+import metricRefund from '@fixtures/chat/metric-refund.json'
+import rulePlatform from '@fixtures/chat/rule-platform.json'
+import { describe, expect, it } from 'vitest'
+
+import type { components } from '@/api/generated'
+
+import { ChatContractError, toChatAnswer } from './chat'
+
+type RawChatResponse = components['schemas']['ChatResponse']
+
+const refund = metricRefund as RawChatResponse
+const gmv = metricGmv as RawChatResponse
+const orderDetail = metricOrderDetail as RawChatResponse
+const rule = rulePlatform as RawChatResponse
+const greeting = chatGreeting as RawChatResponse
+const refused = invalidRefused as RawChatResponse
+
+describe('toChatAnswer · 真实载荷', () => {
+  it('把 snake_case 映射成领域模型', () => {
+    const answer = toChatAnswer(refund)
+
+    expect(answer.id).toBe(refund.id)
+    expect(answer.sessionId).toBe(refund.session_id)
+    expect(answer.mode).toBe('METRIC')
+    expect(answer.category).toBe('REFUND')
+    expect(answer.answer).toContain('289 单')
+  })
+
+  it('METRIC 的指标口径八字段完整映射', () => {
+    const metric = toChatAnswer(refund).metric
+
+    expect(metric).toEqual({
+      code: 'return_count',
+      displayName: '退货量',
+      unit: '单',
+      definition: '统计周期内创建的有效退货退款单数量，按退货单去重。',
+      source: '指标资产库',
+      owner: '售后数据组',
+      status: 'UNVERIFIED',
+    })
+  })
+
+  it('METRIC 的数据与图表来自查询结果', () => {
+    const answer = toChatAnswer(gmv)
+
+    expect(answer.data?.rows).toHaveLength(7)
+    expect(answer.data?.totalRows).toBe(7)
+    expect(answer.data?.truncated).toBe(false)
+    expect(answer.data?.queryPlan).toBeTruthy()
+    expect(answer.chart?.enabled).toBe(true)
+    expect(answer.chart?.dimensionKey).toBe('date')
+    expect(answer.chart?.metricKey).toBe('value')
+    expect(answer.chart?.data).toHaveLength(7)
+  })
+
+  it('订单明细场景保留截断信息', () => {
+    const answer = toChatAnswer(orderDetail)
+
+    expect(answer.data?.totalRows).toBe(327)
+    expect(answer.data?.truncated).toBe(true)
+    expect(answer.data?.rows).toHaveLength(7)
+    // export 属于 B6，B2 不该有下载链接。
+    expect(answer.export).toBeUndefined()
+  })
+
+  it('建议逐条映射，保留 evidence 与 action', () => {
+    const recommendations = toChatAnswer(refund).recommendations
+
+    expect(recommendations).toHaveLength(2)
+    expect(recommendations[0]).toEqual({
+      title: '定位高退货商品',
+      evidence: '最近两日退货量连续上升，7 月 28 日达到周期峰值。',
+      action: '按商品和退款原因拆分，优先处理贡献前 20% 的 SKU。',
+    })
+  })
+
+  it('降级信息进入质量轨迹', () => {
+    const quality = toChatAnswer(refund).quality
+
+    expect(quality.degraded).toBe(true)
+    expect(quality.degradedReason).toBe('当前为演示规则结果，未查询经营数据库')
+    expect(quality.sources).toEqual(['FALLBACK'])
+    expect(quality.status).toBe('DEGRADED')
+    expect(quality.attempts).toBe(0)
+    expect(quality.notes.length).toBeGreaterThan(0)
+  })
+
+  it('猜你想问带当前组与备选组', () => {
+    const suggestions = toChatAnswer(refund).suggestions
+
+    expect(suggestions.current).toEqual([
+      '按商品查看退货量排行',
+      '这些退货的主要原因是什么？',
+      '导出最近7天退货明细',
+    ])
+    expect(suggestions.alternates).toHaveLength(3)
+    expect(suggestions.alternates[0]).toHaveLength(3)
+  })
+
+  it('思考步骤同构且不含内部实现细节', () => {
+    const steps = toChatAnswer(gmv).thinkingSteps
+
+    expect(steps.length).toBeGreaterThan(0)
+    for (const step of steps) {
+      expect(Object.keys(step).sort()).toEqual(['label', 'node'])
+      expect(step.label).not.toMatch(/SELECT|Doris|数据库/)
+    }
+  })
+})
+
+describe('toChatAnswer · 无数据模式不被编造默认值填充', () => {
+  it('RULE 没有指标、数据和图表', () => {
+    const answer = toChatAnswer(rule)
+
+    expect(answer.mode).toBe('RULE')
+    expect(answer.category).toBe('PLATFORM_RULE')
+    expect(answer.metric).toBeUndefined()
+    expect(answer.data).toBeUndefined()
+    expect(answer.chart).toBeUndefined()
+    // RULE 仍然有建议，这是原型行为。
+    expect(answer.recommendations).toHaveLength(2)
+  })
+
+  it('CHAT 是无来源回答', () => {
+    const answer = toChatAnswer(greeting)
+
+    expect(answer.mode).toBe('CHAT')
+    expect(answer.category).toBe('UNKNOWN')
+    expect(answer.metric).toBeUndefined()
+    expect(answer.data).toBeUndefined()
+    expect(answer.recommendations).toEqual([])
+    expect(answer.quality.sources).toEqual(['NONE'])
+    expect(answer.quality.degraded).toBe(false)
+    expect(answer.quality.degradedReason).toBeUndefined()
+  })
+
+  it('INVALID 同样不带数据', () => {
+    const answer = toChatAnswer(refused)
+
+    expect(answer.mode).toBe('INVALID')
+    expect(answer.data).toBeUndefined()
+    expect(answer.quality.sources).toEqual(['NONE'])
+  })
+})
+
+describe('toChatAnswer · 语义守卫', () => {
+  const clone = (patch: Partial<RawChatResponse>): RawChatResponse => ({ ...refund, ...patch })
+
+  it('拒绝空回答', () => {
+    expect(() => toChatAnswer(clone({ answer: '   ' }))).toThrow(ChatContractError)
+  })
+
+  it('拒绝枚举外的 answer_mode', () => {
+    const bad = clone({ answer_mode: 'SOMETHING_ELSE' as RawChatResponse['answer_mode'] })
+    expect(() => toChatAnswer(bad)).toThrow(ChatContractError)
+  })
+
+  it('拒绝空的 analysis_sources', () => {
+    expect(() => toChatAnswer(clone({ analysis_sources: [] }))).toThrow(ChatContractError)
+  })
+
+  it('CHAT 必须且只能是 NONE', () => {
+    const bad = { ...greeting, analysis_sources: ['DATABASE'] } as RawChatResponse
+    expect(() => toChatAnswer(bad)).toThrow(/NONE/)
+  })
+
+  it('CHAT 不得标记为降级', () => {
+    const bad = { ...greeting, degraded: true, degraded_reason: '演示' } as RawChatResponse
+    expect(() => toChatAnswer(bad)).toThrow(ChatContractError)
+  })
+
+  it('含 FALLBACK 时必须降级', () => {
+    const bad = clone({ degraded: false, degraded_reason: null })
+    expect(() => toChatAnswer(bad)).toThrow(/FALLBACK/)
+  })
+
+  it('降级必须给出原因', () => {
+    expect(() => toChatAnswer(clone({ degraded_reason: null }))).toThrow(ChatContractError)
+  })
+
+  it('METRIC 缺指标字段时报错', () => {
+    expect(() => toChatAnswer(clone({ metric_owner: null }))).toThrow(/metric/i)
+  })
+
+  it('METRIC 缺图表时报错', () => {
+    expect(() => toChatAnswer(clone({ visualization: null }))).toThrow(ChatContractError)
+  })
+
+  it('quality_attempts 超出 0–2 时报错', () => {
+    expect(() => toChatAnswer(clone({ quality_attempts: 3 }))).toThrow(ChatContractError)
+    expect(() => toChatAnswer(clone({ quality_attempts: -1 }))).toThrow(ChatContractError)
+  })
+
+  it('错误信息是中文，可直接展示', () => {
+    try {
+      toChatAnswer(clone({ answer: '' }))
+      expect.unreachable('应当抛出 ChatContractError')
+    } catch (error) {
+      expect((error as Error).message).toMatch(/[一-龥]/)
+    }
+  })
+})

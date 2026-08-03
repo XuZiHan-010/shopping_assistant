@@ -1,0 +1,50 @@
+{
+  "analysis_sources": [
+    "NONE"
+  ],
+  "answer": "您好，我是 Borough 商家 AI 助手，有任何经营、订单、退货、客服、赔付、优惠券、商品或商家资料问题都可以问我。",
+  "answer_mode": "CHAT",
+  "category": "UNKNOWN",
+  "created_at": "2026-07-28T12:00:00Z",
+  "data_rows": null,
+  "degraded": false,
+  "degraded_reason": null,
+  "export": null,
+  "id": "fdeac1b3-e67f-5af8-95a5-e3146025c038",
+  "metric_code": null,
+  "metric_definition": null,
+  "metric_display_name": null,
+  "metric_owner": null,
+  "metric_source": null,
+  "metric_status": null,
+  "metric_unit": null,
+  "quality_attempts": 0,
+  "quality_notes": [],
+  "quality_status": "NOT_RUN",
+  "query_plan": null,
+  "recommendations": null,
+  "session_id": "5009d671-95bd-58da-976f-75abce9b54ad",
+  "suggestion_alternates": [],
+  "suggestions": [
+    "我想查看保证金",
+    "最近7天咨询工单量",
+    "我要货品上架，具体规则有吗？"
+  ],
+  "thinking_steps": [
+    {
+      "label": "识别商家与业务意图",
+      "node": "classify"
+    },
+    {
+      "label": "整理演示规则说明",
+      "node": "compose"
+    },
+    {
+      "label": "整理结论与可执行建议",
+      "node": "suggest_questions"
+    }
+  ],
+  "total_rows": null,
+  "truncated": null,
+  "visualization": null
+}

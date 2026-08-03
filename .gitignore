@@ -1,0 +1,51 @@
+# ── 依赖与构建产物 ─────────────────────────────────────
+node_modules/
+dist/
+build/
+target/
+*.local
+
+# ── Python ────────────────────────────────────────────
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+backend/.venv/
+backend/.pytest_cache/
+backend/.mypy_cache/
+backend/.ruff_cache/
+backend/.coverage
+
+# ── 环境变量：只有 .env.example 与 .env.development 进版本库 ──
+.env
+.env.*
+!.env.example
+!.env.development
+
+# ── 测试与运行产物 ────────────────────────────────────
+playwright-report/
+test-results/
+coverage/
+*.log
+
+# ── 操作系统与编辑器垃圾 ──────────────────────────────
+__MACOSX/
+.DS_Store
+._*
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# ── superpowers 工作区（SDD ledger、审查包等临时产物）──
+.superpowers/
+
+# ── 只读参考项目：本地对照用，不进版本库 ──────────────
+# AGENTS.md 多处引用它们做口径与视觉参考，但它们既非 Borough 代码，
+# 也不被构建消费，占仓库一半体积。保留在本地即可。
+yshopping-merchant-ai 4/
+yshopping-prototype/

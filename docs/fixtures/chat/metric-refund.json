@@ -1,0 +1,151 @@
+{
+  "analysis_sources": [
+    "FALLBACK"
+  ],
+  "answer": "近 7 天退货量共 289 单，日均 41.3 单。7 月 28 日达到 61 单，较 7 月 22 日上升 90.6%。从趋势看，最近两日增长明显，需要优先排查高退货商品和退款原因。",
+  "answer_mode": "METRIC",
+  "category": "REFUND",
+  "created_at": "2026-07-28T12:00:00Z",
+  "data_rows": [
+    {
+      "date": "07-22",
+      "value": 32
+    },
+    {
+      "date": "07-23",
+      "value": 28
+    },
+    {
+      "date": "07-24",
+      "value": 35
+    },
+    {
+      "date": "07-25",
+      "value": 41
+    },
+    {
+      "date": "07-26",
+      "value": 39
+    },
+    {
+      "date": "07-27",
+      "value": 53
+    },
+    {
+      "date": "07-28",
+      "value": 61
+    }
+  ],
+  "degraded": true,
+  "degraded_reason": "当前为演示规则结果，未查询经营数据库",
+  "export": null,
+  "id": "71967237-7202-5f6c-bd1d-412ddcc6ac2a",
+  "metric_code": "return_count",
+  "metric_definition": "统计周期内创建的有效退货退款单数量，按退货单去重。",
+  "metric_display_name": "退货量",
+  "metric_owner": "售后数据组",
+  "metric_source": "指标资产库",
+  "metric_status": "UNVERIFIED",
+  "metric_unit": "单",
+  "quality_attempts": 0,
+  "quality_notes": [
+    "当前回答使用演示规则，不代表真实经营数据分析。"
+  ],
+  "quality_status": "DEGRADED",
+  "query_plan": {
+    "summary": "演示查询计划，未执行数据库查询。"
+  },
+  "recommendations": [
+    {
+      "action": "按商品和退款原因拆分，优先处理贡献前 20% 的 SKU。",
+      "evidence": "最近两日退货量连续上升，7 月 28 日达到周期峰值。",
+      "title": "定位高退货商品"
+    },
+    {
+      "action": "复核重点商品详情页，并抽查最近三日发货与质检记录。",
+      "evidence": "尺码不符、描述差异通常会驱动退货集中增长。",
+      "title": "检查履约与描述"
+    }
+  ],
+  "session_id": "bebf17f9-0413-59d6-9d5d-6e9e28f55156",
+  "suggestion_alternates": [
+    [
+      "我想查看保证金",
+      "最近7天咨询工单量",
+      "我要货品上架，具体规则有吗？"
+    ],
+    [
+      "昨天总 GMV 是多少？",
+      "最近7天退货量趋势",
+      "查看优惠券明细"
+    ],
+    [
+      "查看商品上架明细",
+      "昨天退款金额是多少？",
+      "我的商家手机号是多少？"
+    ]
+  ],
+  "suggestions": [
+    "按商品查看退货量排行",
+    "这些退货的主要原因是什么？",
+    "导出最近7天退货明细"
+  ],
+  "thinking_steps": [
+    {
+      "label": "识别商家与业务意图",
+      "node": "classify"
+    },
+    {
+      "label": "读取业务口径并整理演示数据",
+      "node": "compose"
+    },
+    {
+      "label": "整理结论与可执行建议",
+      "node": "suggest_questions"
+    }
+  ],
+  "total_rows": 7,
+  "truncated": false,
+  "visualization": {
+    "allowed_types": [
+      "line",
+      "bar"
+    ],
+    "data": [
+      {
+        "date": "07-22",
+        "value": 32
+      },
+      {
+        "date": "07-23",
+        "value": 28
+      },
+      {
+        "date": "07-24",
+        "value": 35
+      },
+      {
+        "date": "07-25",
+        "value": 41
+      },
+      {
+        "date": "07-26",
+        "value": 39
+      },
+      {
+        "date": "07-27",
+        "value": 53
+      },
+      {
+        "date": "07-28",
+        "value": 61
+      }
+    ],
+    "dimension_key": "date",
+    "enabled": true,
+    "metric_key": "value",
+    "title": "退货量演示趋势",
+    "type": "line",
+    "unit": "单"
+  }
+}
