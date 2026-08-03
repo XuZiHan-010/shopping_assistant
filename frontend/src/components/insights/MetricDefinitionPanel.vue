@@ -135,7 +135,7 @@ const statusLabel = computed(() => {
 
 .metric-panel__field dt {
   margin: 0;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   font-size: var(--font-size-caption);
 }
 
@@ -152,7 +152,7 @@ const statusLabel = computed(() => {
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-4) var(--space-2);
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   text-align: center;
 }
 

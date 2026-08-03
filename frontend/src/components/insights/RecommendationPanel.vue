@@ -161,7 +161,7 @@ const suggestedQuestions = computed(() => props.answer?.suggestions.current ?? [
 
 .recommendation-panel__notice {
   margin: 0;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   font-size: var(--font-size-caption);
   line-height: var(--line-height-body);
 }
@@ -172,7 +172,7 @@ const suggestedQuestions = computed(() => props.answer?.suggestions.current ?? [
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-4) var(--space-2);
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   text-align: center;
 }
 
