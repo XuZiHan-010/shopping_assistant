@@ -14,7 +14,9 @@
     "format:check": "prettier --check .",
     "format": "prettier --write .",
     "codegen": "openapi-typescript ../docs/api.json -o src/api/generated.ts",
-    "codegen:check": "node scripts/check-generated.mjs"
+    "codegen:check": "node scripts/check-generated.mjs",
+    "fixtures": "node scripts/sync-fixtures.mjs",
+    "fixtures:check": "node scripts/check-fixtures.mjs"
   },
   "dependencies": {
     "@lucide/vue": "^1.28.0",
