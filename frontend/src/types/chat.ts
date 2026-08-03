@@ -96,3 +96,23 @@ export interface ChatAnswer {
   recommendations: Recommendation[]
   export?: ExportInfo
 }
+
+/**
+ * 消息状态。cancelled 与 error 刻意分开：用户主动取消不是故障，
+ * UI 文案与是否提示重试都不同，混在一起会让每次取消都弹一次「出错了」。
+ */
+export type MessageStatus = 'pending' | 'streaming' | 'complete' | 'cancelled' | 'error'
+
+export interface ChatMessage {
+  localId: string
+  id?: string
+  /** 幂等键。入列时生成并常驻，重试路径直接从消息对象拿（前端方案 §5.9）。 */
+  clientRequestId: string
+  role: 'user' | 'assistant'
+  text: string
+  createdAt: string
+  status: MessageStatus
+  steps: ThinkingStep[]
+  errorMessage?: string
+  answer?: ChatAnswer
+}

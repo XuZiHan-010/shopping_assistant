@@ -5,6 +5,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import ConversationColumn from '@/components/chat/ConversationColumn.vue'
 import MerchantSwitcher from '@/components/layout/MerchantSwitcher.vue'
 import { useChatStore } from '@/stores/chat'
+import type { ChatMessage } from '@/types/chat'
 import AssistantView from './AssistantView.vue'
 
 describe('AssistantView', () => {
@@ -59,7 +60,18 @@ describe('AssistantView', () => {
   it('重复选择当前商家时保留会话，切换到其他商家时才重置', async () => {
     const wrapper = mountView()
     const chatStore = useChatStore()
-    chatStore.isEmptyConversation = false
+    // isEmptyConversation 在 F2 起由 messages 派生（只读），这里改为直接
+    // 灌入一条消息来模拟「已有会话」，而不是给只读的计算属性赋值。
+    const seedMessage: ChatMessage = {
+      localId: 'seed',
+      clientRequestId: 'seed',
+      role: 'user',
+      text: '你好',
+      createdAt: new Date().toISOString(),
+      status: 'complete',
+      steps: [],
+    }
+    chatStore.messages.push(seedMessage)
 
     await wrapper.get('button[aria-label="切换当前演示商家"]').trigger('click')
     await wrapper.get('[data-merchant="Borough商家100"]').trigger('click')
