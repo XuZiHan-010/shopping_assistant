@@ -669,7 +669,10 @@
       if (signal.aborted) throw abortError()
 
       if (request.path === '/api/demo/merchants') {
-        return jsonResponse({ items: MOCK_MERCHANTS })
+        // 契约里这个键是 merchants，不是 items——与 ConversationListResponse 不同。
+        return jsonResponse({
+          merchants: MOCK_MERCHANTS,
+        } satisfies components['schemas']['DemoMerchantListResponse'])
       }
 
       if (request.path === '/api/chat' && request.method === 'POST') {
@@ -1031,7 +1034,8 @@
     const response = await transport({ path: '/api/demo/merchants', method: 'GET' }, signal)
     const payload = (await response.json()) as components['schemas']['DemoMerchantListResponse']
 
-    return payload.items.map((item) => ({
+    // 注意键名是 merchants；会话列表用的才是 items。
+    return payload.merchants.map((item) => ({
       merchantId: item.merchant_id,
       displayName: item.display_name,
       token: item.token,
