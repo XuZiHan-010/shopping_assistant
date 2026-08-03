@@ -17,6 +17,8 @@ export default defineConfigWithVueTs(
       '**/test-results/**',
       // OpenAPI 机器产物，禁止手改，也不参与代码风格检查。
       'src/api/generated.ts',
+      // chat fixture 镜像，同样是机器产物，禁止手改，也不参与代码风格检查。
+      'src/api/mock/fixtures.generated.ts',
     ],
   },
   pluginVue.configs['flat/essential'],

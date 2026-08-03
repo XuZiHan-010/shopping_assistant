@@ -56,6 +56,8 @@ export async function renderModule() {
     '',
   ].join('\n')
 
+  // resolveConfig 找不到 .prettierrc 时静默返回 null，会回落到 prettier 默认值
+  // 而不报错；本仓库根目录一直有 .prettierrc，风险低，留意即可。
   const config = (await resolveConfig(outPath)) ?? {}
   return format(source, { ...config, filepath: outPath })
 }

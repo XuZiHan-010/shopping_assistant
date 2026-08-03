@@ -1,0 +1,11 @@
+# 生成产物统一钉成 LF 换行。
+#
+# 仓库开着 core.autocrlf=true（Windows 常见默认），没有这条规则时，Git 在
+# checkout/clone/reset 时会把这些文件的 LF 还原成 CRLF；而生成脚本
+# （openapi-typescript、prettier 的 endOfLine: lf 默认值）恒定产出 LF。
+# 于是 codegen:check / fixtures:check 的逐字节比对会在一次全新 clone 之后
+# 假失败——文件内容其实完全没有漂移，只是换行符被 Git 自己改写了。
+# 把这些机器生成文件钉成 eol=lf，让 Git 在任何平台的 checkout 结果都与
+# 生成脚本的输出一致。
+frontend/src/api/generated.ts eol=lf
+frontend/src/api/mock/fixtures.generated.ts eol=lf
