@@ -16,8 +16,8 @@ const chatStore = useChatStore()
 const retryNotice = ref('')
 let retryNoticeTimer: ReturnType<typeof setTimeout> | undefined
 
-function showRetryNotice(text: string): void {
-  retryNotice.value = text
+function showRetryNotice(): void {
+  retryNotice.value = '上一轮回答仍在处理中，请稍候再试。'
   clearTimeout(retryNoticeTimer)
   retryNoticeTimer = setTimeout(() => {
     retryNotice.value = ''
@@ -31,7 +31,7 @@ function ask(text: string): void {
 async function retry(localId: string): Promise<void> {
   const started = await chatStore.retryMessage(localId)
   if (!started) {
-    showRetryNotice('上一轮回答仍在处理中，请稍候再试。')
+    showRetryNotice()
   }
 }
 
