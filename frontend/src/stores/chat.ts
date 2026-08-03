@@ -97,8 +97,18 @@ export const useChatStore = defineStore('chat', () => {
 
     const clientRequestId = crypto.randomUUID()
     const user = newMessage('user', content, clientRequestId, 'complete')
-    const assistant = newMessage('assistant', '', clientRequestId, 'pending')
-    messages.value.push(user, assistant)
+    const rawAssistant = newMessage('assistant', '', clientRequestId, 'pending')
+    messages.value.push(user, rawAssistant)
+
+    // 陷阱：push 进去的是原始对象；push 完之后 messages.value 是响应式数组，
+    // 但 rawAssistant 变量本身仍然指向未经代理的原始对象。如果直接把
+    // rawAssistant 传给 runRound，里面对 status/steps/answer 的赋值都发生在
+    // 原始对象上，不经过响应式代理的 set 陷阱，不会触发依赖更新——组件读到的
+    // 数值最终是对的（因为代理只是转发到同一个原始对象），但从来不会因为这些
+    // 赋值而重新渲染，界面就会永远停在 push 那一刻的状态（例如卡在「正在准备」
+    // 且看不到最终答案）。这里必须重新从 messages.value 里取出代理版本再传下去
+    // ——与 retryMessage 的做法一致。
+    const assistant = messages.value.find((message) => message.localId === rawAssistant.localId)!
 
     await runRound(assistant, content)
   }
