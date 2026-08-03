@@ -159,14 +159,14 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
     }
 
     if (request.path === '/api/conversations' && request.method === 'GET') {
-      const items: components['schemas']['ConversationSummary'][] = [
-        ...conversations.values(),
-      ].map((item) => ({
-        id: item.id,
-        title: item.title,
-        created_at: item.createdAt,
-        updated_at: item.createdAt,
-      }))
+      const items: components['schemas']['ConversationSummary'][] = [...conversations.values()].map(
+        (item) => ({
+          id: item.id,
+          title: item.title,
+          created_at: item.createdAt,
+          updated_at: item.createdAt,
+        }),
+      )
       return jsonResponse({
         items,
         limit: 20,

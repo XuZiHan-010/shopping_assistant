@@ -33,9 +33,7 @@ export async function resolveTransport(): Promise<ChatTransport> {
   if (cached) return cached
 
   if (!isMockEnabled()) {
-    throw new Error(
-      '真实传输层将在 F3 提供。当前请设置 VITE_USE_MOCK=true 使用演示数据。',
-    )
+    throw new Error('真实传输层将在 F3 提供。当前请设置 VITE_USE_MOCK=true 使用演示数据。')
   }
 
   const { createMockTransport } = await import('./mock/transport')
