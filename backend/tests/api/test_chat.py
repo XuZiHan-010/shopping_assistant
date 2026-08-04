@@ -16,7 +16,6 @@ import pytest
 import structlog
 from httpx import ASGITransport, AsyncClient
 
-from app.agent.fake_agent import FakeAgent
 from app.api.dependencies import get_chat_service
 from app.api.routes import chat as chat_route
 from app.core.config import Settings
@@ -26,6 +25,7 @@ from app.main import create_app
 from app.schemas.chat import ChatRequest
 from app.services.chat_service import ChatExecution
 from tests.conftest import MERCHANT_ONE_AUTH
+from tests.support.agent import DeterministicAgent
 
 pytestmark = pytest.mark.asyncio
 
@@ -38,7 +38,7 @@ class StubChatService:
     """可控替身：延迟、异常和重放都由测试指定。"""
 
     def __init__(self, *, delay: float = 0.0, error: BaseException | None = None) -> None:
-        self._agent = FakeAgent()
+        self._agent = DeterministicAgent()
         self._delay = delay
         self._error = error
         self._executions: dict[str, ChatExecution] = {}
@@ -418,9 +418,10 @@ async def test_end_to_end_chat_persists_and_replays_by_client_request_id(
     assert first.status_code == 200
     assert replay.status_code == 200
     assert replay.json() == first.json()
-    assert first.json()["answer_mode"] == "METRIC"
+    assert first.json()["answer_mode"] == "CHAT"
     assert first.json()["analysis_sources"] == ["FALLBACK"]
     assert first.json()["degraded"] is True
+    assert "未配置" in first.json()["degraded_reason"]
 
 
 async def test_end_to_end_reused_key_with_new_message_conflicts(
@@ -479,5 +480,5 @@ async def test_end_to_end_stream_stays_readable_as_an_async_byte_stream(
 
     events = parse_sse(b"".join(received).decode("utf-8"))
     assert [name for name, _ in events][-1] == "done"
-    assert events[-1][1]["answer_mode"] == "METRIC"
-    assert events[-1][1]["category"] == "REFUND"
+    assert events[-1][1]["answer_mode"] == "CHAT"
+    assert events[-1][1]["category"] == "UNKNOWN"

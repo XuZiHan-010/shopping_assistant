@@ -421,6 +421,16 @@
         "title": "AnswerMode",
         "description": "回答模式。ATTACHMENT 为 P1 预留值，B2 不产生该模式。"
       },
+      "ChartType": {
+        "type": "string",
+        "enum": [
+          "LINE",
+          "BAR",
+          "PIE"
+        ],
+        "title": "ChartType",
+        "description": "后端允许的图表类型。\n\n约束在契约侧声明后由 OpenAPI 自动传给前端，Adapter 无须自行窄化自由字符串。"
+      },
       "ChatRequest": {
         "properties": {
           "message": {
@@ -1140,17 +1150,16 @@
           "type": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/ChartType"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Type"
+            ]
           },
           "allowed_types": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/ChartType"
             },
             "type": "array",
             "title": "Allowed Types"

@@ -134,6 +134,14 @@ export interface components {
          * @enum {string}
          */
         AnswerMode: "METRIC" | "DETAIL" | "RULE" | "IDENTITY" | "CHAT" | "INVALID" | "ATTACHMENT";
+        /**
+         * ChartType
+         * @description 后端允许的图表类型。
+         *
+         *     约束在契约侧声明后由 OpenAPI 自动传给前端，Adapter 无须自行窄化自由字符串。
+         * @enum {string}
+         */
+        ChartType: "LINE" | "BAR" | "PIE";
         /** ChatRequest */
         ChatRequest: {
             /** Message */
@@ -402,10 +410,9 @@ export interface components {
         Visualization: {
             /** Enabled */
             enabled: boolean;
-            /** Type */
-            type?: string | null;
+            type?: components["schemas"]["ChartType"] | null;
             /** Allowed Types */
-            allowed_types?: string[];
+            allowed_types?: components["schemas"]["ChartType"][];
             /** Title */
             title?: string | null;
             /** Dimension Key */

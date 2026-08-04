@@ -1,16 +1,38 @@
 <script setup lang="ts">
 import { ArrowUp, Paperclip } from '@lucide/vue'
-import { ref } from 'vue'
+import { nextTick, ref, watch } from 'vue'
+
+const props = withDefaults(defineProps<{ busy?: boolean }>(), { busy: false })
 
 const emit = defineEmits<{
   submit: [message: string]
 }>()
 
 const message = ref('')
+const textareaElement = ref<HTMLTextAreaElement | null>(null)
+
+/**
+ * 输入框随内容长高。没有用 CSS 的 field-sizing: content——它目前只有 Chromium
+ * 支持，Firefox 与 Safari 会直接退回固定单行。
+ */
+function resizeTextarea(): void {
+  const element = textareaElement.value
+  if (!element) return
+
+  // 先归零再读 scrollHeight：不归零的话，内容变短时 scrollHeight 仍是上一次被
+  // 撑开的高度，输入框就只会长、不会缩。max-height 交给 CSS 封顶。
+  element.style.height = 'auto'
+  element.style.height = `${element.scrollHeight}px`
+}
+
+// 覆盖输入、粘贴、发送后清空——都是 message 变化，一处接住就够。
+watch(message, () => void nextTick(resizeTextarea))
 
 function submitMessage(): void {
   const content = message.value.trim()
-  if (!content) return
+  // 上一轮在途时不发。Store 那层也有同样的守卫（那才是权威），这里只是不让用户
+  // 白敲一次回车——两层都要有：输入区可能被别的入口复用。
+  if (!content || props.busy) return
 
   emit('submit', content)
   message.value = ''
@@ -37,6 +59,7 @@ function handleKeydown(event: KeyboardEvent): void {
         <Paperclip :size="18" aria-hidden="true" />
       </button>
       <textarea
+        ref="textareaElement"
         v-model="message"
         name="merchant-question"
         rows="1"
@@ -48,8 +71,8 @@ function handleKeydown(event: KeyboardEvent): void {
       <button
         class="chat-composer__send"
         type="submit"
-        aria-label="发送问题"
-        :disabled="!message.trim()"
+        :aria-label="busy ? '上一轮回答仍在进行中' : '发送问题'"
+        :disabled="!message.trim() || busy"
       >
         <ArrowUp :size="18" aria-hidden="true" />
       </button>

@@ -51,7 +51,6 @@ const ANALYSIS_SOURCES = [
   'NONE',
 ] as const
 
-const NO_SOURCE_MODES = new Set(['CHAT', 'INVALID'])
 const METRIC_FIELDS = [
   'metric_code',
   'metric_display_name',
@@ -90,13 +89,23 @@ const semanticGuard = z
     if (hasNone && sources.length > 1) {
       fail('analysis_sources 中的 NONE 只能单独出现')
     }
-    if (NO_SOURCE_MODES.has(value.answer_mode)) {
+    if (value.answer_mode === 'INVALID') {
       if (!hasNone || sources.length > 1) {
-        fail(`${value.answer_mode} 模式的 analysis_sources 必须是 ["NONE"]`)
+        fail('INVALID 模式的 analysis_sources 必须是 ["NONE"]')
       }
       if (value.degraded) {
-        fail(`${value.answer_mode} 模式不应标记为降级`)
+        fail('INVALID 模式不应标记为降级')
       }
+    }
+    if (value.answer_mode === 'CHAT' && !value.degraded && (!hasNone || sources.length > 1)) {
+      fail('未降级的 CHAT 模式的 analysis_sources 必须是 ["NONE"]')
+    }
+    if (
+      value.answer_mode === 'CHAT' &&
+      value.degraded &&
+      (sources.length !== 1 || sources[0] !== 'FALLBACK')
+    ) {
+      fail('降级的 CHAT 模式的 analysis_sources 必须是 ["FALLBACK"]')
     }
     if (sources.includes('FALLBACK') && !value.degraded) {
       fail('含 FALLBACK 来源时 degraded 必须为 true')

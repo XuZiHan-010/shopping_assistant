@@ -44,6 +44,17 @@ class MetricStatus(StrEnum):
     UNVERIFIED = "UNVERIFIED"
 
 
+class ChartType(StrEnum):
+    """后端允许的图表类型。
+
+    约束在契约侧声明后由 OpenAPI 自动传给前端，Adapter 无须自行窄化自由字符串。
+    """
+
+    LINE = "LINE"
+    BAR = "BAR"
+    PIE = "PIE"
+
+
 class QuestionCategory(StrEnum):
     """商家问题的业务分类。
 
@@ -97,8 +108,8 @@ class ExportInfo(BaseModel):
 
 class Visualization(BaseModel):
     enabled: bool
-    type: str | None = None
-    allowed_types: list[str] = Field(default_factory=list)
+    type: ChartType | None = None
+    allowed_types: list[ChartType] = Field(default_factory=list)
     title: str | None = None
     dimension_key: str | None = None
     metric_key: str | None = None
@@ -164,11 +175,23 @@ class ChatResponse(BaseModel):
         sources = set(self.analysis_sources)
         if AnalysisSource.NONE in sources and sources != {AnalysisSource.NONE}:
             raise ValueError("analysis_sources 中的 NONE 只能单独出现")
-        if self.answer_mode in {AnswerMode.CHAT, AnswerMode.INVALID}:
+        if self.answer_mode is AnswerMode.INVALID:
             if self.analysis_sources != [AnalysisSource.NONE]:
-                raise ValueError("CHAT 和 INVALID 必须仅使用 NONE 来源")
+                raise ValueError("INVALID 必须仅使用 NONE 来源")
             if self.degraded:
-                raise ValueError("CHAT 和 INVALID 不应标记为降级")
+                raise ValueError("INVALID 不应标记为降级")
+        if (
+            self.answer_mode is AnswerMode.CHAT
+            and not self.degraded
+            and self.analysis_sources != [AnalysisSource.NONE]
+        ):
+            raise ValueError("未降级的 CHAT 必须仅使用 NONE 来源")
+        if (
+            self.answer_mode is AnswerMode.CHAT
+            and self.degraded
+            and self.analysis_sources != [AnalysisSource.FALLBACK]
+        ):
+            raise ValueError("降级的 CHAT 必须仅使用 FALLBACK 来源")
         if AnalysisSource.FALLBACK in sources and not self.degraded:
             raise ValueError("含 FALLBACK 来源时 degraded 必须为 true")
         if self.degraded and not self.degraded_reason:

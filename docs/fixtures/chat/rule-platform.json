@@ -1,14 +1,14 @@
 {
   "analysis_sources": [
-    "FALLBACK"
+    "KNOWLEDGE"
   ],
-  "answer": "货品上架需要完成「资料完整性、类目资质、价格与描述、平台审核」四项检查。\n\n1. 商品标题、主图、规格、品牌与类目必须完整；\n2. 特殊类目需提交对应资质，品牌商品需提供授权链路；\n3. 售价、库存、运费模板和售后说明必须有效；\n4. 禁止使用绝对化宣传、站外引流或与实物不符的描述。\n\n提交后会依次经过内容审核与风控审核，通过后即可上架。",
+  "answer": "根据知识库检索到的资料：\n- 交易 退款 商品 规则\n  来源：index/README.md\n- 退款 退货 售后\n  来源：业务/退款/规则.md",
   "answer_mode": "RULE",
   "category": "PLATFORM_RULE",
   "created_at": "2026-07-28T12:00:00Z",
   "data_rows": null,
-  "degraded": true,
-  "degraded_reason": "当前为演示规则结果，未查询经营数据库",
+  "degraded": false,
+  "degraded_reason": null,
   "export": null,
   "id": "7b9f4547-a211-5bde-b7ff-efbd4a0544cf",
   "metric_code": null,
@@ -19,58 +19,75 @@
   "metric_status": null,
   "metric_unit": null,
   "quality_attempts": 0,
-  "quality_notes": [
-    "当前回答未检索正式知识库。"
-  ],
-  "quality_status": "DEGRADED",
+  "quality_notes": [],
+  "quality_status": "NOT_RUN",
   "query_plan": null,
-  "recommendations": [
-    {
-      "action": "准备标题、图片、规格、价格、库存和售后说明后再提交。",
-      "evidence": "完整资料可以减少审核打回与重复修改。",
-      "title": "先做资料自检"
-    },
-    {
-      "action": "先确认目标类目的资质清单与授权有效期。",
-      "evidence": "特殊类目和品牌商品存在额外准入要求。",
-      "title": "核对类目资质"
-    }
-  ],
+  "recommendations": null,
   "session_id": "626b96e6-f815-5e61-8990-eb6711a59f20",
   "suggestion_alternates": [
     [
-      "我想查看保证金",
-      "最近7天咨询工单量",
-      "我要货品上架，具体规则有吗？"
-    ],
-    [
-      "昨天总 GMV 是多少？",
-      "最近7天退货量趋势",
-      "查看优惠券明细"
-    ],
-    [
-      "查看商品上架明细",
-      "昨天退款金额是多少？",
-      "我的商家手机号是多少？"
+      "商品发布前要完成哪些检查？",
+      "特殊类目需要哪些额外材料？",
+      "平台发货时效规则是什么？"
     ]
   ],
   "suggestions": [
-    "我的商品为什么审核不通过？",
-    "查看商品上架明细",
-    "哪些类目需要特殊资质？"
+    "商品上架需要哪些资质？",
+    "商品审核被驳回后怎么处理？",
+    "禁售商品规则有哪些？"
   ],
   "thinking_steps": [
     {
-      "label": "识别商家与业务意图",
-      "node": "classify"
+      "label": "识别商家与会话上下文",
+      "node": "load_context"
     },
     {
-      "label": "整理演示规则说明",
-      "node": "compose"
+      "label": "读取业务知识索引",
+      "node": "retrieve_knowledge_index"
     },
     {
-      "label": "整理结论与可执行建议",
+      "label": "识别问题类型与业务域",
+      "node": "classify_intent"
+    },
+    {
+      "label": "结构化理解问题",
+      "node": "understand_intent"
+    },
+    {
+      "label": "校验查询意图",
+      "node": "validate_intent"
+    },
+    {
+      "label": "读取业务知识正文",
+      "node": "retrieve_knowledge_detail"
+    },
+    {
+      "label": "查询经营数据",
+      "node": "query_data"
+    },
+    {
+      "label": "整理回答",
+      "node": "compose_answer"
+    },
+    {
+      "label": "本地校验回答",
+      "node": "local_validate"
+    },
+    {
+      "label": "复核回答质量",
+      "node": "review_answer"
+    },
+    {
+      "label": "判断是否需要重试",
+      "node": "decide_retry"
+    },
+    {
+      "label": "生成推荐问题",
       "node": "suggest_questions"
+    },
+    {
+      "label": "保存本轮回答",
+      "node": "persist_answer"
     }
   ],
   "total_rows": null,

@@ -2,150 +2,119 @@
   "analysis_sources": [
     "FALLBACK"
   ],
-  "answer": "昨天总 GMV 为 ¥256,920，较前一天增长 6.3%。最近 7 天 GMV 整体呈上升趋势，其中周末增长最明显；成交订单 1,284 单，客单价约 ¥200.09。",
+  "answer": "已识别指标和查询范围；经营数据查询将在 B4 接入。",
   "answer_mode": "METRIC",
   "category": "TRADE",
   "created_at": "2026-07-28T12:00:00Z",
-  "data_rows": [
-    {
-      "date": "07-22",
-      "value": 186420
-    },
-    {
-      "date": "07-23",
-      "value": 203510
-    },
-    {
-      "date": "07-24",
-      "value": 198760
-    },
-    {
-      "date": "07-25",
-      "value": 228390
-    },
-    {
-      "date": "07-26",
-      "value": 219850
-    },
-    {
-      "date": "07-27",
-      "value": 241680
-    },
-    {
-      "date": "07-28",
-      "value": 256920
-    }
-  ],
+  "data_rows": [],
   "degraded": true,
-  "degraded_reason": "当前为演示规则结果，未查询经营数据库",
+  "degraded_reason": "经营数据安全查询将在 B4 接入",
   "export": null,
   "id": "b24375c9-1f09-5951-bbc4-09c4f4338ffc",
   "metric_code": "gmv",
-  "metric_definition": "统计周期内已提交订单的商品金额合计，不扣除退款金额。",
-  "metric_display_name": "总 GMV 金额",
-  "metric_owner": "交易数据组",
-  "metric_source": "指标平台",
-  "metric_status": "UNVERIFIED",
+  "metric_definition": "已支付订单金额之和。",
+  "metric_display_name": "成交 GMV",
+  "metric_owner": "经营分析组",
+  "metric_source": "Borough 指标目录",
+  "metric_status": "ACTIVE",
   "metric_unit": "元",
   "quality_attempts": 0,
   "quality_notes": [
-    "当前回答使用演示规则，不代表真实经营数据分析。"
+    "当前未执行经营数据查询。"
   ],
   "quality_status": "DEGRADED",
   "query_plan": {
-    "summary": "演示查询计划，未执行数据库查询。"
+    "summary": "已校验结构化查询意图，尚未执行数据查询。"
   },
   "recommendations": [
     {
-      "action": "保持高转化商品库存，并为前 20 个热销 SKU 设置库存预警。",
-      "evidence": "GMV 连续两日增长，昨天达到近 7 日最高值。",
-      "title": "承接增长流量"
+      "action": "B4 接入受控查询后展示经营结果。",
+      "evidence": "B3 已完成结构化意图校验，尚未执行经营数据查询。",
+      "title": "等待数据查询接入"
     },
     {
-      "action": "对比渠道、券活动与客单价，沉淀下一周期促销方案。",
-      "evidence": "周末 GMV 增幅高于工作日，存在可复用的流量窗口。",
-      "title": "复盘周末转化"
+      "action": "确认日期范围和维度后再查询。",
+      "evidence": "已识别指标代码：gmv。",
+      "title": "核对指标口径"
     }
   ],
   "session_id": "308e4a2d-aa71-5719-bfc7-d9a28ef5373b",
   "suggestion_alternates": [
     [
-      "我想查看保证金",
-      "最近7天咨询工单量",
-      "我要货品上架，具体规则有吗？"
-    ],
-    [
-      "昨天总 GMV 是多少？",
-      "最近7天退货量趋势",
-      "查看优惠券明细"
-    ],
-    [
-      "查看商品上架明细",
-      "昨天退款金额是多少？",
-      "我的商家手机号是多少？"
+      "按类目对比成交 GMV",
+      "成功订单量是多少？",
+      "最近 7 天付款用户数变化"
     ]
   ],
   "suggestions": [
-    "昨天成交订单有多少？",
-    "按品类拆分昨天 GMV",
-    "查看最近7天客单价趋势"
+    "昨天总 GMV 是多少？",
+    "最近 7 天订单量趋势",
+    "按商品查看订单明细"
   ],
   "thinking_steps": [
     {
-      "label": "识别商家与业务意图",
-      "node": "classify"
+      "label": "识别商家与会话上下文",
+      "node": "load_context"
     },
     {
-      "label": "读取业务口径并整理演示数据",
-      "node": "compose"
+      "label": "读取业务知识索引",
+      "node": "retrieve_knowledge_index"
     },
     {
-      "label": "整理结论与可执行建议",
+      "label": "识别问题类型与业务域",
+      "node": "classify_intent"
+    },
+    {
+      "label": "结构化理解问题",
+      "node": "understand_intent"
+    },
+    {
+      "label": "校验查询意图",
+      "node": "validate_intent"
+    },
+    {
+      "label": "读取业务知识正文",
+      "node": "retrieve_knowledge_detail"
+    },
+    {
+      "label": "查询经营数据",
+      "node": "query_data"
+    },
+    {
+      "label": "整理回答",
+      "node": "compose_answer"
+    },
+    {
+      "label": "本地校验回答",
+      "node": "local_validate"
+    },
+    {
+      "label": "复核回答质量",
+      "node": "review_answer"
+    },
+    {
+      "label": "判断是否需要重试",
+      "node": "decide_retry"
+    },
+    {
+      "label": "生成推荐问题",
       "node": "suggest_questions"
+    },
+    {
+      "label": "保存本轮回答",
+      "node": "persist_answer"
     }
   ],
-  "total_rows": 7,
+  "total_rows": 0,
   "truncated": false,
   "visualization": {
-    "allowed_types": [
-      "line",
-      "bar"
-    ],
-    "data": [
-      {
-        "date": "07-22",
-        "value": 186420
-      },
-      {
-        "date": "07-23",
-        "value": 203510
-      },
-      {
-        "date": "07-24",
-        "value": 198760
-      },
-      {
-        "date": "07-25",
-        "value": 228390
-      },
-      {
-        "date": "07-26",
-        "value": 219850
-      },
-      {
-        "date": "07-27",
-        "value": 241680
-      },
-      {
-        "date": "07-28",
-        "value": 256920
-      }
-    ],
-    "dimension_key": "date",
-    "enabled": true,
-    "metric_key": "value",
-    "title": "总 GMV 金额演示趋势",
-    "type": "line",
-    "unit": "元"
+    "allowed_types": [],
+    "data": [],
+    "dimension_key": null,
+    "enabled": false,
+    "metric_key": null,
+    "title": null,
+    "type": null,
+    "unit": null
   }
 }

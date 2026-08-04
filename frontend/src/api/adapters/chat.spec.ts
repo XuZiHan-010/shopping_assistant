@@ -8,7 +8,7 @@
 import chatGreeting from '@fixtures/chat/chat-greeting.json'
 import invalidRefused from '@fixtures/chat/invalid-refused.json'
 import metricGmv from '@fixtures/chat/metric-gmv.json'
-import metricOrderDetail from '@fixtures/chat/metric-order-detail.json'
+import detailOrder from '@fixtures/chat/detail-order.json'
 import metricRefund from '@fixtures/chat/metric-refund.json'
 import rulePlatform from '@fixtures/chat/rule-platform.json'
 import { describe, expect, it } from 'vitest'
@@ -21,7 +21,7 @@ type RawChatResponse = components['schemas']['ChatResponse']
 
 const refund = metricRefund as RawChatResponse
 const gmv = metricGmv as RawChatResponse
-const orderDetail = metricOrderDetail as RawChatResponse
+const orderDetail = detailOrder as RawChatResponse
 const rule = rulePlatform as RawChatResponse
 const greeting = chatGreeting as RawChatResponse
 const refused = invalidRefused as RawChatResponse
@@ -34,7 +34,7 @@ describe('toChatAnswer · 真实载荷', () => {
     expect(answer.sessionId).toBe(refund.session_id)
     expect(answer.mode).toBe('METRIC')
     expect(answer.category).toBe('REFUND')
-    expect(answer.answer).toContain('289 单')
+    expect(answer.answer).toContain('B4')
   })
 
   it('METRIC 的指标口径八字段完整映射', () => {
@@ -43,45 +43,43 @@ describe('toChatAnswer · 真实载荷', () => {
     expect(metric).toEqual({
       code: 'return_count',
       displayName: '退货量',
-      unit: '单',
-      definition: '统计周期内创建的有效退货退款单数量，按退货单去重。',
-      source: '指标资产库',
-      owner: '售后数据组',
-      status: 'UNVERIFIED',
+      unit: '件',
+      definition: '统计周期内创建的有效退货退款单数量。',
+      source: 'Borough 指标目录',
+      owner: '经营分析组',
+      status: 'ACTIVE',
     })
   })
 
-  it('METRIC 的数据与图表来自查询结果', () => {
+  it('B3 的 METRIC 明确返回未查询的受控空结果', () => {
     const answer = toChatAnswer(gmv)
 
-    expect(answer.data?.rows).toHaveLength(7)
-    expect(answer.data?.totalRows).toBe(7)
+    expect(answer.data?.rows).toHaveLength(0)
+    expect(answer.data?.totalRows).toBe(0)
     expect(answer.data?.truncated).toBe(false)
     expect(answer.data?.queryPlan).toBeTruthy()
-    expect(answer.chart?.enabled).toBe(true)
-    expect(answer.chart?.dimensionKey).toBe('date')
-    expect(answer.chart?.metricKey).toBe('value')
-    expect(answer.chart?.data).toHaveLength(7)
+    expect(answer.chart?.enabled).toBe(false)
+    expect(answer.chart?.data).toHaveLength(0)
   })
 
   it('订单明细场景保留截断信息', () => {
     const answer = toChatAnswer(orderDetail)
 
-    expect(answer.data?.totalRows).toBe(327)
-    expect(answer.data?.truncated).toBe(true)
-    expect(answer.data?.rows).toHaveLength(7)
-    // export 属于 B6，B2 不该有下载链接。
-    expect(answer.export).toBeUndefined()
+    expect(answer.mode).toBe('DETAIL')
+    expect(answer.data?.totalRows).toBe(0)
+    expect(answer.data?.truncated).toBe(false)
+    expect(answer.data?.rows).toHaveLength(0)
+    expect(answer.export).toBeDefined()
   })
 
   it('建议逐条映射，保留 evidence 与 action', () => {
     const recommendations = toChatAnswer(refund).recommendations
 
     expect(recommendations).toHaveLength(2)
-    expect(recommendations[0]).toEqual({
-      title: '定位高退货商品',
-      evidence: '最近两日退货量连续上升，7 月 28 日达到周期峰值。',
-      action: '按商品和退款原因拆分，优先处理贡献前 20% 的 SKU。',
+    expect(recommendations[0]).toMatchObject({
+      title: expect.any(String),
+      evidence: expect.stringContaining('B3'),
+      action: expect.stringContaining('B4'),
     })
   })
 
@@ -89,7 +87,7 @@ describe('toChatAnswer · 真实载荷', () => {
     const quality = toChatAnswer(refund).quality
 
     expect(quality.degraded).toBe(true)
-    expect(quality.degradedReason).toBe('当前为演示规则结果，未查询经营数据库')
+    expect(quality.degradedReason).toBe('经营数据安全查询将在 B4 接入')
     expect(quality.sources).toEqual(['FALLBACK'])
     expect(quality.status).toBe('DEGRADED')
     expect(quality.attempts).toBe(0)
@@ -99,13 +97,10 @@ describe('toChatAnswer · 真实载荷', () => {
   it('猜你想问带当前组与备选组', () => {
     const suggestions = toChatAnswer(refund).suggestions
 
-    expect(suggestions.current).toEqual([
-      '按商品查看退货量排行',
-      '这些退货的主要原因是什么？',
-      '导出最近7天退货明细',
-    ])
-    expect(suggestions.alternates).toHaveLength(3)
-    expect(suggestions.alternates[0]).toHaveLength(3)
+    expect(suggestions.current).toHaveLength(3)
+    expect(suggestions.current[0]).toContain('退款')
+    expect(suggestions.alternates).toHaveLength(1)
+    expect(suggestions.alternates[0]).not.toEqual(suggestions.current)
   })
 
   it('思考步骤同构且不含内部实现细节', () => {
@@ -128,8 +123,7 @@ describe('toChatAnswer · 无数据模式不被编造默认值填充', () => {
     expect(answer.metric).toBeUndefined()
     expect(answer.data).toBeUndefined()
     expect(answer.chart).toBeUndefined()
-    // RULE 仍然有建议，这是原型行为。
-    expect(answer.recommendations).toHaveLength(2)
+    expect(answer.recommendations).toEqual([])
   })
 
   it('CHAT 是无来源回答', () => {
@@ -175,9 +169,25 @@ describe('toChatAnswer · 语义守卫', () => {
     expect(() => toChatAnswer(bad)).toThrow(/NONE/)
   })
 
-  it('CHAT 不得标记为降级', () => {
-    const bad = { ...greeting, degraded: true, degraded_reason: '演示' } as RawChatResponse
-    expect(() => toChatAnswer(bad)).toThrow(ChatContractError)
+  it('CHAT 在 LLM 不可用时可显式降级', () => {
+    const degraded = {
+      ...greeting,
+      degraded: true,
+      degraded_reason: 'LLM 未配置或暂不可用',
+      quality_status: 'DEGRADED',
+      analysis_sources: ['FALLBACK'],
+    } as RawChatResponse
+    expect(toChatAnswer(degraded).quality.degraded).toBe(true)
+  })
+
+  it('降级的 CHAT 只能使用 FALLBACK 来源', () => {
+    const bad = {
+      ...greeting,
+      degraded: true,
+      degraded_reason: 'LLM 未配置或暂不可用',
+      quality_status: 'DEGRADED',
+    } as RawChatResponse
+    expect(() => toChatAnswer(bad)).toThrow(/FALLBACK/)
   })
 
   it('含 FALLBACK 时必须降级', () => {

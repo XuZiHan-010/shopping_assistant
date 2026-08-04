@@ -11,7 +11,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agent.fake_agent import FakeAgent, FakeAgentResult
+from app.agent.graph import AgentRunResult
 from app.core.errors import (
     AppError,
     ErrorCode,
@@ -30,6 +30,7 @@ from app.repositories.conversation import ConversationRepository
 from app.schemas.chat import AnswerMode, ChatRequest
 from app.services.chat_service import ChatService
 from app.services.merchant_scope import MerchantScopeService
+from tests.support.agent import DeterministicAgent
 
 MERCHANT_ID = UUID("00000000-0000-0000-0000-000000000021")
 OTHER_MERCHANT_ID = UUID("00000000-0000-0000-0000-000000000022")
@@ -37,23 +38,14 @@ CONTEXT = MerchantContext(merchant_id=MERCHANT_ID)
 OTHER_CONTEXT = MerchantContext(merchant_id=OTHER_MERCHANT_ID)
 
 
-class CountingFakeAgent(FakeAgent):
-    def __init__(self) -> None:
-        self.calls = 0
-
-    async def run(self, message: str, session_id: UUID) -> FakeAgentResult:
-        self.calls += 1
-        return await super().run(message, session_id)
+class CountingAgent(DeterministicAgent):
+    pass
 
 
-class SlowCountingAgent(FakeAgent):
+class SlowCountingAgent(DeterministicAgent):
     """把 Agent 拉长，好让两个并发请求真的在 INSERT 上撞车。"""
 
-    def __init__(self) -> None:
-        self.calls = 0
-
-    async def run(self, message: str, session_id: UUID) -> FakeAgentResult:
-        self.calls += 1
+    async def run(self, message: str, session_id: UUID) -> AgentRunResult:
         await asyncio.sleep(0.2)
         return await super().run(message, session_id)
 
@@ -62,18 +54,18 @@ class ExplodingAgent:
     def __init__(self, error: BaseException) -> None:
         self.error = error
 
-    async def run(self, message: str, session_id: UUID) -> FakeAgentResult:
+    async def run(self, message: str, session_id: UUID) -> AgentRunResult:
         raise self.error
 
 
-class BlockingAgent(FakeAgent):
+class BlockingAgent(DeterministicAgent):
     """卡在 Agent 内部，好让测试在「已启动但未完成」的时刻精确取消。"""
 
     def __init__(self) -> None:
         self.started = asyncio.Event()
-        self.calls = 0
+        super().__init__()
 
-    async def run(self, message: str, session_id: UUID) -> FakeAgentResult:
+    async def run(self, message: str, session_id: UUID) -> AgentRunResult:
         self.calls += 1
         self.started.set()
         await asyncio.Event().wait()
@@ -107,7 +99,7 @@ async def test_succeeded_request_replays_saved_response_without_running_agent(
     db_session: AsyncSession,
 ) -> None:
     await seed_merchants(db_session)
-    agent = CountingFakeAgent()
+    agent = CountingAgent()
     service = build_service(db_session, agent)
     request = ChatRequest(message="最近7天退货量趋势", client_request_id="request-replay-1")
 
@@ -125,7 +117,7 @@ async def test_reused_key_with_different_message_is_rejected(
     db_session: AsyncSession,
 ) -> None:
     await seed_merchants(db_session)
-    agent = CountingFakeAgent()
+    agent = CountingAgent()
     service = build_service(db_session, agent)
 
     await service.submit(
@@ -149,7 +141,7 @@ async def test_processing_row_blocks_a_second_submission(
     db_session: AsyncSession,
 ) -> None:
     await seed_merchants(db_session)
-    agent = CountingFakeAgent()
+    agent = CountingAgent()
     service = build_service(db_session, agent)
     request = ChatRequest(message="昨天总 GMV 是多少？", client_request_id="request-processing")
 
@@ -187,7 +179,7 @@ async def test_retryable_failure_is_persisted_and_the_same_row_is_reused(
     user_messages = list(await db_session.scalars(select(Message)))
     assert [message.role for message in user_messages] == ["USER"]
 
-    agent = CountingFakeAgent()
+    agent = CountingAgent()
     healthy = build_service(db_session, agent)
     execution = await healthy.submit(CONTEXT, request, request_id="request-2")
 
@@ -213,7 +205,7 @@ async def test_final_failure_replays_the_stored_error(
     assert answer is not None
     assert answer.processing_status == "FAILED_FINAL"
 
-    agent = CountingFakeAgent()
+    agent = CountingAgent()
     retried = build_service(db_session, agent)
     with pytest.raises(AppError) as excinfo:
         await retried.submit(CONTEXT, request, request_id="request-2")
@@ -297,7 +289,7 @@ async def test_cancelled_stream_lands_the_answer_in_a_retryable_state(
     assert [message.role for message in messages] == ["USER"]
 
     # 同一 client_request_id 必须能重新执行，而不是被 409 永久锁死。
-    agent = CountingFakeAgent()
+    agent = CountingAgent()
     resumed = build_service(db_session, agent)
     execution = await resumed.submit(CONTEXT, request, request_id="request-2")
 
@@ -321,7 +313,7 @@ async def test_cancellation_before_the_agent_starts_leaves_no_orphan_row(
     request = ChatRequest(message="昨天总 GMV 是多少？", client_request_id="request-cancel-early")
 
     async with integration_database.session() as session:
-        service = build_service(session, CountingFakeAgent())
+        service = build_service(session, CountingAgent())
         task = asyncio.create_task(service.submit(CONTEXT, request, request_id="request-1"))
         await asyncio.sleep(0)
         task.cancel()
@@ -338,7 +330,7 @@ async def test_follow_up_turn_accumulates_in_the_same_conversation(
     db_session: AsyncSession,
 ) -> None:
     await seed_merchants(db_session)
-    service = build_service(db_session, CountingFakeAgent())
+    service = build_service(db_session, CountingAgent())
 
     first = await service.submit(
         CONTEXT,
@@ -376,7 +368,7 @@ async def test_another_merchant_cannot_continue_a_foreign_conversation(
     integration_database: Database,
 ) -> None:
     await seed_merchants(db_session)
-    owner_service = build_service(db_session, CountingFakeAgent())
+    owner_service = build_service(db_session, CountingAgent())
     owned = await owner_service.submit(
         CONTEXT,
         ChatRequest(message="昨天总 GMV 是多少？", client_request_id="owner-turn"),
@@ -387,7 +379,7 @@ async def test_another_merchant_cannot_continue_a_foreign_conversation(
     intruder = ChatService(
         db_session,
         conversations,
-        CountingFakeAgent(),
+        CountingAgent(),
         MerchantScopeService(conversations, AuditRepository(integration_database)),
     )
 
@@ -414,7 +406,7 @@ async def test_unknown_session_id_is_not_reported_as_scope_violation(
     db_session: AsyncSession,
 ) -> None:
     await seed_merchants(db_session)
-    service = build_service(db_session, CountingFakeAgent())
+    service = build_service(db_session, CountingAgent())
 
     with pytest.raises(AppError) as excinfo:
         await service.submit(
@@ -436,7 +428,7 @@ async def test_stored_payload_round_trips_through_the_database(
     db_session: AsyncSession,
 ) -> None:
     await seed_merchants(db_session)
-    service = build_service(db_session, CountingFakeAgent())
+    service = build_service(db_session, CountingAgent())
     request = ChatRequest(message="最近7天退货量趋势", client_request_id="request-payload")
 
     original = await service.submit(CONTEXT, request, request_id="request-1")

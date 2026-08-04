@@ -79,10 +79,19 @@ test('减少动画偏好会缩短交互过渡', async ({ page }) => {
 test('输入提示和侧栏说明文字达到 WCAG AA 对比度', async ({ page }) => {
   await page.goto('/')
 
+  // F1 的 .side-empty 在 F2 Task 8 被三个真实侧栏面板取代，选择器随之更新。
+  // 用 data-testid 而不是 CSS 类名，避免下次改样式时又静默只剩一个元素匹配。
   const colors = await page
-    .locator('.chat-composer__footnote, .side-empty p')
+    .locator(
+      [
+        '.chat-composer__footnote',
+        '[data-testid="metric-empty"] > *',
+        '[data-testid="chart-empty"] > *',
+        '[data-testid="recommendation-empty"] > *',
+      ].join(', '),
+    )
     .evaluateAll((items) => items.map((item) => getComputedStyle(item).color))
 
-  expect(colors).toHaveLength(3)
+  expect(colors).toHaveLength(7)
   for (const color of colors) expect(contrastAgainstWhite(color)).toBeGreaterThanOrEqual(4.5)
 })

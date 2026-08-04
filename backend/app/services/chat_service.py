@@ -12,7 +12,7 @@ from uuid import UUID
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agent.fake_agent import FakeAgentResult
+from app.agent.graph import AgentRunResult
 from app.core.errors import (
     AppError,
     ErrorCode,
@@ -33,7 +33,7 @@ _FINAL_STATUS_CODES = frozenset({400, 403, 404, 413, 415, 422})
 
 
 class ChatAgentProtocol(Protocol):
-    async def run(self, message: str, session_id: UUID) -> FakeAgentResult: ...
+    async def run(self, message: str, session_id: UUID) -> AgentRunResult: ...
 
 
 @dataclass(frozen=True)
@@ -44,7 +44,7 @@ class ChatExecution:
 
 
 class ChatService:
-    """在可信商家范围内持久化一轮聊天并执行 B2 Fake Agent。"""
+    """在可信商家范围内持久化一轮聊天并执行受控问答图。"""
 
     def __init__(
         self,

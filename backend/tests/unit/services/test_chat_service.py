@@ -10,7 +10,7 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from app.agent.fake_agent import FakeAgent, FakeAgentResult
+from app.agent.graph import AgentRunResult
 from app.core.errors import (
     AppError,
     ErrorCode,
@@ -21,6 +21,7 @@ from app.core.errors import (
 from app.core.security import MerchantContext
 from app.schemas.chat import ChatRequest
 from app.services.chat_service import ChatService, _request_digest
+from tests.support.agent import DeterministicAgent
 
 MERCHANT_ID = UUID("00000000-0000-0000-0000-000000000041")
 CONTEXT = MerchantContext(merchant_id=MERCHANT_ID)
@@ -134,13 +135,8 @@ class FakeConversationRepository:
         answer.error_payload = None
 
 
-class CountingAgent(FakeAgent):
-    def __init__(self) -> None:
-        self.calls = 0
-
-    async def run(self, message: str, session_id: UUID) -> FakeAgentResult:
-        self.calls += 1
-        return await super().run(message, session_id)
+class CountingAgent(DeterministicAgent):
+    pass
 
 
 class ExplodingAgent:
@@ -148,7 +144,7 @@ class ExplodingAgent:
         self.error = error
         self.calls = 0
 
-    async def run(self, message: str, session_id: UUID) -> FakeAgentResult:
+    async def run(self, message: str, session_id: UUID) -> AgentRunResult:
         self.calls += 1
         raise self.error
 

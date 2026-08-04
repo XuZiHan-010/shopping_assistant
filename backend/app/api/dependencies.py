@@ -9,15 +9,22 @@ from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agent.fake_agent import FakeAgent
+from app.agent.graph import MerchantQaGraph
 from app.core.config import Settings
 from app.core.errors import AuthRequiredError
 from app.core.security import MerchantContext, resolve_demo_token
 from app.db.session import Database
+from app.knowledge.retrieval import KnowledgeRetrieval
+from app.llm.client import LlmClient
+from app.llm.deepseek import DeepSeekLlmClient
+from app.llm.fake import FakeLlmClient
+from app.metrics.catalog import MetricCatalog
 from app.models.conversation import Conversation
 from app.repositories.audit import AuditRepository
 from app.repositories.conversation import ConversationRepository
+from app.repositories.knowledge import KnowledgeRepository
 from app.repositories.merchant import MerchantRepository
+from app.repositories.metric import MetricRepository
 from app.services.chat_service import ChatService
 from app.services.merchant_scope import MerchantScopeService
 
@@ -47,14 +54,25 @@ def get_merchant_repository(
 def get_chat_service(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     database: Annotated[Database, Depends(get_database)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
 ) -> ChatService:
-    """构造请求级 ChatService；B2 固定使用不联网的 Fake Agent。"""
+    """构造请求级 ChatService；B3 起由 MerchantQaGraph 处理问题。"""
 
+    llm: LlmClient = (
+        DeepSeekLlmClient(settings) if settings.llm_api_key else FakeLlmClient(configured=False)
+    )
     conversations = ConversationRepository(session)
+    graph = MerchantQaGraph(
+        retrieval=KnowledgeRetrieval(KnowledgeRepository(session)),
+        intent_service_llm=llm,
+        catalog=MetricCatalog(MetricRepository(session), llm),
+        max_llm_calls=settings.llm_max_calls_per_request,
+        max_llm_tokens=settings.llm_max_tokens_per_request,
+    )
     return ChatService(
         session,
         conversations,
-        FakeAgent(),
+        graph,
         MerchantScopeService(conversations, AuditRepository(database)),
     )
 

@@ -68,11 +68,22 @@ function chooseMerchant(merchant: string): void {
       <ChevronDown aria-hidden="true" :size="15" />
     </button>
 
-    <ul v-if="isOpen" id="merchant-switcher-options" class="merchant-switcher__menu">
-      <li v-for="merchant in props.merchants" :key="merchant">
+    <!-- listbox / option：触发按钮已经声明了 aria-expanded 与 aria-controls，
+         弹出的列表若没有角色，读屏只会念成一个普通列表，读不出「共几项、当前
+         第几项、已选中哪一项」。li 让出角色，由内部按钮承担 option。 -->
+    <ul
+      v-if="isOpen"
+      id="merchant-switcher-options"
+      class="merchant-switcher__menu"
+      role="listbox"
+      aria-label="演示商家"
+    >
+      <li v-for="merchant in props.merchants" :key="merchant" role="presentation">
         <button
           class="merchant-switcher__option"
           type="button"
+          role="option"
+          :aria-selected="merchant === modelValue"
           :aria-current="merchant === modelValue ? 'true' : undefined"
           :data-merchant="merchant"
           @click="chooseMerchant(merchant)"

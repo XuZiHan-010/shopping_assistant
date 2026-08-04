@@ -160,6 +160,20 @@ def test_fallback_source_requires_degradation() -> None:
         )
 
 
+def test_chat_response_allows_visible_degradation_when_llm_is_unavailable() -> None:
+    response = ChatResponse.model_validate(
+        _base_response(
+            answer_mode=AnswerMode.CHAT,
+            analysis_sources=[AnalysisSource.FALLBACK],
+            degraded=True,
+            degraded_reason="LLM 未配置或暂不可用",
+            quality_status=QualityStatus.DEGRADED,
+        )
+    )
+
+    assert response.degraded is True
+
+
 def test_degraded_answer_must_explain_why() -> None:
     with pytest.raises(ValidationError, match="degraded_reason"):
         ChatResponse.model_validate(_metric_response(degraded_reason=None))

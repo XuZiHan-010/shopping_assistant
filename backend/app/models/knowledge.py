@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import CheckConstraint, Index, Integer, String, Text, text
+from sqlalchemy import Boolean, CheckConstraint, Index, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import (
@@ -44,12 +44,21 @@ class KnowledgeDocument(UuidPrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, Bas
             name="ck_knowledge_documents_status",
         ),
         Index("ix_knowledge_documents_category_status", "category", "status"),
+        Index("uq_knowledge_documents_source_path", "source_path", unique=True),
     )
 
     category: Mapped[str] = mapped_column(String(64), nullable=False)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     source: Mapped[str] = mapped_column(String(200), nullable=False)
+    # 检索按「路径 + 正文」匹配；路径携带业务域与文档类型，不能丢弃。
+    source_path: Mapped[str] = mapped_column(Text, nullable=False)
+    # 命中旧 Wiki 的骨架文档时，B5 必须向商家说明资料尚不完整。
+    is_complete: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=text("true"),
+    )
     version: Mapped[int] = mapped_column(
         Integer,
         nullable=False,

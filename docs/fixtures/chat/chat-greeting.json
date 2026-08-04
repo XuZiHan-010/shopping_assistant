@@ -2,7 +2,7 @@
   "analysis_sources": [
     "NONE"
   ],
-  "answer": "您好，我是 Borough 商家 AI 助手，有任何经营、订单、退货、客服、赔付、优惠券、商品或商家资料问题都可以问我。",
+  "answer": "已完成结构化理解。",
   "answer_mode": "CHAT",
   "category": "UNKNOWN",
   "created_at": "2026-07-28T12:00:00Z",
@@ -19,29 +19,82 @@
   "metric_status": null,
   "metric_unit": null,
   "quality_attempts": 0,
-  "quality_notes": [],
+  "quality_notes": [
+    "未命中与当前问题相关的知识资料"
+  ],
   "quality_status": "NOT_RUN",
   "query_plan": null,
   "recommendations": null,
   "session_id": "5009d671-95bd-58da-976f-75abce9b54ad",
-  "suggestion_alternates": [],
+  "suggestion_alternates": [
+    [
+      "最近 7 天退货量趋势",
+      "昨天退款金额是多少？",
+      "按退款原因查看退款数量"
+    ],
+    [
+      "查看商品上架明细",
+      "成功订单量是多少？",
+      "我的商家手机号是多少？"
+    ]
+  ],
   "suggestions": [
-    "我想查看保证金",
-    "最近7天咨询工单量",
+    "昨天总 GMV 是多少？",
+    "最近 7 天咨询工单量",
     "我要货品上架，具体规则有吗？"
   ],
   "thinking_steps": [
     {
-      "label": "识别商家与业务意图",
-      "node": "classify"
+      "label": "识别商家与会话上下文",
+      "node": "load_context"
     },
     {
-      "label": "整理演示规则说明",
-      "node": "compose"
+      "label": "读取业务知识索引",
+      "node": "retrieve_knowledge_index"
     },
     {
-      "label": "整理结论与可执行建议",
+      "label": "识别问题类型与业务域",
+      "node": "classify_intent"
+    },
+    {
+      "label": "结构化理解问题",
+      "node": "understand_intent"
+    },
+    {
+      "label": "校验查询意图",
+      "node": "validate_intent"
+    },
+    {
+      "label": "读取业务知识正文",
+      "node": "retrieve_knowledge_detail"
+    },
+    {
+      "label": "查询经营数据",
+      "node": "query_data"
+    },
+    {
+      "label": "整理回答",
+      "node": "compose_answer"
+    },
+    {
+      "label": "本地校验回答",
+      "node": "local_validate"
+    },
+    {
+      "label": "复核回答质量",
+      "node": "review_answer"
+    },
+    {
+      "label": "判断是否需要重试",
+      "node": "decide_retry"
+    },
+    {
+      "label": "生成推荐问题",
       "node": "suggest_questions"
+    },
+    {
+      "label": "保存本轮回答",
+      "node": "persist_answer"
     }
   ],
   "total_rows": null,

@@ -1039,20 +1039,20 @@ B3 引入 Fake LLM 之后，**Fake Agent 即退役**，不保留两条并行的�
 
 ### 任务
 
-- [ ] 创建 `AnswerMode`（P0 六种，`ATTACHMENT` 在 B8 扩展为第七种）、业务分类和 Query Intent；
-- [ ] 创建指标定义表和 Seed，含 `metric_code` 与 `display_name`；
-- [ ] **建立指标、维度、筛选三套白名单**（本阶段完成，不留到 B4）；
-- [ ] 创建知识文档表和旧 Wiki 导入脚本；
-- [ ] 实现 Metric Catalog；
-- [ ] 实现 Knowledge Retrieval 的两层检索（索引层 + 正文层，见 §6.5）；
-- [ ] 定义 LLM Client Protocol；
-- [ ] 实现 Fake LLM，并退役 B2 的 Fake Agent；
-- [ ] 实现 DeepSeek LLM Adapter，但测试不启用：使用 OpenAI 兼容 Chat Completions API，`base_url=https://api.deepseek.com`，默认 `model=deepseek-v4-flash`；
-- [ ] 实现单请求 LLM 调用次数与 token 上限；
-- [ ] 实现两阶段意图：分类 → 结构化理解；
-- [ ] 结构化输出用 Pydantic 严格校验；
-- [ ] 实现非法输出、超时和有限重试；
-- [ ] 建立 LangGraph State 和基础节点。
+- [x] 创建 `AnswerMode`（P0 六种，`ATTACHMENT` 在 B8 扩展为第七种）、业务分类和 Query Intent；
+- [x] 创建指标定义表和 Seed，含 `metric_code` 与 `display_name`；
+- [x] **建立指标、维度、筛选三套白名单**（本阶段完成，不留到 B4）；
+- [x] 创建知识文档表和旧 Wiki 导入脚本；
+- [x] 实现 Metric Catalog；
+- [x] 实现 Knowledge Retrieval 的两层检索（索引层 + 正文层，见 §6.5）；
+- [x] 定义 LLM Client Protocol；
+- [x] 实现 Fake LLM，并退役 B2 的 Fake Agent；
+- [x] 实现 DeepSeek LLM Adapter，但测试不启用：使用 OpenAI 兼容 Chat Completions API，`base_url=https://api.deepseek.com`，默认 `model=deepseek-v4-flash`；
+- [x] 实现单请求 LLM 调用次数与 token 上限；
+- [x] 实现两阶段意图：分类 → 结构化理解；
+- [x] 结构化输出用 Pydantic 严格校验；
+- [x] 实现非法输出、超时和有限重试；
+- [x] 建立 LangGraph State 和基础节点。
 
 ### 验收
 
@@ -1066,7 +1066,30 @@ B3 引入 Fake LLM 之后，**Fake Agent 即退役**，不保留两条并行的�
 - 单请求超出 LLM 调用次数或 token 上限时显式降级；
 - Fake LLM 覆盖正常、非法 JSON、超时和空响应。
 
+### 实现说明（2026-08-04）
+
+- 三套不可变白名单位于 `app/intent/whitelist.py`；B4 必须在 SQL 模板层再次校验，不能把 B3 校验作为唯一防线。
+- 查询日期范围由后端截断为最多 180 天；参考实现的 365 天范围未沿用，以降低单次分析的成本和超时风险。
+- 日期校验顺序固定为**起止方向 → 未来截断 → 180 天截断**：起止颠倒和整段落在未来的区间一律拒绝（属模型输出错误，替它猜方向会把错误结果当成正常回答），结束日在未来则截断到今天并留可见备注。`today` 由调用方注入，便于冻结时钟测试跨零点行为。
+- 指标口径三级检索在 `retrieve_knowledge_detail` 之后执行：第三级要用知识**正文**生成候选口径，索引层只有目录词汇。生成口径的待核验文案必须进入 `quality_notes`。
+- DeepSeek 适配器把「单请求剩余 token」作为 `max_tokens` 随请求发出，并在预算耗尽时于本地拦截、不发起请求；只做事后记账挡不住已经产生费用的那一次调用。
+- `MerchantQaGraph` 使用 LangGraph 的 13 节点骨架。B4/B5 未实现的节点仍产生可见步骤，所有尚未查询数据的 METRIC、DETAIL、IDENTITY 回答均以 `FALLBACK` 和明确降级原因返回。
+- `FakeAgent` 已退役；测试仅使用 `FakeLlmClient` 或 HTTP Mock。首次真实 DeepSeek 调用尚未发生，仍需用户明确同意模型、调用次数和费用。
+
 ---
+
+### B3 与 B4 共享字段契约（2026-08-04）
+
+B3 的三个意图白名单已经与 B4 第一批受控查询契约对齐，不能再使用参考项目的
+`*_1d` 指标或 `*_detail` 表名：
+
+- 指标：`gmv`、`order_count`、`paying_user_count`、`successful_order_count`、`refund_count`、`refund_amount`、`return_count`、`return_rate`、`support_ticket_count`；
+- 维度和可筛选字段：`date`、`product`、`category`、`order_status`、`refund_reason`、`return_reason`、`return_status`、`ticket_status`；
+- 表路由：交易使用 `orders` + `order_items`，退款/退货使用独立的 `refunds` + `returns`，客服使用 `support_tickets`，商品使用 `products`。所有 B4 经营表均由后端强制注入 `merchant_id`，不得使用 `seller_id`。
+
+规则回答命中知识正文时必须在正文中列出文档路径，并返回 `analysis_sources=["KNOWLEDGE"]`；未命中时必须明确说明未命中。若 LLM 未配置、不可用或单请求预算耗尽，任何回答模式都必须保留可见的 `degraded=true`、`degraded_reason` 和 `FALLBACK` 来源；仅未降级的 `CHAT` 与 `INVALID` 使用 `["NONE"]`。
+
+**预置推荐问题同样受这套契约约束（§6.8 必测）。** `app/services/suggested_questions.py` 的每条问题都标注了期望的回答路径（`DATA` / `KNOWLEDGE` / `IDENTITY`）：`DATA` 问题必须声明白名单内的指标、维度或明细表，`KNOWLEDGE` 与 `IDENTITY` 问题不得声明查询字段，由测试逐条校验。由此产生一处产品取舍：**理赔、优惠券、商家其他和供应链四个业务域在 B4 第一批经营表里没有数据，因此只推荐知识型问题**；原型入口问题里的「我想查看保证金」和「查看优惠券明细」按同一理由替换，避免用户点击后撞 `INVALID`。这四个域补齐经营表后，可把对应问题改回数据型。
 
 ## B4 · 安全经营数据查询
 

@@ -1,14 +1,57 @@
 <script setup lang="ts">
 import { Sparkles } from '@lucide/vue'
-import { onUnmounted, ref } from 'vue'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 
 import { MOCK_QUICK_QUESTIONS } from '@/api/mock/scenarios'
 import { useChatStore } from '@/stores/chat'
 
 import ChatComposer from './ChatComposer.vue'
 import ChatMessage from './ChatMessage.vue'
+import ConversationNav from './ConversationNav.vue'
 
 const chatStore = useChatStore()
+
+// 目录条目要显示的是「问题」，可选中的却是「助手轮次」——两者是相邻的一对消息
+// （submitMessage 成对入列）。在这里把这层配对一次性摊平，目录组件只管渲染。
+const rounds = computed(() =>
+  chatStore.messages.flatMap((message, index) =>
+    message.role === 'assistant'
+      ? [{ localId: message.localId, question: chatStore.messages[index - 1]?.text ?? '本轮提问' }]
+      : [],
+  ),
+)
+
+/**
+ * 自动滚到底，但不跟用户抢滚动条。
+ *
+ * 判据是「用户此刻是不是贴着底部」：贴着就跟着新内容走，往上翻看历史就一直不动，
+ * 直到用户自己滚回底部为止。流式回答每来一个 step 都会长高，若无条件 scrollTop
+ * 到底，用户想回看上一轮时会被反复弹回去。
+ */
+const BOTTOM_THRESHOLD_PX = 48
+const listElement = ref<HTMLElement | null>(null)
+const stickToBottom = ref(true)
+
+function handleListScroll(): void {
+  const element = listElement.value
+  if (!element) return
+
+  const distanceToBottom = element.scrollHeight - element.scrollTop - element.clientHeight
+  stickToBottom.value = distanceToBottom <= BOTTOM_THRESHOLD_PX
+}
+
+watch(
+  // deep：不只是新增消息，流式过程中同一条消息的 steps 与 text 也在长。
+  () => chatStore.messages,
+  async () => {
+    if (!stickToBottom.value) return
+
+    await nextTick()
+    const element = listElement.value
+    if (element) element.scrollTop = element.scrollHeight
+  },
+  { deep: true },
+)
 
 // 重试点击过快（上一轮还没跑完就再点一次）时，retryMessage 会返回 false 而不是
 // 抛异常——这里必须把「本次点击被拒绝」的信息传给用户，否则点了没反应会显得像
@@ -16,16 +59,19 @@ const chatStore = useChatStore()
 const retryNotice = ref('')
 let retryNoticeTimer: ReturnType<typeof setTimeout> | undefined
 
-function showRetryNotice(): void {
-  retryNotice.value = '上一轮回答仍在处理中，请稍候再试。'
+function showRetryNotice(text = '上一轮回答仍在处理中，请稍候再试。'): void {
+  retryNotice.value = text
   clearTimeout(retryNoticeTimer)
   retryNoticeTimer = setTimeout(() => {
     retryNotice.value = ''
   }, 3000)
 }
 
-function ask(text: string): void {
-  void chatStore.submitMessage(text)
+async function ask(text: string): Promise<void> {
+  // submitMessage 在上一轮还在途时返回 false。和重试一样，被拒必须让用户看到，
+  // 否则点了没反应像是界面卡死。
+  const started = await chatStore.submitMessage(text)
+  if (!started && text.trim()) showRetryNotice()
 }
 
 async function retry(localId: string): Promise<void> {
@@ -40,7 +86,20 @@ onUnmounted(() => clearTimeout(retryNoticeTimer))
 
 <template>
   <main class="conversation-column" aria-label="商家助手对话" data-testid="conversation-column">
-    <div class="conversation-column__list" data-testid="chat-list">
+    <!-- 只有一轮时目录没有导航价值，反而占掉对话区高度。 -->
+    <ConversationNav
+      v-if="rounds.length >= 2"
+      class="conversation-column__nav"
+      :rounds="rounds"
+      :selected-id="chatStore.selectedRoundId"
+      @select="chatStore.selectRound"
+    />
+    <div
+      ref="listElement"
+      class="conversation-column__list"
+      data-testid="chat-list"
+      @scroll="handleListScroll"
+    >
       <section class="welcome-card">
         <div class="welcome-card__icon"><Sparkles :size="19" aria-hidden="true" /></div>
         <div>
@@ -50,12 +109,19 @@ onUnmounted(() => clearTimeout(retryNoticeTimer))
       </section>
 
       <section v-if="chatStore.isEmptyConversation" class="empty-card">
-        <span>开始一段新会话</span>
-        <p>输入经营问题后，这里会呈现分析过程、结论和行动建议。</p>
+        <span class="empty-card__eyebrow">快速体验</span>
+        <strong>点一个问题，看看助手能做什么</strong>
         <ul class="quick-questions">
-          <li v-for="question in MOCK_QUICK_QUESTIONS" :key="question">
-            <button type="button" data-testid="quick-question" @click="ask(question)">
-              {{ question }}
+          <li v-for="item in MOCK_QUICK_QUESTIONS" :key="item.question">
+            <!-- data-question 让测试拿到「问题本身」，不用从含分类眉标的按钮全文里剥。 -->
+            <button
+              type="button"
+              data-testid="quick-question"
+              :data-question="item.question"
+              @click="ask(item.question)"
+            >
+              <span class="quick-questions__category">{{ item.category }}</span>
+              {{ item.question }}
             </button>
           </li>
         </ul>
@@ -66,6 +132,7 @@ onUnmounted(() => clearTimeout(retryNoticeTimer))
           v-for="message in chatStore.messages"
           :key="message.localId"
           :message="message"
+          :selected="message.localId === chatStore.selectedRoundId"
           @retry="retry"
           @cancel="chatStore.cancelMessage"
           @select="chatStore.selectRound"
@@ -75,7 +142,7 @@ onUnmounted(() => clearTimeout(retryNoticeTimer))
     <p v-if="retryNotice" class="retry-notice" role="status" aria-live="polite">
       {{ retryNotice }}
     </p>
-    <ChatComposer @submit="ask" />
+    <ChatComposer :busy="chatStore.isBusy" @submit="ask" />
   </main>
 </template>
 
@@ -91,6 +158,11 @@ onUnmounted(() => clearTimeout(retryNoticeTimer))
   background: rgba(250, 252, 255, 0.86);
   box-shadow: var(--shadow-card);
   backdrop-filter: blur(18px);
+}
+
+.conversation-column__nav {
+  flex: none;
+  margin: var(--space-3) var(--space-3) 0;
 }
 
 .conversation-column__list {
@@ -144,47 +216,70 @@ onUnmounted(() => clearTimeout(retryNoticeTimer))
 }
 
 .empty-card {
-  min-height: 160px;
   display: grid;
-  place-content: center;
-  padding: var(--space-5);
-  border-style: dashed;
+  padding: var(--space-4);
   border-radius: 11px;
-  color: var(--color-text-muted);
   background: rgba(255, 255, 255, 0.58);
-  text-align: center;
 }
 
-.empty-card span {
-  color: var(--color-text-secondary);
+.empty-card__eyebrow {
+  color: var(--color-primary-strong);
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-control);
+  letter-spacing: 0.04em;
+}
+
+.empty-card strong {
+  margin-top: var(--space-1);
+  color: var(--color-text);
   font-size: var(--font-size-control);
   font-weight: var(--font-weight-emphasis);
 }
 
+/* 四宫格，与 Prototype 的快速体验区一致；窄屏退回单列。 */
 .quick-questions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-2);
   margin: var(--space-3) 0 0;
   padding: 0;
   list-style: none;
 }
 
+@media (max-width: 520px) {
+  .quick-questions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .quick-questions button {
-  padding: var(--space-1-5) var(--space-3);
+  width: 100%;
+  height: 100%;
+  display: grid;
+  gap: var(--space-0-5);
+  padding: var(--space-2) var(--space-3);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-control);
-  color: var(--color-text-secondary);
+  color: var(--color-text);
   background: var(--color-surface);
-  font-size: var(--font-size-caption);
+  font-size: var(--font-size-body);
+  text-align: left;
   transition: var(--transition-interactive);
+}
+
+.quick-questions__category {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-control);
 }
 
 .quick-questions button:hover {
   border-color: #cdd7fd;
-  color: var(--color-primary);
   background: var(--color-primary-soft);
+}
+
+.quick-questions button:hover .quick-questions__category {
+  color: var(--color-primary-strong);
 }
 
 .retry-notice {

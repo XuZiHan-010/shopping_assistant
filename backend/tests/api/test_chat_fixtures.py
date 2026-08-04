@@ -5,7 +5,7 @@
 构造出 `answer_mode="CHAT"` 配 `analysis_sources=["DATABASE"]` 这类后端永远不会
 产生的组合，测试照样绿，等于自己批改自己的作业。
 
-所以载荷由后端从真实 `FakeAgent` 导出，并在这里逐字节比对，防止后端改了输出而
+所以载荷由后端 B3 问答图导出，并在这里逐字节比对，防止后端改了输出而
 前端还在按旧形状写代码。
 """
 
@@ -40,7 +40,7 @@ async def _payload(case: FixtureCase) -> dict[str, Any]:
 async def test_exported_fixture_matches_the_current_agent(case: FixtureCase) -> None:
     path = fixtures_dir() / f"{case.name}.json"
     stale = (
-        f"{case.name} 与当前 FakeAgent 输出不一致，"
+        f"{case.name} 与当前 B3 问答图输出不一致，"
         "请运行 uv run python ../scripts/export_chat_fixtures.py"
     )
 
@@ -57,10 +57,10 @@ async def test_fixtures_are_deterministic_across_runs() -> None:
     assert first == second
 
 
-async def test_fixtures_cover_every_answer_mode_the_agent_can_emit() -> None:
+async def test_fixtures_cover_every_p0_answer_mode() -> None:
     modes = {(await _payload(case))["answer_mode"] for case in FIXTURES}
 
-    assert modes == {"METRIC", "RULE", "CHAT", "INVALID"}
+    assert modes == {"METRIC", "DETAIL", "IDENTITY", "RULE", "CHAT", "INVALID"}
 
 
 async def test_fake_answers_are_never_presented_as_real_data() -> None:
@@ -71,7 +71,9 @@ async def test_fake_answers_are_never_presented_as_real_data() -> None:
         sources = payload["analysis_sources"]
 
         assert "DATABASE" not in sources
-        assert "KNOWLEDGE" not in sources
+        if "KNOWLEDGE" in sources:
+            assert payload["answer_mode"] == "RULE"
+            assert "来源：" in payload["answer"]
         if "FALLBACK" in sources:
             assert payload["degraded"] is True
             assert payload["degraded_reason"]

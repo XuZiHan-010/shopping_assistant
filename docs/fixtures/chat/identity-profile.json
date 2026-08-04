@@ -1,0 +1,101 @@
+{
+  "analysis_sources": [
+    "FALLBACK"
+  ],
+  "answer": "已完成结构化理解。",
+  "answer_mode": "IDENTITY",
+  "category": "IDENTITY",
+  "created_at": "2026-07-28T12:00:00Z",
+  "data_rows": [],
+  "degraded": true,
+  "degraded_reason": "商家资料查询将在 B4 接入",
+  "export": null,
+  "id": "180b3336-d074-5498-a7f4-b6ed431ddec4",
+  "metric_code": null,
+  "metric_definition": null,
+  "metric_display_name": null,
+  "metric_owner": null,
+  "metric_source": null,
+  "metric_status": null,
+  "metric_unit": null,
+  "quality_attempts": 0,
+  "quality_notes": [
+    "未命中与当前问题相关的知识资料",
+    "当前未执行商家资料查询。"
+  ],
+  "quality_status": "DEGRADED",
+  "query_plan": {
+    "summary": "已校验身份资料查询意图，尚未执行数据查询。"
+  },
+  "recommendations": null,
+  "session_id": "6f5a280c-7ba6-5fbc-8e9a-b6ca1506a18b",
+  "suggestion_alternates": [
+    [
+      "我的店铺名称是什么？",
+      "商家联系方式怎么修改？",
+      "商家资料变更需要什么材料？"
+    ]
+  ],
+  "suggestions": [
+    "我的商家资料是什么？",
+    "我的商家手机号是多少？",
+    "店铺认证状态怎么查看？"
+  ],
+  "thinking_steps": [
+    {
+      "label": "识别商家与会话上下文",
+      "node": "load_context"
+    },
+    {
+      "label": "读取业务知识索引",
+      "node": "retrieve_knowledge_index"
+    },
+    {
+      "label": "识别问题类型与业务域",
+      "node": "classify_intent"
+    },
+    {
+      "label": "结构化理解问题",
+      "node": "understand_intent"
+    },
+    {
+      "label": "校验查询意图",
+      "node": "validate_intent"
+    },
+    {
+      "label": "读取业务知识正文",
+      "node": "retrieve_knowledge_detail"
+    },
+    {
+      "label": "查询经营数据",
+      "node": "query_data"
+    },
+    {
+      "label": "整理回答",
+      "node": "compose_answer"
+    },
+    {
+      "label": "本地校验回答",
+      "node": "local_validate"
+    },
+    {
+      "label": "复核回答质量",
+      "node": "review_answer"
+    },
+    {
+      "label": "判断是否需要重试",
+      "node": "decide_retry"
+    },
+    {
+      "label": "生成推荐问题",
+      "node": "suggest_questions"
+    },
+    {
+      "label": "保存本轮回答",
+      "node": "persist_answer"
+    }
+  ],
+  "total_rows": 0,
+  "truncated": false,
+  "visualization": null
+}

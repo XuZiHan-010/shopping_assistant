@@ -42,6 +42,12 @@ class Settings(BaseSettings):
     db_connect_max_attempts: int = Field(default=5, ge=1, le=20)
     db_connect_retry_seconds: float = Field(default=1.0, ge=0, le=60)
     db_statement_timeout_ms: int = Field(default=5_000, ge=100, le=60_000)
+    llm_api_key: str | None = None
+    llm_base_url: str = "https://api.deepseek.com"
+    llm_model: str = "deepseek-v4-flash"
+    llm_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
+    llm_max_calls_per_request: int = Field(default=4, ge=1, le=20)
+    llm_max_tokens_per_request: int = Field(default=8_000, ge=100, le=200_000)
 
     @field_validator("database_url", mode="before")
     @classmethod

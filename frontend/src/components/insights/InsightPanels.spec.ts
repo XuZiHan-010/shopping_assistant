@@ -30,10 +30,10 @@ describe('MetricDefinitionPanel', () => {
 })
 
 describe('MetricChartPanel', () => {
-  it('有图表数据时只展示 F4 占位说明，不渲染画布', () => {
+  it('B3 尚未查询数据时不伪造图表', () => {
     const wrapper = mount(MetricChartPanel, { props: { answer: metricAnswer } })
 
-    expect(wrapper.get('[data-testid="chart-placeholder"]').text()).toContain('F4')
+    expect(wrapper.get('[data-testid="chart-empty"]').text()).toContain('暂无图表')
     expect(wrapper.find('canvas').exists()).toBe(false)
   })
 })

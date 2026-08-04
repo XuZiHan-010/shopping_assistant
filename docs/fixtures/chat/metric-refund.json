@@ -2,150 +2,120 @@
   "analysis_sources": [
     "FALLBACK"
   ],
-  "answer": "近 7 天退货量共 289 单，日均 41.3 单。7 月 28 日达到 61 单，较 7 月 22 日上升 90.6%。从趋势看，最近两日增长明显，需要优先排查高退货商品和退款原因。",
+  "answer": "已识别指标和查询范围；经营数据查询将在 B4 接入。",
   "answer_mode": "METRIC",
   "category": "REFUND",
   "created_at": "2026-07-28T12:00:00Z",
-  "data_rows": [
-    {
-      "date": "07-22",
-      "value": 32
-    },
-    {
-      "date": "07-23",
-      "value": 28
-    },
-    {
-      "date": "07-24",
-      "value": 35
-    },
-    {
-      "date": "07-25",
-      "value": 41
-    },
-    {
-      "date": "07-26",
-      "value": 39
-    },
-    {
-      "date": "07-27",
-      "value": 53
-    },
-    {
-      "date": "07-28",
-      "value": 61
-    }
-  ],
+  "data_rows": [],
   "degraded": true,
-  "degraded_reason": "当前为演示规则结果，未查询经营数据库",
+  "degraded_reason": "经营数据安全查询将在 B4 接入",
   "export": null,
   "id": "71967237-7202-5f6c-bd1d-412ddcc6ac2a",
   "metric_code": "return_count",
-  "metric_definition": "统计周期内创建的有效退货退款单数量，按退货单去重。",
+  "metric_definition": "统计周期内创建的有效退货退款单数量。",
   "metric_display_name": "退货量",
-  "metric_owner": "售后数据组",
-  "metric_source": "指标资产库",
-  "metric_status": "UNVERIFIED",
-  "metric_unit": "单",
+  "metric_owner": "经营分析组",
+  "metric_source": "Borough 指标目录",
+  "metric_status": "ACTIVE",
+  "metric_unit": "件",
   "quality_attempts": 0,
   "quality_notes": [
-    "当前回答使用演示规则，不代表真实经营数据分析。"
+    "未命中与当前问题相关的知识资料",
+    "当前未执行经营数据查询。"
   ],
   "quality_status": "DEGRADED",
   "query_plan": {
-    "summary": "演示查询计划，未执行数据库查询。"
+    "summary": "已校验结构化查询意图，尚未执行数据查询。"
   },
   "recommendations": [
     {
-      "action": "按商品和退款原因拆分，优先处理贡献前 20% 的 SKU。",
-      "evidence": "最近两日退货量连续上升，7 月 28 日达到周期峰值。",
-      "title": "定位高退货商品"
+      "action": "B4 接入受控查询后展示经营结果。",
+      "evidence": "B3 已完成结构化意图校验，尚未执行经营数据查询。",
+      "title": "等待数据查询接入"
     },
     {
-      "action": "复核重点商品详情页，并抽查最近三日发货与质检记录。",
-      "evidence": "尺码不符、描述差异通常会驱动退货集中增长。",
-      "title": "检查履约与描述"
+      "action": "确认日期范围和维度后再查询。",
+      "evidence": "已识别指标代码：return_count。",
+      "title": "核对指标口径"
     }
   ],
   "session_id": "bebf17f9-0413-59d6-9d5d-6e9e28f55156",
   "suggestion_alternates": [
     [
-      "我想查看保证金",
-      "最近7天咨询工单量",
-      "我要货品上架，具体规则有吗？"
-    ],
-    [
-      "昨天总 GMV 是多少？",
-      "最近7天退货量趋势",
-      "查看优惠券明细"
-    ],
-    [
-      "查看商品上架明细",
-      "昨天退款金额是多少？",
-      "我的商家手机号是多少？"
+      "最近 7 天退货量趋势",
+      "按退货原因查看退货数量",
+      "退货率是多少？"
     ]
   ],
   "suggestions": [
-    "按商品查看退货量排行",
-    "这些退货的主要原因是什么？",
-    "导出最近7天退货明细"
+    "最近 7 天退款单量趋势",
+    "按退款原因查看退款数量",
+    "导出退款明细"
   ],
   "thinking_steps": [
     {
-      "label": "识别商家与业务意图",
-      "node": "classify"
+      "label": "识别商家与会话上下文",
+      "node": "load_context"
     },
     {
-      "label": "读取业务口径并整理演示数据",
-      "node": "compose"
+      "label": "读取业务知识索引",
+      "node": "retrieve_knowledge_index"
     },
     {
-      "label": "整理结论与可执行建议",
+      "label": "识别问题类型与业务域",
+      "node": "classify_intent"
+    },
+    {
+      "label": "结构化理解问题",
+      "node": "understand_intent"
+    },
+    {
+      "label": "校验查询意图",
+      "node": "validate_intent"
+    },
+    {
+      "label": "读取业务知识正文",
+      "node": "retrieve_knowledge_detail"
+    },
+    {
+      "label": "查询经营数据",
+      "node": "query_data"
+    },
+    {
+      "label": "整理回答",
+      "node": "compose_answer"
+    },
+    {
+      "label": "本地校验回答",
+      "node": "local_validate"
+    },
+    {
+      "label": "复核回答质量",
+      "node": "review_answer"
+    },
+    {
+      "label": "判断是否需要重试",
+      "node": "decide_retry"
+    },
+    {
+      "label": "生成推荐问题",
       "node": "suggest_questions"
+    },
+    {
+      "label": "保存本轮回答",
+      "node": "persist_answer"
     }
   ],
-  "total_rows": 7,
+  "total_rows": 0,
   "truncated": false,
   "visualization": {
-    "allowed_types": [
-      "line",
-      "bar"
-    ],
-    "data": [
-      {
-        "date": "07-22",
-        "value": 32
-      },
-      {
-        "date": "07-23",
-        "value": 28
-      },
-      {
-        "date": "07-24",
-        "value": 35
-      },
-      {
-        "date": "07-25",
-        "value": 41
-      },
-      {
-        "date": "07-26",
-        "value": 39
-      },
-      {
-        "date": "07-27",
-        "value": 53
-      },
-      {
-        "date": "07-28",
-        "value": 61
-      }
-    ],
-    "dimension_key": "date",
-    "enabled": true,
-    "metric_key": "value",
-    "title": "退货量演示趋势",
-    "type": "line",
-    "unit": "单"
+    "allowed_types": [],
+    "data": [],
+    "dimension_key": null,
+    "enabled": false,
+    "metric_key": null,
+    "title": null,
+    "type": null,
+    "unit": null
   }
 }

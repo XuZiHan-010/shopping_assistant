@@ -24,6 +24,19 @@ export function setChatTransport(transport: ChatTransport | undefined): void {
   cached = undefined
 }
 
+/**
+ * 丢弃缓存的传输实例，下次 resolveTransport() 重新构造一个。
+ *
+ * 用于切换演示商家：Mock 的会话表挂在传输实例上，不重建的话上一个商家的历史
+ * 会话会留在表里，抽屉一打开就露出来。**这只是 F2 的演示级隔离**——真正的隔离
+ * 必须由服务端按 Token 过滤，F3 接入真实 API 时补上，不能靠前端自觉。
+ *
+ * 不动 override：测试注入的传输由测试自己掌控，不该被业务代码清掉。
+ */
+export function resetTransportCache(): void {
+  cached = undefined
+}
+
 export function isMockEnabled(): boolean {
   return import.meta.env.VITE_USE_MOCK === 'true'
 }

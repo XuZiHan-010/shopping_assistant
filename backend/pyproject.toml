@@ -10,6 +10,8 @@ dependencies = [
     # 客户端断开时的清理能跑完，所以显式声明。
     "anyio>=4.9,<5",
     "fastapi>=0.116,<1",
+    "httpx>=0.28,<1",
+    "langgraph>=0.2,<1",
     "psycopg[binary,pool]>=3.2,<4",
     "pydantic-settings>=2.10,<3",
     "sqlalchemy>=2.0,<3",
@@ -19,7 +21,6 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28,<1",
     "mypy>=1.17,<2",
     "pytest>=8.4,<9",
     "pytest-asyncio>=1.1,<2",
@@ -45,6 +46,7 @@ python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
 packages = ["app"]
+exclude = "^(migrations|scripts|tests)/"
 
 [tool.coverage.run]
 branch = true

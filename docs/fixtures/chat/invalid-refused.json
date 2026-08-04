@@ -2,9 +2,9 @@
   "analysis_sources": [
     "NONE"
   ],
-  "answer": "我无法执行修改、删除或影响订单和商品数据的操作，只能帮你查询和分析。你可以换成查看类问题再问一次。",
+  "answer": "该请求包含不受支持或不安全的查询字段，无法执行。",
   "answer_mode": "INVALID",
-  "category": "UNKNOWN",
+  "category": "TRADE",
   "created_at": "2026-07-28T12:00:00Z",
   "data_rows": null,
   "degraded": false,
@@ -19,29 +19,77 @@
   "metric_status": null,
   "metric_unit": null,
   "quality_attempts": 0,
-  "quality_notes": [],
+  "quality_notes": [
+    "指标字段含 SQL 关键字，拒绝执行"
+  ],
   "quality_status": "NOT_RUN",
   "query_plan": null,
   "recommendations": null,
   "session_id": "0797fb52-910e-52c9-81af-36f08f5056f0",
-  "suggestion_alternates": [],
+  "suggestion_alternates": [
+    [
+      "按类目对比成交 GMV",
+      "成功订单量是多少？",
+      "最近 7 天付款用户数变化"
+    ]
+  ],
   "suggestions": [
-    "我想查看保证金",
-    "最近7天咨询工单量",
-    "我要货品上架，具体规则有吗？"
+    "昨天总 GMV 是多少？",
+    "最近 7 天订单量趋势",
+    "按商品查看订单明细"
   ],
   "thinking_steps": [
     {
-      "label": "识别商家与业务意图",
-      "node": "classify"
+      "label": "识别商家与会话上下文",
+      "node": "load_context"
     },
     {
-      "label": "整理演示规则说明",
-      "node": "compose"
+      "label": "读取业务知识索引",
+      "node": "retrieve_knowledge_index"
     },
     {
-      "label": "整理结论与可执行建议",
+      "label": "识别问题类型与业务域",
+      "node": "classify_intent"
+    },
+    {
+      "label": "结构化理解问题",
+      "node": "understand_intent"
+    },
+    {
+      "label": "校验查询意图",
+      "node": "validate_intent"
+    },
+    {
+      "label": "读取业务知识正文",
+      "node": "retrieve_knowledge_detail"
+    },
+    {
+      "label": "查询经营数据",
+      "node": "query_data"
+    },
+    {
+      "label": "整理回答",
+      "node": "compose_answer"
+    },
+    {
+      "label": "本地校验回答",
+      "node": "local_validate"
+    },
+    {
+      "label": "复核回答质量",
+      "node": "review_answer"
+    },
+    {
+      "label": "判断是否需要重试",
+      "node": "decide_retry"
+    },
+    {
+      "label": "生成推荐问题",
       "node": "suggest_questions"
+    },
+    {
+      "label": "保存本轮回答",
+      "node": "persist_answer"
     }
   ],
   "total_rows": null,

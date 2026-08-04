@@ -89,13 +89,17 @@ frontend/
 ├── playwright.config.ts
 ├── index.html
 ├── scripts/
-│   └── check-generated.mjs   # generated.ts 漂移检查
+│   ├── check-generated.mjs        # generated.ts 漂移检查
+│   ├── sync-fixtures.mjs          # fixture 镜像生成（F2）
+│   ├── check-fixtures.mjs         # fixture 镜像漂移检查（F2）
+│   └── check-no-mock-payload.mjs  # 生产产物不得含 fixture 载荷（F2）
 ├── public/
 │   ├── borough-logo.svg
 │   └── health.html
 ├── e2e/
 │   ├── assistant.spec.ts
 │   ├── responsive.spec.ts
+│   ├── conversation.spec.ts
 │   ├── attachments.spec.ts
 │   └── knowledge.spec.ts
 └── src/
@@ -105,6 +109,11 @@ frontend/
     │   ├── client.ts
     │   ├── generated.ts        # OpenAPI 生成，禁止手改
     │   ├── sse.ts              # fetch + ReadableStream 解析器
+    │   ├── transport.ts        # Mock 与真实实现的唯一分叉点（F2）
+    │   ├── mock/               # 仅 F2 演示数据；由动态 import 挡在生产之外
+    │   │   ├── fixtures.generated.ts  # 由 npm run fixtures 生成，禁止手改
+    │   │   ├── scenarios.ts
+    │   │   └── transport.ts
     │   ├── adapters/           # 生成类型 → 领域模型的唯一转换点
     │   │   ├── chat.ts
     │   │   ├── metric.ts
@@ -118,9 +127,9 @@ frontend/
     │   └── styles.css
     ├── components/
     │   ├── common/
-    │   ├── chat/
-    │   ├── layout/
-    │   ├── insights/
+    │   ├── chat/               # ConversationColumn / ChatMessage / ChatComposer / ConversationNav
+    │   ├── layout/             # MerchantSwitcher / ConversationDrawer
+    │   ├── insights/           # MetricDefinitionPanel / MetricChartPanel / RecommendationPanel
     │   └── knowledge/
     ├── composables/
     │   ├── useChat.ts
@@ -593,14 +602,15 @@ Prototype 中不存在此控件，它由演示 Token 方案引入，形态按 **
 
 ### 组件
 
-创建：
+创建（本阶段结束时已全部存在）：
 
 ```text
-components/chat/ConversationColumn.vue
-components/chat/ChatMessage.vue
-components/chat/ChatComposer.vue
-components/chat/ConversationNav.vue
-components/layout/MerchantSwitcher.vue
+components/chat/ConversationColumn.vue      # F1 创建，F2 接线
+components/chat/ChatMessage.vue             # F2
+components/chat/ChatComposer.vue            # F1 创建，F2 补自适应高度
+components/chat/ConversationNav.vue         # F2
+components/layout/MerchantSwitcher.vue      # F1 创建，F2 接 Auth Store
+components/layout/ConversationDrawer.vue    # F2（历史会话抽屉，计划原文遗漏）
 components/insights/MetricDefinitionPanel.vue
 components/insights/MetricChartPanel.vue
 components/insights/RecommendationPanel.vue
@@ -610,22 +620,28 @@ components/insights/RecommendationPanel.vue
 
 ### 任务
 
-- [ ] 基于 `generated.ts` 定义 `ChatMessage` 领域模型与 `api/adapters/chat.ts`；
-- [ ] 建立 Chat Store，消息持有 `clientRequestId`（见 §5.9）；
-- [ ] 建立 Auth Store，接入 `MerchantSwitcher.vue`（形态定稿见 F1）；
-- [ ] 实现 `sessionStorage` 商家标识持久化与刷新恢复流程（见 §6.2）；
-- [ ] 实现欢迎卡片和一组快速问题（数量以 Prototype 为准）；
-- [ ] 实现用户消息和助手消息；
-- [ ] 实现 `src/api/sse.ts` 解析器与 SSE 消费、阶段标签展示；
-- [ ] 实现 pending、streaming、complete、error 和 cancelled 状态；
-- [ ] 实现输入框自适应高度；
-- [ ] 实现 Enter 发送和 Shift + Enter 换行；
-- [ ] 实现自动滚动，但用户向上阅读时不强制抢滚动；
-- [ ] 实现当前轮次和对话目录；
-- [ ] 实现新会话重置与删除会话；
-- [ ] **Mock 构造成 `generated.ts` 类型后再过 Adapter**，不允许直接手写领域模型当 Mock；
-- [ ] 使用与 Prototype 一致的 mock 场景；
-- [ ] mock 结果必须明确标记为 mock（`analysisSources: ['FALLBACK']`），不能伪装真实数据库结果。
+F2 已于 2026-08-04 收口。带阶段标注的条目是在更早的阶段就已交付、F2 只做接线或复用。
+
+- [x] 基于 `generated.ts` 定义 `ChatMessage` 领域模型与 `api/adapters/chat.ts`；**（F0 已交付）**
+- [x] 建立 Chat Store，消息持有 `clientRequestId`（见 §5.9）；
+- [x] 建立 Auth Store，接入 `MerchantSwitcher.vue`（形态定稿见 F1）；**（切换器本身 F1 创建，F2 换掉硬编码商家名）**
+- [x] 实现 `sessionStorage` 商家标识持久化与刷新恢复流程（见 §6.2）；
+- [x] 实现欢迎卡片和一组快速问题（数量以 Prototype 为准）；
+- [x] 实现用户消息和助手消息；
+- [x] 实现 `src/api/sse.ts` 解析器与 SSE 消费、阶段标签展示；
+- [x] 实现 pending、streaming、complete、error 和 cancelled 状态；
+- [x] 实现输入框自适应高度；
+- [x] 实现 Enter 发送和 Shift + Enter 换行；**（F1 已交付，含输入法组合态兼容）**
+- [x] 实现自动滚动，但用户向上阅读时不强制抢滚动；
+- [x] 实现当前轮次和对话目录；
+- [x] 实现新会话重置与删除会话；
+- [x] **Mock 构造成 `generated.ts` 类型后再过 Adapter**，不允许直接手写领域模型当 Mock；
+- [x] 使用与 Prototype 一致的 mock 场景；
+- [x] mock 结果必须明确标记为 mock（`analysisSources: ['FALLBACK']`），不能伪装真实数据库结果。
+
+Mock 的边界：只有传输层是假的。载荷是后端 FakeAgent 的真实输出（`docs/fixtures/chat/` 的镜像），
+`sse.ts`、`api/chat.ts`、Adapter 与两个 Store 走的都是真实代码路径。
+`api/chat.ts` 已在 F2 建立，**F3 只替换 `api/transport.ts` 的实现与错误码分支，不要重新创建端点封装**。
 
 ### 验收
 
@@ -643,6 +659,9 @@ components/insights/RecommendationPanel.vue
 - 删除会话后目录与列表同步移除；
 - 错误状态可重试；
 - Store 测试覆盖发送、SSE 事件流、新会话、切换商家、选中轮次和错误恢复。
+
+以上验收项已于 2026-08-04 全部通过：Vitest 109 passed / 15 files，Playwright 17 passed，
+八条门禁（`lint`、`format:check`、`fixtures:check`、`codegen:check`、`mock:check`、`typecheck`、`test`、`build`）全绿。
 
 ---
 

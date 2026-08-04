@@ -1,26 +1,80 @@
 <script setup lang="ts">
 import { BookOpen, MessageSquarePlus, PanelLeft } from '@lucide/vue'
-import { ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 
+import { resetTransportCache } from '@/api/transport'
 import ConversationColumn from '@/components/chat/ConversationColumn.vue'
 import MetricChartPanel from '@/components/insights/MetricChartPanel.vue'
 import MetricDefinitionPanel from '@/components/insights/MetricDefinitionPanel.vue'
 import RecommendationPanel from '@/components/insights/RecommendationPanel.vue'
+import ConversationDrawer from '@/components/layout/ConversationDrawer.vue'
 import MerchantSwitcher from '@/components/layout/MerchantSwitcher.vue'
+import { useAppError } from '@/composables/useAppError'
+import { useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
 
+const authStore = useAuthStore()
 const chatStore = useChatStore()
+const { showError } = useAppError()
 
-// F1 仅为视觉与切换交互提供展示名；F2 将由 Auth Store 的演示商家列表替换。
-const merchantOptions = ['Borough商家100', 'Borough商家101', 'Borough商家102'] as const
-const selectedMerchant = ref<(typeof merchantOptions)[number]>(merchantOptions[0])
+// 列表到达前没有可显示的商家名；给切换器一个占位文案，避免触发按钮空着。
+const merchantLabel = computed(() => authStore.selected?.displayName ?? '加载中')
 
-function selectMerchant(merchant: string): void {
-  if (!merchantOptions.includes(merchant as (typeof merchantOptions)[number])) return
-  if (merchant === selectedMerchant.value) return
+// 恢复商家失败或回退到默认商家都是用户需要知道的事，交给 F0 建立的全局提示区
+// 呈现——Store 只负责产出文案，不自己找地方渲染。
+watch(
+  () => authStore.restoreNotice,
+  (notice) => {
+    if (notice) showError(notice)
+  },
+)
 
-  selectedMerchant.value = merchant as (typeof merchantOptions)[number]
+const isDrawerOpen = ref(false)
+const drawerTrigger = ref<HTMLButtonElement | null>(null)
+
+// fire-and-forget 调用必须在这里把失败接住：抛出去只会变成未处理的 Promise
+// 拒绝，而抽屉照样显示「暂无历史会话」——把「加载失败」伪装成「没有历史」。
+// loadConversations 本身仍然如实抛出，await 它的调用方需要那个异常。
+function refreshConversations(): void {
+  chatStore.loadConversations().catch(() => {
+    showError('历史会话加载失败，请稍后重试。')
+  })
+}
+
+function openDrawer(): void {
+  // 每次打开都重新拉一次：刚问完的那轮会创建新会话，只在挂载时拉会漏掉它。
+  refreshConversations()
+  isDrawerOpen.value = true
+}
+
+function closeDrawer(): void {
+  isDrawerOpen.value = false
+  // 焦点归还给触发按钮——触发器在页头，不在抽屉组件内，只能由这里还。
+  drawerTrigger.value?.focus()
+}
+
+onMounted(async () => {
+  // 顺序不能并发：F3 起会话请求要带 Token，而 Token 是 restore() 才恢复出来的。
+  // 并发发出去的话，会话请求会赶在身份就绪之前到达服务端，直接 401。
+  // F2 的 Mock 不校验身份，所以这个顺序现在看不出差别——正因为看不出，更要现在就定死。
+  await authStore.restore()
+  refreshConversations()
+})
+
+function selectMerchant(displayName: string): void {
+  // 仍然只在「合法且确实换了商家」时重置会话——F1 复查整改定下的行为，
+  // 重复点当前商家不能把用户已有的对话清掉。
+  if (displayName === authStore.selected?.displayName) return
+  if (!authStore.displayNames.includes(displayName)) return
+
+  authStore.selectByDisplayName(displayName)
+
+  // 换商家等于换租户。当前对话、本地会话列表、Mock 里那张会话表都要一起丢掉，
+  // 否则抽屉一打开就露出上一个商家的会话标题。
+  // 注意这只是演示级隔离：真正的隔离必须由服务端按 Token 过滤（F3）。
+  resetTransportCache()
   chatStore.reset()
+  chatStore.clearConversations()
 }
 
 function startNewConversation(): void {
@@ -33,10 +87,12 @@ function startNewConversation(): void {
     <a class="skip-link" href="#main-content">跳到对话主内容</a>
     <header class="assistant-header" data-testid="assistant-header">
       <button
+        ref="drawerTrigger"
         class="header-icon-button header-nav-button"
         type="button"
         aria-label="打开对话目录"
-        title="对话目录将在后续版本提供"
+        :aria-expanded="isDrawerOpen"
+        @click="openDrawer"
       >
         <PanelLeft :size="19" aria-hidden="true" />
       </button>
@@ -46,9 +102,9 @@ function startNewConversation(): void {
         <p>经营数据、分析与行动建议</p>
       </div>
       <MerchantSwitcher
-        :model-value="selectedMerchant"
+        :model-value="merchantLabel"
         class="header-merchant-switcher"
-        :merchants="merchantOptions"
+        :merchants="authStore.displayNames"
         @update:model-value="selectMerchant"
       />
       <div class="header-actions">
@@ -87,6 +143,8 @@ function startNewConversation(): void {
         <RecommendationPanel :answer="chatStore.currentAnswer" @ask="chatStore.submitMessage" />
       </aside>
     </section>
+
+    <ConversationDrawer :open="isDrawerOpen" @close="closeDrawer" />
   </div>
 </template>
 
@@ -123,7 +181,9 @@ function startNewConversation(): void {
 .assistant-header {
   min-height: 54px;
   display: grid;
-  grid-template-columns: 36px 50px minmax(0, 1fr) minmax(118px, 145px) auto;
+  /* 商家名不能被截断——Borough商家100/101/102 只差最后那位数字，截掉就等于
+     无法确认当前身份。1440px 实测名称需要 107px，加状态点、箭头和内边距取 175px。 */
+  grid-template-columns: 36px 50px minmax(0, 1fr) minmax(150px, 175px) auto;
   grid-template-areas: 'nav logo title merchant actions';
   align-items: center;
   gap: var(--space-2);
@@ -186,7 +246,9 @@ function startNewConversation(): void {
 
 .brand-title p {
   margin: var(--space-1) 0 0;
-  color: var(--color-text-muted);
+  /* 不用 --color-text-muted：#8a95a7 在本页背景上只有约 2.8-3.0:1，
+     12px 正文需要 4.5:1。这个 token 只适合大字号或纯装饰。 */
+  color: var(--color-text-secondary);
   font-size: var(--font-size-body);
 }
 

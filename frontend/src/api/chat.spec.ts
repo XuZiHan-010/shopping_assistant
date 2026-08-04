@@ -24,7 +24,7 @@ describe('submitChat', () => {
     expect(onStep.mock.calls[0][0]).toHaveProperty('label')
     expect(answer.mode).toBe('METRIC')
     expect(answer.metric?.displayName).toBeTruthy()
-    expect(answer.answer).toContain('GMV')
+    expect(answer.answer).toContain('B4')
   })
 
   it('请求体携带 client_request_id 且不含 merchant_id', async () => {
