@@ -10,6 +10,12 @@ from app.models import (
     Merchant,
     Message,
     MetricDefinition,
+    Order,
+    OrderItem,
+    Product,
+    Refund,
+    ReturnRecord,
+    SupportTicket,
 )
 from app.models.base import Base
 
@@ -24,4 +30,10 @@ __all__ = [
     "Merchant",
     "Message",
     "MetricDefinition",
+    "Order",
+    "OrderItem",
+    "Product",
+    "Refund",
+    "ReturnRecord",
+    "SupportTicket",
 ]

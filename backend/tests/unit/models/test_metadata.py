@@ -21,7 +21,6 @@ def test_metadata_contains_only_expected_b1_foundation_tables() -> None:
     assert table_names >= EXPECTED_FOUNDATION_TABLES
     assert "users" not in table_names
     assert "attachments" not in table_names
-    assert "orders" not in table_names
 
 
 def test_all_foundation_tables_use_default_schema() -> None:
