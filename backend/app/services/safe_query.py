@@ -7,13 +7,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Final
 
 from app.analytics.contract import (
     DETAIL_BY_CATEGORY,
+    DIMENSION_SPECS,
+    REFUND_CATEGORY_REFUND_KEYWORDS,
+    REFUND_CATEGORY_RETURN_KEYWORDS,
     DetailSpec,
     UnknownFieldError,
     compatible_dimensions,
@@ -87,6 +90,10 @@ class SafeQueryService:
         intent: QueryIntent,
         *,
         now: datetime,
+        #: 分类阶段（`app.intent.service.InitialIntent.intent_keywords`）产出的
+        #: 原始关键词，仅用于 REFUND 类别内部退款/退货二次路由。可选且默认为
+        #: 空——没有注入关键词的既有调用方（测试、尚未接线的路径）行为不变。
+        keywords: Sequence[str] = (),
     ) -> QueryResult:
         try:
             date_range, notes = resolve_range(intent.date_range, now=now, timezone=self._timezone)
@@ -96,7 +103,7 @@ class SafeQueryService:
             raise UnsupportedQueryError(error.reason) from error
 
         if intent.answer_mode is AnswerMode.DETAIL:
-            return await self._detail(context, intent, date_range, notes)
+            return await self._detail(context, intent, date_range, notes, keywords)
         if intent.answer_mode is AnswerMode.METRIC:
             return await self._metric(context, intent, date_range, notes)
         raise UnsupportedQueryError(f"{intent.answer_mode.value} 模式不执行经营数据查询")
@@ -170,8 +177,14 @@ class SafeQueryService:
         intent: QueryIntent,
         date_range: DateRange,
         notes: tuple[str, ...],
+        keywords: Sequence[str],
     ) -> QueryResult:
         table = DETAIL_BY_CATEGORY.get(intent.category.value)
+        if table == "refunds":
+            # REFUND 分类本身覆盖退款（资金）与退货（货品）两件事，计划稿
+            # 曾经把它写死路由到 refunds、导致 returns 表永远查不到——这里
+            # 按信号可靠性从高到低再判一次，判不出来就维持原有兜底行为。
+            table = self._resolve_refund_table(intent, keywords)
         if table is None:
             # 展示中文业务名而不是枚举码：枚举码（如 "SCM"）对商家不友好，
             # 但仍然是公开分类值，不属于表名/列名——只是可读性问题。
@@ -205,6 +218,34 @@ class SafeQueryService:
             notes=notes,
             non_additive=False,
         )
+
+    def _resolve_refund_table(self, intent: QueryIntent, keywords: Sequence[str]) -> str:
+        """REFUND 分类内部再分流到 `returns`（退货）或 `refunds`（退款）。
+
+        PRD 明确退款是资金动作、退货是货品动作，二者可以单独发生，不能混淆；
+        但 B3 的分类粒度只到 REFUND 这一级，两者都挂在同一个分类下。信号按
+        可靠性从高到低取，命中就返回，不叠加判断：
+
+        1. 维度/筛选字段落在哪张表就查哪张——用户已经明确说了要按什么筛选，
+           这是最强信号，且直接复用 `DIMENSION_SPECS` 注册表，不需要新词表；
+        2. 分类阶段产出的关键词（`intent_keywords`）命中"退货"或"退款"；
+        3. 两种信号都没有时维持既有兜底行为（查 refunds），不去猜——猜错了
+           商家会把退款明细当成退货明细看，比"查不到"更危险。
+        """
+
+        codes = (*intent.dimensions, *intent.filters)
+        tables = {DIMENSION_SPECS[code].table for code in codes if code in DIMENSION_SPECS}
+        if "returns" in tables:
+            return "returns"
+        if "refunds" in tables:
+            return "refunds"
+
+        if _keywords_mention(keywords, REFUND_CATEGORY_RETURN_KEYWORDS):
+            return "returns"
+        if _keywords_mention(keywords, REFUND_CATEGORY_REFUND_KEYWORDS):
+            return "refunds"
+
+        return "refunds"
 
     def _check_detail_filters(self, spec: DetailSpec, filters: Mapping[str, str]) -> None:
         """仓储层的 `detail()` 只对落在 `spec.table` 上的筛选生效，其余静默丢弃。
@@ -267,3 +308,9 @@ class SafeQueryService:
             f"数据来源：{sources}",
             *notes,
         )
+
+
+def _keywords_mention(keywords: Sequence[str], markers: frozenset[str]) -> bool:
+    """任一关键词包含任一标记子串就算命中——分类阶段产出的是自由词，不是枚举值。"""
+
+    return any(marker in keyword for keyword in keywords for marker in markers)

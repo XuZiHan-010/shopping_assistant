@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import MerchantContext
 from app.intent.models import DateRange, QueryIntent
-from app.models.analytics import Order
+from app.models.analytics import Order, OrderItem, Product, ReturnRecord
 from app.repositories.analytics import AnalyticsRepository
 from app.schemas.chat import AnswerMode, QuestionCategory
 from app.services import safe_query
@@ -55,6 +55,70 @@ async def _order(session: AsyncSession, merchant_id: UUID) -> None:
     await session.flush()
 
 
+async def _return_record(
+    session: AsyncSession, merchant_id: UUID, *, reason: str, quantity: int = 1
+) -> None:
+    """退货明细的最小依赖链：product -> order -> order_item -> return。
+
+    REFUND 类别的路由缺口修复之后，这条链路第一次能通过 `SafeQueryService`
+    端到端验证——此前只能在 `AnalyticsRepository` 这一层直接测（见
+    `tests/integration/repositories/test_analytics_detail.py`），因为
+    `DETAIL_BY_CATEGORY` 把 REFUND 写死到了 `refunds`。
+    """
+
+    product = Product(
+        merchant_id=merchant_id,
+        business_date=DAY,
+        product_code=f"SKU-{uuid4().hex[:8]}",
+        title="演示商品",
+        category="女装",
+        price=Decimal("100.00"),
+        status="ONLINE",
+        listed_at=NOW,
+    )
+    session.add(product)
+    await session.flush()
+
+    order = Order(
+        merchant_id=merchant_id,
+        business_date=DAY,
+        order_no=f"NO-{uuid4().hex[:8]}",
+        buyer_key="buyer",
+        order_status="COMPLETED",
+        total_amount=Decimal("100.00"),
+        paid_amount=Decimal("100.00"),
+        placed_at=NOW,
+        paid_at=NOW,
+    )
+    session.add(order)
+    await session.flush()
+
+    item = OrderItem(
+        merchant_id=merchant_id,
+        business_date=DAY,
+        order_id=order.id,
+        product_id=product.id,
+        quantity=quantity,
+        item_amount=Decimal("100.00"),
+    )
+    session.add(item)
+    await session.flush()
+
+    session.add(
+        ReturnRecord(
+            merchant_id=merchant_id,
+            business_date=DAY,
+            order_item_id=item.id,
+            return_quantity=quantity,
+            return_reason=reason,
+            return_status="COMPLETED",
+            logistics_status="DELIVERED",
+            returned_at=NOW,
+        )
+    )
+    await session.flush()
+
+
 @pytest.mark.asyncio
 async def test_metric_intent_returns_rows_and_a_plan_summary(
     db_session: AsyncSession, merchant_one_id: UUID
@@ -91,6 +155,8 @@ async def test_detail_intent_routes_by_category_and_carries_export_spec(
 async def test_refund_category_detail_reads_the_refunds_table(
     db_session: AsyncSession, merchant_one_id: UUID
 ) -> None:
+    """无维度/筛选、无关键词时的兜底行为：REFUND 类别维持查 refunds 不变。"""
+
     result = await _service(db_session).execute(
         MerchantContext(merchant_id=merchant_one_id),
         _intent(
@@ -386,3 +452,91 @@ async def test_detail_without_a_mapped_table_shows_the_chinese_category_name(
 
     assert "供应链" in error.value.reason
     assert "SCM" not in error.value.reason
+
+
+@pytest.mark.asyncio
+async def test_refund_category_with_return_filter_routes_to_returns(
+    db_session: AsyncSession, merchant_one_id: UUID
+) -> None:
+    """维度/筛选字段是最强信号：出现 `return_reason` 说明用户要的是退货明细，
+
+    不是退款明细——计划稿曾经把 REFUND 写死到 refunds，这条走不通。
+    """
+
+    await _return_record(db_session, merchant_one_id, reason="质量问题")
+
+    result = await _service(db_session).execute(
+        MerchantContext(merchant_id=merchant_one_id),
+        _intent(
+            answer_mode=AnswerMode.DETAIL,
+            metric=None,
+            category=QuestionCategory.REFUND,
+            filters={"return_reason": "质量问题"},
+        ),
+        now=NOW,
+    )
+
+    assert result.source_tables == ("returns",)
+    assert result.total_rows == 1
+    assert result.rows[0]["return_quantity"] == 1
+
+
+@pytest.mark.asyncio
+async def test_refund_category_with_return_keyword_routes_to_returns(
+    db_session: AsyncSession, merchant_one_id: UUID
+) -> None:
+    """没有维度/筛选信号时退到关键词：分类阶段识别出「退货」就该查退货明细。"""
+
+    result = await _service(db_session).execute(
+        MerchantContext(merchant_id=merchant_one_id),
+        _intent(answer_mode=AnswerMode.DETAIL, metric=None, category=QuestionCategory.REFUND),
+        now=NOW,
+        keywords=("导出最近7天退货明细",),
+    )
+
+    assert result.source_tables == ("returns",)
+
+
+@pytest.mark.asyncio
+async def test_refund_category_with_refund_keyword_routes_to_refunds(
+    db_session: AsyncSession, merchant_one_id: UUID
+) -> None:
+    """关键词命中「退款」时维持查退款明细，不能被「退货」的字面相似性带偏。"""
+
+    result = await _service(db_session).execute(
+        MerchantContext(merchant_id=merchant_one_id),
+        _intent(answer_mode=AnswerMode.DETAIL, metric=None, category=QuestionCategory.REFUND),
+        now=NOW,
+        keywords=("查询退款明细",),
+    )
+
+    assert result.source_tables == ("refunds",)
+
+
+@pytest.mark.asyncio
+async def test_refund_category_return_routing_never_leaks_another_merchant(
+    db_session: AsyncSession, merchant_one_id: UUID, merchant_two_id: UUID
+) -> None:
+    """§B4 验收「退货明细可查询、可导出，跨商家退货记录不可见」的端到端钉子。
+
+    路由缺口修复前这条走不通——REFUND 永远查 refunds，returns 表压根到不了，
+    `SafeQueryService` 这一层就没法验证商家隔离。两个商家同一天都有退货
+    原因相同的记录，但件数不同：如果隔离失效，返回行会同时出现 3 和 9。
+    """
+
+    await _return_record(db_session, merchant_one_id, reason="质量问题", quantity=3)
+    await _return_record(db_session, merchant_two_id, reason="质量问题", quantity=9)
+
+    result = await _service(db_session).execute(
+        MerchantContext(merchant_id=merchant_one_id),
+        _intent(
+            answer_mode=AnswerMode.DETAIL,
+            metric=None,
+            category=QuestionCategory.REFUND,
+            filters={"return_reason": "质量问题"},
+        ),
+        now=NOW,
+    )
+
+    assert result.source_tables == ("returns",)
+    assert [row["return_quantity"] for row in result.rows] == [3]

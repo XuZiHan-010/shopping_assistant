@@ -7,6 +7,7 @@ tests/integration 的仓储测试负责。
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from datetime import date
 from decimal import Decimal
 from uuid import uuid4
@@ -36,9 +37,20 @@ class _StubQueryService:
     def __init__(self, result: QueryResult | Exception) -> None:
         self._result = result
         self.calls = 0
+        #: `_query_data` 现在总是显式传 `keywords`（REFUND 类别的退款/退货
+        #: 二次路由要用），这里记录下来供路由测试断言它被正确透传。
+        self.received_keywords: Sequence[str] | None = None
 
-    async def execute(self, context: object, intent: object, *, now: object) -> QueryResult:
+    async def execute(
+        self,
+        context: object,
+        intent: object,
+        *,
+        now: object,
+        keywords: Sequence[str] = (),
+    ) -> QueryResult:
         self.calls += 1
+        self.received_keywords = keywords
         if isinstance(self._result, Exception):
             raise self._result
         return self._result
@@ -157,6 +169,21 @@ async def test_metric_answer_carries_real_rows_and_drops_the_b4_fallback() -> No
     assert result.response.total_rows == 1
     assert result.response.analysis_sources == [AnalysisSource.DATABASE]
     assert result.response.degraded is False
+
+
+@pytest.mark.asyncio
+async def test_query_data_passes_the_classification_keywords_through() -> None:
+    """`SafeQueryService` 的 REFUND 退款/退货二次路由靠这些关键词判断；
+
+    `_query_data` 必须把分类阶段（`classify_intent`）产出的
+    `initial_intent.intent_keywords` 原样透传，不能悄悄丢在图里。
+    """
+
+    service = _StubQueryService(_metric_result())
+
+    await _graph(service).run("昨天 GMV", uuid4())
+
+    assert service.received_keywords == ("GMV",)
 
 
 @pytest.mark.asyncio

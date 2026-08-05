@@ -164,12 +164,24 @@ DETAIL_SPECS: Final[Mapping[str, DetailSpec]] = {
 }
 
 #: 业务分类到默认明细表的路由。没有对应经营表的域不出现在这里。
+#:
+#: `REFUND` 这一级本身是模糊的：退款（资金动作）与退货（货品动作）在 PRD 里
+#: 明确是两件可以分开发生的事，但 B3 的分类粒度只到 `REFUND` 这一级，两者
+#: 都挂在同一个分类下。这里维持"退款"作为兜底，真正的二次判定（按维度/筛选
+#: 字段、再按关键词分流到 `returns`）由 `app.services.safe_query` 完成——
+#: 那里离意图和查询上下文更近，这张表只负责"分类拿不到更多信号时查什么"。
 DETAIL_BY_CATEGORY: Final[Mapping[str, str]] = {
     "TRADE": "orders",
     "REFUND": "refunds",
     "CS_TICKET": "support_tickets",
     "GOODS": "products",
 }
+
+#: `REFUND` 分类下用关键词二次判定该查 `returns`（退货）还是 `refunds`
+#: （退款）——出现子串就足以判定，不需要完整分词。词表是不可变契约的一部分，
+#: 不下放到服务层，避免同一个判断标准散落在多处、后续改一处漏一处。
+REFUND_CATEGORY_RETURN_KEYWORDS: Final[frozenset[str]] = frozenset({"退货", "退回"})
+REFUND_CATEGORY_REFUND_KEYWORDS: Final[frozenset[str]] = frozenset({"退款"})
 
 
 def detail_spec(table: str) -> DetailSpec:

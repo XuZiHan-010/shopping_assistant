@@ -19,11 +19,13 @@ DAY = date(2026, 8, 3)
 async def _return_record(session: AsyncSession, merchant_id: UUID, reason: str) -> None:
     """退货明细的最小依赖链：product -> order -> order_item -> return。
 
-    `DETAIL_SPECS["returns"]` 在契约里注册了列，但目前没有任何 `QuestionCategory`
-    路由到它（`DETAIL_BY_CATEGORY` 只把 `REFUND` 指向 `refunds` 表）——退货明细
-    因此只能在 Repository 这一层直接验证「可查询、跨商家不可见」，无法通过
-    `SafeQueryService` 端到端验证。这是 B4 计划本身遗留的路由缺口，不是
-    Task 10 的实现范围，见 Task 10 报告里的记录。
+    `DETAIL_BY_CATEGORY` 只把 `REFUND` 静态指向 `refunds` 表，`returns` 表
+    曾经没有任何路由能到达——`SafeQueryService` 已在 REFUND 类别内部按
+    维度/筛选字段与分类关键词做了二次路由（见
+    `tests/integration/services/test_safe_query.py` 里的
+    `test_refund_category_with_*` 系列），这里仍然直接测 Repository，
+    是为了在编排层之下单独钉住「可查询、跨商家不可见」这条不依赖路由逻辑
+    的最小行为。
     """
 
     product = Product(

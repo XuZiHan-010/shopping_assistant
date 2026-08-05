@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -42,7 +43,12 @@ class QueryServiceLike(Protocol):
     """`_query_data` 需要的最小接口；真实实现是 B4 的 `SafeQueryService`。"""
 
     async def execute(
-        self, context: MerchantContext, intent: QueryIntent, *, now: datetime
+        self,
+        context: MerchantContext,
+        intent: QueryIntent,
+        *,
+        now: datetime,
+        keywords: Sequence[str] = (),
     ) -> QueryResult: ...
 
 
@@ -241,11 +247,18 @@ class MerchantQaGraph:
         if intent.answer_mode not in {AnswerMode.METRIC, AnswerMode.DETAIL}:
             return self._step(state, "query_data")
 
+        # REFUND 类别下退款/退货二次路由要靠分类阶段的关键词；初始意图理论上
+        # 此时必已产出（`classify_intent` 在图里排在 `query_data` 之前），但
+        # 状态类型是 Optional，缺失时按「没有关键词信号」处理，不额外报错。
+        initial = state["initial_intent"]
+        keywords = initial.intent_keywords if initial is not None else ()
+
         try:
             result = await self._query_service.execute(
                 MerchantContext(merchant_id=self._merchant_id),
                 intent,
                 now=datetime.now(UTC),
+                keywords=keywords,
             )
         except UnsupportedQueryError as error:
             return {
