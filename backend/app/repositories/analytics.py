@@ -62,6 +62,15 @@ class DetailResult:
     source_tables: tuple[str, ...]
 
 
+def _order_identity(*, via_order_items: bool) -> ColumnElement[Any]:
+    """`orders` 行标识列：join 展开成多行时必须 distinct，否则同一张订单
+
+    会被同一分组里的多个订单项数出多次。
+    """
+
+    return cast("ColumnElement[Any]", func.distinct(Order.id) if via_order_items else Order.id)
+
+
 def _metric_expression(metric: MetricSpec, *, via_order_items: bool = False) -> ColumnElement[Any]:
     """`via_order_items` 为真时说明本次查询为了拿 `product`/`category` 维度，
 
@@ -79,14 +88,14 @@ def _metric_expression(metric: MetricSpec, *, via_order_items: bool = False) -> 
             Order.order_status.in_(("PAID", "SHIPPED", "COMPLETED"))
         )
     if metric.code == "order_count":
-        order_id = func.distinct(Order.id) if via_order_items else Order.id
-        return func.count(order_id)
+        return func.count(_order_identity(via_order_items=via_order_items))
     if metric.code == "paying_user_count":
         # distinct(buyer_key) 按值去重，不按行去重，join 展开不会放大它。
         return func.count(func.distinct(Order.buyer_key)).filter(Order.paid_at.is_not(None))
     if metric.code == "successful_order_count":
-        order_id = func.distinct(Order.id) if via_order_items else Order.id
-        return func.count(order_id).filter(Order.order_status == "COMPLETED")
+        return func.count(_order_identity(via_order_items=via_order_items)).filter(
+            Order.order_status == "COMPLETED"
+        )
     if metric.code == "refund_count":
         return func.count(Refund.id).filter(Refund.refund_status.in_(("APPROVED", "REFUNDED")))
     if metric.code == "refund_amount":

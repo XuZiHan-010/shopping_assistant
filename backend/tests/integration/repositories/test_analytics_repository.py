@@ -335,6 +335,8 @@ async def test_gmv_by_category_sums_back_to_the_order_amount(
     by_category = {row["category"]: row["gmv"] for row in result.rows}
     assert by_category == {"女装": Decimal("150.00"), "男装": Decimal("150.00")}
     assert sum(by_category.values()) == Decimal("300.00")
+    # 走 order_items 路径时，source_tables 得如实报告真正参与聚合的三张表。
+    assert result.source_tables == ("order_items", "orders", "products")
 
 
 @pytest.mark.asyncio
@@ -361,6 +363,7 @@ async def test_order_count_by_category_does_not_double_count_the_same_order(
 
     by_category = {row["category"]: row["order_count"] for row in result.rows}
     assert by_category == {"女装": 1, "男装": 1}
+    assert result.source_tables == ("order_items", "orders", "products")
 
 
 @pytest.mark.asyncio
@@ -387,6 +390,7 @@ async def test_successful_order_count_by_category_does_not_double_count(
 
     by_category = {row["category"]: row["successful_order_count"] for row in result.rows}
     assert by_category == {"女装": 1, "男装": 1}
+    assert result.source_tables == ("order_items", "orders", "products")
 
 
 @pytest.mark.asyncio
@@ -413,3 +417,111 @@ async def test_paying_user_count_by_category_is_not_affected_by_join_fanout(
 
     by_category = {row["category"]: row["paying_user_count"] for row in result.rows}
     assert by_category == {"女装": 1, "男装": 1}
+
+
+async def _fixture_category_order_with_excluded_status(
+    session: AsyncSession, merchant_id: UUID
+) -> None:
+    """同一个类目下两张订单：一张 `COMPLETED`（应计入 GMV），一张 `CANCELLED`
+
+    （不应计入）。两张订单的商品都在「女装」类目下，这样才能验证「同类目内
+    也会按订单状态排除」，而不是靠类目不同蒙混过去——如果 GMV 改走
+    `order_items.item_amount` 聚合时把 `Order.order_status` 的 FILTER
+    弄丢或挂错了列，这张 `CANCELLED` 订单的 500 元会混进「女装」类目的 GMV。
+    """
+
+    qualifying_product = Product(
+        merchant_id=merchant_id,
+        business_date=DAY,
+        product_code=f"SKU-{uuid4().hex[:8]}",
+        title="演示商品-合格",
+        category="女装",
+        price=Decimal("100.00"),
+        status="ONLINE",
+        listed_at=datetime(2026, 8, 3, 2, 0, tzinfo=UTC),
+    )
+    excluded_product = Product(
+        merchant_id=merchant_id,
+        business_date=DAY,
+        product_code=f"SKU-{uuid4().hex[:8]}",
+        title="演示商品-被取消",
+        category="女装",
+        price=Decimal("500.00"),
+        status="ONLINE",
+        listed_at=datetime(2026, 8, 3, 2, 0, tzinfo=UTC),
+    )
+    session.add_all([qualifying_product, excluded_product])
+    await session.flush()
+
+    qualifying_order = Order(
+        merchant_id=merchant_id,
+        business_date=DAY,
+        order_no=f"NO-{uuid4().hex[:10]}",
+        buyer_key="buyer-qualifying",
+        order_status="COMPLETED",
+        total_amount=Decimal("100.00"),
+        paid_amount=Decimal("100.00"),
+        placed_at=datetime(2026, 8, 3, 2, 0, tzinfo=UTC),
+        paid_at=datetime(2026, 8, 3, 3, 0, tzinfo=UTC),
+    )
+    excluded_order = Order(
+        merchant_id=merchant_id,
+        business_date=DAY,
+        order_no=f"NO-{uuid4().hex[:10]}",
+        buyer_key="buyer-excluded",
+        order_status="CANCELLED",
+        total_amount=Decimal("500.00"),
+        paid_amount=Decimal("500.00"),
+        placed_at=datetime(2026, 8, 3, 2, 0, tzinfo=UTC),
+        paid_at=None,
+    )
+    session.add_all([qualifying_order, excluded_order])
+    await session.flush()
+
+    session.add_all(
+        [
+            OrderItem(
+                merchant_id=merchant_id,
+                business_date=DAY,
+                order_id=qualifying_order.id,
+                product_id=qualifying_product.id,
+                quantity=1,
+                item_amount=Decimal("100.00"),
+            ),
+            OrderItem(
+                merchant_id=merchant_id,
+                business_date=DAY,
+                order_id=excluded_order.id,
+                product_id=excluded_product.id,
+                quantity=1,
+                item_amount=Decimal("500.00"),
+            ),
+        ]
+    )
+    await session.flush()
+
+
+@pytest.mark.asyncio
+async def test_gmv_by_category_still_excludes_disqualifying_order_status(
+    db_session: AsyncSession, merchant_one_id: UUID
+) -> None:
+    """`gmv` 改走 order_items.item_amount 聚合之后，订单状态过滤必须依然生效——
+
+    `CANCELLED` 订单的 500 元不能因为改了聚合基础列就漏进「女装」类目的 GMV。
+    """
+
+    await _fixture_category_order_with_excluded_status(db_session, merchant_one_id)
+    repository = AnalyticsRepository(db_session)
+
+    result = await repository.aggregate(
+        merchant_id=merchant_one_id,
+        metric=METRIC_SPECS["gmv"],
+        dimensions=("category",),
+        filters={},
+        start=DAY,
+        end=DAY,
+        limit=200,
+    )
+
+    by_category = {row["category"]: row["gmv"] for row in result.rows}
+    assert by_category == {"女装": Decimal("100.00")}
