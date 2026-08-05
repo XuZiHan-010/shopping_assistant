@@ -8,13 +8,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
+from decimal import Decimal
 from itertools import pairwise
-from typing import Any, Final, cast
+from typing import Any, Final, Protocol, cast
 from uuid import UUID, uuid4
 
 from langgraph.graph import END, START, StateGraph
 
 from app.agent.state import AgentState
+from app.core.security import MerchantContext
+from app.intent.models import QueryIntent
 from app.intent.service import IntentService
 from app.knowledge.retrieval import KnowledgeResult, KnowledgeRetrieval
 from app.llm.client import LlmBudget, LlmClient
@@ -31,7 +34,17 @@ from app.schemas.chat import (
     ThinkingStep,
     Visualization,
 )
+from app.services.safe_query import QueryResult, UnsupportedQueryError
 from app.services.suggested_questions import suggestions_for
+
+
+class QueryServiceLike(Protocol):
+    """`_query_data` 需要的最小接口；真实实现是 B4 的 `SafeQueryService`。"""
+
+    async def execute(
+        self, context: MerchantContext, intent: QueryIntent, *, now: datetime
+    ) -> QueryResult: ...
+
 
 MAX_REVIEW_ATTEMPTS: Final[int] = 2
 GRAPH_NODES: Final[tuple[str, ...]] = (
@@ -83,12 +96,16 @@ class MerchantQaGraph:
         catalog: MetricCatalog,
         max_llm_calls: int = 4,
         max_llm_tokens: int = 8_000,
+        query_service: QueryServiceLike | None = None,
+        merchant_id: UUID | None = None,
     ) -> None:
         self._retrieval = retrieval
         self._intent_service = IntentService(intent_service_llm)
         self._catalog = catalog
         self._max_calls = max_llm_calls
         self._max_tokens = max_llm_tokens
+        self._query_service = query_service
+        self._merchant_id = merchant_id
         self._graph = self._build_graph()
 
     async def run(self, message: str, session_id: UUID) -> AgentRunResult:
@@ -129,6 +146,8 @@ class MerchantQaGraph:
             "intent": None,
             "intent_validation": None,
             "metric_definition": None,
+            "query_result": None,
+            "query_error": None,
             "candidate_answer": "",
             "visualization": None,
             "recommendations": [],
@@ -215,8 +234,30 @@ class MerchantQaGraph:
         }
 
     async def _query_data(self, state: AgentState) -> dict[str, object]:
-        # 占位：安全经营数据查询属于 B4；此处绝不拼接或执行 SQL。
-        return self._step(state, "query_data")
+        intent = _required(state["intent"])
+        if self._query_service is None or self._merchant_id is None:
+            # 未注入查询服务时保持 B3 的可见降级，而不是假装查过。
+            return self._step(state, "query_data")
+        if intent.answer_mode not in {AnswerMode.METRIC, AnswerMode.DETAIL}:
+            return self._step(state, "query_data")
+
+        try:
+            result = await self._query_service.execute(
+                MerchantContext(merchant_id=self._merchant_id),
+                intent,
+                now=datetime.now(UTC),
+            )
+        except UnsupportedQueryError as error:
+            return {
+                **self._step(state, "query_data"),
+                "query_error": error.reason,
+                "quality_notes": [*state["quality_notes"], error.reason],
+            }
+        return {
+            **self._step(state, "query_data"),
+            "query_result": result,
+            "quality_notes": [*state["quality_notes"], *result.notes],
+        }
 
     async def _compose_answer(self, state: AgentState) -> dict[str, object]:
         intent = _required(state["intent"])
@@ -261,7 +302,13 @@ class MerchantQaGraph:
         intent = _required(state["intent"])
         if intent.answer_mode is AnswerMode.METRIC:
             metric = state["metric_definition"] or _unverified_metric(intent.metric)
-            notes = [*state["quality_notes"], "当前未执行经营数据查询。"]
+            outcome = _query_outcome(
+                state,
+                fallback_query_plan="已校验结构化查询意图，尚未执行数据查询。",
+                fallback_note="当前未执行经营数据查询。",
+                fallback_reason="经营数据安全查询将在 B4 接入",
+            )
+            notes = list(outcome.notes)
             if metric.generated and metric.notice is not None:
                 # 生成口径必须带待核验说明，否则用户会把模型猜的口径当成正式口径。
                 notes.append(metric.notice)
@@ -272,15 +319,15 @@ class MerchantQaGraph:
                 answer_mode=AnswerMode.METRIC,
                 category=intent.category,
                 thinking_steps=state["steps"],
-                quality_status=QualityStatus.DEGRADED,
+                quality_status=outcome.quality_status,
                 quality_attempts=0,
                 quality_notes=notes,
-                analysis_sources=[AnalysisSource.FALLBACK],
-                degraded=True,
-                degraded_reason="经营数据安全查询将在 B4 接入",
+                analysis_sources=outcome.analysis_sources,
+                degraded=outcome.degraded,
+                degraded_reason=outcome.degraded_reason,
                 suggestions=state["suggestions"],
                 suggestion_alternates=state["suggestion_alternates"],
-                query_plan=QueryPlanSummary(summary="已校验结构化查询意图，尚未执行数据查询。"),
+                query_plan=outcome.query_plan,
                 metric_code=metric.metric_code,
                 metric_display_name=metric.display_name,
                 metric_unit=metric.unit,
@@ -288,9 +335,11 @@ class MerchantQaGraph:
                 metric_source=metric.source,
                 metric_owner=metric.owner,
                 metric_status=MetricStatus(metric.status),
-                data_rows=[],
-                total_rows=0,
-                truncated=False,
+                data_rows=outcome.data_rows,
+                total_rows=outcome.total_rows,
+                truncated=outcome.truncated,
+                # 图表与建议仍是 B5 的工作：这里只保证契约必填字段有值，
+                # 不据真实数据生成——那会预支 B5 尚未做的分析。
                 visualization=Visualization(enabled=False),
                 recommendations=[
                     Recommendation(
@@ -308,6 +357,12 @@ class MerchantQaGraph:
 
         if intent.answer_mode is AnswerMode.DETAIL:
             export_id = uuid4()
+            outcome = _query_outcome(
+                state,
+                fallback_query_plan="已校验明细查询意图，尚未执行数据查询。",
+                fallback_note="当前未执行经营明细查询。",
+                fallback_reason="经营数据安全查询将在 B4 接入",
+            )
             return ChatResponse(
                 id=uuid4(),
                 session_id=state["session_id"],
@@ -315,18 +370,20 @@ class MerchantQaGraph:
                 answer_mode=AnswerMode.DETAIL,
                 category=intent.category,
                 thinking_steps=state["steps"],
-                quality_status=QualityStatus.DEGRADED,
+                quality_status=outcome.quality_status,
                 quality_attempts=0,
-                quality_notes=[*state["quality_notes"], "当前未执行经营明细查询。"],
-                analysis_sources=[AnalysisSource.FALLBACK],
-                degraded=True,
-                degraded_reason="经营数据安全查询将在 B4 接入",
+                quality_notes=outcome.notes,
+                analysis_sources=outcome.analysis_sources,
+                degraded=outcome.degraded,
+                degraded_reason=outcome.degraded_reason,
                 suggestions=state["suggestions"],
                 suggestion_alternates=state["suggestion_alternates"],
-                query_plan=QueryPlanSummary(summary="已校验明细查询意图，尚未执行数据查询。"),
-                data_rows=[],
-                total_rows=0,
-                truncated=False,
+                query_plan=outcome.query_plan,
+                data_rows=outcome.data_rows,
+                total_rows=outcome.total_rows,
+                truncated=outcome.truncated,
+                # 导出端点属于 B6：这里仍只登记一个占位 id/url，
+                # QueryResult.export_spec（真正的表/列/时间范围）留给 B6 消费。
                 export=ExportInfo(
                     id=export_id,
                     url=f"/api/exports/{export_id}",
@@ -403,6 +460,82 @@ def _required[T](value: T | None) -> T:
     if value is None:
         raise RuntimeError("问答图状态缺少必填字段")
     return value
+
+
+@dataclass(frozen=True)
+class _QueryOutcome:
+    """METRIC/DETAIL 两个分支共用的「查询结果如何填进响应」计算结果。"""
+
+    query_plan: QueryPlanSummary
+    data_rows: list[dict[str, object]]
+    total_rows: int
+    truncated: bool
+    analysis_sources: list[AnalysisSource]
+    degraded: bool
+    degraded_reason: str | None
+    quality_status: QualityStatus
+    notes: list[str]
+
+
+def _query_outcome(
+    state: AgentState,
+    *,
+    fallback_query_plan: str,
+    fallback_note: str,
+    fallback_reason: str,
+) -> _QueryOutcome:
+    """把 `_query_data` 节点的结果翻译成响应字段。
+
+    有 `query_result` 就是真查询成功；没有的话要区分「查询被拒」（`query_error`
+    非空，拒绝原因来自 `UnsupportedQueryError.reason`，可以直接展示）和「根本
+    没注入查询服务」（保留 B3 的通用降级文案）两种情况，但两者对用户来说都是
+    同一种可见降级，不能悄悄返回空数组假装没有数据。
+    """
+
+    query_result = state["query_result"]
+    if query_result is not None:
+        return _QueryOutcome(
+            query_plan=QueryPlanSummary(summary="；".join(query_result.plan_steps)),
+            data_rows=_json_rows(query_result.rows),
+            total_rows=query_result.total_rows,
+            truncated=query_result.truncated,
+            analysis_sources=[AnalysisSource.DATABASE],
+            degraded=False,
+            degraded_reason=None,
+            quality_status=QualityStatus.NOT_RUN,
+            notes=list(state["quality_notes"]),
+        )
+    return _QueryOutcome(
+        query_plan=QueryPlanSummary(summary=fallback_query_plan),
+        data_rows=[],
+        total_rows=0,
+        truncated=False,
+        analysis_sources=[AnalysisSource.FALLBACK],
+        degraded=True,
+        degraded_reason=state["query_error"] or fallback_reason,
+        quality_status=QualityStatus.DEGRADED,
+        notes=[*state["quality_notes"], fallback_note],
+    )
+
+
+def _json_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Decimal 转字符串保精度，日期转 ISO 8601。float 会丢分。"""
+
+    converted: list[dict[str, object]] = []
+    for row in rows:
+        converted.append(
+            {
+                key: (
+                    str(value)
+                    if isinstance(value, Decimal)
+                    else value.isoformat()
+                    if isinstance(value, date | datetime)
+                    else value
+                )
+                for key, value in row.items()
+            }
+        )
+    return converted
 
 
 def _knowledge_answer(detail: KnowledgeResult | None) -> str:

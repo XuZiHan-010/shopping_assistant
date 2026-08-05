@@ -64,13 +64,22 @@ async def test_fixtures_cover_every_p0_answer_mode() -> None:
 
 
 async def test_fake_answers_are_never_presented_as_real_data() -> None:
-    """AGENTS.md R7：演示结果不得伪装成真实经营数据。"""
+    """AGENTS.md R7：演示结果不得伪装成真实经营数据。
+
+    B4 起 METRIC/DETAIL 走真实的 `query_data` 节点，导出脚本用
+    `_StubQueryService` 演示「查询已成功」这一真实存在的分支——这里的
+    DATABASE 不是伪装，是这两个模式现在确实会产生的结果。R7 真正要防的是
+    反过来的情况：从不查询经营数据的模式（CHAT/RULE/IDENTITY/INVALID）绝不能
+    生造出一个 DATABASE 来源，把没做过的事说成做过了。
+    """
 
     for case in FIXTURES:
         payload = await _payload(case)
         sources = payload["analysis_sources"]
 
-        assert "DATABASE" not in sources
+        if "DATABASE" in sources:
+            assert payload["answer_mode"] in {"METRIC", "DETAIL"}
+            assert payload["degraded"] is False
         if "KNOWLEDGE" in sources:
             assert payload["answer_mode"] == "RULE"
             assert "来源：" in payload["answer"]

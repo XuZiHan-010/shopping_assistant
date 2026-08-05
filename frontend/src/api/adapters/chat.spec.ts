@@ -51,24 +51,25 @@ describe('toChatAnswer · 真实载荷', () => {
     })
   })
 
-  it('B3 的 METRIC 明确返回未查询的受控空结果', () => {
+  it('B4 的 METRIC 携带真实查询到的数据行', () => {
     const answer = toChatAnswer(gmv)
 
-    expect(answer.data?.rows).toHaveLength(0)
-    expect(answer.data?.totalRows).toBe(0)
+    expect(answer.data?.rows).toEqual([{ gmv: '128000.50' }])
+    expect(answer.data?.totalRows).toBe(1)
     expect(answer.data?.truncated).toBe(false)
     expect(answer.data?.queryPlan).toBeTruthy()
+    // 图表仍是 B5 的工作：B4 只保证契约必填字段有值，不据真实数据生成图表。
     expect(answer.chart?.enabled).toBe(false)
     expect(answer.chart?.data).toHaveLength(0)
   })
 
-  it('订单明细场景保留截断信息', () => {
+  it('订单明细场景携带真实数据行', () => {
     const answer = toChatAnswer(orderDetail)
 
     expect(answer.mode).toBe('DETAIL')
-    expect(answer.data?.totalRows).toBe(0)
+    expect(answer.data?.totalRows).toBe(2)
     expect(answer.data?.truncated).toBe(false)
-    expect(answer.data?.rows).toHaveLength(0)
+    expect(answer.data?.rows).toHaveLength(2)
     expect(answer.export).toBeDefined()
   })
 
@@ -83,13 +84,13 @@ describe('toChatAnswer · 真实载荷', () => {
     })
   })
 
-  it('降级信息进入质量轨迹', () => {
+  it('真实数据查询成功后不再降级，来源标记为 DATABASE', () => {
     const quality = toChatAnswer(refund).quality
 
-    expect(quality.degraded).toBe(true)
-    expect(quality.degradedReason).toBe('经营数据安全查询将在 B4 接入')
-    expect(quality.sources).toEqual(['FALLBACK'])
-    expect(quality.status).toBe('DEGRADED')
+    expect(quality.degraded).toBe(false)
+    expect(quality.degradedReason).toBeUndefined()
+    expect(quality.sources).toEqual(['DATABASE'])
+    expect(quality.status).toBe('NOT_RUN')
     expect(quality.attempts).toBe(0)
     expect(quality.notes.length).toBeGreaterThan(0)
   })
@@ -191,12 +192,13 @@ describe('toChatAnswer · 语义守卫', () => {
   })
 
   it('含 FALLBACK 时必须降级', () => {
-    const bad = clone({ degraded: false, degraded_reason: null })
+    const bad = clone({ analysis_sources: ['FALLBACK'], degraded: false, degraded_reason: null })
     expect(() => toChatAnswer(bad)).toThrow(/FALLBACK/)
   })
 
   it('降级必须给出原因', () => {
-    expect(() => toChatAnswer(clone({ degraded_reason: null }))).toThrow(ChatContractError)
+    const bad = clone({ analysis_sources: ['FALLBACK'], degraded: true, degraded_reason: null })
+    expect(() => toChatAnswer(bad)).toThrow(ChatContractError)
   })
 
   it('METRIC 缺指标字段时报错', () => {

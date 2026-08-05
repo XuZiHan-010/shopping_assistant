@@ -109,11 +109,12 @@ describe('ConversationColumn', () => {
     const wrapper = mount(ConversationColumn)
     const store = useChatStore()
 
-    await store.submitMessage('昨天总 GMV 是多少？')
+    // B4 起 METRIC/DETAIL 已接入真实查询，不再演示降级；商家资料查询（IDENTITY）
+    // 仍是 B4 未接入的受控空结果，analysis_sources 是 ['FALLBACK']、degraded 为
+    // true——用它保留这条「FALLBACK 必须可见」（R7）的回归覆盖。
+    await store.submitMessage('我的商家资料是什么？')
     await wrapper.vm.$nextTick()
 
-    // fixture 的 analysis_sources 是 ['FALLBACK']、degraded 为 true。
-    // 不显示的话，页面上的 ¥256,920 看起来和真实经营数据一模一样。
     expect(store.messages[1].answer?.quality.degraded).toBe(true)
     const notice = wrapper.get('[data-testid="degraded-notice"]')
     expect(notice.text()).toContain('演示数据')

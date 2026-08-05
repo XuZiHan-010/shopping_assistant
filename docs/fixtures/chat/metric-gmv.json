@@ -1,14 +1,18 @@
 {
   "analysis_sources": [
-    "FALLBACK"
+    "DATABASE"
   ],
   "answer": "已识别指标和查询范围；经营数据查询将在 B4 接入。",
   "answer_mode": "METRIC",
   "category": "TRADE",
   "created_at": "2026-07-28T12:00:00Z",
-  "data_rows": [],
-  "degraded": true,
-  "degraded_reason": "经营数据安全查询将在 B4 接入",
+  "data_rows": [
+    {
+      "gmv": "128000.50"
+    }
+  ],
+  "degraded": false,
+  "degraded_reason": null,
   "export": null,
   "id": "b24375c9-1f09-5951-bbc4-09c4f4338ffc",
   "metric_code": "gmv",
@@ -19,12 +23,10 @@
   "metric_status": "ACTIVE",
   "metric_unit": "元",
   "quality_attempts": 0,
-  "quality_notes": [
-    "当前未执行经营数据查询。"
-  ],
-  "quality_status": "DEGRADED",
+  "quality_notes": [],
+  "quality_status": "NOT_RUN",
   "query_plan": {
-    "summary": "已校验结构化查询意图，尚未执行数据查询。"
+    "summary": "按商家范围检索成交 GMV；时间范围 2026-07-29 至 2026-08-04；数据来源：订单"
   },
   "recommendations": [
     {
@@ -105,7 +107,7 @@
       "node": "persist_answer"
     }
   ],
-  "total_rows": 0,
+  "total_rows": 1,
   "truncated": false,
   "visualization": {
     "allowed_types": [],

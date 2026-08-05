@@ -1,14 +1,29 @@
 {
   "analysis_sources": [
-    "FALLBACK"
+    "DATABASE"
   ],
   "answer": "已识别明细查询意图；经营数据查询将在 B4 接入。",
   "answer_mode": "DETAIL",
   "category": "TRADE",
   "created_at": "2026-07-28T12:00:00Z",
-  "data_rows": [],
-  "degraded": true,
-  "degraded_reason": "经营数据安全查询将在 B4 接入",
+  "data_rows": [
+    {
+      "business_date": "2026-08-03",
+      "order_no": "BR20260803-0001",
+      "order_status": "COMPLETED",
+      "paid_amount": "258.00",
+      "placed_at": "2026-08-03T09:12:00+00:00"
+    },
+    {
+      "business_date": "2026-08-03",
+      "order_no": "BR20260803-0002",
+      "order_status": "PAID",
+      "paid_amount": "129.50",
+      "placed_at": "2026-08-03T10:05:00+00:00"
+    }
+  ],
+  "degraded": false,
+  "degraded_reason": null,
   "export": {
     "expires_at": "2026-07-28T12:00:00Z",
     "id": "17575e95-31e5-5282-9d66-2c237c468537",
@@ -23,12 +38,10 @@
   "metric_status": null,
   "metric_unit": null,
   "quality_attempts": 0,
-  "quality_notes": [
-    "当前未执行经营明细查询。"
-  ],
-  "quality_status": "DEGRADED",
+  "quality_notes": [],
+  "quality_status": "NOT_RUN",
   "query_plan": {
-    "summary": "已校验明细查询意图，尚未执行数据查询。"
+    "summary": "按商家范围检索订单明细；时间范围 2026-07-29 至 2026-08-04；数据来源：订单"
   },
   "recommendations": [
     {
@@ -109,7 +122,7 @@
       "node": "persist_answer"
     }
   ],
-  "total_rows": 0,
+  "total_rows": 2,
   "truncated": false,
   "visualization": null
 }

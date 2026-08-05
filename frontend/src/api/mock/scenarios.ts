@@ -53,6 +53,15 @@ export const MOCK_SCENARIOS: readonly Scenario[] = [
     fixture: 'invalidRefused',
     keywords: ['修改订单', '改金额', '删除数据'],
   },
+  {
+    // IDENTITY 仍是 B4 未接入的受控空结果（商家资料查询留给后续阶段），刻意不给
+    // category：和 chatGreeting/invalidRefused 一样，不该被主动推荐去踩一个
+    // 明知会降级的场景，但仍需可达——它是目前唯一还能演示「FALLBACK 必须可见」
+    // （R7）的固定场景。
+    question: '我的商家资料是什么？',
+    fixture: 'identityProfile',
+    keywords: ['商家资料', '身份信息'],
+  },
 ] as const
 
 /** 快速体验入口。顺序与分类对齐 Prototype 的四宫格。 */
