@@ -14,6 +14,7 @@ from app.intent.models import DateRange, QueryIntent
 from app.models.analytics import Order
 from app.repositories.analytics import AnalyticsRepository
 from app.schemas.chat import AnswerMode, QuestionCategory
+from app.services import safe_query
 from app.services.safe_query import SafeQueryService, UnsupportedQueryError
 
 NOW = datetime(2026, 8, 4, 2, 0, tzinfo=UTC)
@@ -124,12 +125,21 @@ async def test_unknown_metric_is_refused_with_a_showable_reason(
 async def test_incompatible_dimension_is_refused_not_silently_dropped(
     db_session: AsyncSession, merchant_one_id: UUID
 ) -> None:
-    with pytest.raises(UnsupportedQueryError):
+    """拒绝原因要展示中文标签，不能回显原始 code——它可能就等于真实列名
+
+    （见 `app.analytics.contract.DIMENSION_SPECS`，`refund_reason` 的
+    `code` 和 `column` 是同一个字符串）。
+    """
+
+    with pytest.raises(UnsupportedQueryError) as error:
         await _service(db_session).execute(
             MerchantContext(merchant_id=merchant_one_id),
             _intent(dimensions=["refund_reason"]),
             now=NOW,
         )
+
+    assert "退款原因" in error.value.reason
+    assert "refund_reason" not in error.value.reason
 
 
 @pytest.mark.asyncio
@@ -284,3 +294,95 @@ async def test_detail_filter_from_another_table_is_refused_not_silently_dropped(
     assert "SELECT" not in error.value.reason.upper()
     assert "returns" not in error.value.reason
     assert "orders" not in error.value.reason
+
+
+@pytest.mark.asyncio
+async def test_plan_steps_never_expose_raw_table_names(
+    db_session: AsyncSession, merchant_one_id: UUID
+) -> None:
+    """`plan_steps` 是「只承载可安全展示描述」的字段，不能把 SQLAlchemy 的表名
+
+    夹在给商家看的中文句子里——哪怕只是英文单词混进中文也不行。分别覆盖
+    orders（gmv 直查）、order_items（退货率按区间重算）、refunds（退款金额）
+    三条不同的来源路径。
+    """
+
+    await _order(db_session, merchant_one_id)
+    service = _service(db_session)
+    context = MerchantContext(merchant_id=merchant_one_id)
+
+    gmv_result = await service.execute(context, _intent(), now=NOW)
+    ratio_result = await service.execute(
+        context, _intent(metric="return_rate", dimensions=["date"]), now=NOW
+    )
+    refund_result = await service.execute(context, _intent(metric="refund_amount"), now=NOW)
+
+    for result in (gmv_result, ratio_result, refund_result):
+        text = "".join(result.plan_steps)
+        assert "orders" not in text
+        assert "order_items" not in text
+        assert "refunds" not in text
+
+
+@pytest.mark.asyncio
+async def test_metric_result_is_truncated_when_group_count_exceeds_the_preview_limit(
+    db_session: AsyncSession, merchant_one_id: UUID, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """预览上限是「截断但可见」，不是「悄悄按不完整数据回答却说数据完整」。
+
+    真实阈值是 200，为了不用真的构造 201 个分组，这里把服务层的预览常量
+    调小后验证探测逻辑本身：向仓储多取一行，超出阈值就裁剪并标记
+    truncated——`_METRIC_PREVIEW_LIMIT` 是模块级常量，服务层没有开注入口，
+    所以直接 monkeypatch 模块属性。
+    """
+
+    monkeypatch.setattr(safe_query, "_METRIC_PREVIEW_LIMIT", 2)
+    for day in ("2026-08-01", "2026-08-02", "2026-08-03"):
+        db_session.add(
+            Order(
+                merchant_id=merchant_one_id,
+                business_date=date.fromisoformat(day),
+                order_no=f"NO-{uuid4().hex[:8]}",
+                buyer_key="buyer",
+                order_status="COMPLETED",
+                total_amount=Decimal("10.00"),
+                paid_amount=Decimal("10.00"),
+                placed_at=NOW,
+                paid_at=NOW,
+            )
+        )
+    await db_session.flush()
+
+    result = await _service(db_session).execute(
+        MerchantContext(merchant_id=merchant_one_id),
+        _intent(
+            dimensions=["date"],
+            date_range=DateRange(start=date(2026, 8, 1), end=date(2026, 8, 3)),
+        ),
+        now=NOW,
+    )
+
+    assert result.truncated is True
+    assert len(result.rows) == 2
+    assert result.total_rows == 2
+
+
+@pytest.mark.asyncio
+async def test_detail_without_a_mapped_table_shows_the_chinese_category_name(
+    db_session: AsyncSession, merchant_one_id: UUID
+) -> None:
+    """没有明细表的分类要拒绝，拒绝原因用中文业务名而不是英文枚举码。"""
+
+    with pytest.raises(UnsupportedQueryError) as error:
+        await _service(db_session).execute(
+            MerchantContext(merchant_id=merchant_one_id),
+            _intent(
+                answer_mode=AnswerMode.DETAIL,
+                metric=None,
+                category=QuestionCategory.SCM,
+            ),
+            now=NOW,
+        )
+
+    assert "供应链" in error.value.reason
+    assert "SCM" not in error.value.reason

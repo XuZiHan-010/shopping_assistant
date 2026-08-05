@@ -28,7 +28,22 @@ from app.intent.whitelist import MAX_DETAIL_LIMIT
 from app.repositories.analytics import AnalyticsRepository, ResultColumn
 from app.schemas.chat import CATEGORY_DISPLAY_NAMES, AnswerMode
 
+# 明细预览与指标预览各自独立设置：明细走 B3 的 MAX_DETAIL_LIMIT（也是导出的
+# 行数上限），指标预览是本服务自己的"够画一张图/一张表"的阈值，两者取值目前
+# 恰好都是 200 纯属巧合，未来任一个调整都不应该联动另一个。
 _METRIC_PREVIEW_LIMIT: Final[int] = 200
+
+#: `source_tables` 只会来自 `app.repositories.analytics._TABLES` 的键，这里
+#: 穷举同一个集合，把它们翻成商家能看懂的中文说法——`plan_steps` 不允许出现
+#: 英文表标识符。
+_TABLE_LABELS: Final[dict[str, str]] = {
+    "orders": "订单",
+    "order_items": "订单明细",
+    "products": "商品",
+    "refunds": "退款",
+    "returns": "退货",
+    "support_tickets": "客服工单",
+}
 
 
 class UnsupportedQueryError(Exception):
@@ -103,17 +118,28 @@ class SafeQueryService:
         allowed = compatible_dimensions(metric)
         for code in intent.dimensions:
             try:
-                dimension_spec(code)
+                dimension = dimension_spec(code)
             except UnknownFieldError as error:
                 raise UnsupportedQueryError(f"维度 {code} 不在可查询范围内") from error
             if code not in allowed:
-                raise UnsupportedQueryError(f"{metric.label} 不支持按「{code}」拆分")
+                # 用 dimension.label 而不是原始 code：好几个维度的 code 本身就
+                # 等于真实列名（refund_reason、return_reason……），把它拼进
+                # 「可安全展示」的拒绝原因等于泄漏了列名。
+                raise UnsupportedQueryError(f"{metric.label} 不支持按「{dimension.label}」拆分")
         for code in intent.filters:
+            try:
+                dimension = dimension_spec(code)
+            except UnknownFieldError as error:
+                raise UnsupportedQueryError(f"筛选字段 {code} 不在可查询范围内") from error
             if code not in allowed:
-                raise UnsupportedQueryError(f"{metric.label} 不支持按「{code}」筛选")
+                raise UnsupportedQueryError(f"{metric.label} 不支持按「{dimension.label}」筛选")
 
         sort = self._checked_sort(intent.sort, metric.code, tuple(intent.dimensions))
 
+        # 多取一行来探测是否被截断：仓储不返回总数，"要一行、比一下" 是不改
+        # AnalyticsRepository.aggregate() 签名/返回结构就能拿到截断信号的
+        # 唯一办法——按 product 这类高基数维度拆分时，200 条上限很容易真的
+        # 被打满，这里不能像之前那样一律汇报 truncated=False。
         result = await self._repository.aggregate(
             merchant_id=context.merchant_id,
             metric=metric,
@@ -121,14 +147,16 @@ class SafeQueryService:
             filters=dict(intent.filters),
             start=date_range.start,
             end=date_range.end,
-            limit=_METRIC_PREVIEW_LIMIT,
+            limit=_METRIC_PREVIEW_LIMIT + 1,
             sort=sort,
         )
+        truncated = len(result.rows) > _METRIC_PREVIEW_LIMIT
+        rows = result.rows[:_METRIC_PREVIEW_LIMIT] if truncated else result.rows
         return QueryResult(
             columns=result.columns,
-            rows=result.rows,
-            total_rows=len(result.rows),
-            truncated=False,
+            rows=rows,
+            total_rows=len(rows),
+            truncated=truncated,
             source_tables=result.source_tables,
             plan_steps=self._plan_steps(metric.label, result.source_tables, date_range, notes),
             export_spec=None,
@@ -226,11 +254,16 @@ class SafeQueryService:
         date_range: DateRange,
         notes: tuple[str, ...],
     ) -> tuple[str, ...]:
-        """查询计划只承载可安全展示的描述，不含 SQL 与数据行。"""
+        """查询计划只承载可安全展示的描述，不含 SQL 与数据行。
 
+        `source_tables` 是 SQLAlchemy 的表名，不能直接拼进给商家看的中文
+        句子——用 `_TABLE_LABELS` 换成业务说法。
+        """
+
+        sources = "、".join(_TABLE_LABELS.get(table, table) for table in source_tables)
         return (
             f"按商家范围检索{subject}",
             f"时间范围 {date_range.start:%Y-%m-%d} 至 {date_range.end:%Y-%m-%d}",
-            f"数据来源：{'、'.join(source_tables)}",
+            f"数据来源：{sources}",
             *notes,
         )
