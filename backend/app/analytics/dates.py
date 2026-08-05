@@ -16,7 +16,23 @@ from app.intent.whitelist import MAX_QUERY_DAYS
 DEFAULT_RANGE_DAYS: Final[int] = 7
 
 
+class FutureRangeError(ValueError):
+    """请求区间整体位于未来，没有可查询的经营数据。
+
+    调用方（Task 7 的 `SafeQueryService`）应捕获后转成
+    `UnsupportedQueryError`，而不是把这里的 `reason` 当成普通的调整说明——
+    这条路径没有合法区间可返回，不能像 `notes` 一样被静默吞掉。
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        #: 可直接展示给商家的中文拒绝原因。
+        self.reason = reason
+
+
 def business_today(now: datetime, *, timezone: str) -> date:
+    """把注入的时钟换算到业务时区后取日期，作为全系统唯一的「今天」判定点。"""
+
     return now.astimezone(ZoneInfo(timezone)).date()
 
 
@@ -26,7 +42,14 @@ def resolve_range(
     now: datetime,
     timezone: str,
 ) -> tuple[DateRange, tuple[str, ...]]:
-    """产出一定合法的查询区间，并说明做过哪些调整。"""
+    """产出一定合法的查询区间，并说明做过哪些调整。
+
+    请求区间的起始日期本身就晚于今天时拒绝而不是截断：把结束日截到今天、
+    起始日再收敛到同一天，会静默地用「今天」的数据回答一个问未来的问题，
+    调用方很容易把这当成对未来区间的正常回答。这里与 B3
+    `app.intent.whitelist.validate_intent` 对同型输入的处理保持一致——
+    两处都判「起始日期在未来」为不可执行，不是可调整的越界。
+    """
 
     today = business_today(now, timezone=timezone)
     notes: list[str] = []
@@ -35,6 +58,9 @@ def resolve_range(
         start = today - timedelta(days=DEFAULT_RANGE_DAYS - 1)
         notes.append(f"问题未指定时间范围，默认查询最近 {DEFAULT_RANGE_DAYS} 天")
         return DateRange(start=start, end=today), tuple(notes)
+
+    if requested.start > today:
+        raise FutureRangeError("日期范围完全位于未来，没有可查询的经营数据")
 
     start, end = requested.start, requested.end
     if end > today:
