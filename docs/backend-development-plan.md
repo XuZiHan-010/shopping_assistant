@@ -1217,6 +1217,14 @@ PostgreSQL 钉住的一条（`test_return_count_reads_returns_not_refunds`）。
 这是「这张表的时间语义是什么」的声明，和列名、标签一样属于表本身的性质。**新增明细表时
 先想清楚它是事件表还是维度表**，默认值是更保守的按业务日过滤。
 
+**遗留给 B6 的一处不一致（`ExportSpec` 与预览的时间范围）**：`date_filtered=False` 的
+明细（当前只有 `products`）预览时忽略查询区间，但 `SafeQueryService` 交给下游的
+`ExportSpec` 仍然带着 `start`/`end`。B4 内无副作用——导出端点尚不存在、`ExportInfo`
+是占位——但 **B6 实现导出时若直接采信 `ExportSpec.start`/`end`，导出的 CSV 会和用户刚
+看到的预览不一致**（预览是全量商品，CSV 只有 7 天内上架的）。B6 动手前必须先决定：
+让 `ExportSpec` 也尊重 `date_filtered`（推荐，保持预览与导出同源），还是显式声明导出
+永远按区间。这是 B4 终审后定向复审发现的，记录在此以免 B6 重新踩一遍。
+
 **期间发现并按人工裁定纠正的四处偏离**（原计划字面没有覆盖，均已由集成测试钉住回归）：
 
 1. **按 `product`/`category` 拆分时的 join 放大**（Task 5）：`orders` join 到 `order_items`/`products`
