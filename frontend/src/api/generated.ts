@@ -119,6 +119,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/metrics/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Metric Definition
+         * @description 返回正式指标口径。指标目录对所有商家一致，因此不按商家过滤。
+         */
+        get: operations["get_metric_definition_api_metrics__code__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -359,6 +379,22 @@ export interface components {
             status: string;
             /** Version */
             version: string;
+        };
+        /** MetricDefinitionResponse */
+        MetricDefinitionResponse: {
+            /** Metric Code */
+            metric_code: string;
+            /** Display Name */
+            display_name: string;
+            /** Unit */
+            unit: string;
+            /** Definition */
+            definition: string;
+            /** Source */
+            source: string;
+            /** Owner */
+            owner: string;
+            status: components["schemas"]["MetricStatus"];
         };
         /**
          * MetricStatus
@@ -709,6 +745,55 @@ export interface operations {
             };
             /** @description 越权访问其他商家资源 */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_metric_definition_api_metrics__code__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetricDefinitionResponse"];
+                };
+            };
+            /** @description 缺少或提供了无效的商家凭证 */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };

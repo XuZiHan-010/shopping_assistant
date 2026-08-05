@@ -396,6 +396,74 @@
           }
         }
       }
+    },
+    "/api/metrics/{code}": {
+      "get": {
+        "tags": [
+          "metrics"
+        ],
+        "summary": "Get Metric Definition",
+        "description": "返回正式指标口径。指标目录对所有商家一致，因此不按商家过滤。",
+        "operationId": "get_metric_definition_api_metrics__code__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetricDefinitionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "缺少或提供了无效的商家凭证",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "资源不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "请求参数不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1030,6 +1098,48 @@
           "version"
         ],
         "title": "HealthResponse"
+      },
+      "MetricDefinitionResponse": {
+        "properties": {
+          "metric_code": {
+            "type": "string",
+            "title": "Metric Code"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "unit": {
+            "type": "string",
+            "title": "Unit"
+          },
+          "definition": {
+            "type": "string",
+            "title": "Definition"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "owner": {
+            "type": "string",
+            "title": "Owner"
+          },
+          "status": {
+            "$ref": "#/components/schemas/MetricStatus"
+          }
+        },
+        "type": "object",
+        "required": [
+          "metric_code",
+          "display_name",
+          "unit",
+          "definition",
+          "source",
+          "owner",
+          "status"
+        ],
+        "title": "MetricDefinitionResponse"
       },
       "MetricStatus": {
         "type": "string",
