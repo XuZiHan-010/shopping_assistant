@@ -94,3 +94,86 @@ def compatible_dimensions(metric: MetricSpec) -> frozenset[str]:
 
     tables = _COMPATIBLE[metric.table]
     return frozenset(code for code, spec in DIMENSION_SPECS.items() if spec.table in tables)
+
+
+@dataclass(frozen=True)
+class DetailSpec:
+    table: str
+    label: str
+    #: (列名, 中文标签) 的有序元组。顺序即展示顺序；显式列举也是「禁止 SELECT *」的落点。
+    columns: tuple[tuple[str, str], ...]
+
+
+DETAIL_SPECS: Final[Mapping[str, DetailSpec]] = {
+    "orders": DetailSpec(
+        "orders",
+        "订单明细",
+        (
+            ("business_date", "日期"),
+            ("order_no", "订单号"),
+            ("order_status", "订单状态"),
+            ("paid_amount", "实付金额"),
+            ("placed_at", "下单时间"),
+        ),
+    ),
+    "refunds": DetailSpec(
+        "refunds",
+        "退款明细",
+        (
+            ("business_date", "日期"),
+            ("refund_amount", "退款金额"),
+            ("refund_reason", "退款原因"),
+            ("refund_status", "退款状态"),
+            ("refunded_at", "退款时间"),
+        ),
+    ),
+    "returns": DetailSpec(
+        "returns",
+        "退货明细",
+        (
+            ("business_date", "日期"),
+            ("return_quantity", "退货件数"),
+            ("return_reason", "退货原因"),
+            ("return_status", "退货状态"),
+            ("logistics_status", "物流状态"),
+        ),
+    ),
+    "products": DetailSpec(
+        "products",
+        "商品明细",
+        (
+            ("business_date", "日期"),
+            ("product_code", "商品编码"),
+            ("title", "商品名称"),
+            ("category", "类目"),
+            ("price", "价格"),
+            ("status", "状态"),
+        ),
+    ),
+    "support_tickets": DetailSpec(
+        "support_tickets",
+        "工单明细",
+        (
+            ("business_date", "日期"),
+            ("ticket_no", "工单号"),
+            ("ticket_status", "工单状态"),
+            ("ticket_reason", "工单类型"),
+            ("opened_at", "创建时间"),
+        ),
+    ),
+}
+
+#: 业务分类到默认明细表的路由。没有对应经营表的域不出现在这里。
+DETAIL_BY_CATEGORY: Final[Mapping[str, str]] = {
+    "TRADE": "orders",
+    "REFUND": "refunds",
+    "CS_TICKET": "support_tickets",
+    "GOODS": "products",
+}
+
+
+def detail_spec(table: str) -> DetailSpec:
+    try:
+        return DETAIL_SPECS[table]
+    except KeyError as error:
+        raise UnknownFieldError(f"明细 {table} 不在受控查询契约内") from error

@@ -19,6 +19,7 @@ from sqlalchemy import ColumnElement, Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analytics.contract import (
+    DetailSpec,
     DimensionSpec,
     MetricSpec,
     UnknownFieldError,
@@ -49,6 +50,15 @@ class ResultColumn:
 class AggregateResult:
     columns: tuple[ResultColumn, ...]
     rows: list[dict[str, object]]
+    source_tables: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class DetailResult:
+    columns: tuple[ResultColumn, ...]
+    rows: list[dict[str, object]]
+    total_rows: int
+    truncated: bool
     source_tables: tuple[str, ...]
 
 
@@ -169,6 +179,54 @@ class AnalyticsRepository:
             source_tables=self._source_tables(
                 metric, specs, filters, via_order_items=via_order_items
             ),
+        )
+
+    async def detail(
+        self,
+        *,
+        merchant_id: UUID,
+        spec: DetailSpec,
+        filters: Mapping[str, str],
+        start: date,
+        end: date,
+        limit: int,
+    ) -> DetailResult:
+        """预览有上限，总数照实报——只给 200 行却说「共 200 条」是撒谎。
+
+        明细查询不 join 维度表：筛选条件只对落在 `spec.table` 自身的维度生效，
+        跨表的维度会被忽略而不是报错。这是当前已知的窄口——真正校验筛选与
+        目标明细表是否兼容，应该在调用方（意图解析/路由层）完成。
+        """
+
+        table = _TABLES[spec.table]
+        columns = [getattr(table, name) for name, _ in spec.columns]
+        conditions = [
+            table.merchant_id == merchant_id,
+            table.business_date >= start,
+            table.business_date <= end,
+        ]
+        for code, value in filters.items():
+            dimension = dimension_spec(code)
+            if dimension.table == spec.table:
+                conditions.append(getattr(table, dimension.column) == value)
+
+        total = await self._session.scalar(
+            select(func.count()).select_from(table).where(*conditions)
+        )
+        preview = await self._session.execute(
+            select(*columns)
+            .where(*conditions)
+            .order_by(table.business_date.desc(), table.id)
+            .limit(limit)
+        )
+        rows = [dict(row) for row in preview.mappings()]
+        total_rows = int(total or 0)
+        return DetailResult(
+            columns=tuple(ResultColumn(name, label, "DIMENSION") for name, label in spec.columns),
+            rows=rows,
+            total_rows=total_rows,
+            truncated=total_rows > len(rows),
+            source_tables=(spec.table,),
         )
 
     async def _aggregate_ratio(
