@@ -55,6 +55,15 @@ def test_first_migration_upgrades_empty_postgres_and_can_repeat(
         "knowledge_documents",
         "audit_logs",
         "llm_usage",
+        # B4 的六张经营数据表：单独钉住，不能只靠其他集成测试间接覆盖——
+        # 那些测试假定表已存在，迁移本身漏建表时它们只会报无关的连接错误，
+        # 而不是清楚地指向「迁移没建对表」。
+        "orders",
+        "order_items",
+        "products",
+        "refunds",
+        "returns",
+        "support_tickets",
         "alembic_version",
     } <= table_names
     assert "users" not in table_names

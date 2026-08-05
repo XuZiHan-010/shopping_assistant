@@ -10,10 +10,108 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analytics.contract import DETAIL_SPECS
-from app.models.analytics import Order
+from app.models.analytics import Order, OrderItem, Product, ReturnRecord
 from app.repositories.analytics import AnalyticsRepository
 
 DAY = date(2026, 8, 3)
+
+
+async def _return_record(session: AsyncSession, merchant_id: UUID, reason: str) -> None:
+    """退货明细的最小依赖链：product -> order -> order_item -> return。
+
+    `DETAIL_SPECS["returns"]` 在契约里注册了列，但目前没有任何 `QuestionCategory`
+    路由到它（`DETAIL_BY_CATEGORY` 只把 `REFUND` 指向 `refunds` 表）——退货明细
+    因此只能在 Repository 这一层直接验证「可查询、跨商家不可见」，无法通过
+    `SafeQueryService` 端到端验证。这是 B4 计划本身遗留的路由缺口，不是
+    Task 10 的实现范围，见 Task 10 报告里的记录。
+    """
+
+    product = Product(
+        merchant_id=merchant_id,
+        business_date=DAY,
+        product_code=f"SKU-{uuid4().hex[:8]}",
+        title="演示商品",
+        category="女装",
+        price=Decimal("100.00"),
+        status="ONLINE",
+        listed_at=datetime(2026, 8, 3, 2, 0, tzinfo=UTC),
+    )
+    session.add(product)
+    await session.flush()
+
+    order = Order(
+        merchant_id=merchant_id,
+        business_date=DAY,
+        order_no=f"NO-{uuid4().hex[:8]}",
+        buyer_key="buyer",
+        order_status="COMPLETED",
+        total_amount=Decimal("100.00"),
+        paid_amount=Decimal("100.00"),
+        placed_at=datetime(2026, 8, 3, 2, 0, tzinfo=UTC),
+        paid_at=datetime(2026, 8, 3, 3, 0, tzinfo=UTC),
+    )
+    session.add(order)
+    await session.flush()
+
+    item = OrderItem(
+        merchant_id=merchant_id,
+        business_date=DAY,
+        order_id=order.id,
+        product_id=product.id,
+        quantity=1,
+        item_amount=Decimal("100.00"),
+    )
+    session.add(item)
+    await session.flush()
+
+    session.add(
+        ReturnRecord(
+            merchant_id=merchant_id,
+            business_date=DAY,
+            order_item_id=item.id,
+            return_quantity=1,
+            return_reason=reason,
+            return_status="COMPLETED",
+            logistics_status="DELIVERED",
+            returned_at=datetime(2026, 8, 4, 3, 0, tzinfo=UTC),
+        )
+    )
+    await session.flush()
+
+
+@pytest.mark.asyncio
+async def test_returns_detail_is_queryable_and_never_visible_to_other_merchants(
+    db_session: AsyncSession, merchant_one_id: UUID, merchant_two_id: UUID
+) -> None:
+    """§B4 验收「退货明细可查询、跨商家不可见」在 Repository 层的钉子。
+
+    两个商家各留一条退货原因不同的记录：商家一能查到自己那条（且原因字段值
+    正确，不是随手返回了任意一行），商家二查不到商家一的记录。
+    """
+
+    await _return_record(db_session, merchant_one_id, "尺码不合适")
+    await _return_record(db_session, merchant_two_id, "质量问题")
+    repository = AnalyticsRepository(db_session)
+
+    owner_result = await repository.detail(
+        merchant_id=merchant_one_id,
+        spec=DETAIL_SPECS["returns"],
+        filters={},
+        start=DAY,
+        end=DAY,
+        limit=200,
+    )
+    other_result = await repository.detail(
+        merchant_id=merchant_two_id,
+        spec=DETAIL_SPECS["returns"],
+        filters={},
+        start=DAY,
+        end=DAY,
+        limit=200,
+    )
+
+    assert [row["return_reason"] for row in owner_result.rows] == ["尺码不合适"]
+    assert [row["return_reason"] for row in other_result.rows] == ["质量问题"]
 
 
 async def _orders(session: AsyncSession, merchant_id: UUID, count: int) -> None:

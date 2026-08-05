@@ -1095,19 +1095,19 @@ B3 的三个意图白名单已经与 B4 第一批受控查询契约对齐，不�
 
 ### 任务
 
-- [ ] 创建订单、订单项、**退款、退货**、商品和工单表；
-- [ ] 创建 **180 天**演示数据 Seed（含退款与退货两类记录，且存在"只退款不退货""退货并退款"两种样本）；
-- [ ] 实现 `GET /api/metrics/{code}` 指标口径接口，返回 `metric_source`、`metric_owner`、`metric_status`；
-- [ ] 实现 Analytics Repository；
-- [ ] 实现 Safe Query Service；
-- [ ] 将 B3 建立的三套白名单接入查询路由；
-- [ ] 实现日期解析和最大范围（180 天，业务时区 `Asia/Shanghai`）；
-- [ ] 实现指标聚合；
-- [ ] 实现明细路由；
-- [ ] 实现总数、预览、截断和排序；
-- [ ] 实现查询计划摘要；
-- [ ] 添加 statement timeout；
-- [ ] 添加 Decimal 和日期序列化。
+- [x] 创建订单、订单项、**退款、退货**、商品和工单表；
+- [x] 创建 **180 天**演示数据 Seed（含退款与退货两类记录，且存在"只退款不退货""退货并退款"两种样本）；
+- [x] 实现 `GET /api/metrics/{code}` 指标口径接口，返回 `metric_source`、`metric_owner`、`metric_status`；
+- [x] 实现 Analytics Repository；
+- [x] 实现 Safe Query Service；
+- [x] 将 B3 建立的三套白名单接入查询路由；
+- [x] 实现日期解析和最大范围（180 天，业务时区 `Asia/Shanghai`）；
+- [x] 实现指标聚合；
+- [x] 实现明细路由；
+- [x] 实现总数、预览、截断和排序；
+- [x] 实现查询计划摘要；
+- [x] 添加 statement timeout；
+- [x] 添加 Decimal 和日期序列化。
 
 ### 第一批指标
 
@@ -1164,6 +1164,68 @@ ticket_status
 - 多商家同日期数据不会串用；
 - SQL 注入测试通过；
 - 查询结果包含稳定列顺序和安全中文标签元数据。
+
+### 实现说明（2026-08-05，B4 收口）
+
+**指标口径表**（`app/analytics/contract.py` 的 `METRIC_SPECS`，与迁移
+`20260804_0006_metric_sql_definition.py` 写入 `metric_definitions.sql_definition`
+的文案逐字一致）：
+
+| `metric_code` | 中文名 | 单位 | 主表 | 口径 | 可加和 |
+| --- | --- | --- | --- | --- | --- |
+| `gmv` | 成交 GMV | 元 | `orders` | `SUM(orders.paid_amount)`，限 `order_status IN ('PAID','SHIPPED','COMPLETED')` | 是 |
+| `order_count` | 订单量 | 单 | `orders` | `COUNT(orders.id)`，不限状态 | 是 |
+| `paying_user_count` | 付款用户数 | 人 | `orders` | `COUNT(DISTINCT orders.buyer_key)`，限 `paid_at IS NOT NULL` | **否**（去重计数） |
+| `successful_order_count` | 成功订单量 | 单 | `orders` | `COUNT(orders.id)`，限 `order_status = 'COMPLETED'` | 是 |
+| `refund_count` | 退款量 | 单 | `refunds` | `COUNT(refunds.id)`，限 `refund_status IN ('APPROVED','REFUNDED')` | 是 |
+| `refund_amount` | 退款金额 | 元 | `refunds` | `SUM(refunds.refund_amount)`，限 `refund_status = 'REFUNDED'` | 是 |
+| `return_count` | 退货量 | 件 | `returns` | `SUM(returns.return_quantity)` | 是 |
+| `return_rate` | 退货率 | % | `order_items` | 退货件数 ÷ 同期订单项件数（按区间重算，见下） | **否**（比例） |
+| `support_ticket_count` | 客服工单量 | 单 | `support_tickets` | `COUNT(support_tickets.id)` | 是 |
+
+`refund_count`/`refund_amount` 取自 `refunds`（资金动作），`return_count` 取自
+`returns`（货品动作），两者不得互相替代——这也是 Task 5/10 专门用真实
+PostgreSQL 钉住的一条（`test_return_count_reads_returns_not_refunds`）。
+
+**`return_rate` 的归属选择**：退货件数按**订单项所属的下单日**（`order_items.business_date`）
+归属，而不是按退货实际发生日。原因是分母固定为「同期下的订单项件数」，如果分子按退货发生日
+归属，一笔跨期退货会让分子落在退货当天、分母却落在下单当天，区间对不上会算出无意义的比例。
+为避免同一个订单项有多条退货记录时把分母重复计入，实现（`AnalyticsRepository._aggregate_ratio`）
+先把 `returns` 按 `order_item_id` 聚合成子查询，再 `LEFT JOIN` 回 `order_items`，而不是直接
+`JOIN order_items` 到 `returns` 逐行相乘。`return_rate` 标记为**不可加和**：按区间整体重算一次，
+不是把每天的比例算出来再求平均或求和（B5 的答案组装依赖这个标记，见 `non_additive` 字段）。
+
+**`business_date` 为什么是物理列而不是查询期 `AT TIME ZONE` 表达式**：六张经营表都在写入
+（目前只有 Seed 一处写入路径）时把 UTC 时间戳按 `Asia/Shanghai` 换算成业务日、落成一个真实的
+`date` 列，而不是在每次查询时对 `created_at`/`placed_at` 做时区转换。原因有两条：一是所有查询
+都要按 `merchant_id + business_date` 过滤和分组，物理列上能建复合索引，表达式索引在 PostgreSQL
+里既拿不到同等的范围扫描收益，又要求每条 SQL 都重复一次时区换算逻辑；二是业务时区目前是
+写死的应用配置（不按商家可变），换算规则只有一处产生分歧的可能（Seed），不存在多处写入导致
+物理列与实时计算结果漂移的风险。冻结时钟对「跨零点的昨天」的校验因此只需要覆盖
+`app/analytics/dates.py` 的日期解析，不需要在每条查询上重复验证时区语义。
+
+**期间发现并按人工裁定纠正的三处偏离**（原计划字面没有覆盖，均已由集成测试钉住回归）：
+
+1. **按 `product`/`category` 拆分时的 join 放大**（Task 5）：`orders` join 到 `order_items`/`products`
+   会把订单行按订单项展开，直接对展开后的行 `SUM(orders.paid_amount)` 或 `COUNT(orders.id)`
+   会把同一张跨类目订单的金额/订单数重复计入每个类目。修复为：这条路径下金额类指标改为
+   `SUM(order_items.item_amount)`（按订单项分摊，而不是复述整单金额），计数类指标改为
+   `COUNT(DISTINCT orders.id)`。不需要该维度的默认路径未受影响。见
+   `tests/integration/repositories/test_analytics_repository.py` 的
+   `test_gmv_by_category_sums_back_to_the_order_amount` 等用例。
+2. **完全落在未来的日期区间改为显式拒绝，不是静默截断**（Task 4）：原计划的截断逻辑会把
+   「结束日超过今天」截到今天，但对「起始日也在未来」的区间同样截断会静默地用「今天」的数据
+   回答一个问未来的问题。改为：起始日期晚于业务今天时抛 `FutureRangeError`，服务层转成
+   `UnsupportedQueryError`，与 B3 `validate_intent` 对同型输入的处理保持一致。
+3. **指标口径端点必须能返回已废弃指标**（Task 8）：`GET /api/metrics/{code}` 最初复用了
+   `MetricRepository.get_by_code`（聊天路径用来把已废弃指标排除出查询范围的同一个方法），
+   导致 `status=DEPRECATED` 的指标查口径时和拼写错误一样 404，文档承诺的「口径面板可查已废弃
+   指标」实际不可达。修复为新增一个不过滤状态的独立仓储方法给口径端点专用，`get_by_code`
+   本身（及它在聊天路径的排除语义）保持不变。
+
+这三处均记在 `.superpowers/sdd/2026-08-04-backend-b4-safe-analytics-query/progress.md`
+的逐 Task 账本里；B5/B6 若要触碰同一批聚合表达式或口径端点，先读那份账本，避免把已经
+裁定过的偏离当成待发现的新缺陷重新讨论一遍。
 
 ---
 
