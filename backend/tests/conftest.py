@@ -122,6 +122,34 @@ async def db_session(integration_database: Database) -> AsyncIterator[AsyncSessi
 
 
 @pytest_asyncio.fixture
+async def merchant_one_id(db_session: AsyncSession) -> UUID:
+    """经营数据表对 merchant_id 有外键约束，夹具必须先落一行商家记录。"""
+
+    db_session.add(
+        Merchant(
+            id=MERCHANT_ONE_ID,
+            merchant_code="borough-analytics-100",
+            display_name="Borough商家100",
+        )
+    )
+    await db_session.flush()
+    return MERCHANT_ONE_ID
+
+
+@pytest_asyncio.fixture
+async def merchant_two_id(db_session: AsyncSession) -> UUID:
+    db_session.add(
+        Merchant(
+            id=MERCHANT_TWO_ID,
+            merchant_code="borough-analytics-101",
+            display_name="Borough商家101",
+        )
+    )
+    await db_session.flush()
+    return MERCHANT_TWO_ID
+
+
+@pytest_asyncio.fixture
 async def postgres_app(migrated_postgres: str) -> AsyncIterator[FastAPI]:
     """接真实 PostgreSQL 的应用，用于 API 层的隔离与持久化验收。
 
