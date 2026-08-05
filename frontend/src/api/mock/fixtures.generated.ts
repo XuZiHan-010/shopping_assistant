@@ -101,14 +101,14 @@ export const CHAT_FIXTURES = {
     },
     recommendations: [
       {
-        action: 'B4 接入受控查询后展示明细。',
-        evidence: 'B3 已完成结构化意图校验，尚未执行经营数据查询。',
-        title: '等待明细查询接入',
+        action: '确认筛选条件是否覆盖你想查看的记录。',
+        evidence: '本次预览返回 2 行，已覆盖本次查询的全部结果。',
+        title: '核对查询范围',
       },
       {
-        action: '补充日期或商品条件后再查询。',
-        evidence: '当前没有可展示的明细数据。',
-        title: '补充筛选条件',
+        action: '如需完整明细用于外部处理，可使用导出功能。',
+        evidence: '预览行数受上限约束，导出可拿到完整明细文件。',
+        title: '导出完整明细',
       },
     ],
     session_id: '1659dbf2-df4d-5883-a572-99858f3ea82d',
@@ -255,12 +255,12 @@ export const CHAT_FIXTURES = {
     },
     recommendations: [
       {
-        action: 'B4 接入受控查询后展示经营结果。',
-        evidence: 'B3 已完成结构化意图校验，尚未执行经营数据查询。',
-        title: '等待数据查询接入',
+        action: '确认日期范围和维度是否覆盖你想了解的口径。',
+        evidence: '本次查询返回 1 行数据。',
+        title: '核对查询范围',
       },
       {
-        action: '确认日期范围和维度后再查询。',
+        action: '如口径与预期不符，请调整问题后重新查询。',
         evidence: '已识别指标代码：gmv。',
         title: '核对指标口径',
       },
@@ -324,12 +324,12 @@ export const CHAT_FIXTURES = {
     },
     recommendations: [
       {
-        action: 'B4 接入受控查询后展示经营结果。',
-        evidence: 'B3 已完成结构化意图校验，尚未执行经营数据查询。',
-        title: '等待数据查询接入',
+        action: '确认日期范围和维度是否覆盖你想了解的口径。',
+        evidence: '本次查询返回 1 行数据。',
+        title: '核对查询范围',
       },
       {
-        action: '确认日期范围和维度后再查询。',
+        action: '如口径与预期不符，请调整问题后重新查询。',
         evidence: '已识别指标代码：return_count。',
         title: '核对指标口径',
       },

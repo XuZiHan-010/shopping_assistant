@@ -338,21 +338,11 @@ class MerchantQaGraph:
                 data_rows=outcome.data_rows,
                 total_rows=outcome.total_rows,
                 truncated=outcome.truncated,
-                # 图表与建议仍是 B5 的工作：这里只保证契约必填字段有值，
-                # 不据真实数据生成——那会预支 B5 尚未做的分析。
+                # 图表仍是 B5 的工作：这里只保证契约必填字段有值，不据真实数据生成
+                # 图表——那会预支 B5 尚未做的分析。`recommendations` 不属于这条限制：
+                # 它必须如实反映「查没查到数据」，见 `_metric_recommendations`。
                 visualization=Visualization(enabled=False),
-                recommendations=[
-                    Recommendation(
-                        title="等待数据查询接入",
-                        evidence="B3 已完成结构化意图校验，尚未执行经营数据查询。",
-                        action="B4 接入受控查询后展示经营结果。",
-                    ),
-                    Recommendation(
-                        title="核对指标口径",
-                        evidence=f"已识别指标代码：{metric.metric_code}。",
-                        action="确认日期范围和维度后再查询。",
-                    ),
-                ],
+                recommendations=_metric_recommendations(outcome, metric),
             )
 
         if intent.answer_mode is AnswerMode.DETAIL:
@@ -389,18 +379,7 @@ class MerchantQaGraph:
                     url=f"/api/exports/{export_id}",
                     expires_at=datetime.now(UTC),
                 ),
-                recommendations=[
-                    Recommendation(
-                        title="等待明细查询接入",
-                        evidence="B3 已完成结构化意图校验，尚未执行经营数据查询。",
-                        action="B4 接入受控查询后展示明细。",
-                    ),
-                    Recommendation(
-                        title="补充筛选条件",
-                        evidence="当前没有可展示的明细数据。",
-                        action="补充日期或商品条件后再查询。",
-                    ),
-                ],
+                recommendations=_detail_recommendations(outcome),
             )
 
         mode = (
@@ -475,6 +454,9 @@ class _QueryOutcome:
     degraded_reason: str | None
     quality_status: QualityStatus
     notes: list[str]
+    #: 真查询成功了——`recommendations` 靠它选文案，不能对着降级结果说「已查到」，
+    #: 也不能对着真数据说「尚未执行」。
+    succeeded: bool
 
 
 def _query_outcome(
@@ -504,6 +486,7 @@ def _query_outcome(
             degraded_reason=None,
             quality_status=QualityStatus.NOT_RUN,
             notes=list(state["quality_notes"]),
+            succeeded=True,
         )
     return _QueryOutcome(
         query_plan=QueryPlanSummary(summary=fallback_query_plan),
@@ -515,7 +498,78 @@ def _query_outcome(
         degraded_reason=state["query_error"] or fallback_reason,
         quality_status=QualityStatus.DEGRADED,
         notes=[*state["quality_notes"], fallback_note],
+        succeeded=False,
     )
+
+
+def _metric_recommendations(outcome: _QueryOutcome, metric: MetricPayload) -> list[Recommendation]:
+    """METRIC 的 `recommendations`：查到了就不能再说「尚未执行」。
+
+    这两条建议本身不是 B5 的「有洞察的分析」——它们不解读数字，只核对范围和
+    口径，`evidence` 里出现的行数直接来自 `outcome.total_rows`（真实查询结果），
+    不编造业务结论。B5 才会在这基础上生成有分析价值的建议。
+    """
+
+    if not outcome.succeeded:
+        return [
+            Recommendation(
+                title="等待数据查询接入",
+                evidence="B3 已完成结构化意图校验，尚未执行经营数据查询。",
+                action="B4 接入受控查询后展示经营结果。",
+            ),
+            Recommendation(
+                title="核对指标口径",
+                evidence=f"已识别指标代码：{metric.metric_code}。",
+                action="确认日期范围和维度后再查询。",
+            ),
+        ]
+    return [
+        Recommendation(
+            title="核对查询范围",
+            evidence=f"本次查询返回 {outcome.total_rows} 行数据。",
+            action="确认日期范围和维度是否覆盖你想了解的口径。",
+        ),
+        Recommendation(
+            title="核对指标口径",
+            evidence=f"已识别指标代码：{metric.metric_code}。",
+            action="如口径与预期不符，请调整问题后重新查询。",
+        ),
+    ]
+
+
+def _detail_recommendations(outcome: _QueryOutcome) -> list[Recommendation]:
+    """DETAIL 的 `recommendations`：同上，查到了就不能再说「尚未执行」。"""
+
+    if not outcome.succeeded:
+        return [
+            Recommendation(
+                title="等待明细查询接入",
+                evidence="B3 已完成结构化意图校验，尚未执行经营数据查询。",
+                action="B4 接入受控查询后展示明细。",
+            ),
+            Recommendation(
+                title="补充筛选条件",
+                evidence="当前没有可展示的明细数据。",
+                action="补充日期或商品条件后再查询。",
+            ),
+        ]
+    scope_evidence = (
+        f"本次预览返回 {outcome.total_rows} 行，已达到预览上限，可能还有更多记录。"
+        if outcome.truncated
+        else f"本次预览返回 {outcome.total_rows} 行，已覆盖本次查询的全部结果。"
+    )
+    return [
+        Recommendation(
+            title="核对查询范围",
+            evidence=scope_evidence,
+            action="确认筛选条件是否覆盖你想查看的记录。",
+        ),
+        Recommendation(
+            title="导出完整明细",
+            evidence="预览行数受上限约束，导出可拿到完整明细文件。",
+            action="如需完整明细用于外部处理，可使用导出功能。",
+        ),
+    ]
 
 
 def _json_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:

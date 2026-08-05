@@ -77,10 +77,11 @@ describe('toChatAnswer · 真实载荷', () => {
     const recommendations = toChatAnswer(refund).recommendations
 
     expect(recommendations).toHaveLength(2)
+    // 查询已成功，evidence 引用的是这次真实查询返回的行数，不是 B3 时代的占位文案。
     expect(recommendations[0]).toMatchObject({
       title: expect.any(String),
-      evidence: expect.stringContaining('B3'),
-      action: expect.stringContaining('B4'),
+      evidence: expect.stringContaining('本次查询返回'),
+      action: expect.any(String),
     })
   })
 

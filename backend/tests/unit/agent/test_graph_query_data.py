@@ -18,7 +18,7 @@ from app.knowledge.retrieval import KnowledgeRetrieval
 from app.llm.fake import FakeLlmClient
 from app.metrics.catalog import MetricCatalog
 from app.repositories.analytics import ResultColumn
-from app.schemas.chat import AnalysisSource, AnswerMode, QualityStatus
+from app.schemas.chat import AnalysisSource, AnswerMode, ChatResponse, QualityStatus
 from app.services.safe_query import QueryResult, UnsupportedQueryError
 
 
@@ -94,6 +94,58 @@ def _graph(service: _StubQueryService) -> MerchantQaGraph:
     )
 
 
+def _detail_result() -> QueryResult:
+    return QueryResult(
+        columns=(ResultColumn("order_no", "订单号", "DIMENSION"),),
+        rows=[{"order_no": "BR20260803-0001"}],
+        total_rows=1,
+        truncated=False,
+        source_tables=("orders",),
+        plan_steps=("按商家范围检索订单明细",),
+        export_spec=None,
+        notes=(),
+        non_additive=False,
+    )
+
+
+def _llm_detail() -> FakeLlmClient:
+    return FakeLlmClient(
+        responses=[
+            json.dumps({"answer_mode": "DETAIL", "category": "TRADE", "intent_keywords": ["订单"]}),
+            json.dumps(
+                {
+                    "answer_mode": "DETAIL",
+                    "category": "TRADE",
+                    "metric": None,
+                    "dimensions": [],
+                    "filters": {},
+                    "date_range": {"start": "2026-08-03", "end": "2026-08-03"},
+                    "sort": None,
+                    "limit": None,
+                    "followup_reference": False,
+                    "needs_attachment": False,
+                }
+            ),
+        ]
+    )
+
+
+def _detail_graph(service: _StubQueryService) -> MerchantQaGraph:
+    llm = _llm_detail()
+    return MerchantQaGraph(
+        retrieval=KnowledgeRetrieval(_Documents()),
+        intent_service_llm=llm,
+        catalog=MetricCatalog(_NoMetric(), llm),
+        query_service=service,
+        merchant_id=uuid4(),
+    )
+
+
+#: 有真实数据却在 recommendations 里说「查询没发生」，比没写文案更糟——
+#: 那是让用户不信任真实数字的不诚实（AGENTS.md R7）。
+_DENIAL_PHRASES = ("尚未执行", "将在 B4 接入")
+
+
 @pytest.mark.asyncio
 async def test_metric_answer_carries_real_rows_and_drops_the_b4_fallback() -> None:
     service = _StubQueryService(_metric_result())
@@ -146,3 +198,36 @@ async def test_no_query_service_keeps_the_previous_degradation_path() -> None:
 
     assert result.response.answer_mode is AnswerMode.METRIC
     assert result.response.degraded is True
+
+
+def _assert_no_denial(response: ChatResponse) -> None:
+    recommendations = response.recommendations or []
+    assert recommendations
+    for recommendation in recommendations:
+        text = f"{recommendation.title}{recommendation.evidence}{recommendation.action}"
+        for phrase in _DENIAL_PHRASES:
+            assert phrase not in text, f"{phrase!r} 出现在成功查询的 recommendations 里：{text!r}"
+
+
+@pytest.mark.asyncio
+async def test_successful_metric_recommendations_never_deny_the_query_happened() -> None:
+    """查到数据后，recommendations 不能还说「尚未执行」——这条钉住会话自洽性。"""
+
+    service = _StubQueryService(_metric_result())
+
+    result = await _graph(service).run("昨天 GMV", uuid4())
+
+    assert result.response.degraded is False
+    assert result.response.data_rows
+    _assert_no_denial(result.response)
+
+
+@pytest.mark.asyncio
+async def test_successful_detail_recommendations_never_deny_the_query_happened() -> None:
+    service = _StubQueryService(_detail_result())
+
+    result = await _detail_graph(service).run("查看最近订单明细", uuid4())
+
+    assert result.response.degraded is False
+    assert result.response.data_rows
+    _assert_no_denial(result.response)
