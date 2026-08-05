@@ -154,8 +154,9 @@ def _detail_graph(service: _StubQueryService) -> MerchantQaGraph:
 
 
 #: 有真实数据却在响应里说「查询没发生」，比没写文案更糟——
-#: 那是让用户不信任真实数字的不诚实（AGENTS.md R7）。
-_DENIAL_PHRASES = ("尚未执行", "将在 B4 接入")
+#: 那是让用户不信任真实数字的不诚实（AGENTS.md R7）。指向阶段代号的
+#: 「将在 X 接入」由 `test_stage_reference_hygiene.py` 单独机械拦截。
+_DENIAL_PHRASES = ("尚未执行", "未执行经营", "没有取到")
 
 
 @pytest.mark.asyncio
@@ -303,4 +304,4 @@ async def test_degraded_metric_answer_keeps_the_not_executed_wording() -> None:
     result = await _graph(service).run("查个不存在的指标", uuid4())
 
     assert result.response.degraded is True
-    assert "尚未" in result.response.answer or "将在" in result.response.answer
+    assert "尚未执行" in result.response.answer

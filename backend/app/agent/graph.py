@@ -54,6 +54,11 @@ class QueryServiceLike(Protocol):
 
 
 MAX_REVIEW_ATTEMPTS: Final[int] = 2
+
+#: 只在「查询服务根本没注入」时用（查询被拒时 `degraded_reason` 取
+#: `UnsupportedQueryError.reason`，那条更具体）。不写「将在某阶段接入」——受控查询
+#: 本身已经交付，这么说会让用户以为功能还没上线，而实际是这次请求没能查成。
+_QUERY_SERVICE_UNAVAILABLE: Final[str] = "经营数据查询服务当前不可用，本次未执行查询"
 GRAPH_NODES: Final[tuple[str, ...]] = (
     "load_context",
     "retrieve_knowledge_index",
@@ -93,7 +98,7 @@ class AgentRunResult:
 
 
 class MerchantQaGraph:
-    """以结构化意图和受控知识检索驱动的 B3 问答图。"""
+    """以结构化意图、受控知识检索和受控经营查询驱动的商家问答图。"""
 
     def __init__(
         self,
@@ -286,14 +291,17 @@ class MerchantQaGraph:
                 "已按识别到的指标口径和时间范围查询经营数据，结果见下方数据与查询计划；"
                 "对数字的解读与图表将在后续阶段补齐。"
                 if queried
-                else "已识别指标和查询范围；经营数据查询将在 B4 接入。"
+                # 降级分支说「尚未执行」是真话，保留；但不能承诺「将在某阶段接入」——
+                # 受控查询本身已经交付了，这次没有数据是本次请求的问题，
+                # 具体原因在 degraded_reason 里。
+                else "已识别指标和查询范围，本次尚未执行经营数据查询。"
             )
         elif intent.answer_mode is AnswerMode.DETAIL:
             answer = (
                 "已按识别到的明细范围查询经营数据，结果见下方明细与查询计划；"
                 "对明细的解读与导出将在后续阶段补齐。"
                 if queried
-                else "已识别明细查询意图；经营数据查询将在 B4 接入。"
+                else "已识别明细查询意图，本次尚未执行经营数据查询。"
             )
         elif intent.answer_mode is AnswerMode.RULE:
             answer = _knowledge_answer(detail)
@@ -334,7 +342,7 @@ class MerchantQaGraph:
                 state,
                 fallback_query_plan="已校验结构化查询意图，尚未执行数据查询。",
                 fallback_note="当前未执行经营数据查询。",
-                fallback_reason="经营数据安全查询将在 B4 接入",
+                fallback_reason=_QUERY_SERVICE_UNAVAILABLE,
             )
             notes = list(outcome.notes)
             if metric.generated and metric.notice is not None:
@@ -379,7 +387,7 @@ class MerchantQaGraph:
                 state,
                 fallback_query_plan="已校验明细查询意图，尚未执行数据查询。",
                 fallback_note="当前未执行经营明细查询。",
-                fallback_reason="经营数据安全查询将在 B4 接入",
+                fallback_reason=_QUERY_SERVICE_UNAVAILABLE,
             )
             return ChatResponse(
                 id=uuid4(),
@@ -541,10 +549,12 @@ def _metric_recommendations(outcome: _QueryOutcome, metric: MetricPayload) -> li
 
     if not outcome.succeeded:
         return [
+            # 用户看不懂内部阶段代号，也不该被告诉「功能还没上线」——受控查询已经
+            # 交付，这次没有数据是本次请求的问题，具体原因在 degraded_reason 里。
             Recommendation(
-                title="等待数据查询接入",
-                evidence="B3 已完成结构化意图校验，尚未执行经营数据查询。",
-                action="B4 接入受控查询后展示经营结果。",
+                title="本次没有取到经营数据",
+                evidence="已完成结构化意图校验，但尚未执行经营数据查询。",
+                action="按上方降级说明调整问题后重试。",
             ),
             Recommendation(
                 title="核对指标口径",
@@ -572,9 +582,9 @@ def _detail_recommendations(outcome: _QueryOutcome) -> list[Recommendation]:
     if not outcome.succeeded:
         return [
             Recommendation(
-                title="等待明细查询接入",
-                evidence="B3 已完成结构化意图校验，尚未执行经营数据查询。",
-                action="B4 接入受控查询后展示明细。",
+                title="本次没有取到明细数据",
+                evidence="已完成结构化意图校验，但尚未执行经营明细查询。",
+                action="按上方降级说明调整问题后重试。",
             ),
             Recommendation(
                 title="补充筛选条件",

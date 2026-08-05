@@ -13,6 +13,7 @@ from app.analytics.contract import (
     DIMENSION_SPECS,
     METRIC_SPECS,
     DetailSpec,
+    DimensionSpec,
     UnknownFieldError,
     compatible_dimensions,
     dimension_spec,
@@ -106,6 +107,35 @@ def test_date_filtering_defaults_to_on_for_new_detail_specs() -> None:
     """新增明细表时忘了想时间语义，应该退到「按业务日过滤」这条更保守的默认。"""
 
     assert DetailSpec("x", "x", (("business_date", "日期"),)).date_filtered is True
+
+
+@pytest.mark.parametrize("spec", list(DIMENSION_SPECS.values()), ids=lambda s: str(s.code))
+def test_every_dimension_column_exists_on_its_model(spec: DimensionSpec) -> None:
+    """维度列和明细列是同一类接缝：`_dimension_column` 也用 `getattr` 解析。
+
+    写错列名同样是**请求期**的 AttributeError，只有真的按那个维度拆分过才会暴露。
+    """
+
+    from app.repositories.analytics import _TABLES
+
+    if not spec.table:
+        # 空 table 是「用主表自己的列」的约定，目前只有 date：它落到本次查询主表的
+        # business_date 上，主表是哪张由指标决定，所以六张经营表都必须有这一列。
+        assert spec.column == "business_date", "空 table 的约定只覆盖业务日列"
+        for table, model in _TABLES.items():
+            assert spec.column in model.__table__.c, f"{table}.{spec.column}"
+        return
+
+    assert spec.column in _TABLES[spec.table].__table__.c, f"{spec.table}.{spec.column}"
+
+
+@pytest.mark.parametrize("spec", list(DIMENSION_SPECS.values()), ids=lambda s: str(s.code))
+def test_every_dimension_table_is_a_known_analytics_table(spec: DimensionSpec) -> None:
+    """`table` 写成注册表里没有的名字，会在 `_TABLES[...]` 处抛 KeyError，同样是请求期。"""
+
+    from app.repositories.analytics import _TABLES
+
+    assert spec.table == "" or spec.table in _TABLES, spec.code
 
 
 @pytest.mark.parametrize("spec", list(DETAIL_SPECS.values()), ids=lambda s: str(s.table))
