@@ -37,6 +37,20 @@ async def seeded_client(
             )
             for item in METRIC_SEED
         )
+        # 单独补一条已废弃指标：口径端点必须能把治理状态原样暴露出来，
+        # 不能像聊天链路那样把 DEPRECATED 过滤成「查无此指标」。
+        session.add(
+            MetricDefinition(
+                metric_code="legacy_gmv_1d",
+                display_name="历史 GMV（已废弃）",
+                unit="元",
+                business_definition="历史口径，已被 gmv 取代。",
+                sql_definition="SUM(legacy_gmv)",
+                source="Borough 指标目录",
+                owner="经营分析组",
+                status="DEPRECATED",
+            )
+        )
         await session.commit()
     yield postgres_client
 
@@ -53,6 +67,18 @@ async def test_known_metric_returns_the_full_definition(seeded_client: AsyncClie
     assert payload["source"]
     assert payload["owner"]
     assert payload["status"] in {"ACTIVE", "DEPRECATED", "UNVERIFIED"}
+
+
+@pytest.mark.asyncio
+async def test_deprecated_metric_still_returns_its_definition(seeded_client: AsyncClient) -> None:
+    """废弃指标要能被口径面板看到并标成 DEPRECATED，而不是和拼错的指标码一样 404。"""
+
+    response = await seeded_client.get("/api/metrics/legacy_gmv_1d", headers=MERCHANT_ONE_AUTH)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["metric_code"] == "legacy_gmv_1d"
+    assert payload["status"] == "DEPRECATED"
 
 
 @pytest.mark.asyncio

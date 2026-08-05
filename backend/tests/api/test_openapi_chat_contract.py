@@ -70,6 +70,7 @@ EXPECTED_ERROR_CODES: dict[tuple[str, str], set[str]] = {
     ("get", CONVERSATION_ITEM_PATH): {"401", "403", "404", "422"},
     ("delete", CONVERSATION_ITEM_PATH): {"401", "403", "404", "422"},
     ("get", "/api/demo/merchants"): {"404"},
+    ("get", "/api/metrics/{code}"): {"401", "404", "422"},
     ("get", "/api/ready"): {"503"},
 }
 

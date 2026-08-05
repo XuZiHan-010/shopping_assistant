@@ -33,7 +33,7 @@ async def get_metric_definition(
 ) -> MetricDefinitionResponse:
     """返回正式指标口径。指标目录对所有商家一致，因此不按商家过滤。"""
 
-    definition = await MetricRepository(session).get_by_code(code)
+    definition = await MetricRepository(session).get_by_code_including_deprecated(code)
     if definition is None:
         raise ResourceNotFoundError("指标口径")
     return MetricDefinitionResponse(
