@@ -1,7 +1,8 @@
-"""B3 商家问答 LangGraph。
+"""商家问答 LangGraph。
 
-图的节点顺序与后端设计 §10 一致。B4/B5 尚未实现的数据查询与质量复核节点保留为
-可见的 passthrough，保证 SSE 处理轨迹与后续阶段兼容，而不伪装成已完成的数据分析。
+图的节点顺序与后端设计 §10 一致。`query_data` 在注入了查询服务时执行真实的
+受控经营查询；质量复核相关节点仍是可见的 passthrough，保证 SSE 处理轨迹与
+后续阶段兼容，而不伪装成已完成的数据分析。
 """
 
 from __future__ import annotations
@@ -275,11 +276,25 @@ class MerchantQaGraph:
     async def _compose_answer(self, state: AgentState) -> dict[str, object]:
         intent = _required(state["intent"])
         detail = state["knowledge_detail"]
+        # `compose_answer` 排在 `query_data` 之后，所以这里能看到本轮到底查没查到
+        # 数据。查到了还说「查询将在后续阶段接入」，就是一边给结果一边否认查询
+        # 发生过——用户会连旁边的真实数字一起不信（AGENTS.md R7）。
+        queried = state["query_result"] is not None
         answer = "已完成结构化理解。"
         if intent.answer_mode is AnswerMode.METRIC:
-            answer = "已识别指标和查询范围；经营数据查询将在 B4 接入。"
+            answer = (
+                "已按识别到的指标口径和时间范围查询经营数据，结果见下方数据与查询计划；"
+                "对数字的解读与图表将在后续阶段补齐。"
+                if queried
+                else "已识别指标和查询范围；经营数据查询将在 B4 接入。"
+            )
         elif intent.answer_mode is AnswerMode.DETAIL:
-            answer = "已识别明细查询意图；经营数据查询将在 B4 接入。"
+            answer = (
+                "已按识别到的明细范围查询经营数据，结果见下方明细与查询计划；"
+                "对明细的解读与导出将在后续阶段补齐。"
+                if queried
+                else "已识别明细查询意图；经营数据查询将在 B4 接入。"
+            )
         elif intent.answer_mode is AnswerMode.RULE:
             answer = _knowledge_answer(detail)
         elif intent.answer_mode is AnswerMode.INVALID:
@@ -401,7 +416,8 @@ class MerchantQaGraph:
             else AnswerMode.CHAT
         )
         if mode is AnswerMode.IDENTITY:
-            # B4 尚无商家资料查询；保持契约所需的数据型空结果并明确降级。
+            # 受控查询只覆盖经营数据，商家资料查询属于后续阶段；
+            # 保持契约所需的数据型空结果并明确降级，不返回空数组假装查过。
             return ChatResponse(
                 id=uuid4(),
                 session_id=state["session_id"],
@@ -414,7 +430,7 @@ class MerchantQaGraph:
                 quality_notes=[*state["quality_notes"], "当前未执行商家资料查询。"],
                 analysis_sources=[AnalysisSource.FALLBACK],
                 degraded=True,
-                degraded_reason="商家资料查询将在 B4 接入",
+                degraded_reason="当前版本尚未开放商家资料查询",
                 suggestions=state["suggestions"],
                 suggestion_alternates=state["suggestion_alternates"],
                 query_plan=QueryPlanSummary(summary="已校验身份资料查询意图，尚未执行数据查询。"),
@@ -625,7 +641,7 @@ def _unverified_metric(metric_code: str | None) -> MetricPayload:
         metric_code=metric_code or "unknown_metric",
         display_name="待确认指标",
         unit="",
-        definition="未命中正式指标目录，等待 B4 数据查询前人工确认。",
+        definition="未命中正式指标目录，口径需人工确认后才能作为正式口径使用。",
         source="Borough 指标目录",
         owner="经营分析组",
         status=MetricStatus.UNVERIFIED.value,

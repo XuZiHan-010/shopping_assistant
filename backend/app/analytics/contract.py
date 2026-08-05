@@ -102,6 +102,18 @@ class DetailSpec:
     label: str
     #: (列名, 中文标签) 的有序元组。顺序即展示顺序；显式列举也是「禁止 SELECT *」的落点。
     columns: tuple[tuple[str, str], ...]
+    #: 这张表的 `business_date` 是不是「业务事件发生日」，决定明细查询要不要
+    #: 按查询区间过滤它。
+    #:
+    #: 事件表（订单、退款、退货、工单）为真：一行就是某一天发生的一件事，
+    #: 「最近 7 天的订单」理应只看那 7 天。维度表为假：`products.business_date`
+    #: 是**上架日**，商品一旦上架就一直存在，按查询区间过滤会让「看看我的商品
+    #: 明细」只返回窗口内恰好上架的那一两个，其余被静默丢掉——商家看不到自己
+    #: 大部分商品，也没有任何提示。
+    #:
+    #: 放在契约层而不是让服务层特判某张表：这是「这张表的时间语义是什么」的
+    #: 声明，和列名、标签一样属于表本身的性质，不是调用方的临时决定。
+    date_filtered: bool = True
 
 
 DETAIL_SPECS: Final[Mapping[str, DetailSpec]] = {
@@ -142,13 +154,15 @@ DETAIL_SPECS: Final[Mapping[str, DetailSpec]] = {
         "products",
         "商品明细",
         (
-            ("business_date", "日期"),
+            ("business_date", "上架日"),
             ("product_code", "商品编码"),
             ("title", "商品名称"),
             ("category", "类目"),
             ("price", "价格"),
             ("status", "状态"),
         ),
+        # 商品是维度表：`business_date` 是上架日，不是业务事件日。见 DetailSpec.date_filtered。
+        date_filtered=False,
     ),
     "support_tickets": DetailSpec(
         "support_tickets",

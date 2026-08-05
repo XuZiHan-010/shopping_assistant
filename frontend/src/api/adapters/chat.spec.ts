@@ -34,7 +34,9 @@ describe('toChatAnswer · 真实载荷', () => {
     expect(answer.sessionId).toBe(refund.session_id)
     expect(answer.mode).toBe('METRIC')
     expect(answer.category).toBe('REFUND')
-    expect(answer.answer).toContain('B4')
+    // 断言与载荷逐字相等，而不是找某个阶段代号：后端接入真实查询后回答正文
+    // 会一路变化，钉死字面量只会让这条测试变成「文案改了没」的哨兵。
+    expect(answer.answer).toBe(refund.answer)
   })
 
   it('METRIC 的指标口径八字段完整映射', () => {

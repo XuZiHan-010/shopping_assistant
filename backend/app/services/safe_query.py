@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Final
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.analytics.contract import (
     DETAIL_BY_CATEGORY,
     DIMENSION_SPECS,
@@ -39,6 +41,16 @@ _METRIC_PREVIEW_LIMIT: Final[int] = 200
 #: `source_tables` 只会来自 `app.repositories.analytics._TABLES` 的键，这里
 #: 穷举同一个集合，把它们翻成商家能看懂的中文说法——`plan_steps` 不允许出现
 #: 英文表标识符。
+#: 仓储抛出数据库异常时统一给用户的说法。不带异常原文、表名、列名和驱动名——
+#: 那些对商家没有意义，对攻击者却是情报。statement timeout 也走这条。
+_QUERY_FAILED_REASON: Final[str] = "经营数据查询暂时无法完成，请缩小时间范围后重试"
+
+#: 日期筛选值解析失败时的说法。同样不回显模型给的原始值——它未经任何白名单
+#: 校验，回显等于把攻击者写入的内容当成「可安全展示的拒绝原因」发出去。
+_BAD_DATE_FILTER_REASON: Final[str] = (
+    "按日期筛选需要具体日期（例如 2026-08-01），当前的时间说法无法识别"
+)
+
 _TABLE_LABELS: Final[dict[str, str]] = {
     "orders": "订单",
     "order_items": "订单明细",
@@ -102,6 +114,8 @@ class SafeQueryService:
             # 「结束日截到今天」那样可以静默调整后继续查的越界。
             raise UnsupportedQueryError(error.reason) from error
 
+        self._check_filter_values(intent.filters)
+
         if intent.answer_mode is AnswerMode.DETAIL:
             return await self._detail(context, intent, date_range, notes, keywords)
         if intent.answer_mode is AnswerMode.METRIC:
@@ -147,16 +161,19 @@ class SafeQueryService:
         # AnalyticsRepository.aggregate() 签名/返回结构就能拿到截断信号的
         # 唯一办法——按 product 这类高基数维度拆分时，200 条上限很容易真的
         # 被打满，这里不能像之前那样一律汇报 truncated=False。
-        result = await self._repository.aggregate(
-            merchant_id=context.merchant_id,
-            metric=metric,
-            dimensions=tuple(intent.dimensions),
-            filters=dict(intent.filters),
-            start=date_range.start,
-            end=date_range.end,
-            limit=_METRIC_PREVIEW_LIMIT + 1,
-            sort=sort,
-        )
+        try:
+            result = await self._repository.aggregate(
+                merchant_id=context.merchant_id,
+                metric=metric,
+                dimensions=tuple(intent.dimensions),
+                filters=dict(intent.filters),
+                start=date_range.start,
+                end=date_range.end,
+                limit=_METRIC_PREVIEW_LIMIT + 1,
+                sort=sort,
+            )
+        except SQLAlchemyError as error:
+            raise UnsupportedQueryError(_QUERY_FAILED_REASON) from error
         truncated = len(result.rows) > _METRIC_PREVIEW_LIMIT
         rows = result.rows[:_METRIC_PREVIEW_LIMIT] if truncated else result.rows
         return QueryResult(
@@ -192,23 +209,40 @@ class SafeQueryService:
             raise UnsupportedQueryError(f"「{category_label}」暂无可查询的经营明细")
         spec = detail_spec(table)
         self._check_detail_filters(spec, intent.filters)
-        limit = min(intent.limit or MAX_DETAIL_LIMIT, MAX_DETAIL_LIMIT)
+        # 上下界都在这里夹紧，而不是在 `QueryIntent` 上加 `ge=1`：B3 的
+        # `validate_intent` 对超出上限的 limit 也是「覆盖成合法值」而不是判整个
+        # 意图非法，下界用同一种处理方式才不会出现「大了就修、小了就整条拒」的
+        # 不一致；而且服务层本来就是「什么能到达 SQL」的收口点。
+        limit = min(max(intent.limit or MAX_DETAIL_LIMIT, 1), MAX_DETAIL_LIMIT)
 
-        result = await self._repository.detail(
-            merchant_id=context.merchant_id,
-            spec=spec,
-            filters=dict(intent.filters),
-            start=date_range.start,
-            end=date_range.end,
-            limit=limit,
-        )
+        try:
+            result = await self._repository.detail(
+                merchant_id=context.merchant_id,
+                spec=spec,
+                filters=dict(intent.filters),
+                start=date_range.start,
+                end=date_range.end,
+                limit=limit,
+            )
+        except SQLAlchemyError as error:
+            raise UnsupportedQueryError(_QUERY_FAILED_REASON) from error
+        if not spec.date_filtered:
+            # 这条路径本次查询根本没按日期过滤，原来那些日期调整说明（默认 7 天、
+            # 截断到今天……）在这里全是假的，留着比不写更误导。
+            notes = (f"{spec.label}不按日期筛选，返回该商家的全部记录",)
         return QueryResult(
             columns=result.columns,
             rows=result.rows,
             total_rows=result.total_rows,
             truncated=result.truncated,
             source_tables=result.source_tables,
-            plan_steps=self._plan_steps(spec.label, result.source_tables, date_range, notes),
+            plan_steps=self._plan_steps(
+                spec.label,
+                result.source_tables,
+                date_range,
+                notes,
+                date_filtered=spec.date_filtered,
+            ),
             export_spec=ExportSpec(
                 table=spec.table,
                 columns=tuple(name for name, _ in spec.columns),
@@ -246,6 +280,23 @@ class SafeQueryService:
             return "refunds"
 
         return "refunds"
+
+    def _check_filter_values(self, filters: Mapping[str, str]) -> None:
+        """B3 白名单只校验筛选字段的**键**，值是模型透传的自由文本。
+
+        绝大多数维度落在文本列上，值再离谱也只是匹配不到行；`date` 不一样——
+        它落到一个 `date` 类型的列上，模型抽出的「昨天」这类中文时间表达会在
+        数据库层直接抛类型错误，一路冒泡成 500。合法意图不该以服务端错误收场，
+        所以在这里判成可见拒绝。
+        """
+
+        value = filters.get("date")
+        if value is None:
+            return
+        try:
+            date.fromisoformat(value)
+        except ValueError as error:
+            raise UnsupportedQueryError(_BAD_DATE_FILTER_REASON) from error
 
     def _check_detail_filters(self, spec: DetailSpec, filters: Mapping[str, str]) -> None:
         """仓储层的 `detail()` 只对落在 `spec.table` 上的筛选生效，其余静默丢弃。
@@ -294,17 +345,27 @@ class SafeQueryService:
         source_tables: tuple[str, ...],
         date_range: DateRange,
         notes: tuple[str, ...],
+        *,
+        date_filtered: bool = True,
     ) -> tuple[str, ...]:
         """查询计划只承载可安全展示的描述，不含 SQL 与数据行。
 
         `source_tables` 是 SQLAlchemy 的表名，不能直接拼进给商家看的中文
         句子——用 `_TABLE_LABELS` 换成业务说法。
+
+        `date_filtered` 为假时不能写「时间范围 X 至 Y」：那条查询压根没按日期
+        过滤，写出来就是给用户一个假的范围承诺。
         """
 
         sources = "、".join(_TABLE_LABELS.get(table, table) for table in source_tables)
+        scope = (
+            f"时间范围 {date_range.start:%Y-%m-%d} 至 {date_range.end:%Y-%m-%d}"
+            if date_filtered
+            else "不限时间范围"
+        )
         return (
             f"按商家范围检索{subject}",
-            f"时间范围 {date_range.start:%Y-%m-%d} 至 {date_range.end:%Y-%m-%d}",
+            scope,
             f"数据来源：{sources}",
             *notes,
         )

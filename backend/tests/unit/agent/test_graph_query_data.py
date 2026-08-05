@@ -153,7 +153,7 @@ def _detail_graph(service: _StubQueryService) -> MerchantQaGraph:
     )
 
 
-#: 有真实数据却在 recommendations 里说「查询没发生」，比没写文案更糟——
+#: 有真实数据却在响应里说「查询没发生」，比没写文案更糟——
 #: 那是让用户不信任真实数字的不诚实（AGENTS.md R7）。
 _DENIAL_PHRASES = ("尚未执行", "将在 B4 接入")
 
@@ -228,17 +228,33 @@ async def test_no_query_service_keeps_the_previous_degradation_path() -> None:
 
 
 def _assert_no_denial(response: ChatResponse) -> None:
+    """自洽性不变量作用在**整个响应**上，不是某一个字段上。
+
+    上一轮只扫 `recommendations`，于是同一条响应里 `answer` 说「查询将在 B4
+    接入」、`data_rows` 却带着真实数字，测试照样通过。字段作用域的不变量挡不住
+    相邻字段——所以这里穷举所有会被用户读到的自然语言字段。
+    """
+
     recommendations = response.recommendations or []
     assert recommendations
-    for recommendation in recommendations:
-        text = f"{recommendation.title}{recommendation.evidence}{recommendation.action}"
+    texts: list[tuple[str, str]] = [("answer", response.answer)]
+    texts.extend(
+        (
+            "recommendations",
+            f"{recommendation.title}{recommendation.evidence}{recommendation.action}",
+        )
+        for recommendation in recommendations
+    )
+    texts.extend(("quality_notes", note) for note in response.quality_notes)
+    texts.append(("degraded_reason", response.degraded_reason or ""))
+    for field, text in texts:
         for phrase in _DENIAL_PHRASES:
-            assert phrase not in text, f"{phrase!r} 出现在成功查询的 recommendations 里：{text!r}"
+            assert phrase not in text, f"{phrase!r} 出现在成功查询的 {field} 里：{text!r}"
 
 
 @pytest.mark.asyncio
-async def test_successful_metric_recommendations_never_deny_the_query_happened() -> None:
-    """查到数据后，recommendations 不能还说「尚未执行」——这条钉住会话自洽性。"""
+async def test_successful_metric_response_never_denies_the_query_happened() -> None:
+    """查到数据后，响应的任何一个字段都不能还说「尚未执行」。"""
 
     service = _StubQueryService(_metric_result())
 
@@ -250,7 +266,7 @@ async def test_successful_metric_recommendations_never_deny_the_query_happened()
 
 
 @pytest.mark.asyncio
-async def test_successful_detail_recommendations_never_deny_the_query_happened() -> None:
+async def test_successful_detail_response_never_denies_the_query_happened() -> None:
     service = _StubQueryService(_detail_result())
 
     result = await _detail_graph(service).run("查看最近订单明细", uuid4())
@@ -258,3 +274,33 @@ async def test_successful_detail_recommendations_never_deny_the_query_happened()
     assert result.response.degraded is False
     assert result.response.data_rows
     _assert_no_denial(result.response)
+
+
+@pytest.mark.asyncio
+async def test_successful_metric_answer_states_the_query_ran() -> None:
+    """`answer` 是用户最先读到的字段，必须如实说查询已经执行过。
+
+    只断言「不含否认文案」不够——一个空字符串也能通过；这里同时钉住它确实
+    在讲本次查询。
+    """
+
+    service = _StubQueryService(_metric_result())
+
+    result = await _graph(service).run("昨天 GMV", uuid4())
+
+    assert "已按" in result.response.answer
+    assert "查询" in result.response.answer
+
+
+@pytest.mark.asyncio
+async def test_degraded_metric_answer_keeps_the_not_executed_wording() -> None:
+    """没有查询结果时说「尚未执行」是真话，不能因为上面的修复被一并抹掉——
+    否则降级会变得对用户不可见（AGENTS.md R7）。
+    """
+
+    service = _StubQueryService(UnsupportedQueryError("指标 seller_secret 不在可查询范围内"))
+
+    result = await _graph(service).run("查个不存在的指标", uuid4())
+
+    assert result.response.degraded is True
+    assert "尚未" in result.response.answer or "将在" in result.response.answer

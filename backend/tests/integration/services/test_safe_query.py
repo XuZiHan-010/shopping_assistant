@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import MerchantContext
 from app.intent.models import DateRange, QueryIntent
-from app.models.analytics import Order, OrderItem, Product, ReturnRecord
+from app.models.analytics import Order, OrderItem, Product, ReturnRecord, SupportTicket
 from app.repositories.analytics import AnalyticsRepository
 from app.schemas.chat import AnswerMode, QuestionCategory
 from app.services import safe_query
@@ -511,6 +511,127 @@ async def test_refund_category_with_refund_keyword_routes_to_refunds(
     )
 
     assert result.source_tables == ("refunds",)
+
+
+@pytest.mark.asyncio
+async def test_goods_detail_returns_products_listed_outside_the_query_window(
+    db_session: AsyncSession, merchant_one_id: UUID
+) -> None:
+    """§B4 把商品明细列为五类明细之一，但共享的时间窗规则让它实际不可用。
+
+    `products.business_date` 是上架日：默认窗口只有 7 天，而演示数据把商品
+    铺在 180 天里，商家问「看看我的商品明细」只会拿到窗口内恰好上架的那一两个。
+    这里用一个半年前上架的商品钉住「不按业务日过滤」，并要求查询计划如实说明。
+    """
+
+    db_session.add(
+        Product(
+            merchant_id=merchant_one_id,
+            business_date=DAY - timedelta(days=170),
+            product_code="SKU-OLD",
+            title="半年前上架的商品",
+            category="女装",
+            price=Decimal("100.00"),
+            status="ONLINE",
+            listed_at=NOW,
+        )
+    )
+    await db_session.flush()
+
+    result = await _service(db_session).execute(
+        MerchantContext(merchant_id=merchant_one_id),
+        _intent(
+            answer_mode=AnswerMode.DETAIL,
+            metric=None,
+            category=QuestionCategory.GOODS,
+            date_range=None,
+        ),
+        now=NOW,
+    )
+
+    assert result.source_tables == ("products",)
+    assert [row["product_code"] for row in result.rows] == ["SKU-OLD"]
+    plan = "".join(result.plan_steps)
+    assert "不限时间范围" in plan
+    assert "至" not in plan, "没按日期过滤就不能给出一个假的时间范围承诺"
+    assert any("不按日期筛选" in note for note in result.notes)
+
+
+@pytest.mark.asyncio
+async def test_support_ticket_metric_and_detail_run_against_the_real_table(
+    db_session: AsyncSession, merchant_one_id: UUID
+) -> None:
+    """`support_ticket_count` 与工单明细此前从未连库跑过。
+
+    `_metric_expression` 和 `detail()` 都按契约里登记的名字解析列，写错只会在
+    真的查那张表时才炸——这条把「工单能聚合、也能出明细」一次钉住。
+    """
+
+    db_session.add(
+        SupportTicket(
+            merchant_id=merchant_one_id,
+            business_date=DAY,
+            ticket_no="TK-0001",
+            order_id=None,
+            ticket_status="OPEN",
+            ticket_reason="物流查询",
+            opened_at=NOW,
+        )
+    )
+    await db_session.flush()
+    service = _service(db_session)
+    context = MerchantContext(merchant_id=merchant_one_id)
+
+    metric_result = await service.execute(
+        context,
+        _intent(metric="support_ticket_count", category=QuestionCategory.CS_TICKET),
+        now=NOW,
+    )
+    detail_result = await service.execute(
+        context,
+        _intent(answer_mode=AnswerMode.DETAIL, metric=None, category=QuestionCategory.CS_TICKET),
+        now=NOW,
+    )
+
+    assert metric_result.rows == [{"support_ticket_count": 1}]
+    assert metric_result.source_tables == ("support_tickets",)
+    assert [row["ticket_no"] for row in detail_result.rows] == ["TK-0001"]
+
+
+@pytest.mark.asyncio
+async def test_support_ticket_metric_splits_by_ticket_status(
+    db_session: AsyncSession, merchant_one_id: UUID
+) -> None:
+    """按工单状态拆分是这张表唯一的自有维度，同样从未跑过。"""
+
+    for index, status in enumerate(("OPEN", "OPEN", "CLOSED")):
+        db_session.add(
+            SupportTicket(
+                merchant_id=merchant_one_id,
+                business_date=DAY,
+                ticket_no=f"TK-{index:04d}",
+                order_id=None,
+                ticket_status=status,
+                ticket_reason="物流查询",
+                opened_at=NOW,
+            )
+        )
+    await db_session.flush()
+
+    result = await _service(db_session).execute(
+        MerchantContext(merchant_id=merchant_one_id),
+        _intent(
+            metric="support_ticket_count",
+            category=QuestionCategory.CS_TICKET,
+            dimensions=["ticket_status"],
+        ),
+        now=NOW,
+    )
+
+    assert {row["ticket_status"]: row["support_ticket_count"] for row in result.rows} == {
+        "OPEN": 2,
+        "CLOSED": 1,
+    }
 
 
 @pytest.mark.asyncio

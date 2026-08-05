@@ -58,7 +58,8 @@ export const CHAT_FIXTURES = {
   },
   detailOrder: {
     analysis_sources: ['DATABASE'],
-    answer: '已识别明细查询意图；经营数据查询将在 B4 接入。',
+    answer:
+      '已按识别到的明细范围查询经营数据，结果见下方明细与查询计划；对明细的解读与导出将在后续阶段补齐。',
     answer_mode: 'DETAIL',
     category: 'TRADE',
     created_at: '2026-07-28T12:00:00Z',
@@ -143,7 +144,7 @@ export const CHAT_FIXTURES = {
     created_at: '2026-07-28T12:00:00Z',
     data_rows: [],
     degraded: true,
-    degraded_reason: '商家资料查询将在 B4 接入',
+    degraded_reason: '当前版本尚未开放商家资料查询',
     export: null,
     id: '180b3336-d074-5498-a7f4-b6ed431ddec4',
     metric_code: null,
@@ -231,7 +232,8 @@ export const CHAT_FIXTURES = {
   },
   metricGmv: {
     analysis_sources: ['DATABASE'],
-    answer: '已识别指标和查询范围；经营数据查询将在 B4 接入。',
+    answer:
+      '已按识别到的指标口径和时间范围查询经营数据，结果见下方数据与查询计划；对数字的解读与图表将在后续阶段补齐。',
     answer_mode: 'METRIC',
     category: 'TRADE',
     created_at: '2026-07-28T12:00:00Z',
@@ -300,7 +302,8 @@ export const CHAT_FIXTURES = {
   },
   metricRefund: {
     analysis_sources: ['DATABASE'],
-    answer: '已识别指标和查询范围；经营数据查询将在 B4 接入。',
+    answer:
+      '已按识别到的指标口径和时间范围查询经营数据，结果见下方数据与查询计划；对数字的解读与图表将在后续阶段补齐。',
     answer_mode: 'METRIC',
     category: 'REFUND',
     created_at: '2026-07-28T12:00:00Z',

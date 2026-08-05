@@ -2,7 +2,7 @@
   "analysis_sources": [
     "DATABASE"
   ],
-  "answer": "已识别指标和查询范围；经营数据查询将在 B4 接入。",
+  "answer": "已按识别到的指标口径和时间范围查询经营数据，结果见下方数据与查询计划；对数字的解读与图表将在后续阶段补齐。",
   "answer_mode": "METRIC",
   "category": "REFUND",
   "created_at": "2026-07-28T12:00:00Z",

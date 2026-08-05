@@ -74,7 +74,9 @@ describe('readChatStream', () => {
     const last = events.at(-1)
     expect(last?.type).toBe('done')
     expect(last?.type === 'done' && last.raw.answer).toBe(fixture.answer)
-    expect(last?.type === 'done' && last.raw.answer).toContain('B4')
+    // 这条用例要证明的是「中文没被切块切坏」，所以断言正文里真的有中文，
+    // 而不是断言它提到某个阶段代号——后端接入真实查询后文案已经变了。
+    expect(last?.type === 'done' && last.raw.answer).toMatch(/[一-龥]/)
   })
 
   it('流结束却没有 done 或 error 时抛中断错误', async () => {

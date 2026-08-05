@@ -1160,7 +1160,8 @@ ticket_status
 - 跨零点的"昨天"按 `Asia/Shanghai` 归属，冻结时钟测试通过；
 - 平均值和比例不被错误求和，`return_rate` 按区间重新计算而非按日均值；
 - **"最近 30 天退货量趋势"能返回退货数据，且与退款金额不混淆**；
-- **退货明细可查询、可导出，跨商家退货记录不可见**；
+- **退货明细可查询、跨商家退货记录不可见**（导出：`ExportSpec` 已由 Task 7 产出，
+  **导出端点本身落在 B6**，B4 的 `ExportInfo` 仍是占位 id/url，不要当成 B4 已交付导出）；
 - 多商家同日期数据不会串用；
 - SQL 注入测试通过；
 - 查询结果包含稳定列顺序和安全中文标签元数据。
@@ -1204,7 +1205,19 @@ PostgreSQL 钉住的一条（`test_return_count_reads_returns_not_refunds`）。
 物理列与实时计算结果漂移的风险。冻结时钟对「跨零点的昨天」的校验因此只需要覆盖
 `app/analytics/dates.py` 的日期解析，不需要在每条查询上重复验证时区语义。
 
-**期间发现并按人工裁定纠正的三处偏离**（原计划字面没有覆盖，均已由集成测试钉住回归）：
+**维度表不按业务日过滤**（`DetailSpec.date_filtered`，B5/B6 会依赖这条语义决定）：
+六张经营表都有 `business_date`，但语义不同。事件表（`orders`/`refunds`/`returns`/
+`support_tickets`）的 `business_date` 是**事件发生日**，明细查询按查询区间过滤它是对的；
+`products.business_date` 是**上架日**，商品上架后一直存在，套用同一条时间窗规则会让
+「看看我的商品明细」只返回默认 7 天窗口里恰好上架的那一两个商品（演示数据把 24 个商品
+铺在 180 天里），其余被静默丢掉且没有任何提示。修复为在契约层给 `DetailSpec` 增加
+`date_filtered`（默认 `True`，`products` 为 `False`），由 `AnalyticsRepository.detail()`
+尊重它；该路径下 `plan_steps` 写「不限时间范围」而不是一个假的时间范围承诺，`notes` 也
+换成「不按日期筛选，返回该商家的全部记录」。标记放在契约层而不是服务层特判某张表：
+这是「这张表的时间语义是什么」的声明，和列名、标签一样属于表本身的性质。**新增明细表时
+先想清楚它是事件表还是维度表**，默认值是更保守的按业务日过滤。
+
+**期间发现并按人工裁定纠正的四处偏离**（原计划字面没有覆盖，均已由集成测试钉住回归）：
 
 1. **按 `product`/`category` 拆分时的 join 放大**（Task 5）：`orders` join 到 `order_items`/`products`
    会把订单行按订单项展开，直接对展开后的行 `SUM(orders.paid_amount)` 或 `COUNT(orders.id)`
@@ -1222,10 +1235,46 @@ PostgreSQL 钉住的一条（`test_return_count_reads_returns_not_refunds`）。
    导致 `status=DEPRECATED` 的指标查口径时和拼写错误一样 404，文档承诺的「口径面板可查已废弃
    指标」实际不可达。修复为新增一个不过滤状态的独立仓储方法给口径端点专用，`get_by_code`
    本身（及它在聊天路径的排除语义）保持不变。
+4. **REFUND 分类的明细按信号分流到 `returns` 或 `refunds`**（Task 9 收口）：`DETAIL_BY_CATEGORY`
+   把 `REFUND` 静态指向 `refunds`，而 PRD 里退款（资金动作）与退货（货品动作）是两件可以
+   分开发生的事——B3 的分类粒度只到 `REFUND` 这一级，于是 `returns` 表的明细永远查不到。
+   修复为在 `SafeQueryService._resolve_refund_table` 里做二次路由，信号按可靠性从高到低取，
+   命中即返回、**不叠加判断**：
+   1. 维度/筛选字段落在哪张表就查哪张（用户已明确说了按什么筛选，最强信号，直接复用
+      `DIMENSION_SPECS`，不引入新词表）；
+   2. 分类阶段产出的 `intent_keywords` 命中「退货 / 退回」或「退款」（词表是契约的一部分，
+      见 `contract.REFUND_CATEGORY_*_KEYWORDS`，不下放到服务层）；
+   3. 两种信号都没有时维持既有兜底（查 `refunds`），不去猜——猜错会让商家把退款明细当成
+      退货明细看，比「查不到」更危险。
+   `DETAIL_BY_CATEGORY[REFUND]` 保持 `refunds` 作为兜底值不变。见
+   `tests/integration/services/test_safe_query.py` 的 `test_refund_category_with_*` 系列。
 
-这三处均记在 `.superpowers/sdd/2026-08-04-backend-b4-safe-analytics-query/progress.md`
+这四处均记在 `.superpowers/sdd/2026-08-04-backend-b4-safe-analytics-query/progress.md`
 的逐 Task 账本里；B5/B6 若要触碰同一批聚合表达式或口径端点，先读那份账本，避免把已经
 裁定过的偏离当成待发现的新缺陷重新讨论一遍。
+
+**终审修复轮（2026-08-05）另外确定的三条约束**：
+
+1. **响应不得自相矛盾**：查到数据时 `ChatResponse.answer` 必须如实说查询已经执行过。
+   此前 `answer` 无条件输出「经营数据查询将在 B4 接入」，和同一条响应里的
+   `analysis_sources=["DATABASE"]`、真实 `data_rows` 直接打架，用户会连旁边的真数字
+   一起不信（AGENTS.md R7）。自洽性不变量因此作用在**整个响应**上而不是单个字段：
+   `tests/unit/agent/test_graph_query_data.py::_assert_no_denial` 同时扫 `answer`、
+   `recommendations`、`quality_notes`、`degraded_reason`——字段作用域的不变量挡不住
+   相邻字段，这正是上一轮只改 `recommendations` 却让缺陷溜过 Task 级评审的原因。
+   B5 接入真正的回答正文时，替换的是这条如实文案，不是重新引入前向引用。
+   **没有查询结果的降级分支保持「尚未执行」的措辞**——那条路径上它说的是真话。
+2. **仓储与图之间必须有异常边界**：`SafeQueryService` 的两处仓储调用都包了
+   `except SQLAlchemyError → UnsupportedQueryError`。不收口的话任何数据库异常
+   （含本阶段专门加的 statement timeout）都会一路上抛到 `ChatService._abort` →
+   全局处理器 → 500，合法意图的用户拿到服务端错误而不是可见降级。拒绝原因是固定
+   文案，不带异常原文、表名、列名和驱动名。
+3. **筛选字段的「值」也要校验**：B3 白名单只校验筛选字段的**键**。`date` 落到 `date`
+   类型的列上，模型抽出的「昨天」这类中文时间表达传到 PostgreSQL 就是
+   `invalid input syntax for type date`。值校验放在 `SafeQueryService` 而不是扩
+   `FILTER_WHITELIST`——白名单成员是 B3 的契约（有测试钉住它与 `DIMENSION_WHITELIST`
+   相等）。同理 `intent.limit` 的下界在服务层夹紧（`min(max(limit, 1), MAX_DETAIL_LIMIT)`），
+   与 B3 `validate_intent` 对上界「覆盖成合法值而不是判整条意图非法」的处理方式一致。
 
 ---
 

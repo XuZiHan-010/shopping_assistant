@@ -9,8 +9,10 @@ from __future__ import annotations
 import pytest
 
 from app.analytics.contract import (
+    DETAIL_SPECS,
     DIMENSION_SPECS,
     METRIC_SPECS,
+    DetailSpec,
     UnknownFieldError,
     compatible_dimensions,
     dimension_spec,
@@ -78,3 +80,46 @@ def test_refund_reason_is_not_offered_for_gmv() -> None:
 def test_date_is_compatible_with_every_metric() -> None:
     for spec in METRIC_SPECS.values():
         assert "date" in compatible_dimensions(spec), spec.code
+
+
+def test_products_detail_is_not_filtered_by_business_date() -> None:
+    """`products.business_date` 是上架日，不是业务事件日。
+
+    事件表（订单/退款/退货/工单）套用「查询区间内的 business_date」是对的；
+    维度表套用同一条规则会让商家问「看看我的商品明细」时，只拿到默认 7 天
+    窗口里恰好上架的那一两个商品，其余全部被静默过滤掉。
+    """
+
+    assert DETAIL_SPECS["products"].date_filtered is False
+
+
+@pytest.mark.parametrize(
+    "table", ["orders", "refunds", "returns", "support_tickets"], ids=lambda t: str(t)
+)
+def test_event_detail_tables_stay_filtered_by_business_date(table: str) -> None:
+    """放宽只针对维度表；事件表丢掉时间窗等于每次都全表返回。"""
+
+    assert DETAIL_SPECS[table].date_filtered is True
+
+
+def test_date_filtering_defaults_to_on_for_new_detail_specs() -> None:
+    """新增明细表时忘了想时间语义，应该退到「按业务日过滤」这条更保守的默认。"""
+
+    assert DetailSpec("x", "x", (("business_date", "日期"),)).date_filtered is True
+
+
+@pytest.mark.parametrize("spec", list(DETAIL_SPECS.values()), ids=lambda s: str(s.table))
+def test_every_detail_column_exists_on_its_model(spec: DetailSpec) -> None:
+    """`AnalyticsRepository.detail()` 用 `getattr(table, name)` 解析列。
+
+    列名写错不是导入期错误，是**请求期**的 AttributeError——只有真的查过那张
+    表才会暴露。契约里登记了五张明细表，此前只有三张被任何测试触达过；这条把
+    「契约列名 ↔ ORM 列」这道接缝整体钉住，不依赖某张表恰好有人查。
+    """
+
+    from app.repositories.analytics import _TABLES
+
+    columns = _TABLES[spec.table].__table__.c
+    for name, label in spec.columns:
+        assert name in columns, f"{spec.table}.{name}"
+        assert label, f"{spec.table}.{name} 缺中文标签"

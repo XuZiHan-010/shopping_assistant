@@ -24,7 +24,9 @@ describe('submitChat', () => {
     expect(onStep.mock.calls[0][0]).toHaveProperty('label')
     expect(answer.mode).toBe('METRIC')
     expect(answer.metric?.displayName).toBeTruthy()
-    expect(answer.answer).toContain('B4')
+    // 只要求回答正文被完整带回来（Mock 传输按 3 字节切块，会切断中文）；
+    // 不钉具体文案——那是后端的内容，会随阶段变化。
+    expect(answer.answer).toMatch(/[一-龥]/)
   })
 
   it('请求体携带 client_request_id 且不含 merchant_id', async () => {
