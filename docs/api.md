@@ -142,7 +142,7 @@
             }
           },
           "403": {
-            "description": "越权访问其他商家资源",
+            "description": "无权访问该资源或管理端点",
             "content": {
               "application/json": {
                 "schema": {
@@ -163,6 +163,26 @@
           },
           "422": {
             "description": "请求参数不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "请求过于频繁",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "依赖服务暂时不可用",
             "content": {
               "application/json": {
                 "schema": {
@@ -296,7 +316,7 @@
             }
           },
           "403": {
-            "description": "越权访问其他商家资源",
+            "description": "无权访问该资源或管理端点",
             "content": {
               "application/json": {
                 "schema": {
@@ -365,7 +385,197 @@
             }
           },
           "403": {
-            "description": "越权访问其他商家资源",
+            "description": "无权访问该资源或管理端点",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "资源不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "请求参数不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/exports/{export_id}": {
+      "get": {
+        "tags": [
+          "exports"
+        ],
+        "summary": "Download Export",
+        "operationId": "download_export_api_exports__export_id__get",
+        "parameters": [
+          {
+            "name": "export_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Export Id"
+            }
+          },
+          {
+            "name": "merchant_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Merchant Id"
+            }
+          },
+          {
+            "name": "expires_at",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "title": "Expires At"
+            }
+          },
+          {
+            "name": "signature",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 32,
+              "maxLength": 128,
+              "title": "Signature"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "无权访问该资源或管理端点",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "资源不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "导出链接已过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "请求参数不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/answers/{answer_id}/feedback": {
+      "post": {
+        "tags": [
+          "feedback"
+        ],
+        "summary": "Save Feedback",
+        "operationId": "save_feedback_api_answers__answer_id__feedback_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "answer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Answer Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeedbackRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedbackResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "缺少或提供了无效的商家凭证",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权访问该资源或管理端点",
             "content": {
               "application/json": {
                 "schema": {
@@ -1014,6 +1224,10 @@
           "IDEMPOTENCY_KEY_REUSED",
           "REQUEST_IN_PROGRESS",
           "DATA_SOURCE_UNAVAILABLE",
+          "EXPORT_LINK_EXPIRED",
+          "RATE_LIMITED",
+          "LLM_BUDGET_EXCEEDED",
+          "FORBIDDEN",
           "HTTP_ERROR",
           "INTERNAL_ERROR"
         ],
@@ -1080,6 +1294,65 @@
           "expires_at"
         ],
         "title": "ExportInfo"
+      },
+      "FeedbackReaction": {
+        "type": "string",
+        "enum": [
+          "LIKE",
+          "DISLIKE"
+        ],
+        "title": "FeedbackReaction"
+      },
+      "FeedbackRequest": {
+        "properties": {
+          "is_adopted": {
+            "type": "boolean",
+            "title": "Is Adopted",
+            "default": false
+          },
+          "reaction": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FeedbackReaction"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "FeedbackRequest"
+      },
+      "FeedbackResponse": {
+        "properties": {
+          "answer_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Answer Id"
+          },
+          "is_adopted": {
+            "type": "boolean",
+            "title": "Is Adopted"
+          },
+          "reaction": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FeedbackReaction"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "answer_id",
+          "is_adopted",
+          "reaction"
+        ],
+        "title": "FeedbackResponse"
       },
       "HealthResponse": {
         "properties": {
