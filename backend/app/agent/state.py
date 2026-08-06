@@ -21,6 +21,7 @@ from app.schemas.chat import (
     ThinkingStep,
     Visualization,
 )
+from app.services.answer_service import AnswerFacts
 from app.services.safe_query import QueryResult
 
 
@@ -36,6 +37,7 @@ class AgentState(TypedDict):
     metric_definition: MetricPayload | None
     query_result: QueryResult | None
     query_error: str | None
+    answer_facts: AnswerFacts | None
     candidate_answer: str
     visualization: Visualization | None
     recommendations: list[Recommendation]

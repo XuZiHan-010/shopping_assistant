@@ -24,6 +24,7 @@ from app.intent.service import IntentService
 from app.knowledge.retrieval import KnowledgeResult, KnowledgeRetrieval
 from app.llm.client import LlmBudget, LlmClient
 from app.metrics.catalog import MetricCatalog, MetricPayload
+from app.schemas.answer import AnswerDraft
 from app.schemas.chat import (
     AnalysisSource,
     AnswerMode,
@@ -36,8 +37,11 @@ from app.schemas.chat import (
     ThinkingStep,
     Visualization,
 )
+from app.services.answer_service import AnswerFacts, AnswerService
+from app.services.review_service import ReviewService
 from app.services.safe_query import QueryResult, UnsupportedQueryError
 from app.services.suggested_questions import suggestions_for
+from app.services.visualization_service import VisualizationService
 
 
 class QueryServiceLike(Protocol):
@@ -95,6 +99,7 @@ _STEP_LABELS: Final[dict[str, str]] = {
 class AgentRunResult:
     response: ChatResponse
     steps: list[ThinkingStep]
+    query_result: QueryResult | None = None
 
 
 class MerchantQaGraph:
@@ -110,6 +115,11 @@ class MerchantQaGraph:
         max_llm_tokens: int = 8_000,
         query_service: QueryServiceLike | None = None,
         merchant_id: UUID | None = None,
+        answer_llm: LlmClient | None = None,
+        reviewer_llm: LlmClient | None = None,
+        answer_service: AnswerService | None = None,
+        review_service: ReviewService | None = None,
+        visualization_service: VisualizationService | None = None,
     ) -> None:
         self._retrieval = retrieval
         self._intent_service = IntentService(intent_service_llm)
@@ -118,13 +128,22 @@ class MerchantQaGraph:
         self._max_tokens = max_llm_tokens
         self._query_service = query_service
         self._merchant_id = merchant_id
+        self._answer_llm = answer_llm
+        self._reviewer_llm = reviewer_llm
+        self._answer_service = answer_service or AnswerService()
+        self._review_service = review_service or ReviewService()
+        self._visualization_service = visualization_service or VisualizationService()
         self._graph = self._build_graph()
 
     async def run(self, message: str, session_id: UUID) -> AgentRunResult:
         state = await self._graph.ainvoke(self._initial_state(message, session_id))
         final_state = cast(AgentState, state)
         response = self._response(final_state)
-        return AgentRunResult(response=response, steps=final_state["steps"])
+        return AgentRunResult(
+            response=response,
+            steps=final_state["steps"],
+            query_result=final_state["query_result"],
+        )
 
     def _build_graph(self) -> Any:
         graph = StateGraph(AgentState)
@@ -160,6 +179,7 @@ class MerchantQaGraph:
             "metric_definition": None,
             "query_result": None,
             "query_error": None,
+            "answer_facts": None,
             "candidate_answer": "",
             "visualization": None,
             "recommendations": [],
@@ -286,6 +306,40 @@ class MerchantQaGraph:
         # 发生过——用户会连旁边的真实数字一起不信（AGENTS.md R7）。
         queried = state["query_result"] is not None
         answer = "已完成结构化理解。"
+        if queried and intent.answer_mode in {AnswerMode.METRIC, AnswerMode.DETAIL}:
+            facts = AnswerFacts(
+                question=state["question"],
+                metric=state["metric_definition"],
+                query_result=_required(state["query_result"]),
+            )
+            if self._answer_llm is not None:
+                composed = await self._answer_service.compose(
+                    facts,
+                    self._answer_llm,
+                    state["budget"],
+                )
+                return {
+                    **self._step(state, "compose_answer"),
+                    "answer_facts": facts,
+                    "candidate_answer": composed.draft.answer,
+                    "recommendations": composed.draft.recommendations,
+                    "visualization": self._visualization_service.build(
+                        facts.query_result,
+                        facts.metric,
+                    ),
+                    "analysis_sources": [AnalysisSource.DATABASE],
+                    "quality_status": (
+                        QualityStatus.DEGRADED if composed.degraded else QualityStatus.NOT_RUN
+                    ),
+                    "quality_notes": [*state["quality_notes"], *composed.notes],
+                    "attempt": 1 if composed.degraded else 0,
+                    "degraded": state["degraded"] or composed.degraded,
+                    "degraded_reason": (
+                        "回答生成服务暂不可用，已返回受控数据摘要。"
+                        if composed.degraded
+                        else state["degraded_reason"]
+                    ),
+                }
         if intent.answer_mode is AnswerMode.METRIC:
             answer = (
                 "已按识别到的指标口径和时间范围查询经营数据，结果见下方数据与查询计划；"
@@ -310,16 +364,62 @@ class MerchantQaGraph:
         return {**self._step(state, "compose_answer"), "candidate_answer": answer}
 
     async def _local_validate(self, state: AgentState) -> dict[str, object]:
-        # 占位：B5 的本地答案证据校验尚未接入。
+        # AnswerService 在模型草稿解析后立即校验；本节点保留可见轨迹。
         return self._step(state, "local_validate")
 
     async def _review_answer(self, state: AgentState) -> dict[str, object]:
-        # 占位：B5 的独立 Reviewer 尚未接入。
-        return self._step(state, "review_answer")
+        facts = state["answer_facts"]
+        if facts is None or self._reviewer_llm is None or state["degraded"]:
+            return self._step(state, "review_answer")
+
+        draft = _draft_from_state(state)
+        first = await self._review_service.review(
+            draft,
+            self._answer_service.facts_json(facts),
+            self._reviewer_llm,
+            state["budget"],
+        )
+        if first.degraded:
+            return _review_degraded(state, first.notes, 1)
+        if first.verdict.passed:
+            return {
+                **self._step(state, "review_answer"),
+                "quality_status": QualityStatus.PASSED,
+                "attempt": 1,
+            }
+
+        retried = await self._answer_service.compose(
+            facts, self._answer_llm_or_raise(), state["budget"]
+        )
+        if retried.degraded:
+            return _review_degraded(state, retried.notes, 2)
+        second = await self._review_service.review(
+            retried.draft,
+            self._answer_service.facts_json(facts),
+            self._reviewer_llm,
+            state["budget"],
+        )
+        if second.degraded:
+            return _review_degraded(state, second.notes, 2)
+        return {
+            **self._step(state, "review_answer"),
+            "candidate_answer": retried.draft.answer,
+            "recommendations": retried.draft.recommendations,
+            "quality_status": QualityStatus.PASSED
+            if second.verdict.passed
+            else QualityStatus.FAILED,
+            "attempt": 2,
+            "quality_notes": [*state["quality_notes"], *second.verdict.issues],
+        }
 
     async def _decide_retry(self, state: AgentState) -> dict[str, object]:
-        # B3 不执行 Reviewer；该显式上限为 B5 条件分支预留。
+        # 重试已在 review_answer 内受 MAX_REVIEW_ATTEMPTS=2 限制执行。
         return self._step(state, "decide_retry")
+
+    def _answer_llm_or_raise(self) -> LlmClient:
+        if self._answer_llm is None:
+            raise RuntimeError("回答模型未注入")
+        return self._answer_llm
 
     async def _suggest_questions(self, state: AgentState) -> dict[str, object]:
         intent = _required(state["intent"])
@@ -355,12 +455,12 @@ class MerchantQaGraph:
                 answer_mode=AnswerMode.METRIC,
                 category=intent.category,
                 thinking_steps=state["steps"],
-                quality_status=outcome.quality_status,
-                quality_attempts=0,
+                quality_status=_response_quality(state, outcome),
+                quality_attempts=state["attempt"] if outcome.succeeded else 0,
                 quality_notes=notes,
-                analysis_sources=outcome.analysis_sources,
-                degraded=outcome.degraded,
-                degraded_reason=outcome.degraded_reason,
+                analysis_sources=_response_sources(state, outcome),
+                degraded=_response_degraded(state, outcome),
+                degraded_reason=_response_degraded_reason(state, outcome),
                 suggestions=state["suggestions"],
                 suggestion_alternates=state["suggestion_alternates"],
                 query_plan=outcome.query_plan,
@@ -374,11 +474,9 @@ class MerchantQaGraph:
                 data_rows=outcome.data_rows,
                 total_rows=outcome.total_rows,
                 truncated=outcome.truncated,
-                # 图表仍是 B5 的工作：这里只保证契约必填字段有值，不据真实数据生成
-                # 图表——那会预支 B5 尚未做的分析。`recommendations` 不属于这条限制：
-                # 它必须如实反映「查没查到数据」，见 `_metric_recommendations`。
-                visualization=Visualization(enabled=False),
-                recommendations=_metric_recommendations(outcome, metric),
+                visualization=state["visualization"] or Visualization(enabled=False),
+                recommendations=state["recommendations"]
+                or _metric_recommendations(outcome, metric),
             )
 
         if intent.answer_mode is AnswerMode.DETAIL:
@@ -396,12 +494,12 @@ class MerchantQaGraph:
                 answer_mode=AnswerMode.DETAIL,
                 category=intent.category,
                 thinking_steps=state["steps"],
-                quality_status=outcome.quality_status,
-                quality_attempts=0,
+                quality_status=_response_quality(state, outcome),
+                quality_attempts=state["attempt"] if outcome.succeeded else 0,
                 quality_notes=outcome.notes,
-                analysis_sources=outcome.analysis_sources,
-                degraded=outcome.degraded,
-                degraded_reason=outcome.degraded_reason,
+                analysis_sources=_response_sources(state, outcome),
+                degraded=_response_degraded(state, outcome),
+                degraded_reason=_response_degraded_reason(state, outcome),
                 suggestions=state["suggestions"],
                 suggestion_alternates=state["suggestion_alternates"],
                 query_plan=outcome.query_plan,
@@ -415,7 +513,7 @@ class MerchantQaGraph:
                     url=f"/api/exports/{export_id}",
                     expires_at=datetime.now(UTC),
                 ),
-                recommendations=_detail_recommendations(outcome),
+                recommendations=state["recommendations"] or _detail_recommendations(outcome),
             )
 
         mode = (
@@ -494,6 +592,42 @@ class _QueryOutcome:
     #: 真查询成功了——`recommendations` 靠它选文案，不能对着降级结果说「已查到」，
     #: 也不能对着真数据说「尚未执行」。
     succeeded: bool
+
+
+def _draft_from_state(state: AgentState) -> AnswerDraft:
+    return AnswerDraft(
+        answer=state["candidate_answer"],
+        recommendations=state["recommendations"],
+    )
+
+
+def _review_degraded(state: AgentState, notes: list[str], attempt: int) -> dict[str, object]:
+    return {
+        **MerchantQaGraph._step(state, "review_answer"),
+        "quality_status": QualityStatus.DEGRADED,
+        "attempt": attempt,
+        "quality_notes": [*state["quality_notes"], *notes],
+        "degraded": True,
+        "degraded_reason": "回答质量复核服务暂不可用，已返回受控数据摘要。",
+    }
+
+
+def _response_quality(state: AgentState, outcome: _QueryOutcome) -> QualityStatus:
+    return state["quality_status"] if outcome.succeeded else outcome.quality_status
+
+
+def _response_sources(state: AgentState, outcome: _QueryOutcome) -> list[AnalysisSource]:
+    if outcome.succeeded and state["analysis_sources"] != [AnalysisSource.NONE]:
+        return state["analysis_sources"]
+    return outcome.analysis_sources
+
+
+def _response_degraded(state: AgentState, outcome: _QueryOutcome) -> bool:
+    return state["degraded"] if outcome.succeeded else outcome.degraded
+
+
+def _response_degraded_reason(state: AgentState, outcome: _QueryOutcome) -> str | None:
+    return state["degraded_reason"] if outcome.succeeded else outcome.degraded_reason
 
 
 def _query_outcome(
