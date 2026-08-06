@@ -1388,23 +1388,29 @@ PostgreSQL 钉住的一条（`test_return_count_reads_returns_not_refunds`）。
 
 PRD 的里程碑是 M0–M4 完成 MVP 并上线，M5 才是 P1。把 Railway 排在附件和知识库之后，会让部署、迁移和费用风险暴露得过晚。
 
-> **提醒（2026-08-06）**：B6 提交里已经附带落地了本阶段「LLM 费用与限流」「可信来源 IP」两节的
-> 大部分代码——`app/llm/guard.py`、`app/core/rate_limit.py`、`app/core/client_ip.py`、
-> `app/repositories/llm_budget.py`，以及 `Settings` 里的 `admin_token`/`trusted_proxy_*`/
-> `llm_daily_budget_tokens` 等字段，详见 `docs/project-progress.md`「当前阶段」。这些代码已接入
-> 运行时路径且 `ruff`/`mypy` 全绿，但**下面两节的「必测」用例一条都没有写**，下面的复选框因此保持
-> 未勾选状态——先补测试再勾。Docker/Railway/运维端点/可观测性四节还没有任何相关代码。
+> **更新（2026-08-06，Task 1-18 收口）**：费用防护/限流/可信 IP 补齐了必测，Docker 优雅关闭、
+> `OperationalMetrics` 可观测性、`GET /api/admin/ops/status` 运维端点、`railway.json` 与
+> `docs/deployment.md` 均已实现并提交（`feature/b5-b6-answer-feedback-export` 分支）。
+> `REQUIRE_INTEGRATION_DB=1 pytest` 在真实 PostgreSQL 上 **703 passed、0 skipped、0 failed**
+> （首次跑通时发现并修复一个真实 bug：`tests/postgres.py::TRUNCATE_ALL_TABLES` 漏了
+> `llm_daily_budget`，导致同一天内所有集成测试共用一行预算，跑到后段用例就把默认
+> 20\_000 token 预算耗尽而误报 503——已修复，见提交 `64e60e3`）。`ruff`/`ruff format`/`mypy`
+> （88 源文件）全绿。**Railway 一节仍未勾选**：本轮按计划约束只产出 `railway.json` 和
+> `docs/deployment.md`，没有实际创建 Railway 项目/连接 PostgreSQL/填写环境变量，也没有做
+> 「验收（MVP 出口）」清单里依赖真实部署的项目（重启后数据仍在、健康检查、SSE 真实 CORS 环境
+> 等）——这些需要用户在 Railway 控制台执行后才能勾。可观测性一节里的「查询耗时」（SQL 语句本身
+> 的执行耗时，区别于已实现的 Agent 节点整体耗时）尚未单独实现，也保持未勾。
 
 ### Docker
 
-- [ ] 从官方 Python 基础镜像构建；
-- [ ] 使用非 root 用户；
-- [ ] 安装依赖利用缓存；
-- [ ] Exec form CMD；
-- [ ] 监听 `0.0.0.0:$PORT`；
-- [ ] 不把 `.env`、测试数据或密钥复制进镜像；
-- [ ] 优雅关闭：收到 SIGTERM 后停止接收新请求，允许在途 SSE 流收尾；
-- [ ] 设置合理 worker 数量，避免超出内存。
+- [x] 从官方 Python 基础镜像构建；
+- [x] 使用非 root 用户；
+- [x] 安装依赖利用缓存；
+- [x] Exec form CMD；
+- [x] 监听 `0.0.0.0:$PORT`；
+- [x] 不把 `.env`、测试数据或密钥复制进镜像；
+- [x] 优雅关闭：收到 SIGTERM 后停止接收新请求，允许在途 SSE 流收尾（`app/run.py::GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 30`）；
+- [x] 设置合理 worker 数量，避免超出内存（刻意保持单 worker，决策记录见 `app/run.py` 注释与 `docs/deployment.md`）。
 
 ### Railway
 
@@ -1425,52 +1431,52 @@ PRD 的里程碑是 M0–M4 完成 MVP 并上线，M5 才是 P1。把 Railway �
 
 限流按 Token 和来源 IP 计数，但 Railway 位于反向代理之后，**不能直接采信客户端自带的转发头**，否则攻击者随手伪造 `X-Forwarded-For` 就绕过限流。
 
-- [ ] 只信任 Railway 代理注入的转发头，通过可信代理跳数配置解析，不接受任意客户端提供的 `X-Forwarded-For`、`Forwarded`、`X-Real-IP`；
-- [ ] ASGI Server 显式配置 proxy headers 与 `forwarded-allow-ips`，不使用通配；
-- [ ] 多级代理时取**最右侧可信跳数之外的第一个地址**，并在文档中写死该规则；
-- [ ] 本地开发和测试环境回退到直连 socket 地址；
-- [ ] 必测：伪造 `X-Forwarded-For` 不能重置限流计数。
+- [x] 只信任 Railway 代理注入的转发头，通过可信代理跳数配置解析，不接受任意客户端提供的 `X-Forwarded-For`、`Forwarded`、`X-Real-IP`（`app/core/client_ip.py::resolve_client_ip`）；
+- [x] ASGI Server 显式配置 proxy headers 与 `forwarded-allow-ips`，不使用通配（`app/run.py` 显式传 `proxy_headers=False`，改由应用层按可信跳数自行解析，不依赖 uvicorn 的隐式信任）；
+- [x] 多级代理时取**最右侧可信跳数之外的第一个地址**，规则写在 `app/core/client_ip.py` 与 `docs/deployment.md`；
+- [x] 本地开发和测试环境回退到直连 socket 地址（`trusted_proxy_hops=0` 默认值）；
+- [x] 必测：伪造 `X-Forwarded-For` 不能重置限流计数（`tests/api/test_rate_limit_trust_boundary.py`，真实库回归已过）。
 
 ### LLM 费用与限流
 
 **这一步不能省。** MVP 的部署形态是：公开的 Railway 地址 + 免鉴权的 `/api/demo/merchants` 端点 + 环境变量里的真实 LLM key。任何人扫到这个地址就能取到演示 Token 并无限调用聊天接口，费用是真金白银。
 
-- [ ] 单请求上限：最大 LLM 调用次数与最大输入/输出 token（B3 已实现，此处纳入部署校验）；
-- [ ] 用量累计写入 `llm_usage`：按日聚合调用次数与 token；
-- [ ] **每日预算熔断，扣减必须原子**：用 `UPDATE ... SET used = used + :n WHERE day = :d AND used + :n <= :budget RETURNING used` 这类单语句条件更新，或带行锁的事务。不得先 `SELECT` 判断再 `UPDATE`——多个并发请求会同时读到"预算仍足够"并全部放行；
-- [ ] 预扣后回填：按预估 token 先扣，调用结束后用实际 token 修正差额；请求失败也要记录已消耗部分；
-- [ ] 超预算后全局停止调用 LLM，转显式降级回答，复用已有降级路径；
-- [ ] 基础限流：按 Token 和可信来源 IP 限制频次，命中返回 `RATE_LIMITED`；
-- [ ] MVP 无 Redis，限流使用进程内计数器，并在文档中说明多实例下为近似限制。
+- [x] 单请求上限：最大 LLM 调用次数与最大输入/输出 token（B3 已实现，此处纳入部署校验）；
+- [x] 用量累计写入按日聚合调用次数与 token 的表（实为 `llm_daily_budget` + 明细表 `llm_usage`，非计划早期文案里的单一 `llm_usage` 聚合）；
+- [x] **每日预算熔断，扣减必须原子**：`LlmBudgetRepository.reserve` 用单语句条件 `UPDATE ... WHERE usage_date = :d AND consumed_tokens + :tokens <= :budget RETURNING consumed_tokens`，不先 `SELECT` 再判断；
+- [x] 预扣后回填：`LlmCostGuard` 按预估 token 先 `reserve`，调用结束后用实际 token `reconcile` 差额；请求失败也记录已消耗部分（`tests/unit/llm/test_guard.py`）；
+- [x] 超预算后全局停止调用 LLM，转显式降级回答，复用已有降级路径；
+- [x] 基础限流：按 Token 和可信来源 IP 限制频次，命中返回 `RATE_LIMITED`；
+- [x] MVP 无 Redis，限流使用进程内计数器，`docs/deployment.md` 已说明多实例下为近似限制。
 
 必测：
 
-- 10 个并发请求逼近预算边界时，放行数量不超过预算，无超发；
-- 预估 token 与实际 token 有差异时，日累计值最终收敛到实际值；
-- 请求失败后已消耗的 token 仍被计费记录；
-- 多进程实例下预算不会各算各的。
+- [x] 10 个并发请求逼近预算边界时，放行数量不超过预算，无超发（`tests/integration/repositories/test_llm_budget_repository.py`，真实 PostgreSQL 回归已过）；
+- [x] 预估 token 与实际 token 有差异时，日累计值最终收敛到实际值（`tests/unit/llm/test_guard.py::test_complete_reconciles_estimate_to_actual_tokens_and_records_success`）；
+- [x] 请求失败后已消耗的 token 仍被计费记录（`tests/unit/llm/test_guard.py::test_complete_still_bills_estimate_when_inner_call_fails`）；
+- [x] 多进程实例下预算不会各算各的：由 PostgreSQL 的原子条件更新保证（预算本身不超发），限流命中数/可观测性计数仍是进程内近似值，`docs/deployment.md` 已写明该限制。
 
 ### 运维端点
 
 熔断和限流状态必须可观察，但不能裸奔。
 
-- [ ] `GET /api/admin/ops/status`，**需要 `X-Admin-Token` 请求头**（值为 `ADMIN_TOKEN`），未配置管理员令牌时端点整体关闭；`Authorization` 头一律忽略；
-- [ ] 返回：当日 token 用量与预算剩余、限流命中计数、降级计数、各错误码计数、Agent 节点平均耗时；
-- [ ] **禁止返回**：任何 Token 明文、Prompt 内容、商家经营数据、完整请求正文、数据库连接串；
-- [ ] 商家标识以脱敏形式返回（哈希或序号），不返回商家名称；
-- [ ] 必测：无管理员令牌返回 `401`，普通商家 Token 返回 `403`，响应体不含敏感字段。
+- [x] `GET /api/admin/ops/status`，**需要 `X-Admin-Token` 请求头**（值为 `ADMIN_TOKEN`），未配置管理员令牌时端点整体关闭（不挂载路由，404）；`Authorization` 头一律忽略；
+- [x] 返回：当日 token 用量与预算剩余、限流命中计数、降级计数、各错误码计数、Agent 节点平均耗时；
+- [x] **禁止返回**：任何 Token 明文、Prompt 内容、商家经营数据、完整请求正文、数据库连接串（`tests/api/test_admin_ops.py` 断言响应体不含管理员/商家 Token 与 `postgresql` 字样）；
+- [x] 商家标识以脱敏形式返回（哈希或序号），不返回商家名称：响应本身是系统级聚合，不含任何商家维度字段，天然满足；
+- [x] 必测：无管理员令牌返回 `401`，普通商家 Token 返回 `403`，响应体不含敏感字段（`tests/api/test_admin_ops.py`，真实库回归已过）。
 
 ### 可观测性
 
-- [ ] request ID；
-- [ ] 结构化日志；
-- [ ] 路由耗时；
-- [ ] Agent 节点耗时；
-- [ ] 查询耗时；
-- [ ] LLM 调用次数、token 用量和状态；
-- [ ] 每日预算剩余量；
-- [ ] 降级计数与限流命中计数；
-- [ ] 不记录 Prompt 全文和敏感数据。
+- [x] request ID（`main.py::request_id_middleware`，响应头回写 `X-Request-Id`）；
+- [x] 结构化日志（`request_completed` 事件：request_id/method/route/status_code/duration_ms）；
+- [x] 路由耗时（同上，`OperationalMetrics.record_route_duration`）；
+- [x] Agent 节点耗时（`MerchantQaGraph._timed_node` 包装每个图节点，计入 `OperationalMetrics`）；
+- [ ] 查询耗时：SQL 查询本身的独立耗时尚未单独记录（目前只随 `query_data` 节点的整体 Agent 节点耗时被间接计入，没有单独的日志字段或指标）；
+- [x] LLM 调用次数、token 用量和状态：通过 `GET /api/admin/ops/status` 可查（`llm_calls_today`/`llm_tokens_used_today`），未做成逐次调用的结构化日志行；
+- [x] 每日预算剩余量（`llm_tokens_remaining_today`，同上）；
+- [x] 降级计数与限流命中计数（`OperationalMetrics.degraded_count`/`rate_limit_hits`）；
+- [x] 不记录 Prompt 全文和敏感数据（结构化日志只含 request_id/method/route/status_code/duration_ms，未接触请求体或 Prompt）。
 
 ### 验收（MVP 出口）
 
