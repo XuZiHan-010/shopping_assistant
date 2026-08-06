@@ -243,6 +243,38 @@ class AnalyticsRepository:
             source_tables=(spec.table,),
         )
 
+    async def export_detail(
+        self,
+        *,
+        merchant_id: UUID,
+        spec: DetailSpec,
+        filters: Mapping[str, str],
+        start: date,
+        end: date,
+    ) -> DetailResult:
+        """用已登记的明细规格导出完整结果，绝不接受表名或列名字符串输入。"""
+
+        table = _TABLES[spec.table]
+        columns = [getattr(table, name) for name, _ in spec.columns]
+        conditions = [table.merchant_id == merchant_id]
+        if spec.date_filtered:
+            conditions.extend((table.business_date >= start, table.business_date <= end))
+        for code, value in filters.items():
+            dimension = dimension_spec(code)
+            if dimension.table == spec.table:
+                conditions.append(getattr(table, dimension.column) == value)
+        result = await self._session.execute(
+            select(*columns).where(*conditions).order_by(table.business_date.desc(), table.id)
+        )
+        rows = [dict(row) for row in result.mappings()]
+        return DetailResult(
+            columns=tuple(ResultColumn(name, label, "DIMENSION") for name, label in spec.columns),
+            rows=rows,
+            total_rows=len(rows),
+            truncated=False,
+            source_tables=(spec.table,),
+        )
+
     async def _aggregate_ratio(
         self,
         *,

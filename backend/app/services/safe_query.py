@@ -75,6 +75,8 @@ class ExportSpec:
     columns: tuple[str, ...]
     start: date
     end: date
+    filters: tuple[tuple[str, str], ...] = ()
+    date_filtered: bool = True
 
 
 @dataclass(frozen=True)
@@ -248,6 +250,8 @@ class SafeQueryService:
                 columns=tuple(name for name, _ in spec.columns),
                 start=date_range.start,
                 end=date_range.end,
+                filters=tuple(sorted(intent.filters.items())),
+                date_filtered=spec.date_filtered,
             ),
             notes=notes,
             non_additive=False,

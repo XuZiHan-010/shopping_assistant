@@ -148,6 +148,28 @@ async def test_non_positive_limit_is_clamped_before_reaching_sql(limit: int) -> 
 
 
 @pytest.mark.asyncio
+async def test_detail_export_spec_keeps_the_verified_query_scope() -> None:
+    """导出必须重放本次已验证的表、筛选与日期语义，而不是重新猜查询条件。"""
+
+    repository = _RecordingRepository()
+
+    result = await _service(repository).execute(
+        _context(),
+        _intent(
+            answer_mode=AnswerMode.DETAIL,
+            metric=None,
+            filters={"order_status": "PAID"},
+        ),
+        now=NOW,
+    )
+
+    assert result.export_spec is not None
+    assert result.export_spec.table == "orders"
+    assert result.export_spec.filters == (("order_status", "PAID"),)
+    assert result.export_spec.date_filtered is True
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "error",
     [

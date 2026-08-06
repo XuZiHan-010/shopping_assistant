@@ -12,14 +12,16 @@ from app.models.answer import Answer, Feedback
 from app.models.conversation import Conversation, Message
 from app.models.knowledge import KnowledgeDocument, MetricDefinition
 from app.models.merchant import Merchant
-from app.models.operations import AuditLog, LlmUsage
+from app.models.operations import AuditLog, ExportFile, LlmDailyBudget, LlmUsage
 
 __all__ = [
     "Answer",
     "AuditLog",
     "Conversation",
+    "ExportFile",
     "Feedback",
     "KnowledgeDocument",
+    "LlmDailyBudget",
     "LlmUsage",
     "Merchant",
     "Message",

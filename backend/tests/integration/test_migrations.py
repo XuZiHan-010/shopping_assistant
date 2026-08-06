@@ -51,6 +51,7 @@ def test_first_migration_upgrades_empty_postgres_and_can_repeat(
         "messages",
         "answers",
         "feedback",
+        "export_files",
         "metric_definitions",
         "knowledge_documents",
         "audit_logs",

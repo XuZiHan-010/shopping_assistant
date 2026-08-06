@@ -43,6 +43,7 @@ def _settings(app_env: AppEnvironment) -> Settings:
         app_env=app_env,
         database_url="postgresql://user:pass@localhost:5432/borough",
         frontend_origin="http://localhost:5173",  # type: ignore[arg-type]
+        export_signing_secret="test-export-signing-secret",
     )
 
 
