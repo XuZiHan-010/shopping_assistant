@@ -5,6 +5,7 @@
 """
 
 import asyncio
+from datetime import date
 from uuid import UUID, uuid4
 
 import pytest
@@ -24,12 +25,24 @@ from app.db.session import Database
 from app.models.answer import Answer
 from app.models.conversation import Conversation, Message
 from app.models.merchant import Merchant
-from app.models.operations import AuditLog
+from app.models.operations import AuditLog, ExportFile
+from app.repositories.analytics import AnalyticsRepository, ResultColumn
 from app.repositories.audit import AuditRepository
 from app.repositories.conversation import ConversationRepository
-from app.schemas.chat import AnswerMode, ChatRequest
+from app.repositories.export import ExportRepository
+from app.schemas.chat import (
+    AnalysisSource,
+    AnswerMode,
+    ChatRequest,
+    QualityStatus,
+    QueryPlanSummary,
+    Recommendation,
+    ThinkingStep,
+)
 from app.services.chat_service import ChatService
+from app.services.export_service import ExportService
 from app.services.merchant_scope import MerchantScopeService
+from app.services.safe_query import ExportSpec, QueryResult
 from tests.support.agent import DeterministicAgent
 
 MERCHANT_ID = UUID("00000000-0000-0000-0000-000000000021")
@@ -56,6 +69,78 @@ class ExplodingAgent:
 
     async def run(self, message: str, session_id: UUID) -> AgentRunResult:
         raise self.error
+
+
+class DetailExportAgent:
+    """模拟 B6：DETAIL 查询成功并带回 `ExportSpec`。
+
+    `query_result` 是唯一驱动 `ChatService` 是否创建导出记录的信号；
+    `degraded` 用来钉住「回答降级时不创建导出」这条方案要求的行为
+    （`app/services/chat_service.py` 的 `_run_agent`）。
+    """
+
+    def __init__(self, *, degraded: bool = False) -> None:
+        self._degraded = degraded
+
+    async def run(self, message: str, session_id: UUID) -> AgentRunResult:
+        from datetime import UTC, datetime
+
+        from app.schemas.chat import ChatResponse, ExportInfo
+
+        query_result = QueryResult(
+            columns=(ResultColumn("order_no", "订单号", "DIMENSION"),),
+            rows=[{"order_no": "NO20260805001"}],
+            total_rows=1,
+            truncated=False,
+            source_tables=("orders",),
+            plan_steps=("按最近 7 天查询订单明细",),
+            export_spec=ExportSpec(
+                table="orders",
+                columns=("order_no",),
+                start=date(2026, 8, 1),
+                end=date(2026, 8, 5),
+            ),
+            notes=(),
+            non_additive=False,
+        )
+        source = AnalysisSource.FALLBACK if self._degraded else AnalysisSource.DATABASE
+        reason = "回答生成服务暂不可用，已返回受控数据摘要。" if self._degraded else None
+        response = ChatResponse(
+            id=uuid4(),
+            session_id=session_id,
+            answer=("回答生成已降级为受控数据摘要。" if self._degraded else "已查询订单明细。"),
+            answer_mode=AnswerMode.DETAIL,
+            category="TRADE",
+            thinking_steps=[ThinkingStep(label="查询经营数据", node="query_data")],
+            quality_status=QualityStatus.DEGRADED if self._degraded else QualityStatus.PASSED,
+            quality_attempts=1,
+            quality_notes=[],
+            analysis_sources=[source],
+            degraded=self._degraded,
+            degraded_reason=reason,
+            query_plan=QueryPlanSummary(summary="测试查询计划"),
+            data_rows=query_result.rows,
+            total_rows=1,
+            truncated=False,
+            export=ExportInfo(
+                id=uuid4(), url="/api/exports/placeholder", expires_at=datetime.now(UTC)
+            ),
+            recommendations=[
+                Recommendation(
+                    title="核对查询范围",
+                    evidence="本次结果包含 1 行数据。",
+                    action="确认日期范围。",
+                ),
+                Recommendation(
+                    title="持续观察",
+                    evidence="本次结果包含 1 行数据。",
+                    action="结合后续周期判断。",
+                ),
+            ],
+        )
+        return AgentRunResult(
+            response=response, steps=response.thinking_steps, query_result=query_result
+        )
 
 
 class BlockingAgent(DeterministicAgent):
@@ -437,3 +522,75 @@ async def test_stored_payload_round_trips_through_the_database(
     assert original.response.answer_mode is AnswerMode.METRIC
     assert replay.response.model_dump(mode="json") == original.response.model_dump(mode="json")
     assert replay.steps == original.steps
+
+
+def build_export_service(session: AsyncSession) -> ExportService:
+    return ExportService(
+        ExportRepository(session),
+        AnalyticsRepository(session),
+        signing_secret="test-secret",
+        ttl_minutes=15,
+    )
+
+
+@pytest.mark.asyncio
+async def test_successful_detail_query_persists_an_export_record_and_signs_the_url(
+    db_session: AsyncSession,
+) -> None:
+    await seed_merchants(db_session)
+    service = ChatService(
+        db_session,
+        ConversationRepository(db_session),
+        DetailExportAgent(degraded=False),
+        export_service=build_export_service(db_session),
+    )
+    request = ChatRequest(message="最近 7 天订单明细", client_request_id="request-export-1")
+
+    execution = await service.submit(CONTEXT, request, request_id="request-1")
+
+    assert execution.response.export is not None
+    assert execution.response.export.url.startswith(f"/api/exports/{execution.response.export.id}")
+    assert "signature=" in execution.response.export.url
+    records = list(await db_session.scalars(select(ExportFile)))
+    assert len(records) == 1
+    assert records[0].id == execution.response.export.id
+    assert records[0].merchant_id == MERCHANT_ID
+    assert records[0].answer_id == execution.response.id
+
+
+@pytest.mark.asyncio
+async def test_degraded_detail_response_does_not_create_an_export_record(
+    db_session: AsyncSession,
+) -> None:
+    """方案 Task 4：降级回答的数据可信度未经审核，不落导出记录。"""
+
+    await seed_merchants(db_session)
+    service = ChatService(
+        db_session,
+        ConversationRepository(db_session),
+        DetailExportAgent(degraded=True),
+        export_service=build_export_service(db_session),
+    )
+    request = ChatRequest(message="最近 7 天订单明细", client_request_id="request-export-2")
+
+    execution = await service.submit(CONTEXT, request, request_id="request-1")
+
+    assert execution.response.degraded is True
+    assert list(await db_session.scalars(select(ExportFile))) == []
+
+
+@pytest.mark.asyncio
+async def test_detail_export_without_an_export_service_fails_loudly(
+    db_session: AsyncSession,
+) -> None:
+    """`export_service=None` 只应在明确不需要导出的路径出现；DETAIL + ExportSpec
+    下必须显式失败，而不是悄悄丢弃导出信息。"""
+
+    await seed_merchants(db_session)
+    service = build_service(db_session, DetailExportAgent(degraded=False))
+    request = ChatRequest(message="最近 7 天订单明细", client_request_id="request-export-3")
+
+    with pytest.raises(AppError) as excinfo:
+        await service.submit(CONTEXT, request, request_id="request-1")
+
+    assert excinfo.value.code is ErrorCode.DATA_SOURCE_UNAVAILABLE

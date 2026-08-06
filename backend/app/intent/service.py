@@ -15,7 +15,13 @@ from app.intent.prompts import (
     understand_user_prompt,
 )
 from app.intent.whitelist import IntentValidation, validate_intent
-from app.llm.client import LlmBudget, LlmBudgetExceededError, LlmClient, LlmUnavailableError
+from app.llm.client import (
+    LlmBudget,
+    LlmBudgetError,
+    LlmClient,
+    LlmDailyBudgetExceededError,
+    LlmUnavailableError,
+)
 from app.schemas.chat import AnswerMode, QuestionCategory
 
 MAX_INTENT_RETRIES: Final[int] = 2
@@ -61,7 +67,9 @@ class IntentService:
                     tuple(str(x) for x in keywords if str(x).strip()),
                     True,
                 )
-        except LlmBudgetExceededError:
+        except LlmDailyBudgetExceededError:
+            return _unavailable_initial("今日模型用量已达上限，本次只提供受控数据摘要")
+        except LlmBudgetError:
             return _unavailable_initial("单请求 LLM 调用次数或 token 已达上限")
         except LlmUnavailableError:
             return _unavailable_initial("LLM 未配置或暂不可用")
@@ -104,7 +112,11 @@ class IntentService:
                     # 节点统一透出，避免同一条说明在两处各写一遍。
                     return IntentOutcome(validation.intent, validation, tuple(notes), False)
                 degraded_reason = "LLM 结构化输出不是有效 JSON"
-            except LlmBudgetExceededError:
+            except LlmDailyBudgetExceededError:
+                degraded_reason = "今日模型用量已达上限，本次只提供受控数据摘要"
+                notes.append(f"{degraded_reason}，停止结构化理解重试")
+                break
+            except LlmBudgetError:
                 degraded_reason = "单请求 LLM 调用次数或 token 已达上限"
                 notes.append(f"{degraded_reason}，停止结构化理解重试")
                 break

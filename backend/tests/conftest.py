@@ -63,6 +63,7 @@ def test_settings() -> Settings:
         database_url="postgresql+psycopg://user:pass@localhost/test",
         frontend_origin="http://localhost:5173",
         demo_merchant_tokens={},
+        rate_limit_per_minute=1000,
     )
 
 
@@ -164,6 +165,7 @@ async def postgres_app(migrated_postgres: str) -> AsyncIterator[FastAPI]:
             MERCHANT_ONE_TOKEN: MERCHANT_ONE_ID,
             MERCHANT_TWO_TOKEN: MERCHANT_TWO_ID,
         },
+        rate_limit_per_minute=1000,
     )
     database = Database(settings)
     async with database.session() as session:

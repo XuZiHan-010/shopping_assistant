@@ -31,6 +31,10 @@ class ErrorCode(StrEnum):
     IDEMPOTENCY_KEY_REUSED = "IDEMPOTENCY_KEY_REUSED"
     REQUEST_IN_PROGRESS = "REQUEST_IN_PROGRESS"
     DATA_SOURCE_UNAVAILABLE = "DATA_SOURCE_UNAVAILABLE"
+    EXPORT_LINK_EXPIRED = "EXPORT_LINK_EXPIRED"
+    RATE_LIMITED = "RATE_LIMITED"
+    LLM_BUDGET_EXCEEDED = "LLM_BUDGET_EXCEEDED"
+    FORBIDDEN = "FORBIDDEN"
     HTTP_ERROR = "HTTP_ERROR"
     INTERNAL_ERROR = "INTERNAL_ERROR"
 
@@ -49,10 +53,11 @@ class ErrorResponse(BaseModel):
 # 但先得能从契约里看出某条路由会发出哪些码——不声明就只能靠读后端源码。
 _STATUS_DESCRIPTIONS: dict[int, str] = {
     401: "缺少或提供了无效的商家凭证",
-    403: "越权访问其他商家资源",
+    403: "无权访问该资源或管理端点",
     404: "资源不存在",
     405: "请求方法不被允许",
     409: "幂等键冲突或同一请求正在处理中",
+    410: "导出链接已过期",
     422: "请求参数不合法",
     429: "请求过于频繁",
     500: "服务内部错误",
@@ -163,6 +168,42 @@ class ResourceNotFoundError(AppError):
             message=f"{resource_name}不存在",
             status_code=404,
         )
+
+
+class ExportLinkExpiredError(AppError):
+    """签名正确但已经超过有效期的导出链接。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            code=ErrorCode.EXPORT_LINK_EXPIRED,
+            message="导出链接已过期，请重新发起查询后下载",
+            status_code=410,
+        )
+
+
+class RateLimitedError(AppError):
+    def __init__(self) -> None:
+        super().__init__(
+            code=ErrorCode.RATE_LIMITED,
+            message="请求过于频繁，请稍后重试",
+            status_code=429,
+            retryable=True,
+        )
+
+
+class DailyBudgetExhaustedError(AppError):
+    def __init__(self) -> None:
+        super().__init__(
+            code=ErrorCode.LLM_BUDGET_EXCEEDED,
+            message="今日模型用量已达上限，请稍后重试",
+            status_code=503,
+            retryable=True,
+        )
+
+
+class AdminForbiddenError(AppError):
+    def __init__(self) -> None:
+        super().__init__(code=ErrorCode.FORBIDDEN, message="无管理员权限", status_code=403)
 
 
 def _request_id(request: Request) -> str:

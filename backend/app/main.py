@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from time import monotonic
 from uuid import uuid4
 
 from fastapi import FastAPI, Request, Response
@@ -14,6 +15,7 @@ from app.api.router import api_router
 from app.core.config import Settings, get_settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging
+from app.core.rate_limit import SlidingWindowRateLimiter
 from app.db.session import Database
 
 _REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
@@ -69,6 +71,9 @@ def create_app(
     app.state.settings = resolved_settings
     app.state.logger = logger
     app.state.database = resolved_database
+    app.state.rate_limiter = SlidingWindowRateLimiter(
+        resolved_settings.rate_limit_per_minute, clock=monotonic
+    )
 
     app.add_middleware(
         CORSMiddleware,

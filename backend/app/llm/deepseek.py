@@ -44,7 +44,7 @@ class DeepSeekLlmClient:
                             {"role": "user", "content": user},
                         ],
                         "stream": False,
-                        "max_tokens": remaining,
+                        "max_tokens": min(remaining, self._settings.llm_max_output_tokens_per_call),
                     },
                     headers={"authorization": f"Bearer {self._settings.llm_api_key}"},
                 )

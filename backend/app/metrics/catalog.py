@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Final, Protocol
 
 from app.intent.models import QueryIntent
-from app.llm.client import LlmBudget, LlmBudgetExceededError, LlmClient, LlmUnavailableError
+from app.llm.client import LlmBudget, LlmBudgetError, LlmClient, LlmUnavailableError
 from app.schemas.chat import AnswerMode
 
 GENERATED_NOTICE: Final[str] = (
@@ -76,7 +76,7 @@ class MetricCatalog:
                 budget=budget,
             )
             data = json.loads(result.text)
-        except (json.JSONDecodeError, LlmBudgetExceededError, LlmUnavailableError):
+        except (json.JSONDecodeError, LlmBudgetError, LlmUnavailableError):
             return None
         if not isinstance(data, dict):
             return None

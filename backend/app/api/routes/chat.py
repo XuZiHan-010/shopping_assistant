@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from structlog.stdlib import BoundLogger
 
 from app.api.dependencies import (
+    enforce_rate_limit,
     get_chat_service,
     get_conversation_repository,
     get_conversation_scope_service,
@@ -160,13 +161,14 @@ async def _await_cleanup(task: asyncio.Task[ChatExecution]) -> None:
                 " `ChatResponse` 逐字段相同，`error` 载荷是 `ErrorResponse`。"
             ),
         },
-        **error_responses(401, 403, 409, 422),
+        **error_responses(401, 403, 409, 422, 429, 503),
     },
 )
 async def post_chat(
     payload: ChatRequest,
     request: Request,
     context: Annotated[MerchantContext, Depends(get_merchant_context)],
+    _: Annotated[None, Depends(enforce_rate_limit)],
     service: Annotated[ChatService, Depends(get_chat_service)],
 ) -> JSONResponse | StreamingResponse:
     """默认返回 SSE；明确请求 JSON 时返回与 done 同构的响应。"""

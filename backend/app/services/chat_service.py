@@ -15,16 +15,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agent.graph import AgentRunResult
 from app.core.errors import (
     AppError,
+    DailyBudgetExhaustedError,
     ErrorCode,
     IdempotencyKeyReusedError,
     RequestInProgressError,
     ResourceNotFoundError,
 )
 from app.core.security import MerchantContext
+from app.llm.guard import CostGuardProtocol
 from app.models.answer import Answer
 from app.models.conversation import Conversation
 from app.repositories.conversation import ConversationRepository
-from app.schemas.chat import ChatRequest, ChatResponse, ThinkingStep
+from app.schemas.chat import AnswerMode, ChatRequest, ChatResponse, ThinkingStep
+from app.services.export_service import ExportService
 from app.services.merchant_scope import MerchantScopeService
 
 # §8.5：请求本身有问题时重试没有意义，落 FAILED_FINAL；其余按瞬时故障处理，
@@ -52,11 +55,17 @@ class ChatService:
         conversations: ConversationRepository,
         agent: ChatAgentProtocol,
         scope_service: MerchantScopeService[Conversation] | None = None,
+        export_service: ExportService | None = None,
+        cost_guard: CostGuardProtocol | None = None,
+        budget_gate: CostGuardProtocol | None = None,
     ) -> None:
         self._session = session
         self._conversations = conversations
         self._agent = agent
         self._scope_service = scope_service
+        self._export_service = export_service
+        self._cost_guard = cost_guard
+        self._budget_gate = budget_gate
 
     async def submit(
         self,
@@ -74,12 +83,14 @@ class ChatService:
             replay = _dispatch_existing(existing, digest)
             if replay is not None:
                 return replay
+            await self._require_daily_budget()
             # FAILED_RETRYABLE：复用同一行并置回 PROCESSING 后重跑。
             await self._conversations.reset_answer_processing(existing)
             await self._session.commit()
             return await self._run_agent(context, request, existing.conversation_id, existing)
 
         try:
+            await self._require_daily_budget()
             conversation_id = await self._resolve_conversation(context, request, request_id)
             user_message = await self._conversations.create_message(
                 context.merchant_id,
@@ -144,6 +155,35 @@ class ChatService:
                     "thinking_steps": result.steps,
                 }
             )
+            if (
+                result.query_result is not None
+                and result.query_result.export_spec is not None
+                and response.answer_mode is AnswerMode.DETAIL
+                and not response.degraded
+            ):
+                if self._export_service is None:
+                    raise AppError(
+                        code=ErrorCode.DATA_SOURCE_UNAVAILABLE,
+                        message="导出服务暂时不可用，请稍后重试",
+                        status_code=503,
+                        retryable=True,
+                    )
+                export = await self._export_service.create(
+                    merchant_id=context.merchant_id,
+                    answer_id=answer.id,
+                    spec=result.query_result.export_spec,
+                )
+                response = response.model_copy(update={"export": export})
+            if self._cost_guard is not None and self._cost_guard.daily_cap_hit:
+                if result.query_result is None:
+                    raise DailyBudgetExhaustedError
+                response = response.model_copy(
+                    update={
+                        "degraded": True,
+                        "degraded_reason": response.degraded_reason
+                        or "今日模型用量已达上限，本次只提供受控数据摘要",
+                    }
+                )
             await self._conversations.create_message(
                 context.merchant_id,
                 conversation_id,
@@ -212,6 +252,10 @@ class ChatService:
         if existing_conversation is None:
             raise ResourceNotFoundError("会话")
         return existing_conversation.id
+
+    async def _require_daily_budget(self) -> None:
+        if self._budget_gate is not None and await self._budget_gate.remaining() <= 0:
+            raise DailyBudgetExhaustedError
 
 
 def _dispatch_existing(existing: Answer, digest: str) -> ChatExecution | None:
