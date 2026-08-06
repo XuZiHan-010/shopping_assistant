@@ -7,11 +7,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from itertools import pairwise
+from time import monotonic
 from typing import Any, Final, Protocol, cast
 from uuid import UUID, uuid4
 
@@ -55,6 +56,12 @@ class QueryServiceLike(Protocol):
         now: datetime,
         keywords: Sequence[str] = (),
     ) -> QueryResult: ...
+
+
+class NodeTimerLike(Protocol):
+    """记录 Agent 节点耗时的最小接口。"""
+
+    def record_node_duration(self, node: str, duration_seconds: float) -> None: ...
 
 
 MAX_REVIEW_ATTEMPTS: Final[int] = 2
@@ -120,6 +127,7 @@ class MerchantQaGraph:
         answer_service: AnswerService | None = None,
         review_service: ReviewService | None = None,
         visualization_service: VisualizationService | None = None,
+        node_timer: NodeTimerLike | None = None,
     ) -> None:
         self._retrieval = retrieval
         self._intent_service = IntentService(intent_service_llm)
@@ -133,6 +141,7 @@ class MerchantQaGraph:
         self._answer_service = answer_service or AnswerService()
         self._review_service = review_service or ReviewService()
         self._visualization_service = visualization_service or VisualizationService()
+        self._node_timer = node_timer
         self._graph = self._build_graph()
 
     async def run(self, message: str, session_id: UUID) -> AgentRunResult:
@@ -147,24 +156,32 @@ class MerchantQaGraph:
 
     def _build_graph(self) -> Any:
         graph = StateGraph(AgentState)
-        graph.add_node("load_context", self._load_context)
-        graph.add_node("retrieve_knowledge_index", self._retrieve_knowledge_index)
-        graph.add_node("classify_intent", self._classify_intent)
-        graph.add_node("understand_intent", self._understand_intent)
-        graph.add_node("validate_intent", self._validate_intent)
-        graph.add_node("retrieve_knowledge_detail", self._retrieve_knowledge_detail)
-        graph.add_node("query_data", self._query_data)
-        graph.add_node("compose_answer", self._compose_answer)
-        graph.add_node("local_validate", self._local_validate)
-        graph.add_node("review_answer", self._review_answer)
-        graph.add_node("decide_retry", self._decide_retry)
-        graph.add_node("suggest_questions", self._suggest_questions)
-        graph.add_node("persist_answer", self._persist_answer)
+        node_methods: dict[str, Callable[[AgentState], Awaitable[dict[str, object]]]] = {
+            name: getattr(self, f"_{name}") for name in GRAPH_NODES
+        }
+        for name in GRAPH_NODES:
+            graph.add_node(name, cast(Any, self._timed_node(name, node_methods[name])))
         graph.add_edge(START, "load_context")
         for source, target in pairwise(GRAPH_NODES):
             graph.add_edge(source, target)
         graph.add_edge("persist_answer", END)
         return graph.compile()
+
+    def _timed_node(
+        self, name: str, fn: Callable[[AgentState], Awaitable[dict[str, object]]]
+    ) -> Callable[[AgentState], Awaitable[dict[str, object]]]:
+        if self._node_timer is None:
+            return fn
+        node_timer = self._node_timer
+
+        async def wrapper(state: AgentState) -> dict[str, object]:
+            start = monotonic()
+            try:
+                return await fn(state)
+            finally:
+                node_timer.record_node_duration(name, monotonic() - start)
+
+        return wrapper
 
     def _initial_state(self, message: str, session_id: UUID) -> AgentState:
         return {

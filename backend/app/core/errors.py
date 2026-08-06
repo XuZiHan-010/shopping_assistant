@@ -201,6 +201,15 @@ class DailyBudgetExhaustedError(AppError):
         )
 
 
+class AdminTokenRequiredError(AppError):
+    def __init__(self) -> None:
+        super().__init__(
+            code=ErrorCode.AUTH_REQUIRED,
+            message="请提供有效的管理员凭证",
+            status_code=401,
+        )
+
+
 class AdminForbiddenError(AppError):
     def __init__(self) -> None:
         super().__init__(code=ErrorCode.FORBIDDEN, message="无管理员权限", status_code=403)
@@ -219,6 +228,7 @@ def register_exception_handlers(app: FastAPI, logger: BoundLogger) -> None:
 
     @app.exception_handler(AppError)
     async def handle_app_error(request: Request, exc: AppError) -> JSONResponse:
+        request.app.state.metrics.record_error_code(str(exc.code))
         return _response(
             ErrorResponse(
                 code=exc.code,

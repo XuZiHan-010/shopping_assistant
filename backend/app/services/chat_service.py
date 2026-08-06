@@ -21,6 +21,7 @@ from app.core.errors import (
     RequestInProgressError,
     ResourceNotFoundError,
 )
+from app.core.metrics import OperationalMetrics
 from app.core.security import MerchantContext
 from app.llm.guard import CostGuardProtocol
 from app.models.answer import Answer
@@ -58,6 +59,7 @@ class ChatService:
         export_service: ExportService | None = None,
         cost_guard: CostGuardProtocol | None = None,
         budget_gate: CostGuardProtocol | None = None,
+        metrics: OperationalMetrics | None = None,
     ) -> None:
         self._session = session
         self._conversations = conversations
@@ -66,6 +68,7 @@ class ChatService:
         self._export_service = export_service
         self._cost_guard = cost_guard
         self._budget_gate = budget_gate
+        self._metrics = metrics
 
     async def submit(
         self,
@@ -184,6 +187,8 @@ class ChatService:
                         or "今日模型用量已达上限，本次只提供受控数据摘要",
                     }
                 )
+            if self._metrics is not None and response.degraded:
+                self._metrics.degraded_count += 1
             await self._conversations.create_message(
                 context.merchant_id,
                 conversation_id,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 from collections.abc import AsyncIterator
 from typing import Annotated, cast
 
@@ -12,7 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agent.graph import MerchantQaGraph
 from app.core.client_ip import resolve_client_ip
 from app.core.config import Settings
-from app.core.errors import AuthRequiredError, RateLimitedError
+from app.core.errors import (
+    AdminForbiddenError,
+    AdminTokenRequiredError,
+    AuthRequiredError,
+    RateLimitedError,
+)
 from app.core.security import MerchantContext, resolve_demo_token
 from app.db.session import Database
 from app.knowledge.retrieval import KnowledgeRetrieval
@@ -101,7 +107,21 @@ def enforce_rate_limit(
             trusted_proxy_ips=settings.trusted_proxy_ip_set,
         ),
     ):
+        request.app.state.metrics.rate_limit_hits += 1
         raise RateLimitedError
+
+
+def require_admin_token(
+    request: Request,
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> None:
+    """运维端点专用认证：只认 `X-Admin-Token`，忽略 `Authorization`。"""
+
+    token = request.headers.get("x-admin-token")
+    if not token:
+        raise AdminTokenRequiredError
+    if not settings.admin_token or not hmac.compare_digest(token, settings.admin_token):
+        raise AdminForbiddenError
 
 
 def get_chat_service(
@@ -142,6 +162,7 @@ def get_chat_service(
         merchant_id=context.merchant_id,
         answer_llm=llm,
         reviewer_llm=llm,
+        node_timer=request.app.state.metrics,
     )
     return ChatService(
         session,
@@ -151,6 +172,7 @@ def get_chat_service(
         _build_export_service(session, settings),
         guard,
         guard,
+        metrics=request.app.state.metrics,
     )
 
 

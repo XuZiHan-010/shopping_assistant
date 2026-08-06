@@ -304,3 +304,22 @@ async def test_successful_turn_persists_both_messages_and_touches_conversation()
     assert repository.touched == [execution.response.session_id]
     # 一次提交 PROCESSING 的可见状态，一次提交最终结果。
     assert session.commits == 2
+
+
+@pytest.mark.asyncio
+async def test_finalized_degraded_response_increments_metrics() -> None:
+    from app.core.metrics import OperationalMetrics
+
+    session = FakeSession()
+    repository = FakeConversationRepository()
+    metrics = OperationalMetrics()
+    service = ChatService(
+        session,  # type: ignore[arg-type]
+        repository,
+        CountingAgent(),
+        metrics=metrics,
+    )
+
+    await service.submit(CONTEXT, chat_request(key="req-degraded-1"), request_id="req-1")
+
+    assert metrics.degraded_count == 1
