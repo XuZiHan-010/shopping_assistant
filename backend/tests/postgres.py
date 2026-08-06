@@ -24,7 +24,7 @@ DEFAULT_TEST_DATABASE_URL = (
 TRUNCATE_ALL_TABLES = (
     "TRUNCATE TABLE support_tickets, returns, refunds, order_items, orders, products, "
     "export_files, audit_logs, feedback, answers, messages, "
-    "conversations, llm_usage, metric_definitions, "
+    "conversations, llm_usage, llm_daily_budget, metric_definitions, "
     "knowledge_documents, merchants CASCADE"
 )
 
