@@ -26,7 +26,7 @@ import pytest
 
 #: 正在合并的阶段。**合并 B5 时把它改成 "B5"**——这条测试防的是「当前阶段把自己
 #: 写成未来时态」，阶段推进后 B4 就变成合法的历史引用了。
-CURRENT_STAGE = "B4"
+CURRENT_STAGE = "B6"
 
 #: `(?<![A-Za-z0-9])` 挡掉 `AB4`、`BR20260803`；`(?![0-9])` 挡掉 `B42`。
 #: 只匹配大写 B：fixture 里的 UUID（`b24375c9-…`）是小写。
@@ -123,9 +123,9 @@ def test_the_detector_actually_flags_the_wording_it_is_meant_to_catch() -> None:
     列的三条都是本轮真实修掉的文案；后两条是常见的误报形状，必须**不**命中。
     """
 
-    assert _STAGE_PATTERN.search("已识别指标和查询范围；经营数据查询将在 B4 接入。")
-    assert _STAGE_PATTERN.search("商家资料查询将在 B4 接入")
-    assert _STAGE_PATTERN.search("B4 接入受控查询后展示经营结果。")
+    assert _STAGE_PATTERN.search("已识别指标和查询范围；经营数据查询将在 B6 接入。")
+    assert _STAGE_PATTERN.search("商家资料查询将在 B6 接入")
+    assert _STAGE_PATTERN.search("B6 接入受控查询后展示经营结果。")
     assert not _STAGE_PATTERN.search("BR20260803-0001")
     assert not _STAGE_PATTERN.search("b24375c9-1f09-5951-bbc4-09c4f4338ffc")
 

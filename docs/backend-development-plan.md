@@ -1290,18 +1290,18 @@ PostgreSQL 钉住的一条（`test_return_count_reads_returns_not_refunds`）。
 
 ### 任务
 
-- [ ] 实现 Answer Composition；
-- [ ] 创建回答 Prompt；
-- [ ] 创建 Visualization Service；
-- [ ] 创建 Recommendation Schema；
-- [ ] 实现本地确定性校验；
-- [ ] 实现独立 Reviewer；
-- [ ] 固定最大尝试次数 `MAX_REVIEW_ATTEMPTS=2`；
-- [ ] 实现 `PASSED` / `DEGRADED` / `FAILED` / `NOT_RUN` **四种最终状态**（无 `RETRIED`，重试次数由 `quality_attempts` 表达，见 §8.2）；
-- [ ] 保存 `quality_attempts` 和 `quality_notes`；
-- [ ] 按实际使用的来源填充 `analysis_sources` 有序数组；
-- [ ] 实现非加和指标保护；
-- [ ] 确保规则回答不创建假图表。
+- [x] 实现 Answer Composition；
+- [x] 创建回答 Prompt；
+- [x] 创建 Visualization Service；
+- [x] 创建 Recommendation Schema；
+- [x] 实现本地确定性校验；
+- [x] 实现独立 Reviewer；
+- [x] 固定最大尝试次数 `MAX_REVIEW_ATTEMPTS=2`；
+- [x] 实现 `PASSED` / `DEGRADED` / `FAILED` / `NOT_RUN` **四种最终状态**（无 `RETRIED`，重试次数由 `quality_attempts` 表达，见 §8.2）；
+- [x] 保存 `quality_attempts` 和 `quality_notes`；
+- [x] 按实际使用的来源填充 `analysis_sources` 有序数组；
+- [x] 实现非加和指标保护；
+- [x] 确保规则回答不创建假图表。
 
 推荐问题不在本阶段生成——它是 B2 已完成的预置配置模块（§6.8）在 Graph 中的独立节点。
 
@@ -1314,6 +1314,16 @@ PostgreSQL 钉住的一条（`test_return_count_reads_returns_not_refunds`）。
 - 无数据时是否编造数字；
 - 非加和指标是否被求和；
 - 商家敏感字段是否出现在回答。
+
+**「非加和指标是否被求和」与「敏感字段」的落地方式**（`app/services/answer_service.py`
+`AnswerService._validate`）：`QueryResult.non_additive=True` 且返回多行时，草稿文本命中
+「合计/总计/累计/总和/加总/汇总」任一字样即拒绝——单纯引用某一行的原始数值不受影响，
+拦的是把多行摊平成一个新结论。`non_additive` 同时写进喂给模型和 Reviewer 的事实包
+（`facts_json` 的 `non_additive` 字段），两条 Prompt 都要求据此避免/否决求和式表达，
+本地校验是最后一道机械防线，不依赖模型自觉。敏感字段方面，受控查询契约
+（`DETAIL_SPECS`）本身不含任何 PII 列，真正的泄露面是模型可能在回答里提到不属于
+展示字段的内部标识符（`merchant_id`、`answer_id` 等 UUID）——校验器用 UUID 形状的
+正则拦这一类，命中即判定为幻觉走降级路径。
 
 ### 验收
 
@@ -1333,25 +1343,26 @@ PostgreSQL 钉住的一条（`test_return_count_reads_returns_not_refunds`）。
 
 ### Feedback
 
-- [ ] `POST /api/answers/{id}/feedback`；
-- [ ] 采纳、点赞和点踩；
-- [ ] 点赞点踩互斥；
-- [ ] 幂等更新；
-- [ ] 只能反馈本商家回答。
+- [x] `POST /api/answers/{id}/feedback`；
+- [x] 采纳、点赞和点踩；
+- [x] 点赞点踩互斥；
+- [x] 幂等更新；
+- [x] 只能反馈本商家回答。
 
 ### CSV
 
-- [ ] Export Service；
-- [ ] 实现 `GET /api/exports/{id}` 下载接口；
-- [ ] UTF-8 BOM；
-- [ ] 中文列名；
-- [ ] CSV 公式注入防护；
-- [ ] 权限校验；
-- [ ] **P0 动态生成，不引入 S3 SDK**；对象存储和签名对象 URL 属于 P1；
-- [ ] 导出记录写入 `export_files`；
-- [ ] **签名 URL 自带鉴权**：`GET /api/exports/{id}` 不要求 `Authorization`，校验 HMAC 签名 + 商家归属即可，浏览器可原生下载（理由见 §8.0）；
-- [ ] 签名有效期 **15 分钟**，过期返回 `410 EXPORT_LINK_EXPIRED`；
-- [ ] 响应设 `Referrer-Policy: no-referrer`，签名链接不进日志。
+- [x] Export Service；
+- [x] 实现 `GET /api/exports/{id}` 下载接口；
+- [x] UTF-8 BOM；
+- [x] 中文列名；
+- [x] CSV 公式注入防护；
+- [x] 权限校验；
+- [x] **P0 动态生成，不引入 S3 SDK**；对象存储和签名对象 URL 属于 P1；
+- [x] 导出记录写入 `export_files`；
+- [x] **签名 URL 自带鉴权**：`GET /api/exports/{id}` 不要求 `Authorization`，校验 HMAC 签名 + 商家归属即可，浏览器可原生下载（理由见 §8.0）；
+- [x] 签名有效期 **15 分钟**，过期返回 `410 EXPORT_LINK_EXPIRED`；
+- [x] 响应设 `Referrer-Policy: no-referrer`，签名链接不进日志（应用层不打印请求 URL；
+      生产环境 access log 的脱敏留给 B7 部署配置）。
 
 ### 验收
 
@@ -1361,6 +1372,14 @@ PostgreSQL 钉住的一条（`test_return_count_reads_returns_not_refunds`）。
 - 篡改签名的链接被拒绝；
 - 反馈重复提交结果稳定。
 
+**复审发现并修复的一处偏离（BOM 重复）**：`ExportService._to_csv` 已经在字符串开头拼了
+一次 BOM（`﻿`），路由层最初又用 `content.encode("utf-8-sig")` 编码——这个编码本身
+会自动加一次 BOM，叠加已有字符后实际下载字节是两段 BOM（`EF BB BF EF BB BF...`）。
+`tests/api/test_exports.py::test_download_returns_a_single_bom_prefixed_csv_with_safe_headers`
+钉住只允许一段。修复为路由层改用 `content.encode("utf-8")`，BOM 只在 `_to_csv` 里拼一次；
+新增该测试前这条回归完全不会被发现——单元测试只测了 `ExportService` 自己返回的字符串，
+从未测过 HTTP 路由实际吐出的字节。
+
 ---
 
 ## B7 · Railway、费用防护与 MVP 收口
@@ -1368,6 +1387,13 @@ PostgreSQL 钉住的一条（`test_return_count_reads_returns_not_refunds`）。
 **本阶段属于 P0，是 MVP 的最后一步。执行顺序是 B0 → B7，不要先做 B8/B9 的 P1 功能再部署。**
 
 PRD 的里程碑是 M0–M4 完成 MVP 并上线，M5 才是 P1。把 Railway 排在附件和知识库之后，会让部署、迁移和费用风险暴露得过晚。
+
+> **提醒（2026-08-06）**：B6 提交里已经附带落地了本阶段「LLM 费用与限流」「可信来源 IP」两节的
+> 大部分代码——`app/llm/guard.py`、`app/core/rate_limit.py`、`app/core/client_ip.py`、
+> `app/repositories/llm_budget.py`，以及 `Settings` 里的 `admin_token`/`trusted_proxy_*`/
+> `llm_daily_budget_tokens` 等字段，详见 `docs/project-progress.md`「当前阶段」。这些代码已接入
+> 运行时路径且 `ruff`/`mypy` 全绿，但**下面两节的「必测」用例一条都没有写**，下面的复选框因此保持
+> 未勾选状态——先补测试再勾。Docker/Railway/运维端点/可观测性四节还没有任何相关代码。
 
 ### Docker
 
