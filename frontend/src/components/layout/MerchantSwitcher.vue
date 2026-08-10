@@ -50,6 +50,18 @@ function chooseMerchant(merchant: string): void {
   emit('update:modelValue', merchant)
   closeMenu(true)
 }
+
+/**
+ * 供外部（`AssistantView`，F3 Task 6）在演示身份失效时强制打开切换器并把焦点
+ * 交给触发按钮——这是 401 恢复流程的一部分：菜单内部平时只由用户点击触发按钮
+ * 自己控制开合，这里是唯一的外部入口。
+ */
+function openAndFocus(): void {
+  isOpen.value = true
+  triggerElement.value?.focus()
+}
+
+defineExpose({ openAndFocus })
 </script>
 
 <template>
@@ -58,6 +70,7 @@ function chooseMerchant(merchant: string): void {
       ref="triggerElement"
       class="merchant-switcher__trigger"
       type="button"
+      data-testid="merchant-switcher"
       aria-label="切换当前演示商家"
       :aria-expanded="isOpen"
       aria-controls="merchant-switcher-options"

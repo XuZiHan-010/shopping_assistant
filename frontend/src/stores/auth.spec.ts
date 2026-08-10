@@ -64,4 +64,21 @@ describe('useAuthStore', () => {
     expect(store.selected?.merchantId).toBe('merchant-100')
     expect(store.restoreNotice).toContain('重新选择')
   })
+
+  it('invalidate 清掉内存 Token 与 sessionStorage 标识，但保留商家列表与提示文案', async () => {
+    const store = useAuthStore()
+    await store.loadMerchants()
+    store.selectByDisplayName('Borough商家101')
+    expect(sessionStorage.getItem(MERCHANT_STORAGE_KEY)).toBe('merchant-101')
+
+    store.invalidate()
+
+    expect(store.selected?.token).toBeUndefined()
+    // 身份失效不是「这个商家不存在了」——displayName/merchantId 还在，切换器
+    // 重新打开时用户仍能看到「刚才选的是谁」，只是它已经没有可用凭证。
+    expect(store.selected?.merchantId).toBe('merchant-101')
+    expect(sessionStorage.getItem(MERCHANT_STORAGE_KEY)).toBeNull()
+    expect(store.merchants.length).toBeGreaterThanOrEqual(2)
+    expect(store.restoreNotice).toBe('演示身份已失效，请重新选择商家。')
+  })
 })

@@ -4,11 +4,12 @@
  * F0 只负责解析基础地址；HTTP 客户端、鉴权头和统一错误处理在 F3 补进本文件
  * （AGENTS.md §7.5 把这些职责都归给 api/client.ts）。
  */
+import { AppError } from './errors'
 
-/** 配置缺失或非法时抛出，由全局错误区展示。 */
-export class ApiConfigError extends Error {
+/** 配置缺失或非法时抛出，由全局错误区展示。是 `AppError` 的 `CONFIG` 特化。 */
+export class ApiConfigError extends AppError {
   constructor(message: string) {
-    super(message)
+    super('CONFIG', message)
     this.name = 'ApiConfigError'
   }
 }

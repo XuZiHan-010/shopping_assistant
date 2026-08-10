@@ -9,6 +9,7 @@
  */
 import type { components } from '@/api/generated'
 
+import { buildAuthHeaders } from '../credentials'
 import type { ChatTransport, TransportRequest } from '../transport'
 import { CHAT_FIXTURES } from './fixtures.generated'
 import { MOCK_MERCHANTS, matchScenario } from './scenarios'
@@ -20,10 +21,19 @@ interface MockOptions {
   stepDelayMs?: number
 }
 
-function abortError(): Error {
-  const error = new Error('请求已取消')
-  error.name = 'AbortError'
-  return error
+/**
+ * 必须是真正的 `DOMException`，不能是「改了 `.name` 的普通 `Error`」。
+ *
+ * `toAppError`（`src/api/errors.ts`）用 `error instanceof DOMException &&
+ * error.name === 'AbortError'` 识别取消——这是它唯一的判据，不会退化成看
+ * `.name` 字符串。真实浏览器的 `fetch`/`AbortController` 在中止时抛出的正是
+ * `DOMException`，Mock 传输如果只是给普通 `Error` 改名，形状就和真实环境不
+ * 对称：Store 的 `runRound` 会把它误判成 `INTERNAL_ERROR`，取消操作在 Mock
+ * 下看起来永远在报错，而这条路径在真实后端下其实是好的——问题只出在 Mock
+ * 自己的仿真不到位。
+ */
+function abortError(): DOMException {
+  return new DOMException('请求已取消', 'AbortError')
 }
 
 function jsonResponse(payload: unknown, status = 200): Response {
@@ -102,26 +112,72 @@ function sseResponse(
   })
 }
 
+type ConversationRecord = {
+  id: string
+  title: string
+  createdAt: string
+  messages: components['schemas']['ConversationMessage'][]
+}
+
+/**
+ * 没有可用凭证（未注册 `setCredentialProvider`，或注册了但没给 token）时落进
+ * 这个固定桶。真实后端遇到这种情况会直接 401——Mock 不模拟那条拒绝路径
+ * （401 场景由调用方自己打桩传输层，见 `AssistantView.spec.ts`），只需要保证
+ * 「没带身份」的请求彼此还能看到同一张表，不破坏历史上不关心鉴权的用例。
+ */
+const ANONYMOUS_TENANT_KEY = '(no-authorization-header)'
+
+/**
+ * 按「这次请求会带哪个 Authorization 头」分桶，而不是直接读 `request.auth`
+ * 这个租户范围枚举——真实商家之间的区别在 Token 本身，同为 `'merchant'`
+ * 范围的两个商家必须落进两张不同的表。这里复用 `buildAuthHeaders`，与
+ * `createFetchTransport` 装配请求头走的是同一份代码，保证 Mock 与真实
+ * 传输对「这次请求的身份是什么」这件事的判断口径一致。
+ */
+function tenantKeyFor(request: TransportRequest): string {
+  try {
+    const headers = buildAuthHeaders(request.auth ?? 'merchant')
+    return headers.Authorization ?? headers['X-Admin-Token'] ?? ANONYMOUS_TENANT_KEY
+  } catch {
+    return ANONYMOUS_TENANT_KEY
+  }
+}
+
 export function createMockTransport(options: MockOptions = {}): ChatTransport {
   const resolved: Required<MockOptions> = {
     chunkSizes: options.chunkSizes ?? [5, 13, 3, 29, 7],
     stepDelayMs: options.stepDelayMs ?? 12,
   }
 
-  // 每个 transport 实例持有自己的会话表。放模块级会让状态在测试之间泄漏，
-  // 「删除后列表为空」这类断言就会依赖测试执行顺序。
-  const conversations = new Map<
-    string,
-    {
-      id: string
-      title: string
-      createdAt: string
-      messages: components['schemas']['ConversationMessage'][]
+  // 每个 transport 实例持有自己的租户表集合。放模块级会让状态在测试之间
+  // 泄漏，「删除后列表为空」这类断言就会依赖测试执行顺序。
+  // 一层 Map 套一层 Map：外层按 Authorization 头分商家，内层才是该商家自己
+  // 的会话表——真实后端按 Token 过滤，Mock 至少要在传输实例这一级做到同样
+  // 的隔离，Playwright 的隔离 e2e 才不会在假绿的 Mock 上通过。
+  const conversationsByTenant = new Map<string, Map<string, ConversationRecord>>()
+
+  function conversationsFor(request: TransportRequest): Map<string, ConversationRecord> {
+    const key = tenantKeyFor(request)
+    let table = conversationsByTenant.get(key)
+    if (!table) {
+      table = new Map()
+      conversationsByTenant.set(key, table)
     }
-  >()
+    return table
+  }
 
   return async (request: TransportRequest, signal: AbortSignal): Promise<Response> => {
     if (signal.aborted) throw abortError()
+
+    if (request.path.split('?')[0].startsWith('/api/exports/') && request.method === 'GET') {
+      return new Response('order_no,paid_amount\nBR20260803-0001,258.00\n', {
+        status: 200,
+        headers: {
+          'content-type': 'text/csv; charset=utf-8',
+          'content-disposition': 'attachment; filename="borough-detail.csv"',
+        },
+      })
+    }
 
     if (request.path === '/api/demo/merchants') {
       // 契约里这个键是 merchants，不是 items——与 ConversationListResponse 不同，
@@ -137,6 +193,7 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
       const sessionId = body.session_id ?? fixture.session_id
       const now = new Date().toISOString()
       const answerId = crypto.randomUUID()
+      const conversations = conversationsFor(request)
 
       const existing = conversations.get(sessionId)
       const record = existing ?? {
@@ -158,15 +215,18 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
       return sseResponse(payload, signal, resolved)
     }
 
-    if (request.path === '/api/conversations' && request.method === 'GET') {
-      const items: components['schemas']['ConversationSummary'][] = [...conversations.values()].map(
-        (item) => ({
-          id: item.id,
-          title: item.title,
-          created_at: item.createdAt,
-          updated_at: item.createdAt,
-        }),
-      )
+    // listConversations 现在带 ?limit=，这里只按路径部分匹配，query 由真实后端解释。
+    const pathname = request.path.split('?')[0]
+
+    if (pathname === '/api/conversations' && request.method === 'GET') {
+      const items: components['schemas']['ConversationSummary'][] = [
+        ...conversationsFor(request).values(),
+      ].map((item) => ({
+        id: item.id,
+        title: item.title,
+        created_at: item.createdAt,
+        updated_at: item.createdAt,
+      }))
       return jsonResponse({
         items,
         limit: 20,
@@ -174,9 +234,10 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
       } satisfies components['schemas']['ConversationListResponse'])
     }
 
-    const detailMatch = /^\/api\/conversations\/([^/]+)$/.exec(request.path)
+    const detailMatch = /^\/api\/conversations\/([^/]+)$/.exec(pathname)
     if (detailMatch) {
       const id = detailMatch[1]
+      const conversations = conversationsFor(request)
       if (request.method === 'DELETE') {
         conversations.delete(id)
         return new Response(null, { status: 204 })

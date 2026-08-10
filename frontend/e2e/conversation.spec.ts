@@ -96,13 +96,78 @@ test('删除会话后列表同步移除', async ({ page }) => {
 
 test('演示数据在回答卡片上有明确标识（R7）', async ({ page }) => {
   await page.goto('/')
-  await page.getByTestId('quick-question').first().click()
+  // 快捷问题现在命中真实（非降级）数据，用会命中 identityProfile 降级夹具的问题触发。
+  await page.getByLabel('输入问题').fill('我的商家资料是什么？')
+  await page.getByLabel('发送问题').click()
   await expect(page.getByTestId('stage-label')).toHaveCount(0, { timeout: 15000 })
 
   const notice = page.getByTestId('degraded-notice')
   await expect(notice).toBeVisible()
   await expect(notice).toContainText('演示数据')
   await expect(notice).toContainText('FALLBACK')
+})
+
+test('METRIC 回答在侧栏渲染图表 canvas 与可键盘访问的数据表', async ({ page }) => {
+  await page.goto('/')
+  // 第二个快捷问题「昨天总 GMV 是多少？」命中 metric-gmv fixture，图表已启用。
+  await page.getByTestId('quick-question').nth(1).click()
+  await expect(page.getByTestId('stage-label')).toHaveCount(0, { timeout: 15000 })
+
+  await expect(page.getByTestId('metric-chart-canvas')).toBeVisible()
+  await expect(page.getByTestId('chart-summary')).not.toBeEmpty()
+  await expect(page.getByTestId('chart-empty')).toHaveCount(0)
+
+  await page.getByText('查看数据表').click()
+  await expect(page.locator('details table th[scope="col"]').first()).toBeVisible()
+})
+
+test('RULE 回答不展示虚构图表', async ({ page }) => {
+  await page.goto('/')
+  // 第四个快捷问题「我要货品上架，具体规则有吗？」命中 rule-platform fixture，无 visualization。
+  await page.getByTestId('quick-question').nth(3).click()
+  await expect(page.getByTestId('stage-label')).toHaveCount(0, { timeout: 15000 })
+
+  await expect(page.getByTestId('chart-empty')).toBeVisible()
+  await expect(page.locator('[data-testid="metric-chart-canvas"] canvas')).toHaveCount(0)
+})
+
+test('DETAIL 回答在消息内渲染表格、行数说明与带签名的下载链接', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-07-28T12:00:00Z') })
+  await page.goto('/')
+  // 第三个快捷问题「查看最近订单明细」命中 detail-order fixture。
+  await page.getByTestId('quick-question').nth(2).click()
+  await expect(page.getByTestId('stage-label')).toHaveCount(0, { timeout: 15000 })
+
+  const table = page.getByTestId('detail-table')
+  await expect(table).toBeVisible()
+  await expect(table).toContainText('共 2 行')
+
+  const download = page.getByTestId('download-export')
+  await expect(download).toBeVisible()
+  await expect(download).toHaveAttribute('download', '')
+  await expect(download).toHaveAttribute('target', '_blank')
+  await expect(download).toHaveAttribute('rel', 'noopener')
+  const href = await download.getAttribute('href')
+  expect(href).toMatch(
+    /\/api\/exports\/.+\?merchant_id=[0-9a-f-]+&expires_at=\d+&signature=[0-9a-f]{64}/,
+  )
+})
+
+test('换一换只在本地循环备选问题，不触发新的一轮请求', async ({ page }) => {
+  await page.goto('/')
+  await page.getByTestId('quick-question').nth(1).click()
+  await expect(page.getByTestId('stage-label')).toHaveCount(0, { timeout: 15000 })
+
+  await expect(page.getByTestId('chat-message')).toHaveCount(2)
+  const before = await page.getByTestId('suggested-question').allTextContents()
+
+  await page.getByTestId('rotate-suggestions').click()
+
+  const after = await page.getByTestId('suggested-question').allTextContents()
+  expect(after).not.toEqual(before)
+  // 本地轮换不产生新的一轮问答，也不应该重新出现阶段标签。
+  await expect(page.getByTestId('chat-message')).toHaveCount(2)
+  await expect(page.getByTestId('stage-label')).toHaveCount(0)
 })
 
 test('桌面宽度下商家名完整可见，不被截断', async ({ page }) => {

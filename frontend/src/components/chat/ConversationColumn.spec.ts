@@ -2,9 +2,9 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { MOCK_QUICK_QUESTIONS } from '@/api/mock/scenarios'
 import { createMockTransport } from '@/api/mock/transport'
 import { setChatTransport } from '@/api/transport'
+import { QUICK_QUESTIONS } from '@/constants/quickQuestions'
 import { useChatStore } from '@/stores/chat'
 
 import ChatComposer from './ChatComposer.vue'
@@ -42,15 +42,21 @@ describe('ConversationColumn', () => {
     const store = useChatStore()
 
     const entries = wrapper.findAll('[data-testid="quick-question"]')
-    expect(entries).toHaveLength(4)
+    expect(entries).toHaveLength(QUICK_QUESTIONS.length)
     // 按钮文案含分类眉标，所以断言问题本身要用数据源而不是按钮全文。
-    expect(entries[0].text()).toContain(MOCK_QUICK_QUESTIONS[0].category)
-    expect(entries[0].text()).toContain(MOCK_QUICK_QUESTIONS[0].question)
+    expect(entries.map((entry) => entry.attributes('data-question'))).toEqual([
+      '最近7天退货量趋势',
+      '昨天总 GMV 是多少？',
+      '查看最近订单明细',
+      '我要货品上架，具体规则有吗？',
+    ])
+    expect(entries[0].text()).toContain(QUICK_QUESTIONS[0].category)
+    expect(entries[0].text()).toContain(QUICK_QUESTIONS[0].question)
 
     await entries[0].trigger('click')
     await new Promise((resolve) => setTimeout(resolve, 0))
 
-    expect(store.messages[0].text).toBe(MOCK_QUICK_QUESTIONS[0].question)
+    expect(store.messages[0].text).toBe(QUICK_QUESTIONS[0].question)
     expect(store.messages[1].status).toBe('complete')
   })
 
@@ -109,12 +115,12 @@ describe('ConversationColumn', () => {
     const wrapper = mount(ConversationColumn)
     const store = useChatStore()
 
-    // B4 起 METRIC/DETAIL 已接入真实查询，不再演示降级；商家资料查询（IDENTITY）
-    // 仍是 B4 未接入的受控空结果，analysis_sources 是 ['FALLBACK']、degraded 为
-    // true——用它保留这条「FALLBACK 必须可见」（R7）的回归覆盖。
     await store.submitMessage('我的商家资料是什么？')
     await wrapper.vm.$nextTick()
 
+    // identity-profile fixture 的 analysis_sources 是 ['FALLBACK']、degraded 为 true——
+    // B4 起 METRIC/DETAIL 已改为真实查询，IDENTITY 仍是唯一保留降级语义的场景。
+    // 不显示的话，页面上的回答看起来和真实商家资料一模一样。
     expect(store.messages[1].answer?.quality.degraded).toBe(true)
     const notice = wrapper.get('[data-testid="degraded-notice"]')
     expect(notice.text()).toContain('演示数据')

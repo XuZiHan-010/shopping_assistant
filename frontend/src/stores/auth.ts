@@ -31,6 +31,22 @@ export const useAuthStore = defineStore('auth', () => {
     if (found) select(found)
   }
 
+  /**
+   * 演示 Token 在服务端失效时调用（后端返回 401 `AUTH_REQUIRED`）——见
+   * `AssistantView` 对 `chatStore.messages` 里 `AUTH_REQUIRED` 错误的监听。
+   *
+   * 清掉内存里的 Token 与落盘的商家标识，但**保留 `merchants` 列表**：那是公开
+   * 数据，重新拉一次没有必要，也会让切换器重新弹出时多等一次网络往返。
+   * `selected` 本身不清空——切换器还要接着显示「当前商家是谁」，只是它已经
+   * 没有可用凭证了；`credentials.ts` 的 `buildAuthHeaders` 会在下一次请求时
+   * 因为 `merchantToken` 缺失而直接拒绝，不会带着空 Token 发出注定失败的请求。
+   */
+  function invalidate(): void {
+    if (selected.value) selected.value = { ...selected.value, token: undefined }
+    sessionStorage.removeItem(MERCHANT_STORAGE_KEY)
+    restoreNotice.value = '演示身份已失效，请重新选择商家。'
+  }
+
   async function restore(): Promise<void> {
     try {
       await loadMerchants()
@@ -63,5 +79,6 @@ export const useAuthStore = defineStore('auth', () => {
     loadMerchants,
     selectByDisplayName,
     restore,
+    invalidate,
   }
 })

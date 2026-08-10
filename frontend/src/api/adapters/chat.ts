@@ -9,6 +9,7 @@
  */
 import { z } from 'zod'
 
+import { AppError } from '@/api/errors'
 import type { components } from '@/api/generated'
 import type {
   ChartSeries,
@@ -24,10 +25,13 @@ import type {
 
 type RawChatResponse = components['schemas']['ChatResponse']
 
-/** 载荷违反后端契约时抛出，消息可直接展示给用户。 */
-export class ChatContractError extends Error {
+/**
+ * 载荷违反后端契约时抛出，消息可直接展示给用户。
+ * 是 `AppError` 的 `CONTRACT` 特化——契约违反是前后端之一的缺陷，必须上报。
+ */
+export class ChatContractError extends AppError {
   constructor(message: string) {
-    super(message)
+    super('CONTRACT', message, { shouldReport: true })
     this.name = 'ChatContractError'
   }
 }
@@ -115,18 +119,22 @@ const semanticGuard = z
     }
   })
 
-/** METRIC 的按模式必填校验单独放，好给出指名道姓的错误。 */
-function assertMetricContract(raw: RawChatResponse): void {
-  if (raw.answer_mode !== 'METRIC') return
+/**
+ * METRIC 的按模式必填字段单独校验，但**不抛异常**——缺一个面板不该拖垮整条回答。
+ * 收集到的提示进 `ChatAnswer.contractWarnings`，由 UI 决定怎么展示空状态。
+ * 真正的契约破坏（语义不变量）仍然由 `semanticGuard` 抛 `ChatContractError`。
+ */
+function collectMetricWarnings(raw: RawChatResponse): string[] {
+  if (raw.answer_mode !== 'METRIC') return []
 
-  for (const field of METRIC_FIELDS) {
-    if (raw[field] === null || raw[field] === undefined) {
-      throw new ChatContractError(`METRIC 回答缺少 ${field}，指标口径面板会显示空白`)
-    }
-  }
+  const missing = METRIC_FIELDS.filter((field) => raw[field] === null || raw[field] === undefined)
+  const warnings = missing.length
+    ? [`METRIC 回答缺少 ${missing.join('、')}，指标口径面板将显示空状态`]
+    : []
   if (!raw.visualization) {
-    throw new ChatContractError('METRIC 回答缺少 visualization')
+    warnings.push('METRIC 回答缺少 visualization，图表面板将显示空状态')
   }
+  return warnings
 }
 
 function toThinkingSteps(raw: RawChatResponse): ThinkingStep[] {
@@ -225,7 +233,7 @@ export function toChatAnswer(raw: RawChatResponse): ChatAnswer {
     const reasons = parsed.error.issues.map((issue) => issue.message).join('；')
     throw new ChatContractError(`回答不符合后端契约：${reasons}`)
   }
-  assertMetricContract(raw)
+  const contractWarnings = collectMetricWarnings(raw)
 
   return {
     id: raw.id,
@@ -242,5 +250,6 @@ export function toChatAnswer(raw: RawChatResponse): ChatAnswer {
     chart: toChart(raw),
     recommendations: toRecommendations(raw),
     export: toExport(raw),
+    contractWarnings,
   }
 }

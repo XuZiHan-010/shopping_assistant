@@ -8,6 +8,7 @@
  * 按模式必填的字段在这里一律是可选的：`CHAT`/`INVALID`/`RULE` 本来就没有指标和
  * 数据，把它们标成必填会逼着 Adapter 编造默认值，那正是 §5.0 明令禁止的。
  */
+import type { AppError } from '@/api/errors'
 import type { components } from '@/api/generated'
 
 export type AnswerMode = components['schemas']['AnswerMode']
@@ -95,6 +96,12 @@ export interface ChatAnswer {
   chart?: ChartSeries
   recommendations: Recommendation[]
   export?: ExportInfo
+  /**
+   * 按模式必填字段缺失时的降级提示（中文，可直接展示）。
+   * 与语义不变量违反不同：这里描述的是「某个面板会显示空状态」，不是契约破坏，
+   * 因此 Adapter 只收集警告而不抛异常（§5.0、Task 4）。
+   */
+  contractWarnings: string[]
 }
 
 /**
@@ -113,6 +120,19 @@ export interface ChatMessage {
   createdAt: string
   status: MessageStatus
   steps: ThinkingStep[]
-  errorMessage?: string
+  /**
+   * 归一化后的错误，取代旧的 `errorMessage` 字符串。Store 只存这一份原始错误，
+   * 不预先渲染文案——同一个 `AppError` 在消息级卡片与全局提示条里的措辞并不
+   * 相同，文案统一由 `describeError()`（`src/utils/errorCopy.ts`）在展示时按需
+   * 生成，存字符串就只能有一套措辞。
+   */
+  error?: AppError
   answer?: ChatAnswer
+  /**
+   * 消息来源。`'live'` 是本次会话通过 `submitMessage`/`retryMessage` 产生的消息，
+   * `'history'` 是 `loadConversation` 从后端历史回填的消息。只有 `'live'` 消息可以
+   * 重试——历史消息在 `runRound` 意义上从未真正发起过请求（没有 `AbortController`、
+   * 没有陪跑的 step 流），"重试" 一条历史消息在语义上无从谈起。
+   */
+  origin: 'live' | 'history'
 }

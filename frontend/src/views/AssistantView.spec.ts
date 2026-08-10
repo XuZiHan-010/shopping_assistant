@@ -2,11 +2,14 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
+import { AppError } from '@/api/errors'
 import { createMockTransport } from '@/api/mock/transport'
 import { setChatTransport, type TransportRequest } from '@/api/transport'
 import ConversationColumn from '@/components/chat/ConversationColumn.vue'
 import MerchantSwitcher from '@/components/layout/MerchantSwitcher.vue'
 import { useAppError } from '@/composables/useAppError'
+import router from '@/router'
+import { MERCHANT_STORAGE_KEY, useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
 import type { ChatMessage } from '@/types/chat'
 import AssistantView from './AssistantView.vue'
@@ -168,7 +171,10 @@ describe('AssistantView', () => {
 
     // F3 起会话请求要带 Token，而 Token 是 restore() 才恢复出来的；
     // 并发发出去会赶在身份就绪之前到达服务端，直接 401。
-    expect(order.indexOf('/api/demo/merchants')).toBeLessThan(order.indexOf('/api/conversations'))
+    // listConversations 现在带 ?limit= 查询串，用 startsWith 匹配路径前缀。
+    expect(order.findIndex((path) => path.startsWith('/api/demo/merchants'))).toBeLessThan(
+      order.findIndex((path) => path.startsWith('/api/conversations')),
+    )
   })
 
   it('重复选择当前商家时保留会话，切换到其他商家时才重置', async () => {
@@ -184,6 +190,7 @@ describe('AssistantView', () => {
       createdAt: new Date().toISOString(),
       status: 'complete',
       steps: [],
+      origin: 'live',
     }
     chatStore.messages.push(seedMessage)
 
@@ -194,5 +201,34 @@ describe('AssistantView', () => {
     await wrapper.get('button[aria-label="切换当前演示商家"]').trigger('click')
     await wrapper.get('[data-merchant="Borough商家101"]').trigger('click')
     expect(chatStore.isEmptyConversation).toBe(true)
+  })
+
+  /**
+   * MVP 没有登录页——`/login` 会落到 `not-found` 兜底，跳过去就是一个 404。
+   * Token 失效必须原地恢复：清掉作废的身份、把选择权交还给切换器，同时不能
+   * 把用户刚写完还没发出去的问题一起清掉，否则一次身份失效就变成一次数据丢失。
+   */
+  it('401 清凭证、开切换器、保留未发送输入，且不跳路由', async () => {
+    const healthy = createMockTransport({ chunkSizes: [16], stepDelayMs: 0 })
+    setChatTransport(async (request: TransportRequest, signal: AbortSignal) => {
+      if (request.path === '/api/chat' && request.method === 'POST') {
+        throw new AppError('AUTH_REQUIRED', '演示身份已失效', { status: 401 })
+      }
+      return healthy(request, signal)
+    })
+
+    const wrapper = await mountView()
+
+    await wrapper.get('textarea').setValue('昨天的 GMV 是多少')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(useAuthStore().selected?.token).toBeUndefined()
+    expect(sessionStorage.getItem(MERCHANT_STORAGE_KEY)).toBeNull()
+    expect(wrapper.get('[data-testid="merchant-switcher"]').attributes('aria-expanded')).toBe(
+      'true',
+    )
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('昨天的 GMV 是多少')
+    expect(router.currentRoute.value.path).toBe('/')
   })
 })

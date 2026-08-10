@@ -13,6 +13,15 @@ export default defineConfig({
       '@fixtures': fileURLToPath(new URL('../docs/fixtures', import.meta.url)),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          echarts: ['echarts/core', 'echarts/charts', 'echarts/components', 'echarts/renderers'],
+        },
+      },
+    },
+  },
   test: {
     environment: 'happy-dom',
     include: ['src/**/*.spec.ts'],

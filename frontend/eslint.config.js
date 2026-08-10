@@ -23,4 +23,50 @@ export default defineConfigWithVueTs(
   },
   pluginVue.configs['flat/essential'],
   vueTsConfigs.recommended,
+  {
+    name: 'app/api-no-store-imports',
+    files: ['src/api/**'],
+    rules: {
+      // `src/api/**` 不得 import `src/stores/**`：store 本身要调 api 发请求，
+      // 反向引用会形成 store → api → store 的循环依赖。凭证从 store 传进
+      // api 的唯一合法方式是 `credentials.ts` 的 `setCredentialProvider`
+      // （main.ts 注入），而不是 api 直接 import 某个 store。
+      //
+      // 循环一旦被这条规则挡住就再也回不来了，比写在文档里靠代码评审可靠。
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@/stores/*', '@/stores', '**/stores/*', '**/stores'],
+              message:
+                'src/api/** 禁止直接 import store，会形成 store → api → store 的循环依赖。' +
+                '请通过 credentials.ts 的 setCredentialProvider 由 main.ts 注入凭证来源。',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    name: 'app/no-mock-imports-in-production-code',
+    files: ['src/**/*.{ts,mts,js,mjs,vue}'],
+    ignores: ['src/api/mock/**', 'src/api/transport.ts', 'src/**/*.spec.*'],
+    rules: {
+      // Mock 只能由 transport 边界动态加载；其余生产代码不得静态依赖演示数据。
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@/api/mock', '@/api/mock/*', '**/api/mock', '**/api/mock/*'],
+              message:
+                '生产代码不得依赖 api/mock；Mock 只能由 api/transport.ts 动态加载，' +
+                '产品常量请放在 src/constants/。',
+            },
+          ],
+        },
+      ],
+    },
+  },
 )

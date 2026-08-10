@@ -2,7 +2,6 @@
 import { BookOpen, MessageSquarePlus, PanelLeft } from '@lucide/vue'
 import { computed, onMounted, ref, watch } from 'vue'
 
-import { resetTransportCache } from '@/api/transport'
 import ConversationColumn from '@/components/chat/ConversationColumn.vue'
 import MetricChartPanel from '@/components/insights/MetricChartPanel.vue'
 import MetricDefinitionPanel from '@/components/insights/MetricDefinitionPanel.vue'
@@ -31,6 +30,28 @@ watch(
 
 const isDrawerOpen = ref(false)
 const drawerTrigger = ref<HTMLButtonElement | null>(null)
+const merchantSwitcherRef = ref<InstanceType<typeof MerchantSwitcher> | null>(null)
+
+/**
+ * 401 恢复流程（F3 Task 6）。演示 Token 会在服务端失效——中途换了别的商家的
+ * Token、或者后端重启清空了白名单。此时没有登录页可跳（MVP 没有 `/login`），
+ * 唯一体面的收尾是：清掉这份已经作废的身份，把选择权交还给切换器。
+ *
+ * 在这里按 `chatStore.messages` 的最后一条助手消息收口，而不是散落在每个发起
+ * 请求的调用点（ChatComposer 提交、快速提问、"猜你想问"……）——401 可能从任何
+ * 一个入口冒出来，Store 状态是它们唯一共同汇合的地方。
+ */
+const lastAssistantError = computed(() => {
+  const last = chatStore.messages.at(-1)
+  return last?.role === 'assistant' ? last.error : undefined
+})
+
+watch(lastAssistantError, (error) => {
+  if (error?.code !== 'AUTH_REQUIRED') return
+
+  authStore.invalidate()
+  merchantSwitcherRef.value?.openAndFocus()
+})
 
 // fire-and-forget 调用必须在这里把失败接住：抛出去只会变成未处理的 Promise
 // 拒绝，而抽屉照样显示「暂无历史会话」——把「加载失败」伪装成「没有历史」。
@@ -69,10 +90,11 @@ function selectMerchant(displayName: string): void {
 
   authStore.selectByDisplayName(displayName)
 
-  // 换商家等于换租户。当前对话、本地会话列表、Mock 里那张会话表都要一起丢掉，
-  // 否则抽屉一打开就露出上一个商家的会话标题。
-  // 注意这只是演示级隔离：真正的隔离必须由服务端按 Token 过滤（F3）。
-  resetTransportCache()
+  // 换商家等于换租户。当前对话、本地会话列表都要一起丢掉，否则抽屉一打开就
+  // 露出上一个商家的会话标题。真正的隔离由服务端按 Token 过滤（真实后端）；
+  // Mock 传输层现在也按收到的 Authorization 头分租户（F3 Task 7），所以这里
+  // 不再需要丢弃整个传输实例来假装隔离——那是 F2 时期的演示级补丁，两边现在
+  // 都已经是真隔离了（见 `src/api/transport.ts` 里那个测试专用的丢弃函数）。
   chatStore.reset()
   chatStore.clearConversations()
 }
@@ -102,6 +124,7 @@ function startNewConversation(): void {
         <p>经营数据、分析与行动建议</p>
       </div>
       <MerchantSwitcher
+        ref="merchantSwitcherRef"
         :model-value="merchantLabel"
         class="header-merchant-switcher"
         :merchants="authStore.displayNames"

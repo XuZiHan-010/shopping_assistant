@@ -2,7 +2,21 @@
 import { ArrowUp, Paperclip } from '@lucide/vue'
 import { nextTick, ref, watch } from 'vue'
 
-const props = withDefaults(defineProps<{ busy?: boolean }>(), { busy: false })
+const props = withDefaults(
+  defineProps<{
+    busy?: boolean
+    /**
+     * 可选的提交回调，resolve 为 `false` 时输入区不清空（F3 Task 6：401 时必须
+     * 保留用户刚写完的问题，把一次身份失效变成一次数据丢失是不可接受的）。
+     *
+     * 之所以不能只靠下面的 `submit` 事件做这件事：`emit()` 不回传监听方的返回
+     * 值，组件拿不到「这次提交最终成不成功」。不传时保持旧行为——提交即清，
+     * 兼容没有接入这层判断的调用方（例如独立挂载、不关心失败恢复的测试）。
+     */
+    onSubmit?: (message: string) => boolean | Promise<boolean>
+  }>(),
+  { busy: false },
+)
 
 const emit = defineEmits<{
   submit: [message: string]
@@ -28,14 +42,15 @@ function resizeTextarea(): void {
 // 覆盖输入、粘贴、发送后清空——都是 message 变化，一处接住就够。
 watch(message, () => void nextTick(resizeTextarea))
 
-function submitMessage(): void {
+async function submitMessage(): Promise<void> {
   const content = message.value.trim()
   // 上一轮在途时不发。Store 那层也有同样的守卫（那才是权威），这里只是不让用户
   // 白敲一次回车——两层都要有：输入区可能被别的入口复用。
   if (!content || props.busy) return
 
   emit('submit', content)
-  message.value = ''
+  const shouldClear = props.onSubmit ? await props.onSubmit(content) : true
+  if (shouldClear) message.value = ''
 }
 
 function handleKeydown(event: KeyboardEvent): void {

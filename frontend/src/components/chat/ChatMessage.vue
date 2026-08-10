@@ -2,7 +2,9 @@
 import { AlertTriangle, Loader, RotateCcw, Square } from '@lucide/vue'
 import { computed } from 'vue'
 
+import DetailTable from '@/components/insights/DetailTable.vue'
 import type { ChatMessage as ChatMessageModel } from '@/types/chat'
+import { describeError } from '@/utils/errorCopy'
 
 const props = defineProps<{
   message: ChatMessageModel
@@ -19,6 +21,24 @@ const latestStage = computed(() => props.message.steps.at(-1)?.label ?? '正在�
 const isRunning = computed(
   () => props.message.status === 'pending' || props.message.status === 'streaming',
 )
+
+/**
+ * Store 只存 `AppError`，不存文案——同一个错误在消息卡片与全局提示条里的
+ * 措辞并不相同，文案统一在展示处按需生成（`describeError`，
+ * `src/utils/errorCopy.ts`）。
+ */
+const errorCopy = computed(() =>
+  props.message.error ? describeError(props.message.error) : undefined,
+)
+
+/**
+ * 是否展示重试按钮，直接看后端/`toAppError` 给的 `retryable`，不是看
+ * `status`。`REQUEST_IN_PROGRESS`、`IDEMPOTENCY_KEY_REUSED` 这类错误
+ * `retryable` 恒为 false——后端说这条请求正在处理或已被判定为重复提交，
+ * 再点重试只会打成循环或制造第二条重复请求，UI 只展示提示文案、等待，
+ * 不给出会诱导重复点击的按钮。
+ */
+const canRetryError = computed(() => props.message.error?.retryable ?? false)
 
 /**
  * 降级必须对用户可见（AGENTS.md R7、前端方案 §10）。
@@ -42,6 +62,25 @@ const degradeNotice = computed(() => {
 const isSelectableRound = computed(
   () => props.message.role === 'assistant' && props.message.status === 'complete',
 )
+// METRIC 回答的 `data` 只是趋势行的附带数据来源（图表面板自己的 <details> 已经
+// 用它渲染过一份可访问数据表），不按 answer_mode 过滤的话，同一批行会在聊天
+// 消息里又完整渲染一次「经营明细」表格——两张表、没有下载入口，纯粹是重复。
+const showDetailTable = computed(
+  () =>
+    props.message.origin === 'live' &&
+    props.message.status === 'complete' &&
+    props.message.answer?.mode === 'DETAIL' &&
+    props.message.answer?.data,
+)
+// 历史会话不重放明细数据（后端不落库整张明细表），但仍应说明「为什么这轮
+// 没有表格」，而不是让用户以为这轮回答本来就没有数据。
+const showHistoricalDataNotice = computed(
+  () =>
+    props.message.origin === 'history' &&
+    props.message.status === 'complete' &&
+    props.message.answer?.mode === 'DETAIL' &&
+    Boolean(props.message.answer?.data),
+)
 </script>
 
 <template>
@@ -63,7 +102,9 @@ const isSelectableRound = computed(
     </div>
 
     <p v-else-if="message.status === 'cancelled'" class="chat-message__notice" aria-live="polite">
-      {{ message.errorMessage }}
+      <span data-testid="notice-text">{{ errorCopy?.title }}{{ errorCopy?.detail }}</span>
+      <!-- 取消是用户主动发起的操作，不是「值不值得重试」的错误，重新回答的
+           入口始终展示，不看 error.retryable。 -->
       <button
         type="button"
         data-testid="retry-button"
@@ -80,8 +121,9 @@ const isSelectableRound = computed(
       class="chat-message__notice chat-message__notice--error"
       aria-live="polite"
     >
-      {{ message.errorMessage }}
+      <span data-testid="notice-text">{{ errorCopy?.title }}{{ errorCopy?.detail }}</span>
       <button
+        v-if="canRetryError"
         type="button"
         data-testid="retry-button"
         aria-label="重试本轮问题"
@@ -102,17 +144,30 @@ const isSelectableRound = computed(
         </span>
       </p>
 
-      <button
-        v-if="isSelectableRound"
-        class="chat-message__select"
-        type="button"
-        data-testid="select-round"
-        :aria-current="selected ? 'true' : undefined"
-        :aria-label="`查看本轮分析：${message.text.slice(0, 30)}`"
-        @click="emit('select', message.localId)"
-      >
-        {{ message.text }}
-      </button>
+      <template v-if="isSelectableRound">
+        <button
+          class="chat-message__select"
+          type="button"
+          data-testid="select-round"
+          :aria-current="selected ? 'true' : undefined"
+          :aria-label="`查看本轮分析：${message.text.slice(0, 30)}`"
+          @click="emit('select', message.localId)"
+        >
+          {{ message.text }}
+        </button>
+        <DetailTable
+          v-if="showDetailTable"
+          :data="message.answer!.data!"
+          :export-info="message.answer!.export"
+        />
+        <p
+          v-else-if="showHistoricalDataNotice"
+          class="chat-message__history-notice"
+          data-testid="history-detail-notice"
+        >
+          历史明细数据未保留完整表格，重新提问可查看最新的数据表格与下载链接。
+        </p>
+      </template>
       <p v-else class="chat-message__text">{{ message.text }}</p>
     </template>
   </article>
@@ -189,6 +244,12 @@ const isSelectableRound = computed(
 .chat-message__degraded-sources {
   display: block;
   opacity: 0.85;
+}
+
+.chat-message__history-notice {
+  margin: var(--space-2) 0 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
 }
 
 .chat-message__stage,
