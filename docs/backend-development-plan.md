@@ -753,8 +753,15 @@ B2 的 Fake Agent 只覆盖 `TRADE`、`REFUND`、`PLATFORM_RULE` 三类场景与
 | `metric_code` | `str` | `METRIC` |
 | `metric_display_name` | `str` | `METRIC` |
 | `metric_unit` | `str` | `METRIC` |
-| `metric_definition` | `str` | `METRIC` |
-| `metric_source` | `str` | `METRIC`，口径来源（表或报表） |
+| `metric_business_definition` | `str` | `METRIC`，业务口径 |
+| `metric_sql_definition` | `str \| None` | `METRIC` 可选，SQL 口径 |
+| `metric_dimensions` | `list[str] \| None` | `METRIC` 可选，维度集合 |
+| `metric_database_name` | `str \| None` | `METRIC` 可选，来源库名 |
+| `metric_table_name` | `str \| None` | `METRIC` 可选，来源表名 |
+| `metric_report_url` | `str \| None` | `METRIC` 可选，关联报表链接 |
+| `metric_source` | `MetricDefinitionSource` | `METRIC`，口径来源枚举 |
+| `metric_generated` | `bool` | `METRIC`，口径是否由模型生成 |
+| `metric_notice` | `str \| None` | `metric_generated` 为 `true` 时必填 |
 | `metric_owner` | `str` | `METRIC`，口径负责人 |
 | `metric_status` | `MetricStatus` | `METRIC`，口径状态 |
 | `data_rows` | `list[dict]` | `METRIC`、`DETAIL`、`IDENTITY` |
@@ -766,13 +773,28 @@ B2 的 Fake Agent 只覆盖 `TRADE`、`REFUND`、`PLATFORM_RULE` 三类场景与
 
 `metric_source`、`metric_owner`、`metric_status` 是 PRD 要求指标口径面板展示的三项，缺一前端就只能显示空白，因此列为 `METRIC` 必填。
 
+**`metric_business_definition` 与 `metric_sql_definition` 必须并列存在，不得合并成单个 `metric_definition`。**
+参考项目的指标平台元数据表把它们分列为 `metrics_biz_meaning` / `metrics_sql_meaning`，
+面向读者不同（见 PRD §6.3）。旧契约里的 `metric_definition` 是这次并列化之前的遗留命名，
+迁移时按语义改名为 `metric_business_definition`，不保留别名——保留别名会让前端有两个入口，
+迟早出现一个分区读旧名、一个读新名。
+
+`metric_source` 是三取一的枚举 `METRIC_CATALOG` / `COLUMN_COMMENT` / `AI_GENERATED`，
+对应 PRD §10 Metric Catalog 的三级检索命中层级，**不是自由文本**：前端要据此渲染来源徽标，
+自由文本会让徽标映射退化成字符串匹配。中文标签由前端负责，后端只给枚举。
+
+`metric_generated` 是独立布尔，不要让前端从 `metric_status == UNVERIFIED` 反推——
+「模型生成的口径」和「目录里登记为待核验的口径」是两件事，可以同时成立也可以各自单独成立。
+
 Pydantic 模型**不得**把按模式必填的字段设为无条件必填，否则 `CHAT` 等模式的正常响应会校验失败。正确做法是模型级校验器：按 `answer_mode` 分支检查，`METRIC` 缺 `metric_owner` 必须报错，`CHAT` 缺 `data_rows` 必须放行。
 
 ### 必测
 
 - 一份 Schema 同时生成 Pydantic 与 TypeScript 类型，字段名零差异；
 - `CHAT`、`INVALID`、`RULE` 无数据模式正常通过校验；
-- `METRIC` 缺 `metric_source` / `metric_owner` / `metric_status` 校验失败；
+- `METRIC` 缺 `metric_source` / `metric_owner` / `metric_status` / `metric_business_definition` / `metric_generated` 校验失败；
+- `metric_generated` 为 `true` 但缺 `metric_notice` 校验失败；
+- `METRIC` 缺 `metric_sql_definition` 等可选口径字段时**校验通过**（缺失是合法状态，前端隐藏分区）；
 - `DETAIL` 缺 `export` 校验失败；
 - `analysis_sources` 为空数组时校验失败；
 - `CHAT`、`INVALID` 返回 `["NONE"]` 且 `degraded=false` 时校验通过；
@@ -1098,6 +1120,10 @@ B3 的三个意图白名单已经与 B4 第一批受控查询契约对齐，不�
 - [x] 创建订单、订单项、**退款、退货**、商品和工单表；
 - [x] 创建 **180 天**演示数据 Seed（含退款与退货两类记录，且存在"只退款不退货""退货并退款"两种样本）；
 - [x] 实现 `GET /api/metrics/{code}` 指标口径接口，返回 `metric_source`、`metric_owner`、`metric_status`；
+  - [ ] **未完成（2026-08-09 按 AGENTS.md R9 登记）**：该端点只返回 `business_definition`，
+        `sql_definition`（库里已有值）、维度、来源库表、关联报表、`generated` / `notice`
+        都没有出口，参考项目 `MetricDefinitionPayload` 的 13 个字段我们只兑现了 7 个。
+        补齐范围见 §8.2 字段表；三级检索缺第二级（字段注释）见 PRD §10 Metric Catalog。
 - [x] 实现 Analytics Repository；
 - [x] 实现 Safe Query Service；
 - [x] 将 B3 建立的三套白名单接入查询路由；
@@ -1170,9 +1196,15 @@ ticket_status
 
 **指标口径表**（`app/analytics/contract.py` 的 `METRIC_SPECS`，与迁移
 `20260804_0006_metric_sql_definition.py` 写入 `metric_definitions.sql_definition`
-的文案逐字一致）：
+的文案逐字一致）。
 
-| `metric_code` | 中文名 | 单位 | 主表 | 口径 | 可加和 |
+下表的「SQL 口径」列就是 `metric_definitions.sql_definition` 的内容，对应契约字段
+`metric_sql_definition`；业务口径是另一列 `business_definition`（契约字段
+`metric_business_definition`），两者并列存在，见 §8.2。**这张表在 B4 收口时还没有出口到
+API**——`sql_definition` 只落库未进 `MetricDefinitionResponse`，属于已登记的契约缺口，
+补齐范围见 §8.2 的字段表。
+
+| `metric_code` | 中文名 | 单位 | 主表 | SQL 口径 | 可加和 |
 | --- | --- | --- | --- | --- | --- |
 | `gmv` | 成交 GMV | 元 | `orders` | `SUM(orders.paid_amount)`，限 `order_status IN ('PAID','SHIPPED','COMPLETED')` | 是 |
 | `order_count` | 订单量 | 单 | `orders` | `COUNT(orders.id)`，不限状态 | 是 |

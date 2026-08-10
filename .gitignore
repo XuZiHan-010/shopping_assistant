@@ -43,6 +43,7 @@ Thumbs.db
 
 # ── superpowers 工作区（SDD ledger、审查包等临时产物）──
 .superpowers/
+.worktrees/
 
 # ── 只读参考项目：本地对照用，不进版本库 ──────────────
 # AGENTS.md 多处引用它们做口径与视觉参考，但它们既非 Borough 代码，

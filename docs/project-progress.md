@@ -2,7 +2,55 @@
 
 > 本文件只保留当前可继续开发的事实快照，不追加每日流水账。每次完成一段可验证工作后，更新日期、状态、验证结果、下一步和风险。
 
-**最后更新：2026-08-06**
+**最后更新：2026-08-09**
+
+> **当前集成验收快照（2026-08-09，优先于下方历史阶段摘要）**：B7 + F4 集成工作已在
+> `feature/integrate-b7-f4` 完成，尚未提交或推送。后端在专用 PostgreSQL（55442）上为
+> **707 passed / 0 skipped / 1 个第三方弃用警告**；非数据库路径为 **591 passed / 116 skipped /
+> 1 warning**。`ruff check`、`ruff format --check` 与获批的 `mypy app`（88 个源文件）均通过。
+> 前端 lint、格式、OpenAPI/fixture/mock 边界、类型检查、构建均通过，Vitest 为
+> **206 passed**，Mock Playwright 为 **24 passed**，专用 F4 真实 API Playwright 为 **3 passed**。
+> 全程使用 Fake/确定性 LLM 覆盖，DeepSeek 调用 **0**、费用 **0**；仅使用
+> `borough-int-postgres`（55442）与 `borough-int-f4-postgres`（55443），未操作共享 Compose
+> 或 `borough_borough_postgres_data`。后续类型债务为 `tests/`/`scripts/` 的 103 项既有 Mypy
+> 错误（32 个文件）；ECharts 仍有非阻塞的 556.46 kB chunk-size 提示。下一步为在用户授权下
+> 决定集成/发布路径，以及用户在 Railway 控制台完成真实部署。
+
+## 产品裁决：参考项目是需求基准（2026-08-09）
+
+用户裁定本项目的目标是把 `yshopping-merchant-ai 4/` **1:1 还原**成 Python + TypeScript 版本；
+当我们自己的 `docs/PRD.md` 或开发计划与参考项目实际实现冲突时，**改我们的文档去跟随参考项目**，
+不得反过来用「PRD 没写」论证参考项目里存在的字段可以不做。规则已固化为 `AGENTS.md` R9。
+
+首次适用是指标口径契约。差异审计结论：参考项目 `MetricDefinitionPayload` 有 13 个字段，
+我们的 `MetricDefinitionResponse` 只兑现了 7 个。缺失项与处置：
+
+| 参考项目字段 | 我们的状态 | 处置 |
+| --- | --- | --- |
+| `sqlMeaning`（SQL 口径） | 库里 `metric_definitions.sql_definition` 有真实值，但未出口到 API | 补字段 |
+| `dimensions`（维度集合） | 完全没有 | 补字段（P1） |
+| `reportUrl`（关联报表） | 完全没有，且前端计划曾写「不在契约内就删掉 UI」 | 补字段（P1），前端计划那句已删 |
+| `databaseName` / `tableName`（来源库表） | 完全没有 | 补字段 |
+| `generated`（是否模型生成） | 无，前端用 `status === 'UNVERIFIED'` 反推 | 补独立布尔字段 |
+| `notice`（待核验文案） | 无，文案写死在前端 | 改为后端返回 |
+| `source` 语义 | 我们是自由文本（"Borough 指标目录"），参考项目是枚举 | 改为 `METRIC_CATALOG` / `COLUMN_COMMENT` / `AI_GENERATED` |
+| 三级降级检索 | `app/metrics/catalog.py` 只有两级，缺「字段注释」中间级 | 补第二级 |
+
+我们比参考项目多出的 `metric_code`（稳定英文标识）与 `metric_status` 予以保留——参考项目没有稳定
+指标标识是它的缺陷，不是需要还原的行为。
+
+已同步修订：`AGENTS.md`（新增 R9）、`docs/PRD.md`（§6.3 补 3 条用户故事并说明双口径不可合并、
+§10 Metric Catalog 补三级检索来源表、§11.3 按模式必填表拆分业务口径/SQL 口径、§12.1 演示数据要求；
+新增故事导致原 19–67 号顺延为 22–70）、`docs/frontend-development-plan.md`（§5.6 接口定义与 F4
+验收项按参考项目重写，删除「不展示报表」条款）、`docs/backend-development-plan.md`（§8.2 字段表、
+必测项、B4 口径端点登记未完成项）。
+
+**代码实现尚未开始。** 落点应为 `feature/b4-safe-analytics-query`（`/api/metrics/{code}` 与
+`metric_definitions` 表都在该分支），改动链路：迁移加列 → Seed 补值 → `MetricDefinitionResponse` /
+`MetricPayload` / `ChatResponse` 加字段并把 `metric_definition` 改名为 `metric_business_definition`
+→ 重跑 `codegen` 与 `fixtures` → 前端 `MetricDefinitionPanel.vue` 按参考项目版式还原。
+注意 F4 已在 `feature/f3-real-api-integration` 上完成并提交，该前端改动会与其产生冲突，
+需要先确定两个分支的合并顺序。
 
 ## 当前阶段
 
@@ -11,6 +59,7 @@
 - 后端：**B7「Railway、费用防护与 MVP 收口」代码层面已完成并提交**，分支 `feature/b5-b6-answer-feedback-export`（提交 `1efb79c`…`310fc42`，2026-08-06）。费用守卫、限流、可信 IP 补齐了必测；Docker 优雅关闭、`OperationalMetrics` 可观测性、`GET /api/admin/ops/status` 运维端点、`railway.json`、`docs/deployment.md` 均已实现。`REQUIRE_INTEGRATION_DB=1 pytest` 在真实 PostgreSQL 上跑通 **703 passed、0 skipped、0 failed**（首次跑通时发现一个真实 bug 并已修复，见「最近验证」）；`ruff`/`ruff format`/`mypy`（88 源文件）全绿。**未完成的只剩需要人工在 Railway 控制台操作的部分**：实际创建 Railway 项目、连接 PostgreSQL、填写环境变量、执行部署，以及依赖真实部署环境的验收项（见 `docs/backend-development-plan.md` §B7「验收（MVP 出口）」）。
 - 前端：F0、F1、F2「Mock 会话闭环」已完成；下一阶段为 F3「API 契约与真实会话接入」。F3 开工前仍需补充设计说明与逐 Task 实施计划。前端目前仍对接 Mock，尚未消费 B5/B6 的新接口。
 - F1 遗留：1440×1000 人工视觉比对待本地 Windows Computer Use helper 可用后补做；不影响已通过的结构、几何和无障碍自动化验收。
+- **仓库结构提示（本轮确认）**：本机同时存在多个 worktree——主目录当前签出 `feature/b4-safe-analytics-query`；`.worktrees/feature-b5-b6-answer-feedback-export/` 签出 `feature/b5-b6-answer-feedback-export`（已推到 `origin`）。`docs/superpowers/plans/2026-08-05-backend-b5-b6.md`、`docs/superpowers/specs/2026-08-05-backend-b5-b6-design.md` 是当初驱动 B5/B6/B7 实施的计划与设计文档，留在主目录未提交；它们描述的工作已经在另一个 worktree 里全部完成并提交，不要误读成「B5/B6 尚未开工」。
 
 ## 已完成
 
@@ -73,9 +122,11 @@
    `EXPORT_SIGNING_SECRET`、`LLM_API_KEY` 等）、触发首次部署，都需要用户在 Railway 控制台手动操作——
    不是本地能完成的工作。部署后按 `docs/backend-development-plan.md` §B7「验收（MVP 出口）」逐条验收
    （重启后数据仍在、健康检查、SIGTERM 优雅关闭、伪造转发头无法绕过限流、演示商家端点生产下不可访问等）。
-2. **决定三个分支的去向**：`feature/b4-safe-analytics-query`（代码层面已通过终审）、
-   `feature/b5-b6-answer-feedback-export`（已含 B5/B6/B7，真实库回归 703 passed）——是合并、
-   开 PR 还是保留，尚未决定。
+2. **决定分支去向**：仓库当前有四个相关分支/worktree——`main`、`feature/f2-mock-conversation`（前端
+   F0–F2）、`feature/b4-safe-analytics-query`（B4，已通过终审）、`feature/b5-b6-answer-feedback-export`
+   （已含 B5/B6/B7，真实库回归 703 passed，是四者中最新最完整的一支）。是否合并、开 PR 还是保留，
+   尚未决定；合并前建议先确认 `feature/b5-b6-answer-feedback-export` 是否基于 `feature/b4-safe-analytics-query`
+   的最新提交（`c8efd1d`）而非更早的祖先，避免合并时丢掉终审修复轮的内容。
 3. **前端 F3「API 契约与真实会话接入」**：依赖的后端契约（B0–B7）均已就绪，不必等 Railway 部署完成
    才开工；开工前先补设计说明与逐 Task 实施计划，接入真实 HTTP 传输、`Authorization` 头与统一错误
    处理，不重写已交付的 SSE、Adapter 和 Store 主路径。
@@ -86,8 +137,9 @@
 
 - 未获用户明确同意，不得调用真实 DeepSeek API、收费 OCR 或日报生成；单元测试必须 mock LLM。真实模型调用前须先说明模型、调用次数和预期费用。
 - 商家身份只可由 Bearer Token 解析；后端所有经营查询必须强制注入 `merchant_id`，不得信任前端传入的商家编号。
-- `backend/tests/unit/agent/test_stage_reference_hygiene.py` 的 `CURRENT_STAGE` 常量已推进到 `"B7"`（随
-  B7 最后一个提交更新）；**进入下一阶段时必须再改一次**，否则该防线会继续只挡 B7 字样而放过新的过期文案。
+- `backend/tests/unit/agent/test_stage_reference_hygiene.py` 的 `CURRENT_STAGE` 常量在 `feature/b5-b6-answer-feedback-export`
+  分支上已推进到 `"B7"`；`feature/b4-safe-analytics-query` 分支上仍是 `"B4"`。**分支合并时要以更晚阶段的值为准**，
+  否则该防线会继续只挡旧阶段字样而放过新的过期文案。
 - **Docker Desktop 在本机环境偶发无法启动**：曾出现引擎持续返回 `500 Internal Server Error`（不是
   常见的「还在启动」connection-refused 现象），完全重启 Docker Desktop 进程后仍未恢复，等了将近
   20 分钟后才自行恢复正常。如果下次又遇到真实 PostgreSQL 集成测试连不上库，先确认这不是环境本身的
@@ -97,7 +149,10 @@
   「路由存在但认证总是失败」暴露端点存在性。修改这块代码时留意 `tests/api/test_admin_ops.py` 的
   401/403/404/200 四态断言仍然成立。
 - `yshopping-merchant-ai 4/` 与 `yshopping-prototype/` 只读；新代码、文案和资源必须使用 Borough。
-- 后端 B4 的具体 Task 状态以 `.superpowers/sdd/2026-08-04-backend-b4-safe-analytics-query/progress.md` 和 Git 提交记录为准；该目录被 `.gitignore` 忽略，只存在于产出它的那个工作副本里，不会随分支/worktree 一起出现。B5/B6 本轮没有对应的 SDD 账本，本文件是这段工作的权威摘要。
+- 后端 B4 的具体 Task 状态以 `.superpowers/sdd/2026-08-04-backend-b4-safe-analytics-query/progress.md` 和 Git 提交记录为准；该目录被 `.gitignore` 忽略，只存在于产出它的那个工作副本里，不会随分支/worktree 一起出现。B5/B6/B7 本轮没有对应的 SDD 账本，本文件是这段工作的权威摘要。
+- 本机存在多个 git worktree（见「当前阶段」末尾一条），核对进度前先用 `git worktree list` 和
+  `git log <branch> --oneline` 确认自己看的是哪个分支的状态，不要只看主目录当前签出分支的文件是否存在
+  就下结论。
 
 ## 关键入口
 
