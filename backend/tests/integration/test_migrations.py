@@ -1,16 +1,38 @@
+import os
+from importlib.util import module_from_spec, spec_from_file_location
 from io import StringIO
+from pathlib import Path
 
 from alembic import command
+from pytest import MonkeyPatch
 from sqlalchemy import create_engine, inspect
 
 from app.core.config import Settings
 from tests.postgres import DEFAULT_TEST_DATABASE_URL, alembic_config, assert_test_database
 
+DATABASE_URL = os.environ.get("TEST_DATABASE_URL", DEFAULT_TEST_DATABASE_URL)
+
+
+def test_migration_settings_honors_test_database_url(monkeypatch: MonkeyPatch) -> None:
+    """防止迁移测试绕开集成门禁注入的独立测试库。"""
+
+    injected_url = (
+        "postgresql+psycopg://borough:borough_local@127.0.0.1:55442/borough_integrate_test"
+    )
+    monkeypatch.setenv("TEST_DATABASE_URL", injected_url)
+    spec = spec_from_file_location("migration_settings_probe", Path(__file__))
+    assert spec is not None
+    assert spec.loader is not None
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.migration_settings().database_url == injected_url
+
 
 def migration_settings() -> Settings:
     return Settings(
         app_env="test",
-        database_url=DEFAULT_TEST_DATABASE_URL,
+        database_url=DATABASE_URL,
         frontend_origin="http://localhost:5173",
     )
 
