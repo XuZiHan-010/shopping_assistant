@@ -9,13 +9,16 @@ Postgres 实例就能生成可重复的 Fixture。
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from hashlib import sha256
 from pathlib import Path
+from urllib.parse import urlencode
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,12 +32,13 @@ from app.knowledge.retrieval import KnowledgeRetrieval  # noqa: E402
 from app.llm.fake import FakeLlmClient  # noqa: E402
 from app.metrics.catalog import MetricCatalog  # noqa: E402
 from app.repositories.analytics import ResultColumn  # noqa: E402
-from app.schemas.chat import AnswerMode, ChatResponse  # noqa: E402
-from app.services.safe_query import QueryResult, UnsupportedQueryError  # noqa: E402
+from app.schemas.chat import AnswerMode, ChatResponse, ExportInfo  # noqa: E402
+from app.services.safe_query import ExportSpec, QueryResult, UnsupportedQueryError  # noqa: E402
 
 _FIXTURE_NAMESPACE = uuid5(NAMESPACE_URL, "https://borough.local/fixtures/chat")
 _FROZEN_CREATED_AT = datetime(2026, 7, 28, 12, 0, 0, tzinfo=UTC)
 _FIXTURE_MERCHANT_ID = uuid5(_FIXTURE_NAMESPACE, "merchant")
+_FIXTURE_EXPORT_SECRET = b"fixture-export-signing-secret"
 
 
 @dataclass(frozen=True)
@@ -127,7 +131,12 @@ def _detail_order_result() -> QueryResult:
             "时间范围 2026-07-29 至 2026-08-04",
             "数据来源：订单",
         ),
-        export_spec=None,
+        export_spec=ExportSpec(
+            table="orders",
+            columns=tuple(column.key for column in columns),
+            start=date(2026, 7, 29),
+            end=date(2026, 8, 4),
+        ),
         notes=(),
         non_additive=False,
     )
@@ -137,8 +146,11 @@ def _metric_result(
     *, code: str, label: str, value: object, table: str, table_label: str
 ) -> QueryResult:
     return QueryResult(
-        columns=(ResultColumn(code, label, "METRIC"),),
-        rows=[{code: value}],
+        columns=(
+            ResultColumn("date", "日期", "DIMENSION"),
+            ResultColumn(code, label, "METRIC"),
+        ),
+        rows=[{"date": date(2026, 8, 3), code: value}],
         total_rows=1,
         truncated=False,
         source_tables=(table,),
@@ -203,7 +215,7 @@ def _llm_responses(case: FixtureCase) -> list[str]:
                     "answer_mode": "METRIC",
                     "category": category,
                     "metric": metric,
-                    "dimensions": [],
+                    "dimensions": ["date"],
                     "filters": {},
                     "date_range": None,
                     "sort": None,
@@ -230,6 +242,27 @@ def _llm_responses(case: FixtureCase) -> list[str]:
     ]
 
 
+def _answer_draft() -> str:
+    return json.dumps(
+        {
+            "answer": "已完成本次受控数据查询。",
+            "recommendations": [
+                {
+                    "title": "核对查询范围",
+                    "evidence": "结果来自已校验的商家范围。",
+                    "action": "结合业务背景确认筛选条件。",
+                },
+                {
+                    "title": "持续跟进变化",
+                    "evidence": "当前结果可用于后续核对。",
+                    "action": "缩小日期范围后再次查看。",
+                },
+            ],
+        },
+        ensure_ascii=False,
+    )
+
+
 async def build_fixture(case: FixtureCase) -> ChatResponse:
     session_id = uuid5(_FIXTURE_NAMESPACE, f"{case.name}/session")
     llm = FakeLlmClient(responses=_llm_responses(case))
@@ -239,19 +272,34 @@ async def build_fixture(case: FixtureCase) -> ChatResponse:
         catalog=MetricCatalog(_MetricRepository(), llm),
         query_service=_StubQueryService(),
         merchant_id=_FIXTURE_MERCHANT_ID,
+        answer_llm=(
+            FakeLlmClient(responses=[_answer_draft()])
+            if case.name in {"metric-refund", "metric-gmv", "detail-order"}
+            else None
+        ),
     )
     response = (await graph.run(case.message, session_id)).response
     response = response.model_copy(update={"id": uuid5(_FIXTURE_NAMESPACE, f"{case.name}/answer")})
-    if response.export is not None:
+    if case.name == "detail-order":
         export_id = uuid5(_FIXTURE_NAMESPACE, f"{case.name}/export")
+        expires_at = _FROZEN_CREATED_AT + timedelta(minutes=15)
+        signature_payload = (
+            f"{export_id}:{_FIXTURE_MERCHANT_ID}:{int(expires_at.timestamp())}"
+        ).encode()
+        signature = hmac.new(_FIXTURE_EXPORT_SECRET, signature_payload, sha256).hexdigest()
+        query = urlencode(
+            {
+                "merchant_id": str(_FIXTURE_MERCHANT_ID),
+                "expires_at": str(int(expires_at.timestamp())),
+                "signature": signature,
+            }
+        )
         response = response.model_copy(
             update={
-                "export": response.export.model_copy(
-                    update={
-                        "id": export_id,
-                        "url": f"/api/exports/{export_id}",
-                        "expires_at": _FROZEN_CREATED_AT,
-                    }
+                "export": ExportInfo(
+                    id=export_id,
+                    url=f"/api/exports/{export_id}?{query}",
+                    expires_at=expires_at,
                 )
             }
         )
@@ -272,7 +320,8 @@ def render_readme() -> str:
     return f"""# Chat 契约 Fixture
 
 > 本目录由 `scripts/export_chat_fixtures.py` 生成，请勿手改。除 `IDENTITY` 仍是受控空结果外，
-> 载荷均来自 `MerchantQaGraph` 在 `FakeLlmClient` + `_StubQueryService` 下的真实输出。
+> 载荷均来自 `MerchantQaGraph` 在 `FakeLlmClient` + `_StubQueryService` 下的真实输出；
+> `detail-order` 的导出链接按 `ChatService` 的签名格式确定性补齐。
 
 | 文件 | 触发问题 | 验证点 |
 | --- | --- | --- |

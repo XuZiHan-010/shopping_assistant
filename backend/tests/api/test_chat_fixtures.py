@@ -13,6 +13,8 @@ import json
 import sys
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlparse
+from uuid import UUID
 
 import pytest
 
@@ -61,6 +63,30 @@ async def test_fixtures_cover_every_p0_answer_mode() -> None:
     modes = {(await _payload(case))["answer_mode"] for case in FIXTURES}
 
     assert modes == {"METRIC", "DETAIL", "IDENTITY", "RULE", "CHAT", "INVALID"}
+
+
+async def test_metric_fixture_contains_a_renderable_controlled_visualization() -> None:
+    payload = await _payload(next(case for case in FIXTURES if case.name == "metric-gmv"))
+    visualization = payload["visualization"]
+
+    assert visualization["enabled"] is True
+    assert visualization["dimension_key"] == "date"
+    assert visualization["metric_key"] == "gmv"
+    assert visualization["allowed_types"] == ["LINE"]
+    assert visualization["data"]
+
+
+async def test_detail_fixture_contains_a_signed_export_link() -> None:
+    payload = await _payload(next(case for case in FIXTURES if case.name == "detail-order"))
+    export = payload["export"]
+    assert export is not None
+
+    parsed = urlparse(export["url"])
+    query = parse_qs(parsed.query)
+    assert parsed.path == f"/api/exports/{export['id']}"
+    assert UUID(query["merchant_id"][0])
+    assert query["expires_at"][0].isdigit()
+    assert len(query["signature"][0]) == 64
 
 
 async def test_fake_answers_are_never_presented_as_real_data() -> None:

@@ -2,7 +2,7 @@
   "analysis_sources": [
     "DATABASE"
   ],
-  "answer": "已按识别到的明细范围查询经营数据，结果见下方明细与查询计划；对明细的解读与导出将在后续阶段补齐。",
+  "answer": "已完成本次受控数据查询。",
   "answer_mode": "DETAIL",
   "category": "TRADE",
   "created_at": "2026-07-28T12:00:00Z",
@@ -25,9 +25,9 @@
   "degraded": false,
   "degraded_reason": null,
   "export": {
-    "expires_at": "2026-07-28T12:00:00Z",
+    "expires_at": "2026-07-28T12:15:00Z",
     "id": "17575e95-31e5-5282-9d66-2c237c468537",
-    "url": "/api/exports/17575e95-31e5-5282-9d66-2c237c468537"
+    "url": "/api/exports/17575e95-31e5-5282-9d66-2c237c468537?merchant_id=d8ddc918-ec20-5fe5-a20b-a0877c872e38&expires_at=1785240900&signature=ef3fd48afda378fa362d1ce03b4abc66d97fa093c8007015ea815e7a267a893c"
   },
   "id": "a63fc7e5-5a63-5bbb-8397-e52af3d484c4",
   "metric_code": null,
@@ -45,14 +45,14 @@
   },
   "recommendations": [
     {
-      "action": "确认筛选条件是否覆盖你想查看的记录。",
-      "evidence": "本次预览返回 2 行，已覆盖本次查询的全部结果。",
+      "action": "结合业务背景确认筛选条件。",
+      "evidence": "结果来自已校验的商家范围。",
       "title": "核对查询范围"
     },
     {
-      "action": "如需完整明细用于外部处理，可使用导出功能。",
-      "evidence": "预览行数受上限约束，导出可拿到完整明细文件。",
-      "title": "导出完整明细"
+      "action": "缩小日期范围后再次查看。",
+      "evidence": "当前结果可用于后续核对。",
+      "title": "持续跟进变化"
     }
   ],
   "session_id": "1659dbf2-df4d-5883-a572-99858f3ea82d",

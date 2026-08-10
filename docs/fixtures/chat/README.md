@@ -1,7 +1,8 @@
 # Chat 契约 Fixture
 
 > 本目录由 `scripts/export_chat_fixtures.py` 生成，请勿手改。除 `IDENTITY` 仍是受控空结果外，
-> 载荷均来自 `MerchantQaGraph` 在 `FakeLlmClient` + `_StubQueryService` 下的真实输出。
+> 载荷均来自 `MerchantQaGraph` 在 `FakeLlmClient` + `_StubQueryService` 下的真实输出；
+> `detail-order` 的导出链接按 `ChatService` 的签名格式确定性补齐。
 
 | 文件 | 触发问题 | 验证点 |
 | --- | --- | --- |

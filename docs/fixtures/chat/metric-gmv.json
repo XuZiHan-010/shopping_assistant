@@ -2,12 +2,13 @@
   "analysis_sources": [
     "DATABASE"
   ],
-  "answer": "已按识别到的指标口径和时间范围查询经营数据，结果见下方数据与查询计划；对数字的解读与图表将在后续阶段补齐。",
+  "answer": "已完成本次受控数据查询。",
   "answer_mode": "METRIC",
   "category": "TRADE",
   "created_at": "2026-07-28T12:00:00Z",
   "data_rows": [
     {
+      "date": "2026-08-03",
       "gmv": "128000.50"
     }
   ],
@@ -30,14 +31,14 @@
   },
   "recommendations": [
     {
-      "action": "确认日期范围和维度是否覆盖你想了解的口径。",
-      "evidence": "本次查询返回 1 行数据。",
+      "action": "结合业务背景确认筛选条件。",
+      "evidence": "结果来自已校验的商家范围。",
       "title": "核对查询范围"
     },
     {
-      "action": "如口径与预期不符，请调整问题后重新查询。",
-      "evidence": "已识别指标代码：gmv。",
-      "title": "核对指标口径"
+      "action": "缩小日期范围后再次查看。",
+      "evidence": "当前结果可用于后续核对。",
+      "title": "持续跟进变化"
     }
   ],
   "session_id": "308e4a2d-aa71-5719-bfc7-d9a28ef5373b",
@@ -110,13 +111,20 @@
   "total_rows": 1,
   "truncated": false,
   "visualization": {
-    "allowed_types": [],
-    "data": [],
-    "dimension_key": null,
-    "enabled": false,
-    "metric_key": null,
-    "title": null,
-    "type": null,
-    "unit": null
+    "allowed_types": [
+      "LINE"
+    ],
+    "data": [
+      {
+        "date": "2026-08-03",
+        "gmv": "128000.50"
+      }
+    ],
+    "dimension_key": "date",
+    "enabled": true,
+    "metric_key": "gmv",
+    "title": "成交 GMV趋势",
+    "type": "LINE",
+    "unit": "元"
   }
 }
