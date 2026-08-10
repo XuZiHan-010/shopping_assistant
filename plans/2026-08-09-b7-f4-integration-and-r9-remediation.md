@@ -219,6 +219,8 @@ Expected: 分支名为 `feature/integrate-b7-f4`，HEAD 为 `3faef8a`，工作�
 
 **不要**用 `git ls-files --others` 的输出直接复制——它会把执行期产生的临时文件、日志、调试输出一并带进集成分支。改为固定清单，并要求实际集合与清单**完全一致**，多一个少一个都停：
 
+> **路径已过期（2026-08-10）**：下面 allowlist 里的 `docs/superpowers/plans/`、`docs/superpowers/specs/` 是本步骤**执行当时**的真实路径，保留以如实记录已发生的操作。此后按 `AGENTS.md` R10 已迁移——计划移至 `plans/`，设计文档移至 `docs/specs/`，`docs/superpowers/` 已删除。本步骤已完成，不会重跑，无需按新路径改写。
+
 ```powershell
 Set-Location 'd:\vscode html\merchant_assistant'
 $target = 'd:\vscode html\merchant_assistant\.worktrees\feature-integrate-b7-f4'
@@ -642,12 +644,12 @@ Task 1–4 全绿即构成一个**独立可交付的成果**：一个统一的�
 
 - [ ] **Step 3: 检查权威字段没有多处复制**
 
-排除 `docs/superpowers/` 与 `plans/`——设计规格和执行计划本来就要写类名：
+排除 `docs/specs/` 与 `plans/`——设计规格和执行计划本来就要写类名：
 
 ```powershell
 . 'C:\Users\Penguin\AppData\Local\Temp\claude\gate-helpers.ps1'
 Set-Location 'd:\vscode html\merchant_assistant\.worktrees\feature-integrate-b7-f4'
-rg -n 'metric_business_definition|CrossBusinessPlan|GeneratedMetricPlan|analysis_requested|table_only' AGENTS.md docs --glob '!docs/superpowers/**'
+rg -n 'metric_business_definition|CrossBusinessPlan|GeneratedMetricPlan|analysis_requested|table_only' AGENTS.md docs --glob '!docs/specs/**'
 ```
 
 Expected（Task 5 阶段）：`CrossBusinessPlan`/`GeneratedMetricPlan`/`analysis_requested` **零命中**——它们还没设计。指标口径字段只在 `docs/backend-development-plan.md` §8.2。
@@ -730,7 +732,7 @@ Expected: 11 个主类各定位到一个绝对路径，另附各自的测试类�
 ### Task 7: 统一设计意图契约、会话详情与导出语义
 
 **Files:**
-- Create design: `docs/superpowers/specs/2026-08-09-r9-intent-contract-design.md`
+- Create design: `docs/specs/2026-08-09-r9-intent-contract-design.md`
 - Modify: `docs/PRD.md`、`docs/backend-development-plan.md`（§6.2 与 §8 分开写）、`docs/frontend-development-plan.md`
 
 **Interfaces:**

@@ -59,7 +59,7 @@
 - 后端：**B7「Railway、费用防护与 MVP 收口」代码层面已完成并提交**，分支 `feature/b5-b6-answer-feedback-export`（提交 `1efb79c`…`310fc42`，2026-08-06）。费用守卫、限流、可信 IP 补齐了必测；Docker 优雅关闭、`OperationalMetrics` 可观测性、`GET /api/admin/ops/status` 运维端点、`railway.json`、`docs/deployment.md` 均已实现。`REQUIRE_INTEGRATION_DB=1 pytest` 在真实 PostgreSQL 上跑通 **703 passed、0 skipped、0 failed**（首次跑通时发现一个真实 bug 并已修复，见「最近验证」）；`ruff`/`ruff format`/`mypy`（88 源文件）全绿。**未完成的只剩需要人工在 Railway 控制台操作的部分**：实际创建 Railway 项目、连接 PostgreSQL、填写环境变量、执行部署，以及依赖真实部署环境的验收项（见 `docs/backend-development-plan.md` §B7「验收（MVP 出口）」）。
 - 前端：F0、F1、F2「Mock 会话闭环」已完成；下一阶段为 F3「API 契约与真实会话接入」。F3 开工前仍需补充设计说明与逐 Task 实施计划。前端目前仍对接 Mock，尚未消费 B5/B6 的新接口。
 - F1 遗留：1440×1000 人工视觉比对待本地 Windows Computer Use helper 可用后补做；不影响已通过的结构、几何和无障碍自动化验收。
-- **仓库结构提示（本轮确认）**：本机同时存在多个 worktree——主目录当前签出 `feature/b4-safe-analytics-query`；`.worktrees/feature-b5-b6-answer-feedback-export/` 签出 `feature/b5-b6-answer-feedback-export`（已推到 `origin`）。`docs/superpowers/plans/2026-08-05-backend-b5-b6.md`、`docs/superpowers/specs/2026-08-05-backend-b5-b6-design.md` 是当初驱动 B5/B6/B7 实施的计划与设计文档，留在主目录未提交；它们描述的工作已经在另一个 worktree 里全部完成并提交，不要误读成「B5/B6 尚未开工」。
+- **仓库结构提示（本轮确认）**：本机同时存在多个 worktree——主目录当前签出 `feature/b4-safe-analytics-query`；`.worktrees/feature-b5-b6-answer-feedback-export/` 签出 `feature/b5-b6-answer-feedback-export`（已推到 `origin`）。`plans/2026-08-05-backend-b5-b6.md`、`docs/specs/2026-08-05-backend-b5-b6-design.md` 是当初驱动 B5/B6/B7 实施的计划与设计文档，留在主目录未提交；它们描述的工作已经在另一个 worktree 里全部完成并提交，不要误读成「B5/B6 尚未开工」。
 
 ## 已完成
 

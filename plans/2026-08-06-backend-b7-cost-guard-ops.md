@@ -2112,7 +2112,7 @@ git commit -m "chore(deploy): 新增 Railway 配置即代码（健康检查、�
 # 部署手册（Railway）
 
 > 本文档面向执行实际部署的人（人类或 coding agent）。代码层面的 B7 工作已经完成
-> （见 `docs/superpowers/specs/2026-08-06-backend-b7-cost-guard-ops-design.md`），
+> （见 `docs/specs/2026-08-06-backend-b7-cost-guard-ops-design.md`），
 > 本文档只覆盖 Railway 控制台/CLI 里需要手动做的步骤。
 
 ## 1. 创建两个 Service

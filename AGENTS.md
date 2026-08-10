@@ -135,7 +135,7 @@ yshopping-merchant-ai 4/
 
 读取方式：用 Read、Grep、Glob 查看。需要复用其中的代码或资源时，**复制到新项目路径后再改**，不要就地修改。
 
-新应用源码主要写在 `backend/`、`frontend/` 和按阶段启用的 `worker/` 中；脚本写入 `scripts/`，部署配置写入 `railway/`，文档写入 `docs/`，整改计划写入 `plans/`。所有新文件都与参考项目目录零交集。
+新应用源码主要写在 `backend/`、`frontend/` 和按阶段启用的 `worker/` 中；脚本写入 `scripts/`，部署配置写入 `railway/`，文档写入 `docs/`，设计说明与规格写入 `docs/specs/`，实施计划与整改计划写入 `plans/`。所有新文件都与参考项目目录零交集。
 
 ### R9 · 参考项目是需求基准，冲突时改我们的文档
 
@@ -158,6 +158,19 @@ R8 依然完全有效：参考项目只读，本规则只改变**我们自己**�
 首次适用记录：2026-08-09 按本规则修订了指标口径契约，见 `docs/PRD.md` §6.3 与 §11.3。
 
 全量还原度差异清单见 `docs/yshopping-parity-audit.md`，开工前先查该文件是否已登记相关差异。
+
+### R10 · 技能产出的文档写进项目自己的目录，不建 `superpowers/`
+
+即使本轮工作用了 superpowers、`grill me` 或其他任何技能，它们产出的计划、设计说明和审查记录都一律写进项目自己的目录：
+
+- 实施计划、整改计划 → `plans/`
+- 设计说明、规格 → `docs/specs/`
+
+**不得**新建 `docs/superpowers/`、`superpowers/` 或任何以技能名命名的目录来存放这些文档。技能只是产出文档的工作方式，不是项目结构的一部分——从最终的目录树上不应该看得出用过哪个技能。
+
+例外只有一个：`.superpowers/`（带前导点）是技能自己的临时工作区（SDD 账本等），已被 `.gitignore` 忽略，从不进入仓库，不受本规则约束。
+
+2026-08-10 已按本规则把原 `docs/superpowers/plans/`（10 份）与 `docs/superpowers/specs/`（13 份）迁至上述位置，`docs/superpowers/` 已删除。
 
 ---
 

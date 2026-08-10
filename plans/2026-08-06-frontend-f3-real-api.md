@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - 所有用户可见文案使用中文，代码标识符使用英文。
-- 跨阶段决策以 `docs/superpowers/specs/2026-08-06-frontend-f3-f9-roadmap.md` 的 A1–A8 为准，本计划不重新裁决。
+- 跨阶段决策以 `docs/specs/2026-08-06-frontend-f3-f9-roadmap.md` 的 A1–A8 为准，本计划不重新裁决。
 - F3 不写 UI 组件、不改 `src/components/insights/**`。图表属于 F4，质量轨迹与反馈属于 F5，附件属于 F7。
 - 组件不直接消费 `src/api/generated.ts`，也不自行转换字段；转换点只有 `src/api/adapters/chat.ts`。
 - Token 只进内存与请求头，不写 `localStorage`、URL、日志或构建产物；任何请求都不携带 `merchant_id`。

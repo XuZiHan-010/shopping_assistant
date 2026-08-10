@@ -6,7 +6,7 @@
 
 **阶段契约：F4 只渲染 `ChatAnswer` 里已有的字段，不新增接口调用。** 唯一的例外是 CSV 导出——它走浏览器原生下载，根本不经过 `api/client.ts`。
 
-跨阶段决策见 `docs/superpowers/specs/2026-08-06-frontend-f3-f9-roadmap.md`，本文引用其 A5–A7 编号。
+跨阶段决策见 `docs/specs/2026-08-06-frontend-f3-f9-roadmap.md`，本文引用其 A5–A7 编号。
 
 ## 范围
 
