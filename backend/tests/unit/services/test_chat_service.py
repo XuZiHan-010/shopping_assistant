@@ -356,17 +356,16 @@ async def test_successful_turn_persists_both_messages_and_touches_conversation()
 
 
 @pytest.mark.asyncio
-async def test_table_only_turn_saves_the_answer_payload_without_an_empty_assistant_message() -> (
-    None
-):
-    """会话详情若保存空助手消息，就会在历史记录中生成没有内容的卡片。"""
+async def test_table_only_turn_persists_an_assistant_message_for_history_replay() -> None:
+    """历史详情只从助手消息装配 Answer payload，纯表格轮次也必须可重放。"""
 
     service, repository, _, _ = build_service(TableOnlyAgent())
 
     execution = await service.submit(CONTEXT, chat_request(key="table-only-1"), request_id="r1")
 
     assert execution.response.answer == ""
-    assert [message.role for message in repository.messages] == ["USER"]
+    assert [message.role for message in repository.messages] == ["USER", "ASSISTANT"]
+    assert repository.messages[1].content == ""
     stored = repository.answers["table-only-1"]
     assert stored.processing_status == "SUCCEEDED"
     assert stored.response_payload is not None

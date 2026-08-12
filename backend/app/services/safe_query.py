@@ -165,6 +165,11 @@ class SafeQueryService:
             )
         except SQLAlchemyError as error:
             raise UnsupportedQueryError(_QUERY_FAILED_REASON) from error
+        result_notes = notes
+        if plan.plan_type.value == "ORDER_TO_REFUND" and all(
+            row.get("refund_status") is None for row in result.rows
+        ):
+            result_notes = (*notes, "该订单暂无退款记录")
         return QueryResult(
             columns=result.columns,
             rows=result.rows,
@@ -175,7 +180,7 @@ class SafeQueryService:
                 "关联订单明细",
                 result.source_tables,
                 date_range,
-                notes,
+                result_notes,
                 date_filtered=False,
             ),
             export_spec=ExportSpec(
@@ -187,7 +192,7 @@ class SafeQueryService:
                 kind="cross_business",
                 cross_business_plan=plan,
             ),
-            notes=notes,
+            notes=result_notes,
             non_additive=False,
         )
 

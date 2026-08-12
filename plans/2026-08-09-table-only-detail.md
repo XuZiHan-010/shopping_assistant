@@ -28,7 +28,7 @@
 | 意图 | `backend/app/intent/models.py`、`prompts.py`、`whitelist.py` | 接收并保留 `analysis_requested: bool`，不影响安全查询字段。 |
 | 编排 | `backend/app/agent/graph.py` | 计算 `is_table_only_detail`；复用相同查询结果，阻止纯明细进入回答生成、Reviewer 和建议兜底。 |
 | API | `backend/app/schemas/chat.py`、会话详情装配 | 仅允许 `DETAIL` 使用 `answer == ""`，此时不要求建议；其他模式仍拒绝空白正文。 |
-| 持久化 | `backend/app/services/chat_service.py` | 空正文响应仍保存 Answer payload，但不创建空 `ASSISTANT` message。 |
+| 持久化 | `backend/app/services/chat_service.py` | 空正文响应保存 Answer payload 与 `ASSISTANT` message，确保会话详情可装配历史结果。 |
 | 前端 | `frontend/src/api/adapters/chat.ts`、`stores/chat.ts`、`ChatMessage.vue`、`DetailTable.vue` | Adapter 接受合法空 DETAIL；视图不渲染空正文容器，仍显示表格、总行数、截断提示和导出。 |
 
 ### 统一判定
@@ -46,7 +46,7 @@ is_table_only_detail = (
 
 - 旧 Fake LLM / fixture 未提供该字段时，内部模型默认 `True`，保持既有 DETAIL 分析行为；正式提示词要求每次明确输出该字段。
 - 对 `DETAIL` 且 `analysis_requested=false`，即使回答模型或兜底逻辑产出文字，最终响应必须清为 `""`；不得以降级说明替代正文。
-- 成功纯明细的 `answers.response_payload` 仍完整保存并可幂等重放；会话消息表不写空助手消息，因此详情 API 不会展示空白历史卡片。
+- 成功纯明细的 `answers.response_payload` 与空正文助手消息均完整保存并可幂等重放；详情 API 能装配历史表格，而前端不展示空白正文卡片。
 - 分析型 DETAIL 和所有非 DETAIL 模式维持既有非空正文不变量。
 
 ---

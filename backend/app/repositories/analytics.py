@@ -363,15 +363,20 @@ class AnalyticsRepository:
                 )
                 source_tables = ("orders", "order_items", "products", "refunds")
 
+        statement = statement.order_by(OrderItem.id)
+        total = await self._session.scalar(
+            select(func.count()).select_from(statement.order_by(None).subquery())
+        )
         if limit is not None:
             statement = statement.limit(limit)
-        result = await self._session.execute(statement.order_by(OrderItem.id))
+        result = await self._session.execute(statement)
         rows = [dict(row) for row in result.mappings()]
+        total_rows = int(total or 0)
         return DetailResult(
             columns=columns,
             rows=rows,
-            total_rows=len(rows),
-            truncated=False,
+            total_rows=total_rows,
+            truncated=total_rows > len(rows),
             source_tables=source_tables,
         )
 
