@@ -70,7 +70,10 @@ EXPECTED_ERROR_CODES: dict[tuple[str, str], set[str]] = {
     ("get", CONVERSATION_ITEM_PATH): {"401", "403", "404", "422"},
     ("delete", CONVERSATION_ITEM_PATH): {"401", "403", "404", "422"},
     ("get", "/api/demo/merchants"): {"404"},
+    ("get", "/api/metrics/{code}"): {"401", "404", "422"},
     ("get", "/api/ready"): {"503"},
+    ("post", "/api/answers/{answer_id}/feedback"): {"401", "403", "404", "422"},
+    ("get", "/api/exports/{export_id}"): {"403", "404", "410"},
 }
 
 
@@ -177,13 +180,23 @@ def test_chat_response_declares_every_always_present_field(app: FastAPI) -> None
     }
 
 
-def test_b3_and_later_routes_are_not_exposed_yet(app: FastAPI) -> None:
+def test_future_stage_routes_are_not_exposed_yet(app: FastAPI) -> None:
     paths = set(app.openapi()["paths"])
 
     assert not {path for path in paths if path.startswith("/api/attachments")}
     assert not {path for path in paths if path.startswith("/api/memories")}
     assert not {path for path in paths if path.startswith("/api/admin")}
-    assert "/api/exports/{id}" not in paths
+
+
+def test_b6_feedback_and_export_routes_are_exposed(app: FastAPI) -> None:
+    """B6 上线后这两条路由必须存在；FastAPI 用形参名生成路径模板，是
+    `{export_id}`/`{answer_id}` 而不是计划正文里的 `{id}`（同 `CONVERSATION_ITEM_PATH`）。
+    """
+
+    paths = app.openapi()["paths"]
+
+    assert "post" in paths["/api/answers/{answer_id}/feedback"]
+    assert "get" in paths["/api/exports/{export_id}"]
 
 
 def test_enums_match_the_documented_values(app: FastAPI) -> None:

@@ -753,8 +753,15 @@ B2 的 Fake Agent 只覆盖 `TRADE`、`REFUND`、`PLATFORM_RULE` 三类场景与
 | `metric_code` | `str` | `METRIC` |
 | `metric_display_name` | `str` | `METRIC` |
 | `metric_unit` | `str` | `METRIC` |
-| `metric_definition` | `str` | `METRIC` |
-| `metric_source` | `str` | `METRIC`，口径来源（表或报表） |
+| `metric_business_definition` | `str` | `METRIC`，业务口径 |
+| `metric_sql_definition` | `str \| None` | `METRIC` 可选，SQL 口径 |
+| `metric_dimensions` | `list[str] \| None` | `METRIC` 可选，维度集合 |
+| `metric_database_name` | `str \| None` | `METRIC` 可选，来源库名 |
+| `metric_table_name` | `str \| None` | `METRIC` 可选，来源表名 |
+| `metric_report_url` | `str \| None` | `METRIC` 可选，关联报表链接 |
+| `metric_source` | `MetricDefinitionSource` | `METRIC`，口径来源枚举 |
+| `metric_generated` | `bool` | `METRIC`，口径是否由模型生成 |
+| `metric_notice` | `str \| None` | `metric_generated` 为 `true` 时必填 |
 | `metric_owner` | `str` | `METRIC`，口径负责人 |
 | `metric_status` | `MetricStatus` | `METRIC`，口径状态 |
 | `data_rows` | `list[dict]` | `METRIC`、`DETAIL`、`IDENTITY` |
@@ -766,13 +773,28 @@ B2 的 Fake Agent 只覆盖 `TRADE`、`REFUND`、`PLATFORM_RULE` 三类场景与
 
 `metric_source`、`metric_owner`、`metric_status` 是 PRD 要求指标口径面板展示的三项，缺一前端就只能显示空白，因此列为 `METRIC` 必填。
 
+**`metric_business_definition` 与 `metric_sql_definition` 必须并列存在，不得合并成单个 `metric_definition`。**
+参考项目的指标平台元数据表把它们分列为 `metrics_biz_meaning` / `metrics_sql_meaning`，
+面向读者不同（见 PRD §6.3）。旧契约里的 `metric_definition` 是这次并列化之前的遗留命名，
+迁移时按语义改名为 `metric_business_definition`，不保留别名——保留别名会让前端有两个入口，
+迟早出现一个分区读旧名、一个读新名。
+
+`metric_source` 是三取一的枚举 `METRIC_CATALOG` / `COLUMN_COMMENT` / `AI_GENERATED`，
+对应 PRD §10 Metric Catalog 的三级检索命中层级，**不是自由文本**：前端要据此渲染来源徽标，
+自由文本会让徽标映射退化成字符串匹配。中文标签由前端负责，后端只给枚举。
+
+`metric_generated` 是独立布尔，不要让前端从 `metric_status == UNVERIFIED` 反推——
+「模型生成的口径」和「目录里登记为待核验的口径」是两件事，可以同时成立也可以各自单独成立。
+
 Pydantic 模型**不得**把按模式必填的字段设为无条件必填，否则 `CHAT` 等模式的正常响应会校验失败。正确做法是模型级校验器：按 `answer_mode` 分支检查，`METRIC` 缺 `metric_owner` 必须报错，`CHAT` 缺 `data_rows` 必须放行。
 
 ### 必测
 
 - 一份 Schema 同时生成 Pydantic 与 TypeScript 类型，字段名零差异；
 - `CHAT`、`INVALID`、`RULE` 无数据模式正常通过校验；
-- `METRIC` 缺 `metric_source` / `metric_owner` / `metric_status` 校验失败；
+- `METRIC` 缺 `metric_source` / `metric_owner` / `metric_status` / `metric_business_definition` / `metric_generated` 校验失败；
+- `metric_generated` 为 `true` 但缺 `metric_notice` 校验失败；
+- `METRIC` 缺 `metric_sql_definition` 等可选口径字段时**校验通过**（缺失是合法状态，前端隐藏分区）；
 - `DETAIL` 缺 `export` 校验失败；
 - `analysis_sources` 为空数组时校验失败；
 - `CHAT`、`INVALID` 返回 `["NONE"]` 且 `degraded=false` 时校验通过；
@@ -1095,19 +1117,23 @@ B3 的三个意图白名单已经与 B4 第一批受控查询契约对齐，不�
 
 ### 任务
 
-- [ ] 创建订单、订单项、**退款、退货**、商品和工单表；
-- [ ] 创建 **180 天**演示数据 Seed（含退款与退货两类记录，且存在"只退款不退货""退货并退款"两种样本）；
-- [ ] 实现 `GET /api/metrics/{code}` 指标口径接口，返回 `metric_source`、`metric_owner`、`metric_status`；
-- [ ] 实现 Analytics Repository；
-- [ ] 实现 Safe Query Service；
-- [ ] 将 B3 建立的三套白名单接入查询路由；
-- [ ] 实现日期解析和最大范围（180 天，业务时区 `Asia/Shanghai`）；
-- [ ] 实现指标聚合；
-- [ ] 实现明细路由；
-- [ ] 实现总数、预览、截断和排序；
-- [ ] 实现查询计划摘要；
-- [ ] 添加 statement timeout；
-- [ ] 添加 Decimal 和日期序列化。
+- [x] 创建订单、订单项、**退款、退货**、商品和工单表；
+- [x] 创建 **180 天**演示数据 Seed（含退款与退货两类记录，且存在"只退款不退货""退货并退款"两种样本）；
+- [x] 实现 `GET /api/metrics/{code}` 指标口径接口，返回 `metric_source`、`metric_owner`、`metric_status`；
+  - [ ] **未完成（2026-08-09 按 AGENTS.md R9 登记）**：该端点只返回 `business_definition`，
+        `sql_definition`（库里已有值）、维度、来源库表、关联报表、`generated` / `notice`
+        都没有出口，参考项目 `MetricDefinitionPayload` 的 13 个字段我们只兑现了 7 个。
+        补齐范围见 §8.2 字段表；三级检索缺第二级（字段注释）见 PRD §10 Metric Catalog。
+- [x] 实现 Analytics Repository；
+- [x] 实现 Safe Query Service；
+- [x] 将 B3 建立的三套白名单接入查询路由；
+- [x] 实现日期解析和最大范围（180 天，业务时区 `Asia/Shanghai`）；
+- [x] 实现指标聚合；
+- [x] 实现明细路由；
+- [x] 实现总数、预览、截断和排序；
+- [x] 实现查询计划摘要；
+- [x] 添加 statement timeout；
+- [x] 添加 Decimal 和日期序列化。
 
 ### 第一批指标
 
@@ -1160,10 +1186,135 @@ ticket_status
 - 跨零点的"昨天"按 `Asia/Shanghai` 归属，冻结时钟测试通过；
 - 平均值和比例不被错误求和，`return_rate` 按区间重新计算而非按日均值；
 - **"最近 30 天退货量趋势"能返回退货数据，且与退款金额不混淆**；
-- **退货明细可查询、可导出，跨商家退货记录不可见**；
+- **退货明细可查询、跨商家退货记录不可见**（导出：`ExportSpec` 已由 Task 7 产出，
+  **导出端点本身落在 B6**，B4 的 `ExportInfo` 仍是占位 id/url，不要当成 B4 已交付导出）；
 - 多商家同日期数据不会串用；
 - SQL 注入测试通过；
 - 查询结果包含稳定列顺序和安全中文标签元数据。
+
+### 实现说明（2026-08-05，B4 收口）
+
+**指标口径表**（`app/analytics/contract.py` 的 `METRIC_SPECS`，与迁移
+`20260804_0006_metric_sql_definition.py` 写入 `metric_definitions.sql_definition`
+的文案逐字一致）。
+
+下表的「SQL 口径」列就是 `metric_definitions.sql_definition` 的内容，对应契约字段
+`metric_sql_definition`；业务口径是另一列 `business_definition`（契约字段
+`metric_business_definition`），两者并列存在，见 §8.2。**这张表在 B4 收口时还没有出口到
+API**——`sql_definition` 只落库未进 `MetricDefinitionResponse`，属于已登记的契约缺口，
+补齐范围见 §8.2 的字段表。
+
+| `metric_code` | 中文名 | 单位 | 主表 | SQL 口径 | 可加和 |
+| --- | --- | --- | --- | --- | --- |
+| `gmv` | 成交 GMV | 元 | `orders` | `SUM(orders.paid_amount)`，限 `order_status IN ('PAID','SHIPPED','COMPLETED')` | 是 |
+| `order_count` | 订单量 | 单 | `orders` | `COUNT(orders.id)`，不限状态 | 是 |
+| `paying_user_count` | 付款用户数 | 人 | `orders` | `COUNT(DISTINCT orders.buyer_key)`，限 `paid_at IS NOT NULL` | **否**（去重计数） |
+| `successful_order_count` | 成功订单量 | 单 | `orders` | `COUNT(orders.id)`，限 `order_status = 'COMPLETED'` | 是 |
+| `refund_count` | 退款量 | 单 | `refunds` | `COUNT(refunds.id)`，限 `refund_status IN ('APPROVED','REFUNDED')` | 是 |
+| `refund_amount` | 退款金额 | 元 | `refunds` | `SUM(refunds.refund_amount)`，限 `refund_status = 'REFUNDED'` | 是 |
+| `return_count` | 退货量 | 件 | `returns` | `SUM(returns.return_quantity)` | 是 |
+| `return_rate` | 退货率 | % | `order_items` | 退货件数 ÷ 同期订单项件数（按区间重算，见下） | **否**（比例） |
+| `support_ticket_count` | 客服工单量 | 单 | `support_tickets` | `COUNT(support_tickets.id)` | 是 |
+
+`refund_count`/`refund_amount` 取自 `refunds`（资金动作），`return_count` 取自
+`returns`（货品动作），两者不得互相替代——这也是 Task 5/10 专门用真实
+PostgreSQL 钉住的一条（`test_return_count_reads_returns_not_refunds`）。
+
+**`return_rate` 的归属选择**：退货件数按**订单项所属的下单日**（`order_items.business_date`）
+归属，而不是按退货实际发生日。原因是分母固定为「同期下的订单项件数」，如果分子按退货发生日
+归属，一笔跨期退货会让分子落在退货当天、分母却落在下单当天，区间对不上会算出无意义的比例。
+为避免同一个订单项有多条退货记录时把分母重复计入，实现（`AnalyticsRepository._aggregate_ratio`）
+先把 `returns` 按 `order_item_id` 聚合成子查询，再 `LEFT JOIN` 回 `order_items`，而不是直接
+`JOIN order_items` 到 `returns` 逐行相乘。`return_rate` 标记为**不可加和**：按区间整体重算一次，
+不是把每天的比例算出来再求平均或求和（B5 的答案组装依赖这个标记，见 `non_additive` 字段）。
+
+**`business_date` 为什么是物理列而不是查询期 `AT TIME ZONE` 表达式**：六张经营表都在写入
+（目前只有 Seed 一处写入路径）时把 UTC 时间戳按 `Asia/Shanghai` 换算成业务日、落成一个真实的
+`date` 列，而不是在每次查询时对 `created_at`/`placed_at` 做时区转换。原因有两条：一是所有查询
+都要按 `merchant_id + business_date` 过滤和分组，物理列上能建复合索引，表达式索引在 PostgreSQL
+里既拿不到同等的范围扫描收益，又要求每条 SQL 都重复一次时区换算逻辑；二是业务时区目前是
+写死的应用配置（不按商家可变），换算规则只有一处产生分歧的可能（Seed），不存在多处写入导致
+物理列与实时计算结果漂移的风险。冻结时钟对「跨零点的昨天」的校验因此只需要覆盖
+`app/analytics/dates.py` 的日期解析，不需要在每条查询上重复验证时区语义。
+
+**维度表不按业务日过滤**（`DetailSpec.date_filtered`，B5/B6 会依赖这条语义决定）：
+六张经营表都有 `business_date`，但语义不同。事件表（`orders`/`refunds`/`returns`/
+`support_tickets`）的 `business_date` 是**事件发生日**，明细查询按查询区间过滤它是对的；
+`products.business_date` 是**上架日**，商品上架后一直存在，套用同一条时间窗规则会让
+「看看我的商品明细」只返回默认 7 天窗口里恰好上架的那一两个商品（演示数据把 24 个商品
+铺在 180 天里），其余被静默丢掉且没有任何提示。修复为在契约层给 `DetailSpec` 增加
+`date_filtered`（默认 `True`，`products` 为 `False`），由 `AnalyticsRepository.detail()`
+尊重它；该路径下 `plan_steps` 写「不限时间范围」而不是一个假的时间范围承诺，`notes` 也
+换成「不按日期筛选，返回该商家的全部记录」。标记放在契约层而不是服务层特判某张表：
+这是「这张表的时间语义是什么」的声明，和列名、标签一样属于表本身的性质。**新增明细表时
+先想清楚它是事件表还是维度表**，默认值是更保守的按业务日过滤。
+
+**遗留给 B6 的一处不一致（`ExportSpec` 与预览的时间范围）**：`date_filtered=False` 的
+明细（当前只有 `products`）预览时忽略查询区间，但 `SafeQueryService` 交给下游的
+`ExportSpec` 仍然带着 `start`/`end`。B4 内无副作用——导出端点尚不存在、`ExportInfo`
+是占位——但 **B6 实现导出时若直接采信 `ExportSpec.start`/`end`，导出的 CSV 会和用户刚
+看到的预览不一致**（预览是全量商品，CSV 只有 7 天内上架的）。B6 动手前必须先决定：
+让 `ExportSpec` 也尊重 `date_filtered`（推荐，保持预览与导出同源），还是显式声明导出
+永远按区间。这是 B4 终审后定向复审发现的，记录在此以免 B6 重新踩一遍。
+
+**期间发现并按人工裁定纠正的四处偏离**（原计划字面没有覆盖，均已由集成测试钉住回归）：
+
+1. **按 `product`/`category` 拆分时的 join 放大**（Task 5）：`orders` join 到 `order_items`/`products`
+   会把订单行按订单项展开，直接对展开后的行 `SUM(orders.paid_amount)` 或 `COUNT(orders.id)`
+   会把同一张跨类目订单的金额/订单数重复计入每个类目。修复为：这条路径下金额类指标改为
+   `SUM(order_items.item_amount)`（按订单项分摊，而不是复述整单金额），计数类指标改为
+   `COUNT(DISTINCT orders.id)`。不需要该维度的默认路径未受影响。见
+   `tests/integration/repositories/test_analytics_repository.py` 的
+   `test_gmv_by_category_sums_back_to_the_order_amount` 等用例。
+2. **完全落在未来的日期区间改为显式拒绝，不是静默截断**（Task 4）：原计划的截断逻辑会把
+   「结束日超过今天」截到今天，但对「起始日也在未来」的区间同样截断会静默地用「今天」的数据
+   回答一个问未来的问题。改为：起始日期晚于业务今天时抛 `FutureRangeError`，服务层转成
+   `UnsupportedQueryError`，与 B3 `validate_intent` 对同型输入的处理保持一致。
+3. **指标口径端点必须能返回已废弃指标**（Task 8）：`GET /api/metrics/{code}` 最初复用了
+   `MetricRepository.get_by_code`（聊天路径用来把已废弃指标排除出查询范围的同一个方法），
+   导致 `status=DEPRECATED` 的指标查口径时和拼写错误一样 404，文档承诺的「口径面板可查已废弃
+   指标」实际不可达。修复为新增一个不过滤状态的独立仓储方法给口径端点专用，`get_by_code`
+   本身（及它在聊天路径的排除语义）保持不变。
+4. **REFUND 分类的明细按信号分流到 `returns` 或 `refunds`**（Task 9 收口）：`DETAIL_BY_CATEGORY`
+   把 `REFUND` 静态指向 `refunds`，而 PRD 里退款（资金动作）与退货（货品动作）是两件可以
+   分开发生的事——B3 的分类粒度只到 `REFUND` 这一级，于是 `returns` 表的明细永远查不到。
+   修复为在 `SafeQueryService._resolve_refund_table` 里做二次路由，信号按可靠性从高到低取，
+   命中即返回、**不叠加判断**：
+   1. 维度/筛选字段落在哪张表就查哪张（用户已明确说了按什么筛选，最强信号，直接复用
+      `DIMENSION_SPECS`，不引入新词表）；
+   2. 分类阶段产出的 `intent_keywords` 命中「退货 / 退回」或「退款」（词表是契约的一部分，
+      见 `contract.REFUND_CATEGORY_*_KEYWORDS`，不下放到服务层）；
+   3. 两种信号都没有时维持既有兜底（查 `refunds`），不去猜——猜错会让商家把退款明细当成
+      退货明细看，比「查不到」更危险。
+   `DETAIL_BY_CATEGORY[REFUND]` 保持 `refunds` 作为兜底值不变。见
+   `tests/integration/services/test_safe_query.py` 的 `test_refund_category_with_*` 系列。
+
+这四处均记在 `.superpowers/sdd/2026-08-04-backend-b4-safe-analytics-query/progress.md`
+的逐 Task 账本里；B5/B6 若要触碰同一批聚合表达式或口径端点，先读那份账本，避免把已经
+裁定过的偏离当成待发现的新缺陷重新讨论一遍。
+
+**终审修复轮（2026-08-05）另外确定的三条约束**：
+
+1. **响应不得自相矛盾**：查到数据时 `ChatResponse.answer` 必须如实说查询已经执行过。
+   此前 `answer` 无条件输出「经营数据查询将在 B4 接入」，和同一条响应里的
+   `analysis_sources=["DATABASE"]`、真实 `data_rows` 直接打架，用户会连旁边的真数字
+   一起不信（AGENTS.md R7）。自洽性不变量因此作用在**整个响应**上而不是单个字段：
+   `tests/unit/agent/test_graph_query_data.py::_assert_no_denial` 同时扫 `answer`、
+   `recommendations`、`quality_notes`、`degraded_reason`——字段作用域的不变量挡不住
+   相邻字段，这正是上一轮只改 `recommendations` 却让缺陷溜过 Task 级评审的原因。
+   B5 接入真正的回答正文时，替换的是这条如实文案，不是重新引入前向引用。
+   **没有查询结果的降级分支保持「尚未执行」的措辞**——那条路径上它说的是真话。
+2. **仓储与图之间必须有异常边界**：`SafeQueryService` 的两处仓储调用都包了
+   `except SQLAlchemyError → UnsupportedQueryError`。不收口的话任何数据库异常
+   （含本阶段专门加的 statement timeout）都会一路上抛到 `ChatService._abort` →
+   全局处理器 → 500，合法意图的用户拿到服务端错误而不是可见降级。拒绝原因是固定
+   文案，不带异常原文、表名、列名和驱动名。
+3. **筛选字段的「值」也要校验**：B3 白名单只校验筛选字段的**键**。`date` 落到 `date`
+   类型的列上，模型抽出的「昨天」这类中文时间表达传到 PostgreSQL 就是
+   `invalid input syntax for type date`。值校验放在 `SafeQueryService` 而不是扩
+   `FILTER_WHITELIST`——白名单成员是 B3 的契约（有测试钉住它与 `DIMENSION_WHITELIST`
+   相等）。同理 `intent.limit` 的下界在服务层夹紧（`min(max(limit, 1), MAX_DETAIL_LIMIT)`），
+   与 B3 `validate_intent` 对上界「覆盖成合法值而不是判整条意图非法」的处理方式一致。
 
 ---
 
@@ -1171,18 +1322,18 @@ ticket_status
 
 ### 任务
 
-- [ ] 实现 Answer Composition；
-- [ ] 创建回答 Prompt；
-- [ ] 创建 Visualization Service；
-- [ ] 创建 Recommendation Schema；
-- [ ] 实现本地确定性校验；
-- [ ] 实现独立 Reviewer；
-- [ ] 固定最大尝试次数 `MAX_REVIEW_ATTEMPTS=2`；
-- [ ] 实现 `PASSED` / `DEGRADED` / `FAILED` / `NOT_RUN` **四种最终状态**（无 `RETRIED`，重试次数由 `quality_attempts` 表达，见 §8.2）；
-- [ ] 保存 `quality_attempts` 和 `quality_notes`；
-- [ ] 按实际使用的来源填充 `analysis_sources` 有序数组；
-- [ ] 实现非加和指标保护；
-- [ ] 确保规则回答不创建假图表。
+- [x] 实现 Answer Composition；
+- [x] 创建回答 Prompt；
+- [x] 创建 Visualization Service；
+- [x] 创建 Recommendation Schema；
+- [x] 实现本地确定性校验；
+- [x] 实现独立 Reviewer；
+- [x] 固定最大尝试次数 `MAX_REVIEW_ATTEMPTS=2`；
+- [x] 实现 `PASSED` / `DEGRADED` / `FAILED` / `NOT_RUN` **四种最终状态**（无 `RETRIED`，重试次数由 `quality_attempts` 表达，见 §8.2）；
+- [x] 保存 `quality_attempts` 和 `quality_notes`；
+- [x] 按实际使用的来源填充 `analysis_sources` 有序数组；
+- [x] 实现非加和指标保护；
+- [x] 确保规则回答不创建假图表。
 
 推荐问题不在本阶段生成——它是 B2 已完成的预置配置模块（§6.8）在 Graph 中的独立节点。
 
@@ -1195,6 +1346,16 @@ ticket_status
 - 无数据时是否编造数字；
 - 非加和指标是否被求和；
 - 商家敏感字段是否出现在回答。
+
+**「非加和指标是否被求和」与「敏感字段」的落地方式**（`app/services/answer_service.py`
+`AnswerService._validate`）：`QueryResult.non_additive=True` 且返回多行时，草稿文本命中
+「合计/总计/累计/总和/加总/汇总」任一字样即拒绝——单纯引用某一行的原始数值不受影响，
+拦的是把多行摊平成一个新结论。`non_additive` 同时写进喂给模型和 Reviewer 的事实包
+（`facts_json` 的 `non_additive` 字段），两条 Prompt 都要求据此避免/否决求和式表达，
+本地校验是最后一道机械防线，不依赖模型自觉。敏感字段方面，受控查询契约
+（`DETAIL_SPECS`）本身不含任何 PII 列，真正的泄露面是模型可能在回答里提到不属于
+展示字段的内部标识符（`merchant_id`、`answer_id` 等 UUID）——校验器用 UUID 形状的
+正则拦这一类，命中即判定为幻觉走降级路径。
 
 ### 验收
 
@@ -1214,25 +1375,26 @@ ticket_status
 
 ### Feedback
 
-- [ ] `POST /api/answers/{id}/feedback`；
-- [ ] 采纳、点赞和点踩；
-- [ ] 点赞点踩互斥；
-- [ ] 幂等更新；
-- [ ] 只能反馈本商家回答。
+- [x] `POST /api/answers/{id}/feedback`；
+- [x] 采纳、点赞和点踩；
+- [x] 点赞点踩互斥；
+- [x] 幂等更新；
+- [x] 只能反馈本商家回答。
 
 ### CSV
 
-- [ ] Export Service；
-- [ ] 实现 `GET /api/exports/{id}` 下载接口；
-- [ ] UTF-8 BOM；
-- [ ] 中文列名；
-- [ ] CSV 公式注入防护；
-- [ ] 权限校验；
-- [ ] **P0 动态生成，不引入 S3 SDK**；对象存储和签名对象 URL 属于 P1；
-- [ ] 导出记录写入 `export_files`；
-- [ ] **签名 URL 自带鉴权**：`GET /api/exports/{id}` 不要求 `Authorization`，校验 HMAC 签名 + 商家归属即可，浏览器可原生下载（理由见 §8.0）；
-- [ ] 签名有效期 **15 分钟**，过期返回 `410 EXPORT_LINK_EXPIRED`；
-- [ ] 响应设 `Referrer-Policy: no-referrer`，签名链接不进日志。
+- [x] Export Service；
+- [x] 实现 `GET /api/exports/{id}` 下载接口；
+- [x] UTF-8 BOM；
+- [x] 中文列名；
+- [x] CSV 公式注入防护；
+- [x] 权限校验；
+- [x] **P0 动态生成，不引入 S3 SDK**；对象存储和签名对象 URL 属于 P1；
+- [x] 导出记录写入 `export_files`；
+- [x] **签名 URL 自带鉴权**：`GET /api/exports/{id}` 不要求 `Authorization`，校验 HMAC 签名 + 商家归属即可，浏览器可原生下载（理由见 §8.0）；
+- [x] 签名有效期 **15 分钟**，过期返回 `410 EXPORT_LINK_EXPIRED`；
+- [x] 响应设 `Referrer-Policy: no-referrer`，签名链接不进日志（应用层不打印请求 URL；
+      生产环境 access log 的脱敏留给 B7 部署配置）。
 
 ### 验收
 
@@ -1242,6 +1404,14 @@ ticket_status
 - 篡改签名的链接被拒绝；
 - 反馈重复提交结果稳定。
 
+**复审发现并修复的一处偏离（BOM 重复）**：`ExportService._to_csv` 已经在字符串开头拼了
+一次 BOM（`﻿`），路由层最初又用 `content.encode("utf-8-sig")` 编码——这个编码本身
+会自动加一次 BOM，叠加已有字符后实际下载字节是两段 BOM（`EF BB BF EF BB BF...`）。
+`tests/api/test_exports.py::test_download_returns_a_single_bom_prefixed_csv_with_safe_headers`
+钉住只允许一段。修复为路由层改用 `content.encode("utf-8")`，BOM 只在 `_to_csv` 里拼一次；
+新增该测试前这条回归完全不会被发现——单元测试只测了 `ExportService` 自己返回的字符串，
+从未测过 HTTP 路由实际吐出的字节。
+
 ---
 
 ## B7 · Railway、费用防护与 MVP 收口
@@ -1250,16 +1420,29 @@ ticket_status
 
 PRD 的里程碑是 M0–M4 完成 MVP 并上线，M5 才是 P1。把 Railway 排在附件和知识库之后，会让部署、迁移和费用风险暴露得过晚。
 
+> **更新（2026-08-06，Task 1-18 收口）**：费用防护/限流/可信 IP 补齐了必测，Docker 优雅关闭、
+> `OperationalMetrics` 可观测性、`GET /api/admin/ops/status` 运维端点、`railway.json` 与
+> `docs/deployment.md` 均已实现并提交（`feature/b5-b6-answer-feedback-export` 分支）。
+> `REQUIRE_INTEGRATION_DB=1 pytest` 在真实 PostgreSQL 上 **703 passed、0 skipped、0 failed**
+> （首次跑通时发现并修复一个真实 bug：`tests/postgres.py::TRUNCATE_ALL_TABLES` 漏了
+> `llm_daily_budget`，导致同一天内所有集成测试共用一行预算，跑到后段用例就把默认
+> 20\_000 token 预算耗尽而误报 503——已修复，见提交 `64e60e3`）。`ruff`/`ruff format`/`mypy`
+> （88 源文件）全绿。**Railway 一节仍未勾选**：本轮按计划约束只产出 `railway.json` 和
+> `docs/deployment.md`，没有实际创建 Railway 项目/连接 PostgreSQL/填写环境变量，也没有做
+> 「验收（MVP 出口）」清单里依赖真实部署的项目（重启后数据仍在、健康检查、SSE 真实 CORS 环境
+> 等）——这些需要用户在 Railway 控制台执行后才能勾。可观测性一节里的「查询耗时」（SQL 语句本身
+> 的执行耗时，区别于已实现的 Agent 节点整体耗时）尚未单独实现，也保持未勾。
+
 ### Docker
 
-- [ ] 从官方 Python 基础镜像构建；
-- [ ] 使用非 root 用户；
-- [ ] 安装依赖利用缓存；
-- [ ] Exec form CMD；
-- [ ] 监听 `0.0.0.0:$PORT`；
-- [ ] 不把 `.env`、测试数据或密钥复制进镜像；
-- [ ] 优雅关闭：收到 SIGTERM 后停止接收新请求，允许在途 SSE 流收尾；
-- [ ] 设置合理 worker 数量，避免超出内存。
+- [x] 从官方 Python 基础镜像构建；
+- [x] 使用非 root 用户；
+- [x] 安装依赖利用缓存；
+- [x] Exec form CMD；
+- [x] 监听 `0.0.0.0:$PORT`；
+- [x] 不把 `.env`、测试数据或密钥复制进镜像；
+- [x] 优雅关闭：收到 SIGTERM 后停止接收新请求，允许在途 SSE 流收尾（`app/run.py::GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 30`）；
+- [x] 设置合理 worker 数量，避免超出内存（刻意保持单 worker，决策记录见 `app/run.py` 注释与 `docs/deployment.md`）。
 
 ### Railway
 
@@ -1280,52 +1463,52 @@ PRD 的里程碑是 M0–M4 完成 MVP 并上线，M5 才是 P1。把 Railway �
 
 限流按 Token 和来源 IP 计数，但 Railway 位于反向代理之后，**不能直接采信客户端自带的转发头**，否则攻击者随手伪造 `X-Forwarded-For` 就绕过限流。
 
-- [ ] 只信任 Railway 代理注入的转发头，通过可信代理跳数配置解析，不接受任意客户端提供的 `X-Forwarded-For`、`Forwarded`、`X-Real-IP`；
-- [ ] ASGI Server 显式配置 proxy headers 与 `forwarded-allow-ips`，不使用通配；
-- [ ] 多级代理时取**最右侧可信跳数之外的第一个地址**，并在文档中写死该规则；
-- [ ] 本地开发和测试环境回退到直连 socket 地址；
-- [ ] 必测：伪造 `X-Forwarded-For` 不能重置限流计数。
+- [x] 只信任 Railway 代理注入的转发头，通过可信代理跳数配置解析，不接受任意客户端提供的 `X-Forwarded-For`、`Forwarded`、`X-Real-IP`（`app/core/client_ip.py::resolve_client_ip`）；
+- [x] ASGI Server 显式配置 proxy headers 与 `forwarded-allow-ips`，不使用通配（`app/run.py` 显式传 `proxy_headers=False`，改由应用层按可信跳数自行解析，不依赖 uvicorn 的隐式信任）；
+- [x] 多级代理时取**最右侧可信跳数之外的第一个地址**，规则写在 `app/core/client_ip.py` 与 `docs/deployment.md`；
+- [x] 本地开发和测试环境回退到直连 socket 地址（`trusted_proxy_hops=0` 默认值）；
+- [x] 必测：伪造 `X-Forwarded-For` 不能重置限流计数（`tests/api/test_rate_limit_trust_boundary.py`，真实库回归已过）。
 
 ### LLM 费用与限流
 
 **这一步不能省。** MVP 的部署形态是：公开的 Railway 地址 + 免鉴权的 `/api/demo/merchants` 端点 + 环境变量里的真实 LLM key。任何人扫到这个地址就能取到演示 Token 并无限调用聊天接口，费用是真金白银。
 
-- [ ] 单请求上限：最大 LLM 调用次数与最大输入/输出 token（B3 已实现，此处纳入部署校验）；
-- [ ] 用量累计写入 `llm_usage`：按日聚合调用次数与 token；
-- [ ] **每日预算熔断，扣减必须原子**：用 `UPDATE ... SET used = used + :n WHERE day = :d AND used + :n <= :budget RETURNING used` 这类单语句条件更新，或带行锁的事务。不得先 `SELECT` 判断再 `UPDATE`——多个并发请求会同时读到"预算仍足够"并全部放行；
-- [ ] 预扣后回填：按预估 token 先扣，调用结束后用实际 token 修正差额；请求失败也要记录已消耗部分；
-- [ ] 超预算后全局停止调用 LLM，转显式降级回答，复用已有降级路径；
-- [ ] 基础限流：按 Token 和可信来源 IP 限制频次，命中返回 `RATE_LIMITED`；
-- [ ] MVP 无 Redis，限流使用进程内计数器，并在文档中说明多实例下为近似限制。
+- [x] 单请求上限：最大 LLM 调用次数与最大输入/输出 token（B3 已实现，此处纳入部署校验）；
+- [x] 用量累计写入按日聚合调用次数与 token 的表（实为 `llm_daily_budget` + 明细表 `llm_usage`，非计划早期文案里的单一 `llm_usage` 聚合）；
+- [x] **每日预算熔断，扣减必须原子**：`LlmBudgetRepository.reserve` 用单语句条件 `UPDATE ... WHERE usage_date = :d AND consumed_tokens + :tokens <= :budget RETURNING consumed_tokens`，不先 `SELECT` 再判断；
+- [x] 预扣后回填：`LlmCostGuard` 按预估 token 先 `reserve`，调用结束后用实际 token `reconcile` 差额；请求失败也记录已消耗部分（`tests/unit/llm/test_guard.py`）；
+- [x] 超预算后全局停止调用 LLM，转显式降级回答，复用已有降级路径；
+- [x] 基础限流：按 Token 和可信来源 IP 限制频次，命中返回 `RATE_LIMITED`；
+- [x] MVP 无 Redis，限流使用进程内计数器，`docs/deployment.md` 已说明多实例下为近似限制。
 
 必测：
 
-- 10 个并发请求逼近预算边界时，放行数量不超过预算，无超发；
-- 预估 token 与实际 token 有差异时，日累计值最终收敛到实际值；
-- 请求失败后已消耗的 token 仍被计费记录；
-- 多进程实例下预算不会各算各的。
+- [x] 10 个并发请求逼近预算边界时，放行数量不超过预算，无超发（`tests/integration/repositories/test_llm_budget_repository.py`，真实 PostgreSQL 回归已过）；
+- [x] 预估 token 与实际 token 有差异时，日累计值最终收敛到实际值（`tests/unit/llm/test_guard.py::test_complete_reconciles_estimate_to_actual_tokens_and_records_success`）；
+- [x] 请求失败后已消耗的 token 仍被计费记录（`tests/unit/llm/test_guard.py::test_complete_still_bills_estimate_when_inner_call_fails`）；
+- [x] 多进程实例下预算不会各算各的：由 PostgreSQL 的原子条件更新保证（预算本身不超发），限流命中数/可观测性计数仍是进程内近似值，`docs/deployment.md` 已写明该限制。
 
 ### 运维端点
 
 熔断和限流状态必须可观察，但不能裸奔。
 
-- [ ] `GET /api/admin/ops/status`，**需要 `X-Admin-Token` 请求头**（值为 `ADMIN_TOKEN`），未配置管理员令牌时端点整体关闭；`Authorization` 头一律忽略；
-- [ ] 返回：当日 token 用量与预算剩余、限流命中计数、降级计数、各错误码计数、Agent 节点平均耗时；
-- [ ] **禁止返回**：任何 Token 明文、Prompt 内容、商家经营数据、完整请求正文、数据库连接串；
-- [ ] 商家标识以脱敏形式返回（哈希或序号），不返回商家名称；
-- [ ] 必测：无管理员令牌返回 `401`，普通商家 Token 返回 `403`，响应体不含敏感字段。
+- [x] `GET /api/admin/ops/status`，**需要 `X-Admin-Token` 请求头**（值为 `ADMIN_TOKEN`），未配置管理员令牌时端点整体关闭（不挂载路由，404）；`Authorization` 头一律忽略；
+- [x] 返回：当日 token 用量与预算剩余、限流命中计数、降级计数、各错误码计数、Agent 节点平均耗时；
+- [x] **禁止返回**：任何 Token 明文、Prompt 内容、商家经营数据、完整请求正文、数据库连接串（`tests/api/test_admin_ops.py` 断言响应体不含管理员/商家 Token 与 `postgresql` 字样）；
+- [x] 商家标识以脱敏形式返回（哈希或序号），不返回商家名称：响应本身是系统级聚合，不含任何商家维度字段，天然满足；
+- [x] 必测：无管理员令牌返回 `401`，普通商家 Token 返回 `403`，响应体不含敏感字段（`tests/api/test_admin_ops.py`，真实库回归已过）。
 
 ### 可观测性
 
-- [ ] request ID；
-- [ ] 结构化日志；
-- [ ] 路由耗时；
-- [ ] Agent 节点耗时；
-- [ ] 查询耗时；
-- [ ] LLM 调用次数、token 用量和状态；
-- [ ] 每日预算剩余量；
-- [ ] 降级计数与限流命中计数；
-- [ ] 不记录 Prompt 全文和敏感数据。
+- [x] request ID（`main.py::request_id_middleware`，响应头回写 `X-Request-Id`）；
+- [x] 结构化日志（`request_completed` 事件：request_id/method/route/status_code/duration_ms）；
+- [x] 路由耗时（同上，`OperationalMetrics.record_route_duration`）；
+- [x] Agent 节点耗时（`MerchantQaGraph._timed_node` 包装每个图节点，计入 `OperationalMetrics`）；
+- [ ] 查询耗时：SQL 查询本身的独立耗时尚未单独记录（目前只随 `query_data` 节点的整体 Agent 节点耗时被间接计入，没有单独的日志字段或指标）；
+- [x] LLM 调用次数、token 用量和状态：通过 `GET /api/admin/ops/status` 可查（`llm_calls_today`/`llm_tokens_used_today`），未做成逐次调用的结构化日志行；
+- [x] 每日预算剩余量（`llm_tokens_remaining_today`，同上）；
+- [x] 降级计数与限流命中计数（`OperationalMetrics.degraded_count`/`rate_limit_hits`）；
+- [x] 不记录 Prompt 全文和敏感数据（结构化日志只含 request_id/method/route/status_code/duration_ms，未接触请求体或 Prompt）。
 
 ### 验收（MVP 出口）
 
@@ -1728,6 +1911,7 @@ LLM_ENABLED=false
 BUSINESS_TIMEZONE=Asia/Shanghai
 DEMO_MERCHANT_TOKENS=<token:merchant_id,token:merchant_id,token:merchant_id>
 DEMO_MERCHANTS_ENDPOINT_ENABLED=true
+DEMO_DEPLOYMENT_MODE=false             # 仅对外演示部署时显式开启
 ADMIN_TOKEN=<development-placeholder>   # P0 起必需（运维端点），P1 知识库后台复用；请求头 X-Admin-Token
 EXPORT_URL_TTL_MINUTES=15
 MAX_QUERY_DAYS=180
@@ -1754,7 +1938,7 @@ Chat Completions API；`LLM_BASE_URL` 和 `LLM_MODEL` 采用上面的固定默�
 已弃用的 `deepseek-chat` 或 `deepseek-reasoner`，也不在此阶段引入双模型路由；如需升级为
 `deepseek-v4-pro`，必须先完成真实模型离线验收与 R3 费用确认。
 
-生产环境必须把 `DEMO_MERCHANTS_ENDPOINT_ENABLED` 置为 `false`。
+生产环境默认关闭演示商家端点：`DEMO_MERCHANTS_ENDPOINT_ENABLED` 在生产环境不具备开启效果；仅当 `DEMO_DEPLOYMENT_MODE=true` 时才会显式开放，且不降低其余生产安全校验。
 
 生产环境对弱占位值必须拒绝启动。
 

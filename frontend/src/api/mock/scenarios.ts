@@ -6,6 +6,7 @@
  * 触发问题，与后端 FakeAgent 的判定一致。
  */
 import type { components } from '@/api/generated'
+import { QUICK_QUESTIONS } from '@/constants/quickQuestions'
 
 import type { ChatFixtureKey } from './fixtures.generated'
 
@@ -14,51 +15,37 @@ interface Scenario {
   fixture: ChatFixtureKey
   /** 命中该场景的关键词，任一出现即匹配。 */
   keywords: readonly string[]
-  /**
-   * 快速体验区的分类眉标。只有带 category 的场景才会出现在入口里——
-   * `chatGreeting` 是兜底、`invalidRefused` 是「助手会拒绝」的场景，
-   * **都不该被主动推荐**：推荐一个设计上就要被拒的请求，等于教用户去踩线。
-   */
-  category?: string
+}
+
+const QUICK_SCENARIO_DETAILS: Record<
+  (typeof QUICK_QUESTIONS)[number]['question'],
+  Omit<Scenario, 'question'>
+> = {
+  最近7天退货量趋势: { fixture: 'metricRefund', keywords: ['退货', '退款'] },
+  '昨天总 GMV 是多少？': { fixture: 'metricGmv', keywords: ['gmv', '成交额'] },
+  查看最近订单明细: { fixture: 'detailOrder', keywords: ['明细', '订单列表'] },
+  '我要货品上架，具体规则有吗？': { fixture: 'rulePlatform', keywords: ['规则', '上架', '政策'] },
 }
 
 export const MOCK_SCENARIOS: readonly Scenario[] = [
-  {
-    question: '最近7天退货量趋势',
-    fixture: 'metricRefund',
-    keywords: ['退货', '退款'],
-    category: '趋势分析',
-  },
-  {
-    question: '昨天总 GMV 是多少？',
-    fixture: 'metricGmv',
-    keywords: ['gmv', '成交额'],
-    category: '经营指标',
-  },
-  {
-    question: '查看最近订单明细',
-    fixture: 'detailOrder',
-    keywords: ['明细', '订单列表'],
-    category: '业务明细',
-  },
-  {
-    question: '我要货品上架，具体规则有吗？',
-    fixture: 'rulePlatform',
-    keywords: ['规则', '上架', '政策'],
-    category: '规则问答',
-  },
+  ...QUICK_QUESTIONS.map((item) => ({
+    ...item,
+    ...QUICK_SCENARIO_DETAILS[item.question],
+  })),
   { question: '你好', fixture: 'chatGreeting', keywords: ['你好', '在吗', '介绍'] },
   {
     question: '帮我修改订单金额',
     fixture: 'invalidRefused',
     keywords: ['修改订单', '改金额', '删除数据'],
   },
+  {
+    // 未带 category：IDENTITY 目前仍是受控空结果（降级），不该被主动推荐到四宫格，
+    // 但要能被主动输入命中——它是唯一仍会触发「演示数据」降级提示的场景（R7）。
+    question: '我的商家资料是什么？',
+    fixture: 'identityProfile',
+    keywords: ['商家资料', '店铺认证'],
+  },
 ] as const
-
-/** 快速体验入口。顺序与分类对齐 Prototype 的四宫格。 */
-export const MOCK_QUICK_QUESTIONS = MOCK_SCENARIOS.filter(
-  (scenario): scenario is Scenario & { category: string } => Boolean(scenario.category),
-).map((scenario) => ({ question: scenario.question, category: scenario.category }))
 
 /** 没命中任何关键词时回落到闲聊，与后端 FakeAgent 的兜底一致。 */
 export function matchScenario(message: string): ChatFixtureKey {

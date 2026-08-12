@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Lightbulb, MessageCircleQuestion } from '@lucide/vue'
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 import type { ChatAnswer } from '@/types/chat'
 
@@ -11,7 +11,25 @@ const emit = defineEmits<{
 }>()
 
 const recommendations = computed(() => props.answer?.recommendations ?? [])
-const suggestedQuestions = computed(() => props.answer?.suggestions.current ?? [])
+const alternateIndex = ref(0)
+const suggestionSets = computed(() => {
+  const suggestions = props.answer?.suggestions
+  return suggestions ? [suggestions.current, ...suggestions.alternates] : []
+})
+const suggestedQuestions = computed(() => suggestionSets.value[alternateIndex.value] ?? [])
+const canRotateSuggestions = computed(() => suggestionSets.value.length > 1)
+
+watch(
+  () => props.answer?.id,
+  () => {
+    alternateIndex.value = 0
+  },
+)
+
+function rotateSuggestions(): void {
+  if (!canRotateSuggestions.value) return
+  alternateIndex.value = (alternateIndex.value + 1) % suggestionSets.value.length
+}
 </script>
 
 <template>
@@ -44,6 +62,15 @@ const suggestedQuestions = computed(() => props.answer?.suggestions.current ?? [
         <header class="recommendation-panel__header">
           <MessageCircleQuestion :size="15" aria-hidden="true" />
           <h2>猜你想问</h2>
+          <button
+            v-if="canRotateSuggestions"
+            type="button"
+            class="recommendation-panel__rotate"
+            data-testid="rotate-suggestions"
+            @click="rotateSuggestions"
+          >
+            换一换
+          </button>
         </header>
 
         <ul v-if="suggestedQuestions.length > 0" class="recommendation-panel__question-list">
@@ -88,6 +115,13 @@ const suggestedQuestions = computed(() => props.answer?.suggestions.current ?? [
   color: var(--color-text);
   font-size: var(--font-size-section-title);
   font-weight: var(--font-weight-emphasis);
+}
+
+.recommendation-panel__rotate {
+  margin-left: auto;
+  color: var(--color-primary-strong);
+  background: transparent;
+  font-size: var(--font-size-caption);
 }
 
 .recommendation-panel__list {

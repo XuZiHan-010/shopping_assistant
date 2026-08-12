@@ -291,16 +291,31 @@ interface MetricDefinition {
   metricCode: string        // 稳定英文标识，接口路径和内部引用都用它
   displayName: string       // 中文展示名，只用于展示
   unit: string
-  definition: string
-  source: string            // ← metric_source
-  owner: string             // ← metric_owner
+  businessDefinition: string          // ← metric_business_definition，业务口径，必填
+  sqlDefinition?: string              // ← metric_sql_definition，SQL 口径，可缺失
+  dimensions?: string[]               // ← metric_dimensions，可缺失
+  databaseName?: string               // ← metric_database_name，可缺失
+  tableName?: string                  // ← metric_table_name，可缺失
+  reportUrl?: string                  // ← metric_report_url，可缺失
+  source: MetricDefinitionSource      // ← metric_source
+  generated: boolean                  // ← metric_generated
+  notice?: string                     // ← metric_notice，generated 为 true 时必有
+  owner: string                       // ← metric_owner
   status: 'ACTIVE' | 'DEPRECATED' | 'UNVERIFIED'   // ← metric_status
 }
+
+type MetricDefinitionSource = 'METRIC_CATALOG' | 'COLUMN_COMMENT' | 'AI_GENERATED'
 ```
 
 口径接口是 `GET /api/metrics/{code}`，路径参数用 `metricCode` 而非中文名。
 
-`source`、`owner`、`status` 对应后端 `METRIC` 模式必填的 `metric_source` / `metric_owner` / `metric_status`（见后端 §8.2），三者都有数据来源，可以放心在口径面板展示。**F4 不得展示没有对应字段的信息**——例如"报表"若不在契约内，就从 UI 任务里删掉，不要写了展示要求却没有数据来源。
+**业务口径与 SQL 口径是两个并列字段。** 面向读者不同：业务口径回答"这个数是什么意思"，SQL 口径回答"这个数怎么算出来的"（PRD §6.3 故事 15/16）。前端不得把两者合并成一个"定义"分区。
+
+**`source` 是枚举，不是自由文本。** 前端负责把它映射成人类可读标签（`METRIC_CATALOG` → "指标目录"、`COLUMN_COMMENT` → "字段注释"、`AI_GENERATED` → "大模型生成"），并渲染成来源徽标。**不要直接把枚举值原样打印给用户。**
+
+**待核验告警由 `generated` 驱动，不是由 `status` 反推。** `generated` 为 `true` 时渲染醒目告警块并显示后端返回的 `notice` 文案；`notice` 是后端可配文案，前端不写死。`status === 'UNVERIFIED'` 是指标目录里的独立状态维度，两者都可能出现，互不替代。
+
+**可选字段缺失时隐藏对应分区，不渲染空白占位。** `sqlDefinition`、`dimensions`、`databaseName`、`tableName`、`reportUrl` 都允许缺失。`reportUrl` 额外要求：只有通过 `^https?://` 校验才渲染链接，否则当作没有——防止后端或模型给出 `javascript:` 一类的伪协议。
 
 ### 5.7 推荐问题
 
@@ -709,13 +724,17 @@ Mock 的边界：只有传输层是假的。载荷是后端 FakeAgent 的真实�
 ### 4.1 Metric Definition
 
 - [ ] 展示指标名称（`displayName`）；
-- [ ] 展示业务口径；
-- [ ] 展示 SQL 口径；
-- [ ] 展示 `source`、`owner`、`status` 三项（对应后端 `metric_source` / `metric_owner` / `metric_status`）；
-- [ ] `status` 为 `UNVERIFIED` 时显示醒目的待核验提示；
+- [ ] 展示业务口径（`businessDefinition`，必填，缺失时显示"暂未返回业务口径。"）；
+- [ ] 展示 SQL 口径（`sqlDefinition`，缺失时**隐藏该分区**，不留空白占位）；
+- [ ] 把 `source` 枚举映射成中文来源徽标（指标目录／字段注释／大模型生成），不原样打印枚举值；
+- [ ] 展示 `owner`、`status` 与 `unit`；
+- [ ] `generated` 为 `true` 时显示醒目告警块并渲染后端返回的 `notice` 文案；
+- [ ] `status` 为 `UNVERIFIED` 时显示待核验提示（与 `generated` 告警是两条独立分支，可同时出现）；
+- [ ] 展示来源库表（`databaseName` / `tableName`）与维度集合（`dimensions`），各自缺失即隐藏；
+- [ ] 有 `reportUrl` 且通过 `^https?://` 校验时，展示"查看关联报表"外链（`target="_blank"` + `rel="noopener noreferrer"`）；
 - [ ] 无口径时显示空状态。
 
-**不展示"报表"**——契约中没有对应字段。若后续确有需要，先在后端 §8.2 加字段，再回来加 UI，不允许只写展示要求而没有数据来源。
+版式与分区顺序对齐参考项目 `frontend/src/components/MetricDefinitionPanel.vue`（R9：参考项目是需求基准）。可选字段一律"有才渲染"，这是参考项目的既有行为，不是降级。
 
 ### 4.2 Chart
 
@@ -778,36 +797,36 @@ Mock 的边界：只有传输层是假的。载荷是后端 FakeAgent 的真实�
 
 ### 5.1 Quality Trace
 
-- [ ] 展示 `PASSED`、`DEGRADED`、`FAILED`、`NOT_RUN` 四种状态，**没有 `RETRIED`**；
-- [ ] 展示 Reviewer 尝试次数；"重试后通过"渲染为通过 + "经过 2 次校验"，不单列状态；
-- [ ] 展示可折叠备注（`quality_notes`）；
-- [ ] 展示 `analysisSources` 全部来源徽标，按数组顺序；
-- [ ] 降级状态不允许只放在 tooltip 中。
+- [x] 展示 `PASSED`、`DEGRADED`、`FAILED`、`NOT_RUN` 四种状态，**没有 `RETRIED`**；
+- [x] 展示 Reviewer 尝试次数；"重试后通过"渲染为通过 + "经过 2 次校验"，不单列状态；
+- [x] 展示可折叠备注（`quality_notes`）；
+- [x] 展示 `analysisSources` 全部来源徽标，按数组顺序；
+- [x] 降级状态不允许只放在 tooltip 中。
 
 ### 5.2 Feedback
 
-- [ ] 采纳、点赞和点踩；
-- [ ] 点赞与点踩互斥；
-- [ ] 乐观更新失败时回滚；
-- [ ] 防止重复快速提交；
-- [ ] 显示已记录状态。
+- [x] 采纳、点赞和点踩；
+- [x] 点赞与点踩互斥；
+- [x] 乐观更新失败时保留本地反馈意图并显示错误；"已记录"只在服务端确认后显示；
+- [x] 防止重复快速提交；失败后允许同一反馈重试；
+- [x] 显示保存中与已记录状态。
 
 ### 5.3 无障碍基础（P0，不延后）
 
 无障碍不是 P1 的收尾工作，基础要求在 MVP 就要满足：
 
-- [ ] 所有图标按钮有 `aria-label`；
-- [ ] 错误和加载状态使用 `aria-live`；
-- [ ] 对话新增内容可被辅助技术感知；
-- [ ] 表格有表头；
-- [ ] 图表有文本摘要（见 F4）；
-- [ ] 模态框管理焦点；
-- [ ] 颜色对比满足基本可读性，且颜色不是唯一编码；
-- [ ] 支持键盘关闭目录和弹窗。
+- [x] 所有图标按钮有 `aria-label`；
+- [x] 错误和加载状态使用 `aria-live`；
+- [x] 对话新增内容可被辅助技术感知；
+- [x] 表格有表头；
+- [x] 图表有文本摘要（见 F4）；
+- [x] 模态框管理焦点；
+- [x] 颜色对比满足基本可读性，且颜色不是唯一编码；
+- [x] 支持键盘关闭目录和弹窗。
 
 ### 验收
 
-- 反馈失败能回滚；
+- 反馈失败保留本地反馈意图并给出可见提示，失败后可重试；"已记录"以服务端确认为准；
 - 降级回答清晰可见，不只在 tooltip 里；
 - 质量状态显示"重试后通过"时是 `PASSED` + 2 次，不出现 `RETRIED`；
 - 多个分析来源能同时展示；
@@ -831,19 +850,21 @@ Mock 的边界：只有传输层是假的。载荷是后端 FakeAgent 的真实�
 ### 部署
 
 - [ ] Frontend Service Root `/frontend`；
-- [ ] 构建产物不包含任何密钥；
-- [ ] 静态健康响应可用；
-- [ ] 生产构建关闭 Mock 开关。
+- [x] 构建产物不包含任何密钥；`secrets:check` 递归扫描构建产物，且已用受控泄漏变异验证其会失败。
+- [x] 静态健康响应可用；`public/health.html` 由 Caddy 独立处理，线上可用性留待 F6-B 验证。
+- [x] 生产构建关闭 Mock 开关；`VITE_USE_MOCK=true` 会在 Vite 配置解析期失败，Dockerfile 也显式透传该构建变量。
 
 ### 性能
 
-- [ ] 路由级代码分割；
-- [ ] ECharts 按需引入；
-- [ ] 长会话评估虚拟列表，但 MVP 不提前实现；
+- [x] 路由级代码分割；`/knowledge-base` 保持 lazy，`/` 是首屏故意 eager。真正的首屏收益来自图表面板的显式挂载开关，而不是把助手入口延迟加载。
+- [x] ECharts 按需引入；`chartMountable` 显式控制异步图表面板挂载。`e2e/first-paint.spec.ts` 的生产预览网络观测与 `firstpaint:check` 的静态依赖检查提供双层证据。
+- [ ] 长会话评估虚拟列表，但 MVP 明确不做；已评估，不提前实现。
 - [ ] 避免重复渲染完整大表；
-- [ ] 构建产物不包含源密钥。
+- [x] 构建产物不包含源密钥；见上方 `secrets:check` 及其变异验证。
 
 ### 验收（MVP 出口）
+
+**保持未勾选：依赖 F6-B 的 Railway 控制台部署与真实跨域验收。** F6-A 的本地构建、静态门禁和 Fake/确定性测试不能替代真实部署，也不构成「MVP 完成」声明。
 
 - 通过 Railway 部署域名完成核心 E2E：提问 → 阅读回答 → 反馈 → 导出；
 - SSE 在真实跨域环境下 1 秒内出现首个阶段标签；
@@ -973,7 +994,10 @@ KnowledgeBaseView
 - [ ] `MerchantSwitcher` **两种断点形态**：> 560px 按钮形态、≤ 560px 副行形态，两者都渲染商家名；
 - [ ] `MerchantSwitcher` 跨断点时选中商家不丢失；
 - [ ] 切换商家后 Chat Store 与侧栏被清空；
-- [ ] Metric Definition 的生成口径警告与 `metricCode` 展示；
+- [ ] Metric Definition 的生成口径警告（由 `generated` 驱动，渲染后端 `notice`）与 `metricCode` 展示；
+- [ ] Metric Definition 的双口径渲染：业务口径必显示、`sqlDefinition` 缺失时整块隐藏；
+- [ ] Metric Definition 的 `source` 枚举 → 中文徽标映射三种取值全覆盖；
+- [ ] Metric Definition 的 `reportUrl` 协议校验：`https?` 渲染外链，其他协议一律不渲染；
 - [ ] 推荐问题的"换一换"在 `alternates` 内本地轮换且不发请求；
 - [ ] Quality Trace 的降级显示与 `analysisSources` 多来源渲染；
 - [ ] Feedback 乐观更新和回滚；

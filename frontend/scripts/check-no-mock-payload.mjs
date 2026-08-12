@@ -6,11 +6,10 @@
  * 是那道守卫的验收：守卫一旦失效（比如有人把 mock/transport 改成静态 import），
  * 整包演示数据就会进产物。
  *
- * 为什么不是一句 grep「昨天总 GMV」：那句话同时出现在 mock/scenarios.ts 的快速
- * 问题列表里，而 scenarios.ts 从 Task 7 起就是被 ConversationColumn 静态引用的
- * 应用代码（六个问题文本，不含任何回答载荷）。用它当判据只会稳定误报，然后被人
- * 当噪音关掉。改为从 fixture 的 answer 正文里取判据——那些字符串只可能来自
- * fixtures.generated.ts。
+ * 为什么不是一句 grep「昨天总 GMV」：快速问题现在是 src/constants/ 的产品文案，
+ * Mock 场景反向消费它，因此该文本可以合法进入生产包。用它当判据只会稳定误报，
+ * 然后被人当噪音关掉。改为从 fixture 的 answer 正文里取判据——那些字符串只可能
+ * 来自 fixtures.generated.ts。
  *
  * 与 fixtures:check 一样只进本地门禁与 CI：Railway 的 Docker 构建上下文没有 docs/。
  */

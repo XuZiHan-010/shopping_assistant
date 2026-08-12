@@ -74,7 +74,7 @@ describe('readChatStream', () => {
     const last = events.at(-1)
     expect(last?.type).toBe('done')
     expect(last?.type === 'done' && last.raw.answer).toBe(fixture.answer)
-    expect(last?.type === 'done' && last.raw.answer).toContain('B4')
+    expect(last?.type === 'done' && last.raw.answer).toContain('受控数据查询')
   })
 
   it('流结束却没有 done 或 error 时抛中断错误', async () => {

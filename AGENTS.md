@@ -80,6 +80,7 @@ DATABASE_URL                  [P0]
 LLM_API_KEY                   [P0] DeepSeek API Key
 LLM_BASE_URL                  [P0] 固定为 https://api.deepseek.com
 DEMO_MERCHANT_TOKENS          [P0] 演示 Token 到 merchant_id 的映射
+DEMO_DEPLOYMENT_MODE          [P0] 对外演示部署时显式开放生产环境的演示商家端点，默认 false
 ADMIN_TOKEN                   [P0] 运维端点；[P1] 兼作知识库后台管理员令牌；请求头 X-Admin-Token
 REDIS_URL                     [P1]
 OBJECT_STORAGE_ACCESS_KEY     [P1]
@@ -135,7 +136,42 @@ yshopping-merchant-ai 4/
 
 读取方式：用 Read、Grep、Glob 查看。需要复用其中的代码或资源时，**复制到新项目路径后再改**，不要就地修改。
 
-新应用源码主要写在 `backend/`、`frontend/` 和按阶段启用的 `worker/` 中；脚本写入 `scripts/`，部署配置写入 `railway/`，文档写入 `docs/`，整改计划写入 `plans/`。所有新文件都与参考项目目录零交集。
+新应用源码主要写在 `backend/`、`frontend/` 和按阶段启用的 `worker/` 中；脚本写入 `scripts/`，部署配置写入 `railway/`，文档写入 `docs/`，设计说明与规格写入 `docs/specs/`，实施计划与整改计划写入 `plans/`。所有新文件都与参考项目目录零交集。
+
+### R9 · 参考项目是需求基准，冲突时改我们的文档
+
+本项目的目标是把 `yshopping-merchant-ai 4/` **1:1 还原**为 Python + TypeScript 版本。
+
+因此当 `docs/PRD.md` 或任何开发计划与参考项目的实际实现冲突时：
+
+- **以参考项目为准**，修改我们的 PRD 与计划去跟随它；
+- **不得反过来**用「PRD 没写」「契约里没有」论证参考项目里存在的字段或行为可以不做。
+
+判定顺序也随之固定：发现某个字段、面板分区或降级分支在参考项目里存在、在我们这边缺失时——
+
+1. 先读参考项目对应的 Java service 与 Vue 组件，确认它真实的设计，不要靠 PRD 反推；
+2. 默认结论是「我们缺了，要补」，而不是「不在范围内」；
+3. 同一次改动里把 PRD 与开发计划中与之冲突的条款一并改掉，让文档反映参考项目的设计；
+4. 只有用户明确裁定「这一处不还原」时，才在文档里写明偏离及理由。
+
+R8 依然完全有效：参考项目只读，本规则只改变**我们自己**文档的权威顺序。
+
+首次适用记录：2026-08-09 按本规则修订了指标口径契约，见 `docs/PRD.md` §6.3 与 §11.3。
+
+全量还原度差异清单见 `docs/yshopping-parity-audit.md`，开工前先查该文件是否已登记相关差异。
+
+### R10 · 技能产出的文档写进项目自己的目录，不建 `superpowers/`
+
+即使本轮工作用了 superpowers、`grill me` 或其他任何技能，它们产出的计划、设计说明和审查记录都一律写进项目自己的目录：
+
+- 实施计划、整改计划 → `plans/`
+- 设计说明、规格 → `docs/specs/`
+
+**不得**新建 `docs/superpowers/`、`superpowers/` 或任何以技能名命名的目录来存放这些文档。技能只是产出文档的工作方式，不是项目结构的一部分——从最终的目录树上不应该看得出用过哪个技能。
+
+例外只有一个：`.superpowers/`（带前导点）是技能自己的临时工作区（SDD 账本等），已被 `.gitignore` 忽略，从不进入仓库，不受本规则约束。
+
+2026-08-10 已按本规则把原 `docs/superpowers/plans/`（10 份）与 `docs/superpowers/specs/`（13 份）迁至上述位置，`docs/superpowers/` 已删除。
 
 ---
 
@@ -409,6 +445,7 @@ merchant_assistant/
 ├── docker-compose.yml
 ├── frontend/
 │   ├── Dockerfile
+│   ├── railway.json
 │   ├── package.json
 │   ├── package-lock.json
 │   ├── vite.config.ts
@@ -429,6 +466,7 @@ merchant_assistant/
 │       └── assets/
 ├── backend/
 │   ├── Dockerfile
+│   ├── railway.json
 │   ├── pyproject.toml
 │   ├── uv.lock
 │   ├── alembic.ini
@@ -460,15 +498,11 @@ merchant_assistant/
 │   ├── database.md
 │   ├── api.md
 │   ├── metrics.md
-│   └── deploy-railway.md
+│   └── deployment.md
 ├── plans/                       # 当前为空，供后续整改计划使用
 ├── scripts/
 │   ├── seed_demo_data.py
 │   └── import_legacy_wiki.py
-└── railway/
-    ├── frontend.json
-    ├── backend.json
-    └── worker.json
 ```
 
 ---
@@ -511,7 +545,7 @@ merchant_assistant/
 | `frontend/src/components/insights/MetricChartPanel.vue` | 折线图、柱状图和饼图 |
 | `frontend/src/components/insights/RecommendationPanel.vue` | 经营建议和行动项 |
 | `frontend/src/components/insights/DetailTable.vue` | 明细表、分页、截断说明和 CSV 下载 |
-| `frontend/src/components/insights/QualityTrace.vue` | Reviewer 状态和降级信息 |
+| `frontend/src/components/chat/ChatMessage.vue` | 消息正文、质量轨迹与回答反馈；质量轨迹不另建独立组件 |
 
 ### 7.5 状态、API 与类型
 
@@ -522,6 +556,8 @@ merchant_assistant/
 | `frontend/src/stores/knowledge.ts` | 知识库目录和编辑状态 |
 | `frontend/src/api/client.ts` | API 基础地址的唯一读取点 [P0/F0]；HTTP 客户端、鉴权和统一错误处理 [F3]。**不提供同源 `/api` 回退**——静态镜像不代理 `/api`，配置缺失必须报错而非静默 404 |
 | `frontend/scripts/check-generated.mjs` | `generated.ts` 漂移检查：重新生成到临时文件并与提交版本比对。构建期不跑 codegen，全靠它兜住脱节 |
+| `frontend/scripts/check-first-paint.mjs` | 生产构建的首屏静态依赖门禁：阻止 ECharts 被预加载或经入口静态 import 链带入首屏 |
+| `frontend/scripts/check-no-secrets.mjs` | 递归扫描 `dist/` 的 JS、CSS、HTML、JSON 与 source map，阻止密钥形态字符串进入构建产物 |
 | `frontend/src/api/sse.ts` | `fetch` + `ReadableStream` 的 SSE 解析器（不使用 `EventSource`） |
 | `frontend/src/api/chat.ts` | 聊天、反馈、日报和导出接口 |
 | `frontend/src/api/attachments.ts` | 附件上传和解析状态接口 |
@@ -738,7 +774,7 @@ GET    /api/admin/ops/status
 ```
 
 - `/api/metrics/{code}` 的路径参数是 `metric_code`，不是中文指标名；
-- `/api/demo/merchants` 仅用于演示环境，必须可通过配置关闭，生产环境禁用；
+- `/api/demo/merchants` 仅用于演示环境，默认可通过配置关闭且在生产环境关闭；只有对外演示部署显式设置 `DEMO_DEPLOYMENT_MODE=true` 时才可在生产环境开放；
 - `/api/ready` 可选，只在需要数据库 readiness 探针时提供；`/api/health` 不查库、不调 LLM；
 - `/api/admin/ops/status` 需要 `ADMIN_TOKEN`，返回预算余量、限流命中和降级计数，**禁止返回 Token、Prompt、商家经营数据或完整请求正文**。
 
@@ -965,7 +1001,7 @@ docker compose up --build
 详细步骤写入：
 
 ```text
-docs/deploy-railway.md
+docs/deployment.md
 ```
 
 ---
@@ -986,7 +1022,7 @@ docs/deploy-railway.md
 | 修改附件处理 | `attachment_service.py`、附件 API 和 `ChatComposer.vue` |
 | 修改知识库 | `knowledge_service.py`、知识 API 和 `KnowledgeBaseView.vue` |
 | 修改数据库表 | ORM Model、Alembic Migration、Repository 和 `docs/database.md` |
-| 修改部署 | Dockerfile、Railway 配置和 `docs/deploy-railway.md` |
+| 修改部署 | Dockerfile、Railway 配置和 `docs/deployment.md` |
 
 ---
 

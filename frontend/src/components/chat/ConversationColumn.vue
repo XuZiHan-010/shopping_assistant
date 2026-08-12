@@ -2,7 +2,7 @@
 import { Sparkles } from '@lucide/vue'
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 
-import { MOCK_QUICK_QUESTIONS } from '@/api/mock/scenarios'
+import { QUICK_QUESTIONS } from '@/constants/quickQuestions'
 import { useChatStore } from '@/stores/chat'
 
 import ChatComposer from './ChatComposer.vue'
@@ -67,11 +67,24 @@ function showRetryNotice(text = '上一轮回答仍在处理中，请稍候再�
   }, 3000)
 }
 
-async function ask(text: string): Promise<void> {
+/**
+ * 返回值同时承担两件事（F3 Task 6 前只用于 `@click` 的快速提问，不关心返回值）：
+ * - 传给 `ChatComposer` 的 `onSubmit`：resolve 为 `false` 时它不会清空输入区。
+ * - 目前唯一会返回 `false` 的情形是这一轮以 401（`AUTH_REQUIRED`）收场——
+ *   `AssistantView` 已经据此弹出商家切换器要求重新选择身份，用户没理由把刚
+ *   写完的问题跟着丢掉。其余错误（网络错误、限流……）仍然清空，维持原有行为。
+ */
+async function ask(text: string): Promise<boolean> {
   // submitMessage 在上一轮还在途时返回 false。和重试一样，被拒必须让用户看到，
   // 否则点了没反应像是界面卡死。
   const started = await chatStore.submitMessage(text)
-  if (!started && text.trim()) showRetryNotice()
+  if (!started) {
+    if (text.trim()) showRetryNotice()
+    return true
+  }
+
+  const assistant = chatStore.messages.at(-1)
+  return assistant?.error?.code !== 'AUTH_REQUIRED'
 }
 
 async function retry(localId: string): Promise<void> {
@@ -112,7 +125,7 @@ onUnmounted(() => clearTimeout(retryNoticeTimer))
         <span class="empty-card__eyebrow">快速体验</span>
         <strong>点一个问题，看看助手能做什么</strong>
         <ul class="quick-questions">
-          <li v-for="item in MOCK_QUICK_QUESTIONS" :key="item.question">
+          <li v-for="item in QUICK_QUESTIONS" :key="item.question">
             <!-- data-question 让测试拿到「问题本身」，不用从含分类眉标的按钮全文里剥。 -->
             <button
               type="button"
@@ -136,13 +149,14 @@ onUnmounted(() => clearTimeout(retryNoticeTimer))
           @retry="retry"
           @cancel="chatStore.cancelMessage"
           @select="chatStore.selectRound"
+          @feedback="chatStore.sendFeedback"
         />
       </template>
     </div>
     <p v-if="retryNotice" class="retry-notice" role="status" aria-live="polite">
       {{ retryNotice }}
     </p>
-    <ChatComposer :busy="chatStore.isBusy" @submit="ask" />
+    <ChatComposer :busy="chatStore.isBusy" :on-submit="ask" />
   </main>
 </template>
 

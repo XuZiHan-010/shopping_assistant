@@ -92,6 +92,7 @@ test('输入提示和侧栏说明文字达到 WCAG AA 对比度', async ({ page 
     )
     .evaluateAll((items) => items.map((item) => getComputedStyle(item).color))
 
-  expect(colors).toHaveLength(7)
+  // 该选择器包含一个 footnote 容器和两个空态面板各自的标题、说明，共 5 项。
+  expect(colors).toHaveLength(5)
   for (const color of colors) expect(contrastAgainstWhite(color)).toBeGreaterThanOrEqual(4.5)
 })

@@ -14,8 +14,16 @@ class LlmUnavailableError(RuntimeError):
     """密钥或适配器不可用，调用方应使用 fallback。"""
 
 
-class LlmBudgetExceededError(RuntimeError):
+class LlmBudgetError(RuntimeError):
+    """所有 LLM 预算耗尽异常的基类。"""
+
+
+class LlmBudgetExceededError(LlmBudgetError):
     """单请求的模型调用次数或 token 已超过上限。"""
+
+
+class LlmDailyBudgetExceededError(LlmBudgetError):
+    """每日全局 LLM 费用预算已耗尽。"""
 
 
 @dataclass

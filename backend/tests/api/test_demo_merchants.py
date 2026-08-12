@@ -4,7 +4,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.api.dependencies import get_merchant_repository
-from app.core.config import Settings
+from app.core.config import AppEnvironment, Settings
 from app.main import create_app
 from app.repositories.merchant import MerchantSummary
 
@@ -23,13 +23,20 @@ class FakeMerchantRepository:
         ]
 
 
-def demo_settings(*, enabled: bool) -> Settings:
+def demo_settings(
+    *,
+    enabled: bool,
+    app_env: AppEnvironment = AppEnvironment.TEST,
+    demo_deployment_mode: bool = False,
+) -> Settings:
     return Settings(
-        app_env="test",
+        app_env=app_env,
         database_url="postgresql+psycopg://user:pass@localhost/test",
         frontend_origin="http://localhost:5173",
         demo_merchant_tokens={"merchant-one-token": MERCHANT_ONE_ID},
         demo_merchants_endpoint_enabled=enabled,
+        demo_deployment_mode=demo_deployment_mode,
+        export_signing_secret="a-secure-export-signing-secret",
     )
 
 
@@ -68,4 +75,45 @@ async def test_demo_endpoint_is_hidden_when_disabled() -> None:
 
     assert response.status_code == 404
     assert response.json()["code"] == "NOT_FOUND"
+    await app.state.database.dispose()
+
+
+@pytest.mark.asyncio
+async def test_production_demo_endpoint_is_unavailable_without_deployment_mode() -> None:
+    app = create_app(demo_settings(enabled=True, app_env=AppEnvironment.PRODUCTION))
+    app.dependency_overrides[get_merchant_repository] = FakeMerchantRepository
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        response = await client.get("/api/demo/merchants")
+
+    assert response.status_code == 404
+    await app.state.database.dispose()
+
+
+@pytest.mark.asyncio
+async def test_production_demo_endpoint_returns_configured_merchants_in_deployment_mode() -> None:
+    app = create_app(
+        demo_settings(
+            enabled=False,
+            app_env=AppEnvironment.PRODUCTION,
+            demo_deployment_mode=True,
+        )
+    )
+    app.dependency_overrides[get_merchant_repository] = FakeMerchantRepository
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        response = await client.get("/api/demo/merchants")
+
+    assert response.status_code == 200
+    assert response.json()["merchants"] == [
+        {
+            "merchant_id": str(MERCHANT_ONE_ID),
+            "display_name": "Borough商家100",
+            "token": "merchant-one-token",
+        }
+    ]
     await app.state.database.dispose()

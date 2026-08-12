@@ -119,6 +119,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/exports/{export_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download Export */
+        get: operations["download_export_api_exports__export_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/answers/{answer_id}/feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Save Feedback */
+        post: operations["save_feedback_api_answers__answer_id__feedback_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/metrics/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Metric Definition
+         * @description 返回正式指标口径。指标目录对所有商家一致，因此不按商家过滤。
+         */
+        get: operations["get_metric_definition_api_metrics__code__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -317,7 +371,7 @@ export interface components {
          *     后续阶段（B3 起的意图、查询、限流、附件等）按需扩充。
          * @enum {string}
          */
-        ErrorCode: "AUTH_REQUIRED" | "MERCHANT_SCOPE_VIOLATION" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "INVALID_REQUEST" | "IDEMPOTENCY_KEY_REUSED" | "REQUEST_IN_PROGRESS" | "DATA_SOURCE_UNAVAILABLE" | "HTTP_ERROR" | "INTERNAL_ERROR";
+        ErrorCode: "AUTH_REQUIRED" | "MERCHANT_SCOPE_VIOLATION" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "INVALID_REQUEST" | "IDEMPOTENCY_KEY_REUSED" | "REQUEST_IN_PROGRESS" | "DATA_SOURCE_UNAVAILABLE" | "EXPORT_LINK_EXPIRED" | "RATE_LIMITED" | "LLM_BUDGET_EXCEEDED" | "FORBIDDEN" | "HTTP_ERROR" | "INTERNAL_ERROR";
         /**
          * ErrorResponse
          * @description 对外稳定错误契约。
@@ -353,12 +407,53 @@ export interface components {
              */
             expires_at: string;
         };
+        /**
+         * FeedbackReaction
+         * @enum {string}
+         */
+        FeedbackReaction: "LIKE" | "DISLIKE";
+        /** FeedbackRequest */
+        FeedbackRequest: {
+            /**
+             * Is Adopted
+             * @default false
+             */
+            is_adopted: boolean;
+            reaction?: components["schemas"]["FeedbackReaction"] | null;
+        };
+        /** FeedbackResponse */
+        FeedbackResponse: {
+            /**
+             * Answer Id
+             * Format: uuid
+             */
+            answer_id: string;
+            /** Is Adopted */
+            is_adopted: boolean;
+            reaction: components["schemas"]["FeedbackReaction"] | null;
+        };
         /** HealthResponse */
         HealthResponse: {
             /** Status */
             status: string;
             /** Version */
             version: string;
+        };
+        /** MetricDefinitionResponse */
+        MetricDefinitionResponse: {
+            /** Metric Code */
+            metric_code: string;
+            /** Display Name */
+            display_name: string;
+            /** Unit */
+            unit: string;
+            /** Definition */
+            definition: string;
+            /** Source */
+            source: string;
+            /** Owner */
+            owner: string;
+            status: components["schemas"]["MetricStatus"];
         };
         /**
          * MetricStatus
@@ -552,7 +647,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description 越权访问其他商家资源 */
+            /** @description 无权访问该资源或管理端点 */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -572,6 +667,24 @@ export interface operations {
             };
             /** @description 请求参数不合法 */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求过于频繁 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 依赖服务暂时不可用 */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -651,7 +764,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description 越权访问其他商家资源 */
+            /** @description 无权访问该资源或管理端点 */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -707,8 +820,181 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description 越权访问其他商家资源 */
+            /** @description 无权访问该资源或管理端点 */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    download_export_api_exports__export_id__get: {
+        parameters: {
+            query: {
+                merchant_id: string;
+                expires_at: number;
+                signature: string;
+            };
+            header?: never;
+            path: {
+                export_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description 无权访问该资源或管理端点 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 导出链接已过期 */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    save_feedback_api_answers__answer_id__feedback_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                answer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeedbackRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackResponse"];
+                };
+            };
+            /** @description 缺少或提供了无效的商家凭证 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权访问该资源或管理端点 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_metric_definition_api_metrics__code__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetricDefinitionResponse"];
+                };
+            };
+            /** @description 缺少或提供了无效的商家凭证 */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };

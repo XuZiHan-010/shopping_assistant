@@ -1,14 +1,19 @@
 {
   "analysis_sources": [
-    "FALLBACK"
+    "DATABASE"
   ],
-  "answer": "已识别指标和查询范围；经营数据查询将在 B4 接入。",
+  "answer": "已完成本次受控数据查询。",
   "answer_mode": "METRIC",
   "category": "REFUND",
   "created_at": "2026-07-28T12:00:00Z",
-  "data_rows": [],
-  "degraded": true,
-  "degraded_reason": "经营数据安全查询将在 B4 接入",
+  "data_rows": [
+    {
+      "date": "2026-08-03",
+      "return_count": 186
+    }
+  ],
+  "degraded": false,
+  "degraded_reason": null,
   "export": null,
   "id": "71967237-7202-5f6c-bd1d-412ddcc6ac2a",
   "metric_code": "return_count",
@@ -20,23 +25,22 @@
   "metric_unit": "件",
   "quality_attempts": 0,
   "quality_notes": [
-    "未命中与当前问题相关的知识资料",
-    "当前未执行经营数据查询。"
+    "未命中与当前问题相关的知识资料"
   ],
-  "quality_status": "DEGRADED",
+  "quality_status": "NOT_RUN",
   "query_plan": {
-    "summary": "已校验结构化查询意图，尚未执行数据查询。"
+    "summary": "按商家范围检索退货量；时间范围 2026-07-29 至 2026-08-04；数据来源：退货"
   },
   "recommendations": [
     {
-      "action": "B4 接入受控查询后展示经营结果。",
-      "evidence": "B3 已完成结构化意图校验，尚未执行经营数据查询。",
-      "title": "等待数据查询接入"
+      "action": "结合业务背景确认筛选条件。",
+      "evidence": "结果来自已校验的商家范围。",
+      "title": "核对查询范围"
     },
     {
-      "action": "确认日期范围和维度后再查询。",
-      "evidence": "已识别指标代码：return_count。",
-      "title": "核对指标口径"
+      "action": "缩小日期范围后再次查看。",
+      "evidence": "当前结果可用于后续核对。",
+      "title": "持续跟进变化"
     }
   ],
   "session_id": "bebf17f9-0413-59d6-9d5d-6e9e28f55156",
@@ -106,16 +110,23 @@
       "node": "persist_answer"
     }
   ],
-  "total_rows": 0,
+  "total_rows": 1,
   "truncated": false,
   "visualization": {
-    "allowed_types": [],
-    "data": [],
-    "dimension_key": null,
-    "enabled": false,
-    "metric_key": null,
-    "title": null,
-    "type": null,
-    "unit": null
+    "allowed_types": [
+      "LINE"
+    ],
+    "data": [
+      {
+        "date": "2026-08-03",
+        "return_count": 186
+      }
+    ],
+    "dimension_key": "date",
+    "enabled": true,
+    "metric_key": "return_count",
+    "title": "退货量趋势",
+    "type": "LINE",
+    "unit": "件"
   }
 }

@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.12、FastAPI、SQLAlchemy 2.0（async）、Alembic、Pydantic v2、LangGraph、httpx、pytest、Ruff、mypy。
 
-**设计说明：** `docs/superpowers/specs/2026-08-04-backend-b3-design.md`。本计划的每个决策都以该 spec 为准，冲突时以 spec 为准并回写本文件。
+**设计说明：** `docs/specs/2026-08-04-backend-b3-design.md`。本计划的每个决策都以该 spec 为准，冲突时以 spec 为准并回写本文件。
 
 ## Global Constraints
 

@@ -1,8 +1,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { listConversations, listDemoMerchants, submitChat } from './chat'
+import { AppError } from './errors'
+import { listConversations, listDemoMerchants, submitChat, submitFeedback } from './chat'
 import { createMockTransport } from './mock/transport'
-import { setChatTransport } from './transport'
+import { setChatTransport, type TransportRequest } from './transport'
+
+/** 构造一段直接封装好的 SSE 响应，绕开 mock 的 fixture 匹配逻辑，模拟任意事件序列。 */
+function sseResponseOf(text: string): Response {
+  return new Response(new TextEncoder().encode(text), {
+    status: 200,
+    headers: { 'content-type': 'text/event-stream; charset=utf-8' },
+  })
+}
 
 setChatTransport(createMockTransport({ chunkSizes: [3], stepDelayMs: 0 }))
 
@@ -24,7 +33,7 @@ describe('submitChat', () => {
     expect(onStep.mock.calls[0][0]).toHaveProperty('label')
     expect(answer.mode).toBe('METRIC')
     expect(answer.metric?.displayName).toBeTruthy()
-    expect(answer.answer).toContain('B4')
+    expect(answer.answer).toContain('受控数据查询')
   })
 
   it('请求体携带 client_request_id 且不含 merchant_id', async () => {
@@ -42,6 +51,43 @@ describe('submitChat', () => {
 
     expect(seen[0]).toMatchObject({ message: '你好', client_request_id: 'c2' })
     expect(JSON.stringify(seen[0])).not.toContain('merchant_id')
+  })
+})
+
+describe('submitChat · 流内错误', () => {
+  it('流内 error 事件保留后端错误码，不退化成通用消息', async () => {
+    const payload = {
+      code: 'LLM_BUDGET_EXCEEDED',
+      message: '本月 LLM 预算已用尽',
+      request_id: 'req-budget-1',
+      retryable: false,
+    }
+    setChatTransport(async () =>
+      sseResponseOf(`event: error\ndata: ${JSON.stringify(payload)}\n\n`),
+    )
+
+    await expect(
+      submitChat(
+        { message: '昨天总 GMV 是多少？', clientRequestId: 'c-err' },
+        { onStep: () => {} },
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({
+      code: 'LLM_BUDGET_EXCEEDED',
+      requestId: 'req-budget-1',
+    })
+  })
+
+  it('流无 done 也无 error 时标记为可重试', async () => {
+    setChatTransport(async () => sseResponseOf('event: step\ndata: {"label":"x","node":"y"}\n\n'))
+
+    await expect(
+      submitChat(
+        { message: '昨天总 GMV 是多少？', clientRequestId: 'c-interrupt' },
+        { onStep: () => {} },
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({ code: 'STREAM_INTERRUPTED', retryable: true })
   })
 })
 
@@ -66,5 +112,57 @@ describe('会话与商家端点', () => {
       merchantId: 'merchant-100',
       displayName: 'Borough商家100',
     })
+  })
+
+  it('demo/merchants 不带 Authorization', async () => {
+    const seen: TransportRequest[] = []
+    setChatTransport(async (request, signal) => {
+      seen.push(request)
+      return createMockTransport({ chunkSizes: [8], stepDelayMs: 0 })(request, signal)
+    })
+
+    await listDemoMerchants(new AbortController().signal)
+
+    expect(seen[0]).toMatchObject({ path: '/api/demo/merchants', auth: 'none' })
+  })
+})
+
+describe('回答反馈端点', () => {
+  it('向回答反馈路径提交带商家身份的完整状态并返回领域模型', async () => {
+    const seen: TransportRequest[] = []
+    setChatTransport(async (request) => {
+      seen.push(request)
+      return Response.json({ answer_id: 'answer-1', is_adopted: true, reaction: null })
+    })
+
+    const state = await submitFeedback(
+      'answer-1',
+      { isAdopted: true, reaction: null },
+      new AbortController().signal,
+    )
+
+    expect(seen).toEqual([
+      {
+        path: '/api/answers/answer-1/feedback',
+        method: 'POST',
+        auth: 'merchant',
+        body: { is_adopted: true, reaction: null },
+      },
+    ])
+    expect(state).toEqual({ isAdopted: true, reaction: null })
+  })
+
+  it('不吞掉 transport 返回的 AppError', async () => {
+    setChatTransport(async () => {
+      throw new AppError('NETWORK', '网络不可用', { retryable: true })
+    })
+
+    await expect(
+      submitFeedback(
+        'answer-1',
+        { isAdopted: false, reaction: 'LIKE' },
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({ code: 'NETWORK', retryable: true })
   })
 })

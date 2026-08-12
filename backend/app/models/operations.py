@@ -2,11 +2,21 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Date, ForeignKey, Index, Integer, String, text
+from sqlalchemy import (
+    BigInteger,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -69,3 +79,42 @@ class LlmUsage(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
         server_default=text("0"),
     )
     status: Mapped[str] = mapped_column(String(32), nullable=False)
+
+
+class LlmDailyBudget(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
+    """每日全局 LLM 预算；原子更新而非先查询再判断。"""
+
+    __tablename__ = "llm_daily_budget"
+    __table_args__ = (UniqueConstraint("usage_date", name="uq_llm_daily_budget_usage_date"),)
+
+    usage_date: Mapped[date] = mapped_column(Date, nullable=False)
+    consumed_tokens: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("0")
+    )
+    call_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+        onupdate=text("now()"),
+    )
+
+
+class ExportFile(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
+    """动态 CSV 的受控重放规格；不保存导出文件本身。"""
+
+    __tablename__ = "export_files"
+    __table_args__ = (Index("ix_export_files_merchant_expires", "merchant_id", "expires_at"),)
+
+    merchant_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("merchants.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    answer_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("answers.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    export_spec: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

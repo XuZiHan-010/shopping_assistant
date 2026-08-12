@@ -15,7 +15,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { components } from '@/api/generated'
 
-import { ChatContractError, toChatAnswer } from './chat'
+import { ChatContractError, toChatAnswer, toFeedbackRequestPayload, toFeedbackState } from './chat'
 
 type RawChatResponse = components['schemas']['ChatResponse']
 
@@ -34,7 +34,8 @@ describe('toChatAnswer · 真实载荷', () => {
     expect(answer.sessionId).toBe(refund.session_id)
     expect(answer.mode).toBe('METRIC')
     expect(answer.category).toBe('REFUND')
-    expect(answer.answer).toContain('B4')
+    expect(answer.answer).toContain('受控数据查询')
+    expect(answer.contractWarnings).toEqual([])
   })
 
   it('METRIC 的指标口径八字段完整映射', () => {
@@ -51,47 +52,50 @@ describe('toChatAnswer · 真实载荷', () => {
     })
   })
 
-  it('B3 的 METRIC 明确返回未查询的受控空结果', () => {
+  it('B5 的 METRIC 返回可渲染的受控图表数据', () => {
     const answer = toChatAnswer(gmv)
 
-    expect(answer.data?.rows).toHaveLength(0)
-    expect(answer.data?.totalRows).toBe(0)
+    expect(answer.data?.rows).toHaveLength(1)
+    expect(answer.data?.totalRows).toBe(1)
     expect(answer.data?.truncated).toBe(false)
     expect(answer.data?.queryPlan).toBeTruthy()
-    expect(answer.chart?.enabled).toBe(false)
-    expect(answer.chart?.data).toHaveLength(0)
+    expect(answer.chart?.enabled).toBe(true)
+    expect(answer.chart?.data).toHaveLength(1)
+    expect(answer.chart?.dimensionKey).toBe('date')
+    expect(answer.chart?.metricKey).toBe('gmv')
   })
 
   it('订单明细场景保留截断信息', () => {
     const answer = toChatAnswer(orderDetail)
 
     expect(answer.mode).toBe('DETAIL')
-    expect(answer.data?.totalRows).toBe(0)
+    expect(answer.data?.totalRows).toBe(2)
     expect(answer.data?.truncated).toBe(false)
-    expect(answer.data?.rows).toHaveLength(0)
+    expect(answer.data?.rows).toHaveLength(2)
     expect(answer.export).toBeDefined()
   })
 
   it('建议逐条映射，保留 evidence 与 action', () => {
-    const recommendations = toChatAnswer(refund).recommendations
+    const recommendations = toChatAnswer(gmv).recommendations
 
     expect(recommendations).toHaveLength(2)
     expect(recommendations[0]).toMatchObject({
       title: expect.any(String),
-      evidence: expect.stringContaining('B3'),
-      action: expect.stringContaining('B4'),
+      evidence: '结果来自已校验的商家范围。',
+      action: '结合业务背景确认筛选条件。',
     })
   })
 
-  it('降级信息进入质量轨迹', () => {
-    const quality = toChatAnswer(refund).quality
+  it('质量轨迹字段完整映射', () => {
+    const quality = toChatAnswer(gmv).quality
 
-    expect(quality.degraded).toBe(true)
-    expect(quality.degradedReason).toBe('经营数据安全查询将在 B4 接入')
-    expect(quality.sources).toEqual(['FALLBACK'])
-    expect(quality.status).toBe('DEGRADED')
+    expect(quality.degraded).toBe(false)
+    expect(quality.degradedReason).toBeUndefined()
+    expect(quality.sources).toEqual(['DATABASE'])
+    expect(quality.status).toBe('NOT_RUN')
     expect(quality.attempts).toBe(0)
-    expect(quality.notes.length).toBeGreaterThan(0)
+    expect(quality.notes).toEqual(gmv.quality_notes ?? [])
+    expect(quality.notes).toEqual([])
   })
 
   it('猜你想问带当前组与备选组', () => {
@@ -191,20 +195,40 @@ describe('toChatAnswer · 语义守卫', () => {
   })
 
   it('含 FALLBACK 时必须降级', () => {
-    const bad = clone({ degraded: false, degraded_reason: null })
+    const bad = clone({
+      analysis_sources: ['FALLBACK'] as RawChatResponse['analysis_sources'],
+      degraded: false,
+      degraded_reason: null,
+    })
     expect(() => toChatAnswer(bad)).toThrow(/FALLBACK/)
   })
 
   it('降级必须给出原因', () => {
-    expect(() => toChatAnswer(clone({ degraded_reason: null }))).toThrow(ChatContractError)
+    const bad = clone({ degraded: true, degraded_reason: null })
+    expect(() => toChatAnswer(bad)).toThrow(ChatContractError)
   })
 
-  it('METRIC 缺指标字段时报错', () => {
-    expect(() => toChatAnswer(clone({ metric_owner: null }))).toThrow(/metric/i)
+  it('METRIC 缺按模式字段时降级而非抛异常', () => {
+    const raw = clone({ metric_owner: null })
+    const answer = toChatAnswer(raw)
+
+    expect(answer.metric).toBeUndefined()
+    expect(answer.contractWarnings).toHaveLength(1)
+    expect(answer.contractWarnings[0]).toContain('metric_owner')
+    expect(answer.answer.length).toBeGreaterThan(0) // 正文照常可读
   })
 
-  it('METRIC 缺图表时报错', () => {
-    expect(() => toChatAnswer(clone({ visualization: null }))).toThrow(ChatContractError)
+  it('METRIC 缺图表时降级而非抛异常', () => {
+    const raw = clone({ visualization: null })
+    const answer = toChatAnswer(raw)
+
+    expect(answer.chart).toBeUndefined()
+    expect(answer.contractWarnings).toEqual(['METRIC 回答缺少 visualization，图表面板将显示空状态'])
+  })
+
+  it('语义不变量违反时仍然抛 CONTRACT', () => {
+    const raw = clone({ degraded: true, degraded_reason: null })
+    expect(() => toChatAnswer(raw)).toThrow(expect.objectContaining({ code: 'CONTRACT' }))
   })
 
   it('quality_attempts 超出 0–2 时报错', () => {
@@ -219,5 +243,33 @@ describe('toChatAnswer · 语义守卫', () => {
     } catch (error) {
       expect((error as Error).message).toMatch(/[一-龥]/)
     }
+  })
+})
+
+describe('反馈契约转换', () => {
+  it('请求把完整 camelCase 状态转换为 snake_case，且保留 null reaction', () => {
+    expect(toFeedbackRequestPayload({ isAdopted: true, reaction: null })).toEqual({
+      is_adopted: true,
+      reaction: null,
+    })
+  })
+
+  it('响应转换为领域状态', () => {
+    expect(
+      toFeedbackState({ answer_id: 'answer-1', is_adopted: false, reaction: 'DISLIKE' }),
+    ).toEqual({ isAdopted: false, reaction: 'DISLIKE' })
+  })
+
+  it.each(['LIKE', 'DISLIKE'] as const)('%s 状态双向转换保持一致', (reaction) => {
+    const state = { isAdopted: true, reaction }
+    const request = toFeedbackRequestPayload(state)
+
+    expect(
+      toFeedbackState({
+        answer_id: 'answer-1',
+        is_adopted: request.is_adopted,
+        reaction: request.reaction ?? null,
+      }),
+    ).toEqual(state)
   })
 })

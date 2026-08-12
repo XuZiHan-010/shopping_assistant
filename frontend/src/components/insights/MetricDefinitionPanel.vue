@@ -7,6 +7,7 @@ import type { ChatAnswer } from '@/types/chat'
 const props = defineProps<{ answer?: ChatAnswer }>()
 
 const metric = computed(() => props.answer?.metric)
+const queryPlan = computed(() => props.answer?.data?.queryPlan)
 const isUnverified = computed(() => metric.value?.status === 'UNVERIFIED')
 
 const statusLabel = computed(() => {
@@ -65,6 +66,11 @@ const statusLabel = computed(() => {
           <dd>{{ statusLabel }}</dd>
         </div>
       </dl>
+
+      <div v-if="queryPlan" class="metric-panel__query-plan" data-testid="query-plan-summary">
+        <span>查询计划摘要</span>
+        <p>{{ queryPlan }}</p>
+      </div>
     </div>
 
     <div v-else class="metric-panel__empty" data-testid="metric-empty">
@@ -144,6 +150,21 @@ const statusLabel = computed(() => {
   color: var(--color-text-secondary);
   font-size: var(--font-size-body);
   line-height: var(--line-height-body);
+}
+
+.metric-panel__query-plan {
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+  line-height: var(--line-height-body);
+}
+
+.metric-panel__query-plan span {
+  font-weight: var(--font-weight-emphasis);
+}
+.metric-panel__query-plan p {
+  margin: var(--space-1) 0 0;
 }
 
 .metric-panel__empty {

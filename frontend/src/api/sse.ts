@@ -10,6 +10,8 @@
 import type { components } from '@/api/generated'
 import type { ThinkingStep } from '@/types/chat'
 
+import { AppError } from './errors'
+
 type RawChatResponse = components['schemas']['ChatResponse']
 type RawErrorResponse = components['schemas']['ErrorResponse']
 
@@ -23,10 +25,13 @@ export type ChatStreamEvent =
   | { type: 'done'; raw: RawChatResponse }
   | { type: 'error'; error: RawErrorResponse }
 
-/** 流既没有 done 也没有 error 就结束了。消息必须落到 error，不能永久 streaming。 */
-export class ChatStreamInterruptedError extends Error {
+/**
+ * 流既没有 done 也没有 error 就结束了。消息必须落到 error，不能永久 streaming。
+ * 是 `AppError` 的 `STREAM_INTERRUPTED` 特化，值得让用户重试。
+ */
+export class ChatStreamInterruptedError extends AppError {
   constructor() {
-    super('回答流意外中断，请重试。')
+    super('STREAM_INTERRUPTED', '回答流意外中断，请重试。', { retryable: true })
     this.name = 'ChatStreamInterruptedError'
   }
 }
