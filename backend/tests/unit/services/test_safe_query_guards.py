@@ -16,6 +16,7 @@ from sqlalchemy.exc import OperationalError, SQLAlchemyError
 
 from app.core.security import MerchantContext
 from app.intent.models import DateRange, QueryIntent
+from app.intent.whitelist import validate_intent
 from app.repositories.analytics import AggregateResult, AnalyticsRepository, DetailResult
 from app.schemas.chat import AnswerMode, QuestionCategory
 from app.services.safe_query import SafeQueryService, UnsupportedQueryError
@@ -167,6 +168,31 @@ async def test_detail_export_spec_keeps_the_verified_query_scope() -> None:
     assert result.export_spec.table == "orders"
     assert result.export_spec.filters == (("order_status", "PAID"),)
     assert result.export_spec.date_filtered is True
+
+
+@pytest.mark.asyncio
+async def test_invalid_cross_business_plan_runs_the_normal_detail_fallback() -> None:
+    repository = _RecordingRepository()
+    invalid = QueryIntent.model_validate(
+        {
+            "answer_mode": AnswerMode.DETAIL,
+            "category": QuestionCategory.TRADE,
+            "metric": None,
+            "dimensions": [],
+            "filters": {},
+            "date_range": {"start": DAY.isoformat(), "end": DAY.isoformat()},
+            "cross_business_plan": {"plan_type": "UNKNOWN", "sub_order_no": "NO-1"},
+        }
+    )
+    validated = validate_intent(invalid, today=DAY)
+
+    result = await _service(repository).execute(_context(), validated.intent, now=NOW)
+
+    assert validated.intent.answer_mode is AnswerMode.DETAIL
+    assert validated.intent.cross_business_plan is None
+    assert any("跨业务" in note for note in validated.adjusted)
+    assert repository.detail_calls, "非法计划必须实际执行普通明细查询"
+    assert result.source_tables == ("orders",)
 
 
 @pytest.mark.asyncio

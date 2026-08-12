@@ -60,19 +60,23 @@ Railway 控制台部署与线上验收、B8/B9、F7–F9 尚未完成。R9 阶�
 目录未命中时会直接掉到 LLM，把本可以确定性回答的口径交给模型编，与 PRD §10「不把生成口径
 标记为正式口径」的意图相悖。PRD §10 已补上三级来源表。
 
-### 3.3 跨业务查询计划完全缺失
+### 3.3 跨业务查询计划
+
+**状态：✅ 已修复（R9 Task 11，2026-08-12）。** `QueryIntent.cross_business_plan` 只允许
+`ORDER_TO_REFUND`、`ORDER_TO_GOODS`、`ORDER_REFUND_GOODS` 和受字符集、长度约束的
+`sub_order_no`。嵌套计划非法时，前置校验器清除计划、白名单层添加固定说明，基础意图保持有效；
+计划缺失正常走普通查询。执行层始终先以已验证 `merchant_id` 解析 `orders.order_no`，再按固定 ORM
+关联读取订单项、退款、商品。无法在当前商家范围解析订单时，不区分“不存在”和“属于其他商家”，而是回退
+普通商家明细并显示说明，从而不形成跨商家订单号探测通道。关联结果及 CSV 导出均重放同一受控计划。
 
 **参考**：`QuestionIntent.crossBusinessPlan` / `planType` / `extractedSubOrderId`，
 由 `SemanticLayerService` 的跨业务校验方法校验，白名单三种计划：
 `ORDER_TO_REFUND`、`ORDER_TO_GOODS`、`ORDER_REFUND_GOODS`。
 
-**我们**：`backend/app/intent/models.py` 的 `QueryIntent` 共 10 个字段，**没有任何一个能承载它**。
-grep `cross_business` / `plan_type` 在 `backend/app` 与 `frontend/src` 下零命中。
-
-这是一条完整的产品能力：用户拿着一个子订单号问「这笔订单退款了吗」「这笔订单买的什么商品」，
-参考项目会把它路由成受控的跨表计划；计划对象存在但缺少安全路由参数时，会拒绝该计划、保留基础
-意图并回退普通查询，同时留下可见语义说明。我们目前既不支持、PRD 里也没有对应条款——
-**这属于 PRD 漏写，按 R9 应当补写**。
+**我们**：已在 `backend/app/intent/models.py`、`app/services/safe_query.py` 和
+`app/repositories/analytics.py` 完成受控计划、商家范围解析、固定关联结果与降级说明；
+`ExportService` 会以保存的计划安全重放 CSV。单元与 PostgreSQL 集成测试覆盖三种计划、非法对象、
+跨商家订单、普通查询降级及导出重放。
 
 ### 3.4 「纯明细只出表格」的行为缺失
 
@@ -190,7 +194,7 @@ PRD §10 Metric Catalog 与 §6.2。
 | 能力 | 参考证据（均已只读核对） | 输入、校验、输出与失败语义 | 我方状态 |
 | --- | --- | --- | --- |
 | 纯明细 | `QuestionIntent`、`LlmIntentAnalysisService`、`SemanticLayerService`、`MerchantQaLangGraph` | 模型仅声明是否要求分析；`DETAIL` 且未要求分析时设 table-only；`repairAnswer()` 清空正文，`outputMatchesIntent()` 强制正文为空。 | ✅ `analysis_requested` 内部字段 + 响应空正文不变量、表格/导出保留、历史无空助手消息均已实现。 |
-| 跨业务计划 | `QuestionIntent`、`SemanticLayerService`、`DorisQueryService` | 仅 `ORDER_TO_REFUND`、`ORDER_TO_GOODS`、`ORDER_REFUND_GOODS`；以商家范围和子订单号串行查订单、退款、商品；计划参数非法时移除该计划并记录说明，基础意图继续执行。无订单/无关联记录返回明确 notice。 | 🔴 缺结构化计划、受控路由与可见回退说明。 |
+| 跨业务计划 | `QuestionIntent`、`SemanticLayerService`、`DorisQueryService` | 仅 `ORDER_TO_REFUND`、`ORDER_TO_GOODS`、`ORDER_REFUND_GOODS`；以商家范围和子订单号串行查订单、退款、商品；计划参数非法时移除该计划并记录说明，基础意图继续执行。 | ✅ 已实现受控计划、固定 ORM 路由、商家范围解析、可见降级说明与 CSV 重放；不存在与跨商家订单统一回退，避免存在性探测。 |
 | 临时分组指标 | `QuestionIntent`、`LlmIntentAnalysisService`、`SemanticLayerService`、`DorisQueryService`、`MetricDefinitionService`、`VisualizationService`，以及 `DorisQueryServiceTest`、`LlmIntentAnalysisServiceTest`、`MetricDefinitionServiceTest`、`VisualizationServiceTest` | 白名单仅 `spu_id`、`address_city_name`；按交易/退款类别选择固定聚合；城市筛选可替代分组；金额由分转元；非法维度整体 `INVALID`；截断时生成 CSV 与提示；图表只取查询结果已有字段。 | 🔴 缺受控计划与重放型导出；不得引入自由公式、自由列名或 `measure` 枚举。 |
 | 会话上下文 | `ConversationContextStore`、`ConversationContextStoreTest`、`MerchantQaLangGraph` | 内存中按 `(merchant_id, session_id)` 隔离，TTL 30 分钟；复制意图、查询包、数据行、计划步骤和导出字段；只缓存有效且有数据的轮次；上文分析复用数据但不重新查库。 | ⚪ 我方持久会话优于内存 TTL；但历史详情必须脱敏返回执行载荷，不能返回完整明细行或过期签名 URL。 |
 | Reviewer 循环 | `PromptLoopAnalysisService`、`PromptLoopAnalysisServiceTest`、`MerchantQaLangGraph` | 本地校验与独立 reviewer 均通过才 PASS；最多 3 次总尝试后确定性 FALLBACK；loop notes 记录每轮退回原因；纯明细不允许被 loop 生成正文。 | ✅ 我方已有质量状态/次数/备注，R9 Task 8 已随脱敏历史助手载荷回放。 |

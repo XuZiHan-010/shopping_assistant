@@ -15,7 +15,7 @@ from datetime import date
 from typing import Any, Literal, cast
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, Select, func, select
+from sqlalchemy import ColumnElement, Select, and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analytics.contract import (
@@ -25,6 +25,7 @@ from app.analytics.contract import (
     UnknownFieldError,
     dimension_spec,
 )
+from app.intent.models import CrossBusinessPlan, CrossBusinessPlanType
 from app.models.analytics import Order, OrderItem, Product, Refund, ReturnRecord, SupportTicket
 
 # 值类型写成 type[Any]：这些 ORM 类各自的列集合不同，取公共父类会丢掉列信息；
@@ -241,6 +242,153 @@ class AnalyticsRepository:
             total_rows=total_rows,
             truncated=total_rows > len(rows),
             source_tables=(spec.table,),
+        )
+
+    async def resolve_cross_business_order(
+        self, *, merchant_id: UUID, sub_order_no: str
+    ) -> UUID | None:
+        """Only resolve an order within the verified merchant scope."""
+
+        return cast(
+            "UUID | None",
+            await self._session.scalar(
+                select(Order.id).where(
+                    Order.merchant_id == merchant_id,
+                    Order.order_no == sub_order_no,
+                )
+            ),
+        )
+
+    async def cross_business_detail(
+        self,
+        *,
+        merchant_id: UUID,
+        order_id: UUID,
+        plan: CrossBusinessPlan,
+        limit: int | None,
+    ) -> DetailResult:
+        """Execute a fixed, merchant-scoped order relation plan."""
+
+        order_columns: list[ColumnElement[Any]] = [
+            Order.order_no.label("order_no"),
+            Order.order_status.label("order_status"),
+            Order.paid_amount.label("paid_amount"),
+        ]
+        order_result_columns: tuple[ResultColumn, ...] = (
+            ResultColumn("order_no", "订单号", "DIMENSION"),
+            ResultColumn("order_status", "订单状态", "DIMENSION"),
+            ResultColumn("paid_amount", "实付金额", "METRIC"),
+        )
+        statement: Select[Any] = (
+            select(*order_columns)
+            .select_from(Order)
+            .join(
+                OrderItem,
+                and_(
+                    OrderItem.order_id == Order.id,
+                    OrderItem.merchant_id == merchant_id,
+                ),
+            )
+            .where(
+                Order.merchant_id == merchant_id,
+                Order.id == order_id,
+            )
+        )
+
+        if plan.plan_type is CrossBusinessPlanType.ORDER_TO_REFUND:
+            statement = statement.outerjoin(
+                Refund,
+                and_(
+                    Refund.order_item_id == OrderItem.id,
+                    Refund.merchant_id == merchant_id,
+                ),
+            ).add_columns(
+                Refund.refund_amount.label("refund_amount"),
+                Refund.refund_reason.label("refund_reason"),
+                Refund.refund_status.label("refund_status"),
+                Refund.refunded_at.label("refunded_at"),
+            )
+            columns = (
+                *order_result_columns,
+                ResultColumn("refund_amount", "退款金额", "METRIC"),
+                ResultColumn("refund_reason", "退款原因", "DIMENSION"),
+                ResultColumn("refund_status", "退款状态", "DIMENSION"),
+                ResultColumn("refunded_at", "退款时间", "DIMENSION"),
+            )
+            source_tables: tuple[str, ...] = ("orders", "order_items", "refunds")
+        else:
+            statement = statement.join(
+                Product,
+                and_(
+                    Product.id == OrderItem.product_id,
+                    Product.merchant_id == merchant_id,
+                ),
+            ).add_columns(
+                Product.product_code.label("product_code"),
+                Product.title.label("product_title"),
+                Product.category.label("product_category"),
+                OrderItem.quantity.label("quantity"),
+                OrderItem.item_amount.label("item_amount"),
+            )
+            product_columns = (
+                ResultColumn("product_code", "商品编码", "DIMENSION"),
+                ResultColumn("product_title", "商品名称", "DIMENSION"),
+                ResultColumn("product_category", "商品类目", "DIMENSION"),
+                ResultColumn("quantity", "购买数量", "METRIC"),
+                ResultColumn("item_amount", "商品金额", "METRIC"),
+            )
+            if plan.plan_type is CrossBusinessPlanType.ORDER_TO_GOODS:
+                columns = (*order_result_columns, *product_columns)
+                source_tables = ("orders", "order_items", "products")
+            else:
+                statement = statement.outerjoin(
+                    Refund,
+                    and_(
+                        Refund.order_item_id == OrderItem.id,
+                        Refund.merchant_id == merchant_id,
+                    ),
+                ).add_columns(
+                    Refund.refund_amount.label("refund_amount"),
+                    Refund.refund_reason.label("refund_reason"),
+                    Refund.refund_status.label("refund_status"),
+                    Refund.refunded_at.label("refunded_at"),
+                )
+                columns = (
+                    *order_result_columns,
+                    *product_columns,
+                    ResultColumn("refund_amount", "退款金额", "METRIC"),
+                    ResultColumn("refund_reason", "退款原因", "DIMENSION"),
+                    ResultColumn("refund_status", "退款状态", "DIMENSION"),
+                    ResultColumn("refunded_at", "退款时间", "DIMENSION"),
+                )
+                source_tables = ("orders", "order_items", "products", "refunds")
+
+        if limit is not None:
+            statement = statement.limit(limit)
+        result = await self._session.execute(statement.order_by(OrderItem.id))
+        rows = [dict(row) for row in result.mappings()]
+        return DetailResult(
+            columns=columns,
+            rows=rows,
+            total_rows=len(rows),
+            truncated=False,
+            source_tables=source_tables,
+        )
+
+    async def export_cross_business(
+        self, *, merchant_id: UUID, plan: CrossBusinessPlan
+    ) -> DetailResult:
+        order_id = await self.resolve_cross_business_order(
+            merchant_id=merchant_id,
+            sub_order_no=plan.sub_order_no,
+        )
+        if order_id is None:
+            return DetailResult((), [], 0, False, ())
+        return await self.cross_business_detail(
+            merchant_id=merchant_id,
+            order_id=order_id,
+            plan=plan,
+            limit=None,
         )
 
     async def export_detail(

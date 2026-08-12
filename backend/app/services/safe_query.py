@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Final
+from typing import Final, Literal
 
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -28,7 +28,7 @@ from app.analytics.contract import (
 )
 from app.analytics.dates import FutureRangeError, resolve_range
 from app.core.security import MerchantContext
-from app.intent.models import DateRange, QueryIntent
+from app.intent.models import CrossBusinessPlan, DateRange, QueryIntent
 from app.intent.whitelist import MAX_DETAIL_LIMIT
 from app.repositories.analytics import AnalyticsRepository, ResultColumn
 from app.schemas.chat import CATEGORY_DISPLAY_NAMES, AnswerMode
@@ -77,6 +77,8 @@ class ExportSpec:
     end: date
     filters: tuple[tuple[str, str], ...] = ()
     date_filtered: bool = True
+    kind: Literal["detail", "cross_business"] = "detail"
+    cross_business_plan: CrossBusinessPlan | None = None
 
 
 @dataclass(frozen=True)
@@ -118,11 +120,76 @@ class SafeQueryService:
 
         self._check_filter_values(intent.filters)
 
+        if intent.cross_business_plan is not None:
+            if intent.answer_mode is not AnswerMode.DETAIL:
+                raise UnsupportedQueryError("跨业务关联仅支持查看经营明细")
+            return await self._cross_business_detail(context, intent, date_range, notes, keywords)
         if intent.answer_mode is AnswerMode.DETAIL:
             return await self._detail(context, intent, date_range, notes, keywords)
         if intent.answer_mode is AnswerMode.METRIC:
             return await self._metric(context, intent, date_range, notes)
         raise UnsupportedQueryError(f"{intent.answer_mode.value} 模式不执行经营数据查询")
+
+    async def _cross_business_detail(
+        self,
+        context: MerchantContext,
+        intent: QueryIntent,
+        date_range: DateRange,
+        notes: tuple[str, ...],
+        keywords: Sequence[str],
+    ) -> QueryResult:
+        plan = intent.cross_business_plan
+        assert plan is not None
+        try:
+            order_id = await self._repository.resolve_cross_business_order(
+                merchant_id=context.merchant_id,
+                sub_order_no=plan.sub_order_no,
+            )
+        except SQLAlchemyError as error:
+            raise UnsupportedQueryError(_QUERY_FAILED_REASON) from error
+        if order_id is None:
+            fallback_notes = (
+                *notes,
+                "关联订单不存在或不在当前商家范围，已按普通明细查询",
+            )
+            fallback = intent.model_copy(update={"cross_business_plan": None})
+            return await self._detail(context, fallback, date_range, fallback_notes, keywords)
+
+        limit = min(max(intent.limit or MAX_DETAIL_LIMIT, 1), MAX_DETAIL_LIMIT)
+        try:
+            result = await self._repository.cross_business_detail(
+                merchant_id=context.merchant_id,
+                order_id=order_id,
+                plan=plan,
+                limit=limit,
+            )
+        except SQLAlchemyError as error:
+            raise UnsupportedQueryError(_QUERY_FAILED_REASON) from error
+        return QueryResult(
+            columns=result.columns,
+            rows=result.rows,
+            total_rows=result.total_rows,
+            truncated=result.truncated,
+            source_tables=result.source_tables,
+            plan_steps=self._plan_steps(
+                "关联订单明细",
+                result.source_tables,
+                date_range,
+                notes,
+                date_filtered=False,
+            ),
+            export_spec=ExportSpec(
+                table="cross_business",
+                columns=tuple(column.key for column in result.columns),
+                start=date_range.start,
+                end=date_range.end,
+                date_filtered=False,
+                kind="cross_business",
+                cross_business_plan=plan,
+            ),
+            notes=notes,
+            non_additive=False,
+        )
 
     async def _metric(
         self,

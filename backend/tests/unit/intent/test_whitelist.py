@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from app.intent.models import DateRange, QueryIntent
+from app.intent.models import CrossBusinessPlanType, DateRange, QueryIntent
 from app.intent.whitelist import MAX_DETAIL_LIMIT, MAX_QUERY_DAYS, validate_intent
 from app.schemas.chat import AnswerMode, QuestionCategory
 
@@ -54,6 +54,62 @@ def test_analysis_requested_defaults_to_true_for_existing_intent_payloads() -> N
     intent = _intent(answer_mode=AnswerMode.DETAIL, metric=None)
 
     assert intent.analysis_requested is True
+
+
+def test_valid_cross_business_plan_is_preserved() -> None:
+    result = validate_intent(
+        _intent(
+            answer_mode=AnswerMode.DETAIL,
+            metric=None,
+            cross_business_plan={
+                "plan_type": CrossBusinessPlanType.ORDER_REFUND_GOODS,
+                "sub_order_no": "NO-20260804-001",
+            },
+        ),
+        today=TODAY,
+    )
+
+    assert result.rejected == ()
+    assert result.adjusted == ()
+    assert result.intent.cross_business_plan is not None
+    assert result.intent.cross_business_plan.plan_type is CrossBusinessPlanType.ORDER_REFUND_GOODS
+
+
+def test_invalid_cross_business_plan_falls_back_without_invalidating_intent() -> None:
+    intent = _intent(
+        answer_mode=AnswerMode.DETAIL,
+        metric=None,
+        cross_business_plan={"plan_type": "ORDER_TO_UNKNOWN", "sub_order_no": "NO-1"},
+    )
+
+    result = validate_intent(intent, today=TODAY)
+
+    assert result.rejected == ()
+    assert result.intent.answer_mode is AnswerMode.DETAIL
+    assert result.intent.cross_business_plan is None
+    assert any("跨业务" in note and "拒绝" in note for note in result.adjusted)
+
+
+def test_missing_cross_business_order_no_falls_back_without_invalidating_intent() -> None:
+    intent = _intent(
+        answer_mode=AnswerMode.DETAIL,
+        metric=None,
+        cross_business_plan={"plan_type": "ORDER_TO_REFUND"},
+    )
+
+    result = validate_intent(intent, today=TODAY)
+
+    assert result.rejected == ()
+    assert result.intent.answer_mode is AnswerMode.DETAIL
+    assert result.intent.cross_business_plan is None
+    assert any("跨业务" in note and "拒绝" in note for note in result.adjusted)
+
+
+def test_cross_business_plan_is_optional_without_rejection_note() -> None:
+    result = validate_intent(_intent(answer_mode=AnswerMode.DETAIL, metric=None), today=TODAY)
+
+    assert result.intent.cross_business_plan is None
+    assert not any("跨业务" in note for note in result.adjusted)
 
 
 def test_sql_in_metric_is_rejected() -> None:

@@ -1,6 +1,6 @@
 # 跨业务关联查询还原实施计划
 
-> **状态：** 进行中  
+> **状态：** 已完成（2026-08-12）
 > **日期：** 2026-08-12  
 > **关联路线图：** `plans/2026-08-12-post-f6-execution-roadmap.md` Task 11
 
@@ -145,4 +145,3 @@ npm.cmd run mock:check
 ```
 
 上述验证仅使用 Fake LLM、静态 fixture 与本地 Docker PostgreSQL；不会调用 DeepSeek 或产生 token 费用。
-

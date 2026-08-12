@@ -7,7 +7,7 @@ import hmac
 import io
 from datetime import UTC, date, datetime, timedelta
 from hashlib import sha256
-from typing import Protocol
+from typing import Literal, Protocol, cast
 from urllib.parse import parse_qs, urlencode, urlparse
 from uuid import UUID
 
@@ -17,6 +17,7 @@ from app.core.errors import (
     MerchantScopeViolationError,
     ResourceNotFoundError,
 )
+from app.intent.models import CrossBusinessPlan
 from app.repositories.analytics import AnalyticsRepository, DetailResult
 from app.repositories.export import ExportRepository
 from app.schemas.chat import ExportInfo
@@ -93,19 +94,29 @@ class ExportService:
         if record.expires_at <= current:
             raise ExportLinkExpiredError
         spec = _deserialize_spec(record.export_spec)
-        try:
-            registered = detail_spec(spec.table)
-        except UnknownFieldError as exc:
-            raise ResourceNotFoundError("导出文件") from exc
-        if tuple(name for name, _ in registered.columns) != spec.columns:
-            raise ResourceNotFoundError("导出文件")
-        result = await self._analytics.export_detail(
-            merchant_id=merchant_id,
-            spec=registered,
-            filters=dict(spec.filters),
-            start=spec.start,
-            end=spec.end,
-        )
+        if spec.kind == "cross_business":
+            if spec.cross_business_plan is None:
+                raise ResourceNotFoundError("导出文件")
+            result = await self._analytics.export_cross_business(
+                merchant_id=merchant_id,
+                plan=spec.cross_business_plan,
+            )
+            if tuple(column.key for column in result.columns) != spec.columns:
+                raise ResourceNotFoundError("导出文件")
+        else:
+            try:
+                registered = detail_spec(spec.table)
+            except UnknownFieldError as exc:
+                raise ResourceNotFoundError("导出文件") from exc
+            if tuple(name for name, _ in registered.columns) != spec.columns:
+                raise ResourceNotFoundError("导出文件")
+            result = await self._analytics.export_detail(
+                merchant_id=merchant_id,
+                spec=registered,
+                filters=dict(spec.filters),
+                start=spec.start,
+                end=spec.end,
+            )
         return _to_csv(result)
 
     async def download_from_url(self, url: str, *, now: datetime | None = None) -> str:
@@ -133,6 +144,10 @@ def _serialize_spec(spec: ExportSpec) -> dict[str, object]:
         "end": spec.end.isoformat(),
         "filters": [list(item) for item in spec.filters],
         "date_filtered": spec.date_filtered,
+        "kind": spec.kind,
+        "cross_business_plan": (
+            spec.cross_business_plan.model_dump() if spec.cross_business_plan is not None else None
+        ),
     }
 
 
@@ -140,7 +155,20 @@ def _deserialize_spec(value: dict[str, object]) -> ExportSpec:
     columns = value.get("columns")
     filters = value.get("filters", [])
     table = value.get("table")
-    if not isinstance(table, str) or not isinstance(columns, list) or not isinstance(filters, list):
+    kind = value.get("kind", "detail")
+    if (
+        not isinstance(table, str)
+        or not isinstance(columns, list)
+        or not isinstance(filters, list)
+        or kind not in {"detail", "cross_business"}
+    ):
+        raise ValueError("invalid export specification")
+    raw_plan = value.get("cross_business_plan")
+    try:
+        plan = CrossBusinessPlan.model_validate(raw_plan) if raw_plan is not None else None
+    except ValueError as exc:
+        raise ValueError("invalid export specification") from exc
+    if kind == "cross_business" and plan is None:
         raise ValueError("invalid export specification")
     return ExportSpec(
         table=table,
@@ -153,6 +181,8 @@ def _deserialize_spec(value: dict[str, object]) -> ExportSpec:
             if isinstance(item, list) and len(item) == 2
         ),
         date_filtered=bool(value.get("date_filtered", True)),
+        kind=cast(Literal["detail", "cross_business"], kind),
+        cross_business_plan=plan,
     )
 
 
