@@ -1,9 +1,9 @@
 import { createPinia, setActivePinia } from 'pinia'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AppError } from '@/api/errors'
 import { createMockTransport } from '@/api/mock/transport'
-import { setChatTransport } from '@/api/transport'
+import { setChatTransport, type TransportRequest } from '@/api/transport'
 
 import { useChatStore } from './chat'
 
@@ -11,6 +11,27 @@ beforeEach(() => {
   setActivePinia(createPinia())
   setChatTransport(createMockTransport({ chunkSizes: [4], stepDelayMs: 0 }))
 })
+
+function installFeedbackTransport(
+  onFeedback: (request: TransportRequest, signal: AbortSignal) => Promise<Response>,
+): void {
+  const chatTransport = createMockTransport({ chunkSizes: [16], stepDelayMs: 0 })
+  setChatTransport((request, signal) => {
+    if (request.method === 'POST' && request.path.endsWith('/feedback')) {
+      return onFeedback(request, signal)
+    }
+    return chatTransport(request, signal)
+  })
+}
+
+function feedbackResponse(request: TransportRequest): Response {
+  const body = request.body as { is_adopted: boolean; reaction: 'LIKE' | 'DISLIKE' | null }
+  return Response.json({
+    answer_id: request.path.split('/').at(-2),
+    is_adopted: body.is_adopted,
+    reaction: body.reaction,
+  })
+}
 
 describe('useChatStore', () => {
   it('发送后用户与助手消息各一条，助手落到 complete', async () => {
@@ -175,6 +196,168 @@ describe('取消与重试', () => {
   })
 })
 
+describe('回答反馈', () => {
+  it('采纳后点赞会提交完整状态并保留采纳', async () => {
+    const requests: TransportRequest[] = []
+    installFeedbackTransport(async (request) => {
+      requests.push(request)
+      return feedbackResponse(request)
+    })
+    const store = useChatStore()
+    await store.submitMessage('昨天总 GMV 是多少？')
+    const localId = store.messages[1].localId
+
+    await store.sendFeedback(localId, { type: 'ADOPT' })
+    await store.sendFeedback(localId, { type: 'REACT', reaction: 'LIKE' })
+
+    expect(requests.map((request) => request.body)).toEqual([
+      { is_adopted: true, reaction: null },
+      { is_adopted: true, reaction: 'LIKE' },
+    ])
+    expect(store.messages[1].feedback).toEqual({ isAdopted: true, reaction: 'LIKE' })
+  })
+
+  it('点赞与点踩可以互相切换', async () => {
+    installFeedbackTransport(async (request) => feedbackResponse(request))
+    const store = useChatStore()
+    await store.submitMessage('昨天总 GMV 是多少？')
+    const localId = store.messages[1].localId
+
+    await store.sendFeedback(localId, { type: 'REACT', reaction: 'LIKE' })
+    await store.sendFeedback(localId, { type: 'REACT', reaction: 'DISLIKE' })
+
+    expect(store.messages[1].feedback).toEqual({ isAdopted: false, reaction: 'DISLIKE' })
+  })
+
+  it('成功后重复点击同一反馈是 no-op', async () => {
+    let calls = 0
+    installFeedbackTransport(async (request) => {
+      calls += 1
+      return feedbackResponse(request)
+    })
+    const store = useChatStore()
+    await store.submitMessage('昨天总 GMV 是多少？')
+    const localId = store.messages[1].localId
+
+    await store.sendFeedback(localId, { type: 'ADOPT' })
+    await store.sendFeedback(localId, { type: 'ADOPT' })
+
+    expect(calls).toBe(1)
+  })
+
+  it('失败保留用户意图且同一按钮可以再次点击重试', async () => {
+    let calls = 0
+    installFeedbackTransport(async (request) => {
+      calls += 1
+      if (calls === 1) throw new AppError('NETWORK', '网络不可用', { retryable: true })
+      return feedbackResponse(request)
+    })
+    const store = useChatStore()
+    await store.submitMessage('昨天总 GMV 是多少？')
+    const localId = store.messages[1].localId
+
+    await store.sendFeedback(localId, { type: 'ADOPT' })
+    expect(store.messages[1].feedback).toEqual({ isAdopted: true, reaction: null })
+    expect(store.messages[1].feedbackPersisted).not.toBe(true)
+    expect(store.messages[1].feedbackError?.code).toBe('NETWORK')
+
+    await store.sendFeedback(localId, { type: 'ADOPT' })
+
+    expect(calls).toBe(2)
+    expect(store.messages[1].feedbackPersisted).toBe(true)
+    expect(store.messages[1].feedbackError).toBeUndefined()
+  })
+
+  it('一次失败后点另一个按钮会带上之前未确认的改动', async () => {
+    const bodies: unknown[] = []
+    installFeedbackTransport(async (request) => {
+      bodies.push(request.body)
+      if (bodies.length === 1) {
+        throw new AppError('NETWORK', '网络不可用', { retryable: true })
+      }
+      return feedbackResponse(request)
+    })
+    const store = useChatStore()
+    await store.submitMessage('昨天总 GMV 是多少？')
+    const localId = store.messages[1].localId
+
+    await store.sendFeedback(localId, { type: 'ADOPT' })
+    await store.sendFeedback(localId, { type: 'REACT', reaction: 'LIKE' })
+
+    expect(bodies).toEqual([
+      { is_adopted: true, reaction: null },
+      { is_adopted: true, reaction: 'LIKE' },
+    ])
+  })
+
+  it('服务端确认标志是粘性的，后续失败不会清除', async () => {
+    let calls = 0
+    installFeedbackTransport(async (request) => {
+      calls += 1
+      if (calls === 2) throw new AppError('NETWORK', '网络不可用', { retryable: true })
+      return feedbackResponse(request)
+    })
+    const store = useChatStore()
+    await store.submitMessage('昨天总 GMV 是多少？')
+    const localId = store.messages[1].localId
+
+    await store.sendFeedback(localId, { type: 'ADOPT' })
+    await store.sendFeedback(localId, { type: 'REACT', reaction: 'DISLIKE' })
+
+    expect(store.messages[1].feedback).toEqual({ isAdopted: true, reaction: 'DISLIKE' })
+    expect(store.messages[1].feedbackPersisted).toBe(true)
+    expect(store.messages[1].feedbackError?.code).toBe('NETWORK')
+  })
+
+  it('缺少回答 ID 时不提交反馈', async () => {
+    let calls = 0
+    installFeedbackTransport(async (request) => {
+      calls += 1
+      return feedbackResponse(request)
+    })
+    const store = useChatStore()
+    await store.submitMessage('昨天总 GMV 是多少？')
+    await store.loadConversation(store.sessionId!)
+    const assistant = store.messages.find((message) => message.role === 'assistant')!
+
+    await store.sendFeedback(assistant.localId, { type: 'ADOPT' })
+
+    expect(calls).toBe(0)
+    expect(assistant.feedback).toBeUndefined()
+  })
+
+  it('在途时拒绝重入，reset 会中止反馈请求', async () => {
+    let calls = 0
+    let aborted = false
+    installFeedbackTransport(
+      (request, signal) =>
+        new Promise<Response>((resolve, reject) => {
+          calls += 1
+          signal.addEventListener('abort', () => {
+            aborted = true
+            reject(new DOMException('请求已取消', 'AbortError'))
+          })
+          void request
+          void resolve
+        }),
+    )
+    const store = useChatStore()
+    await store.submitMessage('昨天总 GMV 是多少？')
+    const localId = store.messages[1].localId
+
+    const pending = store.sendFeedback(localId, { type: 'ADOPT' })
+    await vi.waitFor(() => expect(store.messages[1].feedbackPending).toBe(true))
+    await store.sendFeedback(localId, { type: 'REACT', reaction: 'LIKE' })
+    expect(calls).toBe(1)
+
+    store.reset()
+
+    await expect(pending).resolves.toBeUndefined()
+    expect(aborted).toBe(true)
+    expect(store.messages).toEqual([])
+  })
+})
+
 describe('错误码分支', () => {
   // 表驱动穷举各类错误码应落到的消息状态。刻意覆盖「不可重试」的错误
   // （REQUEST_IN_PROGRESS、IDEMPOTENCY_KEY_REUSED）：它们仍然是 status
@@ -303,6 +486,28 @@ describe('消息 origin 与历史消息重试', () => {
 
     expect(store.messages[0].origin).toBe('live')
     expect(store.messages[1].origin).toBe('live')
+  })
+
+  it('实时助手消息只用 answer.id 标识回答，不混入后端消息 ID', async () => {
+    const store = useChatStore()
+
+    await store.submitMessage('昨天总 GMV 是多少？')
+
+    const assistant = store.messages[1]
+    expect(assistant.answer?.id).toBeTruthy()
+    expect(assistant.messageId).toBeUndefined()
+  })
+
+  it('历史消息把 Message.id 存入 messageId，且不伪造回答载荷', async () => {
+    const store = useChatStore()
+    await store.submitMessage('昨天总 GMV 是多少？')
+
+    await store.loadConversation(store.sessionId!)
+
+    expect(store.messages.every((message) => Boolean(message.messageId))).toBe(true)
+    const assistant = store.messages.find((message) => message.role === 'assistant')!
+    expect(assistant.messageId).toBeTruthy()
+    expect(assistant.answer).toBeUndefined()
   })
 
   it('历史消息不可重试', async () => {

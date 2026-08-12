@@ -6,10 +6,17 @@ import {
   getConversation,
   listConversations,
   submitChat,
+  submitFeedback,
   type ConversationSummaryView,
 } from '@/api/chat'
 import { toAppError } from '@/api/errors'
-import type { ChatAnswer, ChatMessage, ThinkingStep } from '@/types/chat'
+import type {
+  ChatAnswer,
+  ChatMessage,
+  FeedbackIntent,
+  FeedbackState,
+  ThinkingStep,
+} from '@/types/chat'
 
 function newMessage(
   role: ChatMessage['role'],
@@ -116,7 +123,6 @@ export const useChatStore = defineStore('chat', () => {
       )
 
       assistant.answer = answer
-      assistant.id = answer.id
       assistant.text = answer.answer
       assistant.status = 'complete'
       sessionId.value = answer.sessionId
@@ -170,6 +176,49 @@ export const useChatStore = defineStore('chat', () => {
   function cancelMessage(localId: string): void {
     // 真正中断底层流，不只是 UI 上隐藏——否则后端会继续跑完并计费。
     controllers.get(localId)?.abort()
+  }
+
+  async function sendFeedback(localId: string, intent: FeedbackIntent): Promise<void> {
+    const message = messages.value.find((item) => item.localId === localId)
+    const answerId = message?.answer?.id
+    if (!message || message.role !== 'assistant' || !answerId || message.feedbackPending) return
+
+    const current: FeedbackState = message.feedback ?? {
+      isAdopted: false,
+      reaction: null,
+    }
+    const next: FeedbackState =
+      intent.type === 'ADOPT'
+        ? { ...current, isAdopted: true }
+        : { ...current, reaction: intent.reaction }
+
+    const unchanged =
+      message.feedback?.isAdopted === next.isAdopted && message.feedback?.reaction === next.reaction
+    // 请求失败时本地保留用户意图；因此有错误时即使值没变，也必须允许同值重试。
+    if (unchanged && !message.feedbackError) return
+
+    message.feedback = next
+    message.feedbackPending = true
+    message.feedbackError = undefined
+
+    const key = `feedback:${localId}`
+    const controller = beginTrackedRequest(key)
+    try {
+      const confirmed = await submitFeedback(answerId, next, controller.signal)
+      // reset() 或打开历史会话可能已替换整组消息；旧响应不得写回新状态。
+      if (messages.value.find((item) => item.localId === localId) !== message) return
+      message.feedback = confirmed
+      message.feedbackPersisted = true
+    } catch (raw) {
+      const error = toAppError(raw)
+      if (messages.value.find((item) => item.localId === localId) !== message) return
+      if (error.code !== 'CANCELLED') message.feedbackError = error
+    } finally {
+      if (messages.value.find((item) => item.localId === localId) === message) {
+        message.feedbackPending = false
+      }
+      endTrackedRequest(key, controller)
+    }
   }
 
   /**
@@ -258,7 +307,7 @@ export const useChatStore = defineStore('chat', () => {
     // 发起过请求，没有可重放的上下文）。
     messages.value = detail.messages.map((item) => ({
       localId: crypto.randomUUID(),
-      id: item.id,
+      messageId: item.id,
       clientRequestId: crypto.randomUUID(),
       role: item.role,
       text: item.content,
@@ -301,6 +350,7 @@ export const useChatStore = defineStore('chat', () => {
     submitMessage,
     retryMessage,
     cancelMessage,
+    sendFeedback,
     selectRound,
     loadConversations,
     loadConversation,

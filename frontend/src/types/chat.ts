@@ -16,6 +16,16 @@ export type QuestionCategory = components['schemas']['QuestionCategory']
 export type QualityStatus = components['schemas']['QualityStatus']
 export type AnalysisSource = components['schemas']['AnalysisSource']
 export type MetricStatus = components['schemas']['MetricStatus']
+export type FeedbackReaction = components['schemas']['FeedbackReaction']
+
+/** 一条回答的完整反馈状态；后端反馈端点以整条覆盖方式写入。 */
+export interface FeedbackState {
+  isAdopted: boolean
+  reaction: FeedbackReaction | null
+}
+
+/** 用户的一次反馈意图。采纳只置位，点赞与点踩可以互相切换。 */
+export type FeedbackIntent = { type: 'ADOPT' } | { type: 'REACT'; reaction: FeedbackReaction }
 
 /** SSE `step` 事件与 `thinking_steps` 同构。 */
 export interface ThinkingStep {
@@ -112,7 +122,8 @@ export type MessageStatus = 'pending' | 'streaming' | 'complete' | 'cancelled' |
 
 export interface ChatMessage {
   localId: string
-  id?: string
+  /** 后端 Message.id；当前仅历史会话回填，不能用于回答反馈。 */
+  messageId?: string
   /** 幂等键。入列时生成并常驻，重试路径直接从消息对象拿（前端方案 §5.9）。 */
   clientRequestId: string
   role: 'user' | 'assistant'
@@ -128,6 +139,11 @@ export interface ChatMessage {
    */
   error?: AppError
   answer?: ChatAnswer
+  feedback?: FeedbackState
+  /** 服务端至少成功确认过一次反馈；一旦为 true，本地不再回退。 */
+  feedbackPersisted?: boolean
+  feedbackPending?: boolean
+  feedbackError?: AppError
   /**
    * 消息来源。`'live'` 是本次会话通过 `submitMessage`/`retryMessage` 产生的消息，
    * `'history'` 是 `loadConversation` 从后端历史回填的消息。只有 `'live'` 消息可以

@@ -149,6 +149,7 @@ onUnmounted(() => clearTimeout(retryNoticeTimer))
           @retry="retry"
           @cancel="chatStore.cancelMessage"
           @select="chatStore.selectRound"
+          @feedback="chatStore.sendFeedback"
         />
       </template>
     </div>

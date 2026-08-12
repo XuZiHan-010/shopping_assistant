@@ -124,7 +124,8 @@ describe('ConversationColumn', () => {
     expect(store.messages[1].answer?.quality.degraded).toBe(true)
     const notice = wrapper.get('[data-testid="degraded-notice"]')
     expect(notice.text()).toContain('演示数据')
-    expect(notice.text()).toContain('FALLBACK')
+    expect(notice.text()).toContain('兜底回答')
+    expect(notice.text()).not.toContain('FALLBACK')
   })
 
   it('只有助手轮次可选中，用户消息不承担选中交互', async () => {
@@ -271,5 +272,32 @@ describe('ConversationColumn', () => {
     // 完成态：阶段标签与停止按钮消失，真正的回答文本出现在 DOM 里。
     expect(findAssistantMessage().find('[data-testid="stage-label"]').exists()).toBe(false)
     expect(findAssistantMessage().text()).toContain('已完成结构化理解')
+  })
+
+  it('消息反馈事件直连 Store 并完成服务端确认', async () => {
+    const mock = createMockTransport({ chunkSizes: [16], stepDelayMs: 0 })
+    setChatTransport((request, signal) => {
+      if (request.method === 'POST' && request.path.endsWith('/feedback')) {
+        const body = request.body as { is_adopted: boolean; reaction: string | null }
+        return Promise.resolve(
+          Response.json({
+            answer_id: request.path.split('/').at(-2),
+            is_adopted: body.is_adopted,
+            reaction: body.reaction,
+          }),
+        )
+      }
+      return mock(request, signal)
+    })
+    const wrapper = mount(ConversationColumn)
+    const store = useChatStore()
+    await store.submitMessage('昨天总 GMV 是多少？')
+    const assistant = wrapper.findAllComponents(ChatMessage).at(-1)!
+
+    assistant.vm.$emit('feedback', store.messages[1].localId, { type: 'ADOPT' })
+    await flushPromises()
+
+    expect(store.messages[1].feedback).toEqual({ isAdopted: true, reaction: null })
+    expect(store.messages[1].feedbackPersisted).toBe(true)
   })
 })

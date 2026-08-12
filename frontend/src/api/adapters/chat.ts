@@ -16,6 +16,7 @@ import type {
   ChatAnswer,
   DataResult,
   ExportInfo,
+  FeedbackState,
   MetricDefinition,
   QualityTrace,
   Recommendation,
@@ -251,5 +252,22 @@ export function toChatAnswer(raw: RawChatResponse): ChatAnswer {
     recommendations: toRecommendations(raw),
     export: toExport(raw),
     contractWarnings,
+  }
+}
+
+/** 反馈请求保持完整覆盖语义，reaction 为 null 时也必须显式发送。 */
+export function toFeedbackRequestPayload(
+  state: FeedbackState,
+): components['schemas']['FeedbackRequest'] {
+  return {
+    is_adopted: state.isAdopted,
+    reaction: state.reaction,
+  }
+}
+
+export function toFeedbackState(raw: components['schemas']['FeedbackResponse']): FeedbackState {
+  return {
+    isAdopted: raw.is_adopted,
+    reaction: raw.reaction,
   }
 }

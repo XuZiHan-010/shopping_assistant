@@ -15,7 +15,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { components } from '@/api/generated'
 
-import { ChatContractError, toChatAnswer } from './chat'
+import { ChatContractError, toChatAnswer, toFeedbackRequestPayload, toFeedbackState } from './chat'
 
 type RawChatResponse = components['schemas']['ChatResponse']
 
@@ -243,5 +243,33 @@ describe('toChatAnswer · 语义守卫', () => {
     } catch (error) {
       expect((error as Error).message).toMatch(/[一-龥]/)
     }
+  })
+})
+
+describe('反馈契约转换', () => {
+  it('请求把完整 camelCase 状态转换为 snake_case，且保留 null reaction', () => {
+    expect(toFeedbackRequestPayload({ isAdopted: true, reaction: null })).toEqual({
+      is_adopted: true,
+      reaction: null,
+    })
+  })
+
+  it('响应转换为领域状态', () => {
+    expect(
+      toFeedbackState({ answer_id: 'answer-1', is_adopted: false, reaction: 'DISLIKE' }),
+    ).toEqual({ isAdopted: false, reaction: 'DISLIKE' })
+  })
+
+  it.each(['LIKE', 'DISLIKE'] as const)('%s 状态双向转换保持一致', (reaction) => {
+    const state = { isAdopted: true, reaction }
+    const request = toFeedbackRequestPayload(state)
+
+    expect(
+      toFeedbackState({
+        answer_id: 'answer-1',
+        is_adopted: request.is_adopted,
+        reaction: request.reaction ?? null,
+      }),
+    ).toEqual(state)
   })
 })

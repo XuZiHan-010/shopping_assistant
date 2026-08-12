@@ -215,6 +215,16 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
       return sseResponse(payload, signal, resolved)
     }
 
+    const feedbackMatch = /^\/api\/answers\/([^/]+)\/feedback$/.exec(request.path)
+    if (feedbackMatch && request.method === 'POST') {
+      const body = request.body as components['schemas']['FeedbackRequest']
+      return jsonResponse({
+        answer_id: feedbackMatch[1],
+        is_adopted: body.is_adopted,
+        reaction: body.reaction ?? null,
+      } satisfies components['schemas']['FeedbackResponse'])
+    }
+
     // listConversations 现在带 ?limit=，这里只按路径部分匹配，query 由真实后端解释。
     const pathname = request.path.split('?')[0]
 

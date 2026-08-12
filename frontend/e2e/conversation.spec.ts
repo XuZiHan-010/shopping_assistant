@@ -1,4 +1,15 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
+
+async function tabToLabel(page: Page, label: string, limit = 60): Promise<void> {
+  for (let index = 0; index < limit; index += 1) {
+    await page.keyboard.press('Tab')
+    const activeLabel = await page.evaluate(() =>
+      document.activeElement?.getAttribute('aria-label'),
+    )
+    if (activeLabel === label) return
+  }
+  throw new Error(`键盘 Tab ${limit} 次后仍未聚焦「${label}」`)
+}
 
 test('点击快速问题可完成一轮问答，阶段标签先于回答出现', async ({ page }) => {
   await page.goto('/')
@@ -104,7 +115,8 @@ test('演示数据在回答卡片上有明确标识（R7）', async ({ page }) =
   const notice = page.getByTestId('degraded-notice')
   await expect(notice).toBeVisible()
   await expect(notice).toContainText('演示数据')
-  await expect(notice).toContainText('FALLBACK')
+  await expect(notice).toContainText('兜底回答')
+  await expect(notice).not.toContainText('FALLBACK')
 })
 
 test('METRIC 回答在侧栏渲染图表 canvas 与可键盘访问的数据表', async ({ page }) => {
@@ -180,4 +192,20 @@ test('桌面宽度下商家名完整可见，不被截断', async ({ page }) => 
     .locator('.merchant-switcher__name')
     .evaluate((el) => el.scrollWidth > el.clientWidth)
   expect(truncated).toBe(false)
+})
+
+test('键盘可完成提问、阅读回答与采纳反馈', async ({ page }) => {
+  await page.goto('/')
+
+  await tabToLabel(page, '输入问题')
+  await page.keyboard.type('昨天总 GMV 是多少？')
+  await page.keyboard.press('Enter')
+  await expect(page.getByTestId('stage-label')).toHaveCount(0, { timeout: 15_000 })
+  await expect(page.getByLabel('质量校验轨迹')).toBeVisible()
+
+  await tabToLabel(page, '采纳本轮回答')
+  await page.keyboard.press('Enter')
+
+  await expect(page.getByLabel('采纳本轮回答')).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByTestId('feedback-status')).toHaveText('已记录')
 })

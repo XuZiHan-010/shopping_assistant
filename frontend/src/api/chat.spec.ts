@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { listConversations, listDemoMerchants, submitChat } from './chat'
+import { AppError } from './errors'
+import { listConversations, listDemoMerchants, submitChat, submitFeedback } from './chat'
 import { createMockTransport } from './mock/transport'
 import { setChatTransport, type TransportRequest } from './transport'
 
@@ -123,5 +124,45 @@ describe('会话与商家端点', () => {
     await listDemoMerchants(new AbortController().signal)
 
     expect(seen[0]).toMatchObject({ path: '/api/demo/merchants', auth: 'none' })
+  })
+})
+
+describe('回答反馈端点', () => {
+  it('向回答反馈路径提交带商家身份的完整状态并返回领域模型', async () => {
+    const seen: TransportRequest[] = []
+    setChatTransport(async (request) => {
+      seen.push(request)
+      return Response.json({ answer_id: 'answer-1', is_adopted: true, reaction: null })
+    })
+
+    const state = await submitFeedback(
+      'answer-1',
+      { isAdopted: true, reaction: null },
+      new AbortController().signal,
+    )
+
+    expect(seen).toEqual([
+      {
+        path: '/api/answers/answer-1/feedback',
+        method: 'POST',
+        auth: 'merchant',
+        body: { is_adopted: true, reaction: null },
+      },
+    ])
+    expect(state).toEqual({ isAdopted: true, reaction: null })
+  })
+
+  it('不吞掉 transport 返回的 AppError', async () => {
+    setChatTransport(async () => {
+      throw new AppError('NETWORK', '网络不可用', { retryable: true })
+    })
+
+    await expect(
+      submitFeedback(
+        'answer-1',
+        { isAdopted: false, reaction: 'LIKE' },
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({ code: 'NETWORK', retryable: true })
   })
 })

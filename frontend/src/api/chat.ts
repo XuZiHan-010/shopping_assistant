@@ -1,14 +1,14 @@
 /**
- * 四个业务端点的调用封装。
+ * 聊天域业务端点的调用封装。
  *
  * 组件与 Store 只调这里，不直接碰 transport 或 generated.ts。
  * SSE 的 done 载荷与非流式响应完全一致，所以两条路径共用同一个 Adapter
  * （后端方案 §8.4：只写一套解析逻辑）。
  */
 import type { components } from '@/api/generated'
-import type { ChatAnswer, ThinkingStep } from '@/types/chat'
+import type { ChatAnswer, FeedbackState, ThinkingStep } from '@/types/chat'
 
-import { toChatAnswer } from './adapters/chat'
+import { toChatAnswer, toFeedbackRequestPayload, toFeedbackState } from './adapters/chat'
 import { AppError } from './errors'
 import { ChatStreamInterruptedError, readChatStream } from './sse'
 import { resolveTransport } from './transport'
@@ -132,6 +132,24 @@ export async function getConversation(
 export async function deleteConversation(id: string, signal: AbortSignal): Promise<void> {
   const transport = await resolveTransport()
   await transport({ path: `/api/conversations/${id}`, method: 'DELETE', auth: 'merchant' }, signal)
+}
+
+export async function submitFeedback(
+  answerId: string,
+  state: FeedbackState,
+  signal: AbortSignal,
+): Promise<FeedbackState> {
+  const transport = await resolveTransport()
+  const response = await transport(
+    {
+      path: `/api/answers/${answerId}/feedback`,
+      method: 'POST',
+      auth: 'merchant',
+      body: toFeedbackRequestPayload(state),
+    },
+    signal,
+  )
+  return toFeedbackState((await response.json()) as components['schemas']['FeedbackResponse'])
 }
 
 /** 演示商家列表是公开接口，不带 Authorization——鸡生蛋问题：选商家之前哪来商家凭证。 */
