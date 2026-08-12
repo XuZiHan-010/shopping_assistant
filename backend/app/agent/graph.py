@@ -318,6 +318,14 @@ class MerchantQaGraph:
     async def _compose_answer(self, state: AgentState) -> dict[str, object]:
         intent = _required(state["intent"])
         detail = state["knowledge_detail"]
+        if _is_table_only_detail(intent):
+            # 参考实现要求纯明细正文必须为空。查询、表格、截断和导出仍由后续节点
+            # 正常生成；这里不能塞进「已完成」之类的兜底文字，也不能调用回答模型。
+            return {
+                **self._step(state, "compose_answer"),
+                "candidate_answer": "",
+                "recommendations": [],
+            }
         # `compose_answer` 排在 `query_data` 之后，所以这里能看到本轮到底查没查到
         # 数据。查到了还说「查询将在后续阶段接入」，就是一边给结果一边否认查询
         # 发生过——用户会连旁边的真实数字一起不信（AGENTS.md R7）。
@@ -537,7 +545,11 @@ class MerchantQaGraph:
                     url=f"/api/exports/{export_id}",
                     expires_at=datetime.now(UTC),
                 ),
-                recommendations=state["recommendations"] or _detail_recommendations(outcome),
+                recommendations=(
+                    []
+                    if _is_table_only_detail(intent)
+                    else state["recommendations"] or _detail_recommendations(outcome)
+                ),
             )
 
         mode = (
@@ -623,6 +635,12 @@ def _draft_from_state(state: AgentState) -> AnswerDraft:
         answer=state["candidate_answer"],
         recommendations=state["recommendations"],
     )
+
+
+def _is_table_only_detail(intent: QueryIntent) -> bool:
+    """判断是否只展示 DETAIL 表格；模型布尔值不参与任何查询标识符选择。"""
+
+    return intent.answer_mode is AnswerMode.DETAIL and not intent.analysis_requested
 
 
 def _review_degraded(state: AgentState, notes: list[str], attempt: int) -> dict[str, object]:

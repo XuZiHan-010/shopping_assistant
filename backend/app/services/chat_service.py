@@ -190,12 +190,15 @@ class ChatService:
                 )
             if self._metrics is not None and response.degraded:
                 self._metrics.degraded_count += 1
-            await self._conversations.create_message(
-                context.merchant_id,
-                conversation_id,
-                "ASSISTANT",
-                response.answer,
-            )
+            # Answer payload 是可幂等重放的真实回答记录；但纯明细的正文按契约必须
+            # 为空，若仍写一条 ASSISTANT message，历史会话就会渲染无内容卡片。
+            if response.answer.strip():
+                await self._conversations.create_message(
+                    context.merchant_id,
+                    conversation_id,
+                    "ASSISTANT",
+                    response.answer,
+                )
             await self._conversations.touch_conversation(context.merchant_id, conversation_id)
             await self._conversations.mark_answer_succeeded(
                 answer,

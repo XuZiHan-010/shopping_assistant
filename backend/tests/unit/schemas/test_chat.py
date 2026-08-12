@@ -274,6 +274,51 @@ def test_detail_passes_once_export_is_present() -> None:
     assert response.answer_mode is AnswerMode.DETAIL
 
 
+def test_table_only_detail_allows_an_empty_answer_without_recommendations() -> None:
+    """纯明细只有表格；把它当成不完整响应会迫使 Agent 伪造分析正文。"""
+
+    response = ChatResponse.model_validate(
+        _metric_response(
+            answer="",
+            answer_mode=AnswerMode.DETAIL,
+            export={
+                "id": str(uuid4()),
+                "url": "https://example.test/exports/1",
+                "expires_at": "2026-07-31T12:00:00Z",
+            },
+            recommendations=[],
+        )
+    )
+
+    assert response.answer == ""
+    assert response.recommendations == []
+
+
+@pytest.mark.parametrize("mode", [AnswerMode.CHAT, AnswerMode.METRIC, AnswerMode.RULE])
+def test_non_detail_modes_reject_an_empty_answer(mode: AnswerMode) -> None:
+    """非明细的空正文会让用户得到没有任何解释的回答卡片。"""
+
+    with pytest.raises(ValidationError, match="answer"):
+        ChatResponse.model_validate(_base_response(answer_mode=mode, answer=""))
+
+
+def test_detail_with_analysis_text_still_requires_two_recommendations() -> None:
+    """要求分析的明细不能借由放宽纯明细契约而丢掉行动建议。"""
+
+    with pytest.raises(ValidationError, match="recommendations"):
+        ChatResponse.model_validate(
+            _metric_response(
+                answer_mode=AnswerMode.DETAIL,
+                export={
+                    "id": str(uuid4()),
+                    "url": "https://example.test/exports/1",
+                    "expires_at": "2026-07-31T12:00:00Z",
+                },
+                recommendations=[],
+            )
+        )
+
+
 def test_identity_requires_query_plan_and_rows_but_not_metric_fields() -> None:
     payload = _base_response(
         answer_mode=AnswerMode.IDENTITY,

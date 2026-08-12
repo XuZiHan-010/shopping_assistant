@@ -37,6 +37,25 @@ def test_valid_intent_is_preserved() -> None:
     assert result.intent.metric == "gmv"
 
 
+def test_analysis_requested_is_preserved_by_the_whitelist() -> None:
+    """查看明细与分析明细共用安全查询，但回答组合必须保留模型的明确意图。"""
+
+    result = validate_intent(
+        _intent(answer_mode=AnswerMode.DETAIL, metric=None, analysis_requested=False),
+        today=TODAY,
+    )
+
+    assert result.intent.analysis_requested is False
+
+
+def test_analysis_requested_defaults_to_true_for_existing_intent_payloads() -> None:
+    """历史 fixture 未提供新字段时，仍应保持原有的带分析 DETAIL 行为。"""
+
+    intent = _intent(answer_mode=AnswerMode.DETAIL, metric=None)
+
+    assert intent.analysis_requested is True
+
+
 def test_sql_in_metric_is_rejected() -> None:
     """SQL 流入意图会给后续查询层制造注入入口。"""
 

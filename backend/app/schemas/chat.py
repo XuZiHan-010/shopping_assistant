@@ -158,7 +158,8 @@ class ChatResponse(BaseModel):
 
     id: UUID
     session_id: UUID
-    answer: Annotated[str, StringConstraints(min_length=1)]
+    # 纯 DETAIL 以精确空串表示「只出表格」。其它回答模式仍由模型校验强制非空。
+    answer: str
     answer_mode: AnswerMode
     category: QuestionCategory | None
     thinking_steps: list[ThinkingStep] = Field(default_factory=list)
@@ -196,6 +197,15 @@ class ChatResponse(BaseModel):
 
     @model_validator(mode="after")
     def validate_cross_field_contract(self) -> ChatResponse:
+        if self.answer_mode is AnswerMode.DETAIL:
+            if self.answer == "":
+                if self.recommendations not in (None, []):
+                    raise ValueError("纯明细不得提供 recommendations")
+            elif not self.answer.strip():
+                raise ValueError("纯明细 answer 必须为精确空字符串")
+        elif not self.answer.strip():
+            raise ValueError("非 DETAIL 回答的 answer 不能为空")
+
         sources = set(self.analysis_sources)
         if AnalysisSource.NONE in sources and sources != {AnalysisSource.NONE}:
             raise ValueError("analysis_sources 中的 NONE 只能单独出现")
@@ -258,7 +268,8 @@ class ChatResponse(BaseModel):
             self._require_recommendations()
         if self.answer_mode is AnswerMode.DETAIL:
             self._require("export", self.export)
-            self._require_recommendations()
+            if self.answer:
+                self._require_recommendations()
         if self.answer_mode is AnswerMode.ATTACHMENT:
             self._require_recommendations()
         return self

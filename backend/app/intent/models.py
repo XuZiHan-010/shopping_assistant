@@ -31,3 +31,6 @@ class QueryIntent(BaseModel):
     limit: int | None = None
     followup_reference: bool = False
     needs_attachment: bool = False
+    # 兼容 Task 10 前写入的 fixture：缺失时维持原有的「明细带分析」行为；
+    # 正式提示词要求模型每次明确输出，且这个字段绝不参与 SQL 或字段选择。
+    analysis_requested: bool = True

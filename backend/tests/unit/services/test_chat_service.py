@@ -19,7 +19,7 @@ from app.core.errors import (
     RequestInProgressError,
 )
 from app.core.security import MerchantContext
-from app.schemas.chat import ChatRequest
+from app.schemas.chat import AnswerMode, ChatRequest, ChatResponse
 from app.services.chat_service import ChatService, _request_digest, _stored_response
 from tests.support.agent import DeterministicAgent
 
@@ -147,6 +147,28 @@ class ExplodingAgent:
     async def run(self, message: str, session_id: UUID) -> AgentRunResult:
         self.calls += 1
         raise self.error
+
+
+class TableOnlyAgent:
+    """返回已由 ChatResponse 契约验证过的纯明细，用于测试持久化层。"""
+
+    async def run(self, message: str, session_id: UUID) -> AgentRunResult:
+        result = await DeterministicAgent().run(message, session_id)
+        base = result.response.model_dump(mode="json")
+        base.update(
+            {
+                "answer": "",
+                "answer_mode": AnswerMode.DETAIL,
+                "export": {
+                    "id": str(uuid4()),
+                    "url": "/api/exports/example",
+                    "expires_at": "2026-08-12T00:00:00Z",
+                },
+                "recommendations": [],
+            }
+        )
+        response = ChatResponse.model_validate(base)
+        return AgentRunResult(response=response, steps=response.thinking_steps)
 
 
 def build_service(
@@ -331,6 +353,24 @@ async def test_successful_turn_persists_both_messages_and_touches_conversation()
     assert repository.touched == [execution.response.session_id]
     # 一次提交 PROCESSING 的可见状态，一次提交最终结果。
     assert session.commits == 2
+
+
+@pytest.mark.asyncio
+async def test_table_only_turn_saves_the_answer_payload_without_an_empty_assistant_message() -> (
+    None
+):
+    """会话详情若保存空助手消息，就会在历史记录中生成没有内容的卡片。"""
+
+    service, repository, _, _ = build_service(TableOnlyAgent())
+
+    execution = await service.submit(CONTEXT, chat_request(key="table-only-1"), request_id="r1")
+
+    assert execution.response.answer == ""
+    assert [message.role for message in repository.messages] == ["USER"]
+    stored = repository.answers["table-only-1"]
+    assert stored.processing_status == "SUCCEEDED"
+    assert stored.response_payload is not None
+    assert stored.response_payload["answer"] == ""
 
 
 @pytest.mark.asyncio
