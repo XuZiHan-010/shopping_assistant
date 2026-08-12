@@ -129,6 +129,13 @@
 
 ## 最近验证
 
+- **阶段 0 全量门禁复核（2026-08-12）**：后端 `ruff check .`、`ruff format --check .` 与
+  `mypy app`（88 个源文件）通过；前端 lint、格式、codegen、fixtures、类型检查、Vitest（**26 个文件 /
+  245 passed**）、生产构建、Mock、密钥与首屏静态门禁均通过。真实 PostgreSQL 全量 pytest 首次指向
+  持久化的 `borough_test` 时被历史 Alembic 版本 `20260808_0005` 阻断；该版本不属于当前分支迁移图。
+  为避免删除现有卷，改用独立空库 `borough_stage0_20260812_test` 重跑，结果为 **717 passed / 0 failed /
+  1 条第三方弃用警告**。全程使用 Fake/确定性 LLM，DeepSeek 调用 **0**、费用 **0**。
+
 - **前端 F6 Task 1–7 定向与门禁验证（2026-08-11～2026-08-12）**：后端 Task 1 定向回归
   `tests/unit/core`、`tests/api/test_demo_merchants.py`、`tests/api/test_admin_ops.py` 共
   **28 passed、1 skipped**（跳过项是本机无真实 PostgreSQL 导致的既有集成用例，非新增缺陷）；
@@ -215,9 +222,9 @@
 
 ## 下一步
 
-1. **完成阶段 0 的本地全量门禁与主线裁定**：F5 与 F6 Task 1–8、12 的本地成果已分组提交；接下来按
-   `plans/2026-08-12-post-f6-execution-roadmap.md` 重跑后端真实 PostgreSQL 与前端全量门禁，再由用户裁定
-   唯一主线（`main` 目前停在 `003cbc7`；`feature/f2-mock-conversation` 只是事实默认分支）以及是否推送。
+1. **完成阶段 0 的主线裁定**：F5 与 F6 Task 1–8、12 的本地成果已分组提交，前后端全量门禁已在
+   2026-08-12 重跑；现在仅待用户裁定唯一主线（`main` 目前停在 `003cbc7`；
+   `feature/f2-mock-conversation` 只是事实默认分支）以及是否推送。
 2. **执行 R9 阶段 B Task 5–8**：阶段 0 出口达标并获用户确认后，先校正文档与契约、修复思考步骤展示和
    历史会话装配；本顺序取代 2026-08-12 前「先部署 Railway」的安排。
 3. **执行 R9 阶段 B Task 9–15 与可信客户端 IP 契约整改**：四个能力切片先分别成文、经用户审阅后实施，
