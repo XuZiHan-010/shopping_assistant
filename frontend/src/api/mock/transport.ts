@@ -119,6 +119,28 @@ type ConversationRecord = {
   messages: components['schemas']['ConversationMessage'][]
 }
 
+function historyAnswerPayload(
+  payload: RawChatResponse,
+): components['schemas']['ConversationAnswerPayload'] {
+  const rows = payload.data_rows ?? []
+  const columns = [...new Set(rows.flatMap((row) => Object.keys(row)))]
+  return {
+    answer_id: payload.id,
+    answer_mode: payload.answer_mode,
+    thinking_steps: payload.thinking_steps ?? [],
+    quality_status: payload.quality_status,
+    quality_attempts: payload.quality_attempts,
+    quality_notes: payload.quality_notes ?? [],
+    degraded: payload.degraded,
+    degraded_reason: payload.degraded_reason,
+    is_adopted: false,
+    reaction: null,
+    columns,
+    total_rows: payload.total_rows ?? null,
+    truncated: payload.truncated ?? null,
+  }
+}
+
 /**
  * 没有可用凭证（未注册 `setCredentialProvider`，或注册了但没给 token）时落进
  * 这个固定桶。真实后端遇到这种情况会直接 401——Mock 不模拟那条拒绝路径
@@ -202,14 +224,20 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
         createdAt: now,
         messages: [],
       }
-      // 记下真实往返，历史会话点开才有内容可载入。
+      const payload = { ...fixture, session_id: sessionId, id: answerId }
+      // 记下真实往返，历史会话点开才有内容可载入；助手侧只保存与后端详情
+      // 契约一致的脱敏载荷，不能把 data_rows / export 放进历史消息。
       record.messages.push(
         { id: crypto.randomUUID(), role: 'user', content: body.message, created_at: now },
-        { id: answerId, role: 'assistant', content: fixture.answer, created_at: now },
+        {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: fixture.answer,
+          created_at: now,
+          answer_payload: historyAnswerPayload(payload),
+        },
       )
       conversations.set(sessionId, record)
-
-      const payload = { ...fixture, session_id: sessionId, id: answerId }
 
       if (request.accept === 'application/json') return jsonResponse(payload)
       return sseResponse(payload, signal, resolved)
@@ -218,8 +246,19 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
     const feedbackMatch = /^\/api\/answers\/([^/]+)\/feedback$/.exec(request.path)
     if (feedbackMatch && request.method === 'POST') {
       const body = request.body as components['schemas']['FeedbackRequest']
+      const answerId = feedbackMatch[1]
+      for (const conversation of conversationsFor(request).values()) {
+        for (const message of conversation.messages) {
+          if (message.answer_payload?.answer_id !== answerId) continue
+          message.answer_payload = {
+            ...message.answer_payload,
+            is_adopted: body.is_adopted,
+            reaction: body.reaction ?? null,
+          }
+        }
+      }
       return jsonResponse({
-        answer_id: feedbackMatch[1],
+        answer_id: answerId,
         is_adopted: body.is_adopted,
         reaction: body.reaction ?? null,
       } satisfies components['schemas']['FeedbackResponse'])

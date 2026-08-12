@@ -52,6 +52,54 @@ describe('ChatMessage', () => {
     expect(wrapper.get('[data-testid="stage-label"]').text()).toBe('读取业务口径并整理演示数据')
   })
 
+  it('完成态实时消息按原顺序展示全部执行步骤', () => {
+    const wrapper = mount(ChatMessage, {
+      props: {
+        message: makeMessage({
+          status: 'complete',
+          text: '分析完成',
+          steps: [
+            { label: '识别商家与会话上下文', node: 'load_context' },
+            { label: '查询经营数据', node: 'query_data' },
+            { label: '保存回答', node: 'persist_answer' },
+          ],
+        }),
+      },
+    })
+
+    expect(wrapper.findAll('[data-testid="thinking-step"]').map((item) => item.text())).toEqual([
+      '识别商家与会话上下文',
+      '查询经营数据',
+      '保存回答',
+    ])
+  })
+
+  it('完成态历史消息使用回答载荷中的完整执行步骤', () => {
+    const answer = toChatAnswer(detailOrder as components['schemas']['ChatResponse'])
+    answer.thinkingSteps = [
+      { label: '识别商家与会话上下文', node: 'load_context' },
+      { label: '查询经营数据', node: 'query_data' },
+      { label: '保存回答', node: 'persist_answer' },
+    ]
+    const wrapper = mount(ChatMessage, {
+      props: {
+        message: makeMessage({
+          origin: 'history',
+          status: 'complete',
+          text: '历史分析完成',
+          steps: [],
+          answer,
+        }),
+      },
+    })
+
+    expect(wrapper.findAll('[data-testid="thinking-step"]').map((item) => item.text())).toEqual([
+      '识别商家与会话上下文',
+      '查询经营数据',
+      '保存回答',
+    ])
+  })
+
   it('error 时提供重试入口（retryable 错误）', async () => {
     const wrapper = mount(ChatMessage, {
       props: {
@@ -238,6 +286,17 @@ describe('ChatMessage', () => {
     const wrapper = mount(ChatMessage, {
       props: {
         message: makeMessage({ origin: 'history', status: 'complete', text: '历史回答' }),
+      },
+    })
+
+    expect(wrapper.find('[aria-label="回答反馈"]').exists()).toBe(false)
+  })
+
+  it('历史回答缺少服务端反馈状态时不开放反馈操作', () => {
+    const answer = toChatAnswer(detailOrder as components['schemas']['ChatResponse'])
+    const wrapper = mount(ChatMessage, {
+      props: {
+        message: makeMessage({ origin: 'history', status: 'complete', text: '历史回答', answer }),
       },
     })
 

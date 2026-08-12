@@ -9,6 +9,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, StringConstraints, model_validator
 
+from app.schemas.feedback import FeedbackReaction
+
 
 class AnswerMode(StrEnum):
     """回答模式。ATTACHMENT 为 P1 预留值，B2 不产生该模式。"""
@@ -252,6 +254,25 @@ class ConversationMessage(BaseModel):
     role: str
     content: str
     created_at: datetime
+    answer_payload: ConversationAnswerPayload | None = None
+
+
+class ConversationAnswerPayload(BaseModel):
+    """会话详情中的助手回答脱敏载荷，不携带明细行和导出 URL。"""
+
+    answer_id: UUID
+    answer_mode: AnswerMode
+    thinking_steps: list[ThinkingStep] = Field(default_factory=list)
+    quality_status: QualityStatus
+    quality_attempts: int = Field(ge=0, le=2)
+    quality_notes: list[str] = Field(default_factory=list)
+    degraded: bool
+    degraded_reason: str | None
+    is_adopted: bool
+    reaction: FeedbackReaction | None
+    columns: list[str] = Field(default_factory=list)
+    total_rows: int | None = Field(default=None, ge=0)
+    truncated: bool | None = None
 
 
 class ConversationDetailResponse(BaseModel):

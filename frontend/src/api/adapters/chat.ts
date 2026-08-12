@@ -25,6 +25,7 @@ import type {
 } from '@/types/chat'
 
 type RawChatResponse = components['schemas']['ChatResponse']
+type RawConversationAnswerPayload = components['schemas']['ConversationAnswerPayload']
 
 /**
  * 载荷违反后端契约时抛出，消息可直接展示给用户。
@@ -252,6 +253,44 @@ export function toChatAnswer(raw: RawChatResponse): ChatAnswer {
     recommendations: toRecommendations(raw),
     export: toExport(raw),
     contractWarnings,
+  }
+}
+
+/** 会话详情的脱敏助手载荷 → 领域回答；不能复用完整 ChatResponse 的校验器。 */
+export function toConversationAnswer(
+  raw: RawConversationAnswerPayload,
+  context: { sessionId: string; content: string; createdAt: string },
+): ChatAnswer {
+  const { sessionId, content, createdAt } = context
+  const hasTableMetadata = raw.total_rows != null && raw.truncated != null
+  return {
+    id: raw.answer_id,
+    sessionId,
+    answer: content,
+    mode: raw.answer_mode,
+    createdAt,
+    thinkingSteps: raw.thinking_steps ?? [],
+    quality: {
+      status: raw.quality_status,
+      attempts: raw.quality_attempts,
+      notes: raw.quality_notes ?? [],
+      // 详情载荷未保存 analysis_sources。历史消息不能伪造来源，质量区只呈现
+      // 可由服务端确认的状态与备注。
+      sources: [],
+      degraded: raw.degraded,
+      degradedReason: raw.degraded_reason ?? undefined,
+    },
+    suggestions: { current: [], alternates: [] },
+    data: hasTableMetadata
+      ? {
+          rows: [],
+          columns: raw.columns ?? [],
+          totalRows: raw.total_rows!,
+          truncated: raw.truncated!,
+        }
+      : undefined,
+    recommendations: [],
+    contractWarnings: [],
   }
 }
 

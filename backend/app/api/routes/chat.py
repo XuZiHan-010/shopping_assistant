@@ -29,6 +29,7 @@ from app.repositories.conversation import ConversationRepository
 from app.schemas.chat import (
     ChatRequest,
     ChatResponse,
+    ConversationAnswerPayload,
     ConversationDetailResponse,
     ConversationListResponse,
     ConversationMessage,
@@ -43,6 +44,51 @@ router = APIRouter(tags=["chat"])
 # §8.4：每 15 秒发一次注释心跳，避免反向代理按空闲超时切断长连接。
 HEARTBEAT_SECONDS = 15.0
 _HEARTBEAT_FRAME = b": keep-alive\n\n"
+
+
+def _history_columns(payload: dict[str, Any]) -> list[str]:
+    """从保存的结果提取列名，不把任何明细值回传给历史会话。"""
+
+    rows = payload.get("data_rows")
+    if not isinstance(rows, list):
+        return []
+
+    columns: list[str] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        for column in row:
+            if isinstance(column, str) and column not in columns:
+                columns.append(column)
+    return columns
+
+
+def _history_answer_payload(
+    answer_id: UUID,
+    payload: dict[str, Any] | None,
+    *,
+    is_adopted: bool,
+    reaction: str | None,
+) -> ConversationAnswerPayload | None:
+    """把已保存 ChatResponse 装配为可回放且不含敏感行的历史摘要。"""
+
+    if payload is None:
+        return None
+    return ConversationAnswerPayload(
+        answer_id=answer_id,
+        answer_mode=payload["answer_mode"],
+        thinking_steps=payload.get("thinking_steps", []),
+        quality_status=payload["quality_status"],
+        quality_attempts=payload["quality_attempts"],
+        quality_notes=payload.get("quality_notes", []),
+        degraded=payload["degraded"],
+        degraded_reason=payload.get("degraded_reason"),
+        is_adopted=is_adopted,
+        reaction=reaction,
+        columns=_history_columns(payload),
+        total_rows=payload.get("total_rows"),
+        truncated=payload.get("truncated"),
+    )
 
 
 def _wants_json(request: Request) -> bool:
@@ -236,18 +282,43 @@ async def get_conversation(
         context.merchant_id,
         conversation.id,
     )
-    return ConversationDetailResponse(
-        id=conversation.id,
-        title=conversation.title,
-        messages=[
+    answers_by_user_message = {
+        answer.user_message_id: (answer, feedback)
+        for answer, feedback in await conversations.list_succeeded_answers_for_conversation(
+            context.merchant_id,
+            conversation.id,
+        )
+        if answer.user_message_id is not None
+    }
+    last_user_message_id: UUID | None = None
+    detail_messages: list[ConversationMessage] = []
+    for message in messages:
+        if message.role == "USER":
+            last_user_message_id = message.id
+        history_payload = None
+        if message.role == "ASSISTANT" and last_user_message_id is not None:
+            matched = answers_by_user_message.get(last_user_message_id)
+            if matched is not None:
+                answer, feedback = matched
+                history_payload = _history_answer_payload(
+                    answer.id,
+                    answer.response_payload,
+                    is_adopted=feedback.is_adopted if feedback is not None else False,
+                    reaction=feedback.reaction if feedback is not None else None,
+                )
+        detail_messages.append(
             ConversationMessage(
                 id=message.id,
                 role=message.role,
                 content=message.content,
                 created_at=message.created_at,
+                answer_payload=history_payload,
             )
-            for message in messages
-        ],
+        )
+    return ConversationDetailResponse(
+        id=conversation.id,
+        title=conversation.title,
+        messages=detail_messages,
         created_at=conversation.created_at,
         updated_at=conversation.updated_at,
     )

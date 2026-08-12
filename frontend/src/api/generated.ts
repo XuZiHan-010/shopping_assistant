@@ -275,6 +275,38 @@ export interface components {
             /** Recommendations */
             recommendations?: components["schemas"]["Recommendation"][] | null;
         };
+        /**
+         * ConversationAnswerPayload
+         * @description 会话详情中的助手回答脱敏载荷，不携带明细行和导出 URL。
+         */
+        ConversationAnswerPayload: {
+            /**
+             * Answer Id
+             * Format: uuid
+             */
+            answer_id: string;
+            answer_mode: components["schemas"]["AnswerMode"];
+            /** Thinking Steps */
+            thinking_steps?: components["schemas"]["ThinkingStep"][];
+            quality_status: components["schemas"]["QualityStatus"];
+            /** Quality Attempts */
+            quality_attempts: number;
+            /** Quality Notes */
+            quality_notes?: string[];
+            /** Degraded */
+            degraded: boolean;
+            /** Degraded Reason */
+            degraded_reason: string | null;
+            /** Is Adopted */
+            is_adopted: boolean;
+            reaction: components["schemas"]["FeedbackReaction"] | null;
+            /** Columns */
+            columns?: string[];
+            /** Total Rows */
+            total_rows?: number | null;
+            /** Truncated */
+            truncated?: boolean | null;
+        };
         /** ConversationDetailResponse */
         ConversationDetailResponse: {
             /**
@@ -322,6 +354,7 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            answer_payload?: components["schemas"]["ConversationAnswerPayload"] | null;
         };
         /** ConversationSummary */
         ConversationSummary: {

@@ -70,6 +70,8 @@ export interface ExportInfo {
 /** 数据结果。无数据模式下整个对象为 undefined，而不是空壳。 */
 export interface DataResult {
   rows: Array<Record<string, unknown>>
+  /** 历史回答只保留列定义，实时回答由 rows 推导。 */
+  columns?: string[]
   totalRows: number
   truncated: boolean
   queryPlan?: string

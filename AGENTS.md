@@ -361,7 +361,7 @@ plans/
 
 不要因为这里为空就认为那些约束不存在——它们已经是上述四份文档的正文，尤其是：扁平 snake_case 契约、`app` 包与 `public` schema、商家隔离前置、P0 费用防护、MVP 阶段边界（后端 B0–B7 / 前端 F0–F6）。
 
-### 4.5 [现有] Python 后端 B0–B2
+### 4.5 [现有] Python 后端 B0–B7 与 R9 整改入口
 
 根目录：
 
@@ -369,7 +369,7 @@ plans/
 backend/
 ```
 
-当前已完成工程骨架、数据库身份基础设施与 Chat API 骨架：
+当前已完成 B0–B7 的工程、身份、经营查询、回答质量、反馈导出和费用防护基础设施：
 
 - Python 3.12、FastAPI App Factory、Pydantic Settings、结构化日志和统一错误；
 - `/api/health`、`/api/ready`、`/api/demo/merchants`；
@@ -383,9 +383,11 @@ backend/
 - `/api/conversations` 列表、详情和删除，复用可信商家范围与跨商家审计；
 - `docs/api.md` 由 `scripts/export_openapi.py` 从 FastAPI 自动导出；
 - 三个演示商家的可重复 Seed；
+- B3 结构化意图、B4 受控经营查询、B5 回答/图表/Reviewer、B6 反馈/签名 CSV、B7 限流/预算/部署配置；
 - pytest、Ruff、mypy、Dockerfile 和本地 PostgreSQL Compose 配置。
 
-本阶段未包含经营数据表、结构化意图、真实 LLM、CSV 导出和 P1 功能；后续继续按 `docs/backend-development-plan.md` 的 B3–B7 顺序实施。
+R9 还原度差异的持续清单见 `docs/yshopping-parity-audit.md`；其阶段 B 的契约设计和整改顺序见
+`plans/2026-08-09-b7-f4-integration-and-r9-remediation.md`。P1 功能仍按后端计划的 B8–B9 实施。
 
 ---
 

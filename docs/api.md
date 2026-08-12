@@ -1030,6 +1030,113 @@
         "title": "ChatResponse",
         "description": "§8.2 的扁平响应；按模式字段由模型级校验控制。"
       },
+      "ConversationAnswerPayload": {
+        "properties": {
+          "answer_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Answer Id"
+          },
+          "answer_mode": {
+            "$ref": "#/components/schemas/AnswerMode"
+          },
+          "thinking_steps": {
+            "items": {
+              "$ref": "#/components/schemas/ThinkingStep"
+            },
+            "type": "array",
+            "title": "Thinking Steps"
+          },
+          "quality_status": {
+            "$ref": "#/components/schemas/QualityStatus"
+          },
+          "quality_attempts": {
+            "type": "integer",
+            "maximum": 2.0,
+            "minimum": 0.0,
+            "title": "Quality Attempts"
+          },
+          "quality_notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Quality Notes"
+          },
+          "degraded": {
+            "type": "boolean",
+            "title": "Degraded"
+          },
+          "degraded_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Degraded Reason"
+          },
+          "is_adopted": {
+            "type": "boolean",
+            "title": "Is Adopted"
+          },
+          "reaction": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FeedbackReaction"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "columns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Columns"
+          },
+          "total_rows": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Rows"
+          },
+          "truncated": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Truncated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "answer_id",
+          "answer_mode",
+          "quality_status",
+          "quality_attempts",
+          "degraded",
+          "degraded_reason",
+          "is_adopted",
+          "reaction"
+        ],
+        "title": "ConversationAnswerPayload",
+        "description": "会话详情中的助手回答脱敏载荷，不携带明细行和导出 URL。"
+      },
       "ConversationDetailResponse": {
         "properties": {
           "id": {
@@ -1124,6 +1231,16 @@
             "type": "string",
             "format": "date-time",
             "title": "Created At"
+          },
+          "answer_payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConversationAnswerPayload"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",

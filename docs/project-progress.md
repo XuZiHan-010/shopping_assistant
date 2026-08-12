@@ -4,6 +4,21 @@
 
 **最后更新：2026-08-12**
 
+> **当前优先快照（2026-08-12，覆盖下方较早的集成与 F6 叙述）**：用户已裁定 `main` 为唯一主线；
+> `feature/integrate-b7-f4` 是当前集成分支，已推送至 `origin/feature/integrate-b7-f4`，未创建 PR，
+> 也未改动 `main`。阶段 0 的静态门禁与独立空 PostgreSQL 库实测已完成：后端
+> `ruff check`、`ruff format --check`、`mypy app` 全绿；前端 Vitest **245 passed**、lint、格式、
+> codegen/fixture/mock/密钥/首屏门禁、类型检查和构建全绿；独立空库
+> `borough_stage0_20260812_test` 上真实数据库 pytest **717 passed / 0 failed / 1 条第三方警告**。
+> DeepSeek 调用 **0**、费用 **0**。旧 `borough_test` 的 Alembic 版本 `20260808_0005` 不属于当前迁移图，
+> 因此未删除该持久库。现正执行 R9 阶段 B 的 Task 5–7：文档事实校正、参考能力审计与契约设计；
+> **R9 阶段 B Task 8 已完成（2026-08-12，待本轮提交）**：会话详情已为助手消息返回脱敏
+> `answer_payload`（回答 ID、模式、完整步骤、质量状态/备注、当前反馈和表格元数据），严格不返回明细行、
+> 导出 URL 或签名。完成态实时与历史回答都按原顺序展示全部步骤；历史明细只展示元数据并引导重新提问。
+> 后端真实 PostgreSQL 全量回归 **718 passed / 0 failed / 1 条第三方警告**；前端完整 Vitest
+> **26 文件 / 249 passed**，类型检查、lint、格式、OpenAPI codegen 与 fixture 检查均通过。全程
+> DeepSeek 调用 **0**、费用 **0**。下一步是 R9 Task 9：先产出并审阅指标口径子计划，再开始该切片代码。
+
 > **当前集成验收快照（2026-08-11，优先于下方历史阶段摘要）**：B7 + F4 集成工作已在
 > `feature/integrate-b7-f4` 完成**并提交**（`3faef8a`…`ac042a0`），**尚未推送到
 > `origin`**。仓库根工作目录当前直接签出该分支（不再是独立 worktree）；
@@ -89,7 +104,7 @@
 
 **代码实现尚未开始。** 落点应为 `feature/b4-safe-analytics-query`（`/api/metrics/{code}` 与
 `metric_definitions` 表都在该分支），改动链路：迁移加列 → Seed 补值 → `MetricDefinitionResponse` /
-`MetricPayload` / `ChatResponse` 加字段并把 `metric_definition` 改名为 `metric_business_definition`
+`MetricPayload` / `ChatResponse` 加字段并完成旧业务口径键的语义改名
 → 重跑 `codegen` 与 `fixtures` → 前端 `MetricDefinitionPanel.vue` 按参考项目版式还原。
 注意 F4 已在 `feature/f3-real-api-integration` 上完成并提交，该前端改动会与其产生冲突，
 需要先确定两个分支的合并顺序。
@@ -222,12 +237,10 @@
 
 ## 下一步
 
-1. **完成阶段 0 的分支收口**：用户已于 2026-08-12 裁定唯一主线为 `main`（当前仍停在
-   `003cbc7`）；`feature/f2-mock-conversation` 只是事实默认分支，不再称作主线。F5 与 F6 Task 1–8、12
-   的本地成果及全量门禁均已完成。尚待用户选择本轮动作：仅推送 `feature/integrate-b7-f4` 备份、推送并
-   以 `main` 为 base 开 PR，或在再次明确授权后快进 `main`。
-2. **执行 R9 阶段 B Task 5–8**：阶段 0 出口达标并获用户确认后，先校正文档与契约、修复思考步骤展示和
-   历史会话装配；本顺序取代 2026-08-12 前「先部署 Railway」的安排。
+1. **产出 R9 Task 9 指标口径子计划**：先固化三级检索、`response_payload` 兼容和 `report_url` 安全策略，
+   经用户审阅后才以 TDD 实施。
+2. **继续 R9 阶段 B Task 10–15**：纯明细、跨业务和临时指标均先各自产出子计划并经用户审阅，最后进行
+   真实数据库 E2E 和可信客户端 IP 契约整改。
 3. **执行 R9 阶段 B Task 9–15 与可信客户端 IP 契约整改**：四个能力切片先分别成文、经用户审阅后实施，
    随后修复 Railway 的 `X-Real-IP` 信任链并由用户裁定 `TRUSTED_PROXY_IPS` 策略。
 4. **最后才进入 Railway 部署与线上验收**：完成 R9 与可信 IP 契约整改后，用户在控制台执行 F6 Task 9–10；

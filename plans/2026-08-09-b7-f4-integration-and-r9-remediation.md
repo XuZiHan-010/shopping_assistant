@@ -745,15 +745,15 @@ Task 1–4 全绿即构成一个**独立可交付的成果**：一个统一的�
 
 > **本任务只做事实校正，不设计新契约。** `CrossBusinessPlan`、`GeneratedMetricPlan`、`analysis_requested`、纯明细正文规则、会话详情载荷、生成指标导出全部归 Task 7——那里有用户审阅门。本任务先写下来，Task 7 一旦改设计就得推翻重写。
 
-- [ ] **Step 1: 按权威顺序修正事实状态**
+- [x] **Step 1: 按权威顺序修正事实状态**
 
 按“PRD → 后端 §8 指标口径 → 前后端计划 → AGENTS 索引 → progress 快照”顺序修改，范围严格限于本计划第二节标注为「Task 5 阶段」的条目。
 
-- [ ] **Step 2: 修正审计清单的五项已知问题**
+- [x] **Step 2: 修正审计清单的五项已知问题**
 
 逐项落实第二节对 `docs/yshopping-parity-audit.md` 的要求。注意第四项的措辞已按实测更正：历史会话不是"只渲染最后一步"，而是**后端根本不返回步骤载荷**，前端无从渲染。
 
-- [ ] **Step 3: 检查权威字段没有多处复制**
+- [x] **Step 3: 检查权威字段没有多处复制**
 
 排除 `docs/specs/` 与 `plans/`——设计规格和执行计划本来就要写类名：
 
@@ -767,7 +767,7 @@ Expected（Task 5 阶段）：`CrossBusinessPlan`/`GeneratedMetricPlan`/`analysi
 
 Expected（Task 14 复查时）：内部意图类型只在 **§6.2 Intent Contract**；外部 API 字段只在 **§8**；PRD 只描述产品语义，AGENTS 只做索引。同一个类名同时出现在 §6.2 和 §8 即为违规。
 
-- [ ] **Step 4: 检查生成文档未被手改**
+- [x] **Step 4: 检查生成文档未被手改**
 
 ```powershell
 . 'C:\Users\Penguin\AppData\Local\Temp\claude\gate-helpers.ps1'
@@ -802,7 +802,7 @@ Expected: 无漂移。
 
 > **为什么扩到 11 个类：** 只读四个 Service 无法确认历史上下文如何存取（`ConversationContextStore`）、Reviewer 循环如何终止（`MerchantQaLangGraph`）、导出文件如何生成（`CsvExportService`）、图表字段如何选取（`VisualizationService`）。而 Task 7 要设计的会话详情契约与生成指标导出，恰好落在这几个类上。
 
-- [ ] **Step 1: 定位全部参考文件**
+- [x] **Step 1: 定位全部参考文件**
 
 ```powershell
 Set-Location 'd:\vscode html\merchant_assistant'
@@ -814,27 +814,27 @@ Get-ChildItem -Recurse -Filter '*.java' -Path '.\yshopping-merchant-ai 4' |
 
 Expected: 11 个主类各定位到一个绝对路径，另附各自的测试类。找不到的类必须在审计里保留 ❓ 并写明"参考实现中未找到同名类"，**不得凭类名推测行为**。只读不写，禁止格式化或在该目录下生成任何文件。
 
-- [ ] **Step 2: 审计跨业务计划**
+- [x] **Step 2: 审计跨业务计划**
 
 记录三种 plan type、子订单号提取、**参数非法时的降级路径**（已裁定 1:1 还原）、订单→退款、订单→商品、订单→退款+商品的查询步骤与无结果提示。
 
-- [ ] **Step 3: 审计纯明细模式**
+- [x] **Step 3: 审计纯明细模式**
 
 记录 `analysisRequested`、`tableOnlyDetail`、`attachmentDriven`、`repairAnswer()`、`outputMatchesIntent()` 和 Reviewer/loop 对空正文的处理。特别记录 `outputMatchesIntent` 对纯明细是**要求**正文为空（`!StringUtils.hasText(answer)`），不是允许为空。
 
-- [ ] **Step 4: 审计临时分组指标**
+- [x] **Step 4: 审计临时分组指标**
 
 记录允许的 group/filter 列、**按问题类别选模板的分流逻辑**、每个模板的固定聚合列集合、`generatedMetricCity` 这个遗留字段的兼容路径、金额精度、图表字段、**截断时的 CSV 导出行为**和所有注入反例测试。
 
-- [ ] **Step 5: 审计历史上下文与回答载荷**
+- [x] **Step 5: 审计历史上下文与回答载荷**
 
 记录 `ConversationContextStore` 存了什么、会话详情回放时哪些字段可用、敏感明细行是否落库、Reviewer 重试步骤是否进入历史。这是 Task 7 设计会话详情契约的唯一输入。
 
-- [ ] **Step 6: 审计导出与图表**
+- [x] **Step 6: 审计导出与图表**
 
 记录 `CsvExportService` 的文件命名、URL 生成、过期语义、公式注入处理；`VisualizationService` 如何从查询结果挑选图表字段。
 
-- [ ] **Step 7: 更新待核实状态**
+- [x] **Step 7: 更新待核实状态**
 
 仅把已经完成能力级对照的条目标成“已核实”；未读完的方法和测试继续保留 ❓，不得硬凑结论。
 
@@ -852,13 +852,13 @@ Expected: 11 个主类各定位到一个绝对路径，另附各自的测试类�
 
 > **本任务承接 Task 5 推迟下来的全部文档条目**，一次写完，避免同一批字段在两个任务里各写一遍。**放置位置有硬性区分**：内部 LLM 意图 → §6.2 Intent Contract；外部 API 字段 → §8 API Schema。
 
-- [ ] **Step 1: 定义纯明细语义（→ §6.2 + §8.2）**
+- [x] **Step 1: 定义纯明细语义（→ §6.2 + §8.2）**
 
 §6.2：模型只输出 `analysis_requested: bool`；后端依据 `answer_mode == DETAIL and not analysis_requested` 计算纯明细模式。
 
 §8.2：`ChatResponse.answer` 在纯明细模式下**必须**为空字符串，其他模式必须非空。措辞按 `outputMatchesIntent` 的 `!StringUtils.hasText(answer)` 对齐——是"必须为空"，不是"允许为空"。同时定义违反时的错误契约。
 
-- [ ] **Step 2: 定义跨业务计划类型与降级语义（→ §6.2）**
+- [x] **Step 2: 定义跨业务计划类型与降级语义（→ §6.2）**
 
 ```python
 class CrossBusinessPlanType(StrEnum):
@@ -879,7 +879,7 @@ class CrossBusinessPlan(BaseModel):
 
 设计文档必须明确写出 Pydantic 校验失败如何转成上述降级——嵌套模型约束本身只会抛 `ValidationError`。方案：`cross_business_plan` 在 `QueryIntent` 上声明为 `CrossBusinessPlan | None`，用 `model_validator(mode="before")` 捕获子模型构造失败并降级为 `None` + 备注，而不是让 `ValidationError` 冒泡。
 
-- [ ] **Step 3: 定义临时分组指标类型与 INVALID 语义（→ §6.2）**
+- [x] **Step 3: 定义临时分组指标类型与 INVALID 语义（→ §6.2）**
 
 **不加 `measure` 枚举**（已裁定）。聚合由后端按问题类别选固定模板，每个模板吐固定一组聚合列，与 `DorisQueryService` 的 `intent.getCategory() == QuestionCategory.REFUND` 分流一致。
 
@@ -908,7 +908,7 @@ class GeneratedMetricPlan(BaseModel):
 
 `name` 和 `unit` 只作展示，**绝不能参与查询模板选择**；后端把 plan 映射到固定 SQLAlchemy 表达式和白名单列，禁止自由公式、自由列名和 SQL 文本。
 
-- [ ] **Step 4: 定义会话详情响应契约（→ §8）**
+- [x] **Step 4: 定义会话详情响应契约（→ §8）**
 
 当前 `GET /api/conversations/{id}` 只返回 `id/role/content/created_at`，前端无从还原任何执行信息。按已裁定的「扩后端契约」新增脱敏助手回答载荷：
 
@@ -917,11 +917,11 @@ class GeneratedMetricPlan(BaseModel):
 - 历史明细的前端表现：显示表格元数据与「历史明细未保留，重新提问可查看完整数据」的可见说明，不渲染空白助手消息。
 - 数据来源：`answers.response_payload`（JSONB）。设计文档必须写明脱敏发生在装配层，不是靠前端不显示。
 
-- [ ] **Step 5: 定义生成指标导出契约（→ §8）**
+- [x] **Step 5: 定义生成指标导出契约（→ §8）**
 
 按已裁定的「允许」扩 export 契约：当前 §8 只允许 DETAIL 成功且未降级时返回 export，需扩展为**生成型 METRIC 结果超出展示上限时同样创建导出记录并返回签名 URL**，附截断提示文案（对应 `queryGeneratedGroupedMetric` 的 `detailNotice`）。设计文档需说明这对 `export_files` 表和 `ExportService.download()` 的重放查询意味着什么——下载时要能重放生成指标查询，不只是明细查询。
 
-- [ ] **Step 6: 定义 `response_payload` 兼容策略（→ §8）**
+- [x] **Step 6: 定义 `response_payload` 兼容策略（→ §8）**
 
 `chat_service.py:274` 的 `_stored_response(existing.response_payload)` 会把历史 JSONB 直接过当前 `ChatResponse` 校验。本轮所有字段新增/改名都会让**升级前写入的幂等回答在重放时校验失败**。设计文档必须二选一并写明理由：
 
@@ -930,7 +930,7 @@ class GeneratedMetricPlan(BaseModel):
 
 无论选哪个，都必须有一条回归测试：写入旧结构 payload → 重放 → 不抛异常且字段完整。
 
-- [ ] **Step 7: 用户审阅设计**
+- [x] **Step 7: 用户审阅设计**
 
 在用户确认上述五个契约前，不进入 Task 8 起的任何代码实施。
 
@@ -951,11 +951,11 @@ class GeneratedMetricPlan(BaseModel):
 
 > **这是前后端契约任务，不是纯组件修复。** 实测 [chat.py:244-247](../.worktrees/feature-b5-b6-answer-feedback-export/backend/app/api/routes/chat.py) 的会话详情只返回 `id/role/content/created_at`，`stores/chat.ts` 据此把历史消息构造成 `{ status: 'complete', steps: [], origin: 'history' }` 且**没有 `answer` 对象**。任何只改组件的方案都只是把缺口从"完成态不显示"挪到"历史态不显示"。
 
-- [ ] **Step 1: 写失败的后端契约测试**
+- [x] **Step 1: 写失败的后端契约测试**
 
 `backend/tests/api/test_conversations.py`：创建一轮带 `thinking_steps` 和反馈状态的助手回答 → `GET /api/conversations/{id}` → 断言响应里助手消息含 `answer_id`、`answer_mode`、`thinking_steps`（顺序与写入一致）、质量状态、当前反馈状态、表格元数据；断言**不含**完整明细数据行与任何 `signature=` 字符串。
 
-- [ ] **Step 2: 运行后端测试确认失败**
+- [x] **Step 2: 运行后端测试确认失败**
 
 ```powershell
 . 'C:\Users\Penguin\AppData\Local\Temp\claude\gate-helpers.ps1'
@@ -966,7 +966,7 @@ if ($LASTEXITCODE -eq 0) { throw '预期失败但通过了——测试没有真�
 
 Expected: FAIL，原因是响应里没有 `thinking_steps`。
 
-- [ ] **Step 3: 实现会话详情载荷并重新生成契约**
+- [x] **Step 3: 实现会话详情载荷并重新生成契约**
 
 按 Task 7 Step 4 的契约扩响应模型与装配层，然后**必须**重跑生成链（否则前端类型对不上）：
 
@@ -979,7 +979,7 @@ Set-Location 'd:\vscode html\merchant_assistant\.worktrees\feature-integrate-b7-
 Invoke-Gate 'codegen' { npm run codegen }
 ```
 
-- [ ] **Step 4: 写失败的前端测试**
+- [x] **Step 4: 写失败的前端测试**
 
 三个组件用例，输入至少三个不同节点：
 
@@ -997,7 +997,7 @@ const steps = [
 
 外加一个 Store 用例：`stores/chat.spec.ts` 断言从新的会话详情响应装配出的历史消息**带有 `answer` 对象**且 `thinkingSteps` 非空——这条防止组件测试用手工构造的数据自欺。
 
-- [ ] **Step 5: 实现 Adapter/Store/组件**
+- [x] **Step 5: 实现 Adapter/Store/组件**
 
 Adapter 从新契约装配 `ChatAnswer` 与当前反馈状态；Store 的历史分支不再写死 `steps: []` 与缺失 `answer`，且只有在 `answer_id` 与反馈状态同时可信时才开放历史反馈；组件：
 
@@ -1024,7 +1024,7 @@ const completedSteps = computed(() =>
 
 key 固定带 index：Reviewer 重试会让同一 `node` 重复出现，纯 `node` 作 key 会触发 Vue 重复 key 告警。不得在组件里去重或丢弃 Reviewer 重试步骤。
 
-- [ ] **Step 6: 运行定向与全量门禁**
+- [x] **Step 6: 运行定向与全量门禁**
 
 ```powershell
 . 'C:\Users\Penguin\AppData\Local\Temp\claude\gate-helpers.ps1'
@@ -1038,7 +1038,7 @@ foreach ($gate in @('codegen:check','fixtures:check','typecheck','lint','test'))
 
 Expected: 全部通过；前端总数为 205 + 本任务新增用例数。
 
-- [ ] **Step 7: 更新审计状态**
+- [x] **Step 7: 更新审计状态**
 
 将 §3.6 从“真实缺口”改为“已修复”，记录后端契约扩展、测试文件与实际通过数。不得提交，除非用户明确授权。
 

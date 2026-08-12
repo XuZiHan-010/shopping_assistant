@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from httpx import AsyncClient
 from sqlalchemy import select
 
+from app.models.answer import Answer
 from app.models.operations import AuditLog
 from tests.conftest import (
     MERCHANT_ONE_AUTH,
@@ -102,6 +103,68 @@ async def test_detail_returns_messages_in_creation_order(
     assert body["id"] == conversation_id
     assert [message["role"] for message in body["messages"]] == ["USER", "ASSISTANT"]
     assert body["messages"][0]["content"] == "昨天总 GMV 是多少？"
+
+
+async def test_detail_returns_redacted_assistant_payload_with_feedback_and_steps(
+    postgres_client: AsyncClient,
+    postgres_app: FastAPI,
+) -> None:
+    """若移除详情装配或直接返回 JSONB，这条会分别漏字段或泄露敏感行。"""
+
+    chat = await postgres_client.post(
+        "/api/chat",
+        headers={**MERCHANT_ONE_AUTH, "Accept": "application/json"},
+        json={"message": "昨天总 GMV 是多少？", "client_request_id": "detail-payload-1"},
+    )
+    assert chat.status_code == 200
+    answer_id = chat.json()["id"]
+    conversation_id = chat.json()["session_id"]
+
+    feedback = await postgres_client.post(
+        f"/api/answers/{answer_id}/feedback",
+        headers=MERCHANT_ONE_AUTH,
+        json={"is_adopted": True, "reaction": "LIKE"},
+    )
+    assert feedback.status_code == 200
+
+    async with postgres_app.state.database.session() as session:
+        answer = await session.scalar(select(Answer).where(Answer.id == answer_id))
+        assert answer is not None
+        assert answer.response_payload is not None
+        answer.response_payload = {
+            **answer.response_payload,
+            "data_rows": [{"order_no": "visible-column", "buyer_phone": "13800138000"}],
+            "total_rows": 241,
+            "truncated": True,
+            "export": {
+                "id": str(uuid4()),
+                "url": "/api/exports/example?signature=must-not-leak",
+                "expires_at": "2026-08-12T00:00:00Z",
+            },
+        }
+        await session.commit()
+
+    response = await postgres_client.get(
+        f"/api/conversations/{conversation_id}",
+        headers=MERCHANT_ONE_AUTH,
+    )
+
+    assert response.status_code == 200
+    assistant = response.json()["messages"][1]
+    payload = assistant["answer_payload"]
+    assert payload["answer_id"] == answer_id
+    assert payload["answer_mode"] == chat.json()["answer_mode"]
+    assert payload["thinking_steps"] == chat.json()["thinking_steps"]
+    assert payload["quality_status"] == chat.json()["quality_status"]
+    assert payload["is_adopted"] is True
+    assert payload["reaction"] == "LIKE"
+    assert payload["columns"] == ["order_no", "buyer_phone"]
+    assert payload["total_rows"] == 241
+    assert payload["truncated"] is True
+    assert "data_rows" not in payload
+    assert "export" not in payload
+    assert "13800138000" not in response.text
+    assert "signature=" not in response.text
 
 
 async def test_cross_merchant_detail_returns_audited_scope_error(

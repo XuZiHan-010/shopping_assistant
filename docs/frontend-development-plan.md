@@ -284,6 +284,17 @@ interface QualityTrace {
 
 **`NONE` 是"本来就没有分析来源"**，用于 `CHAT` 问候闲聊和 `INVALID` 危险请求／无法处理。它只会单独出现，且 `degraded` 为 `false`。UI 对 `["NONE"]` **不渲染任何来源徽标**，也不显示降级提示——这类回答本来就不该有数据出处，硬贴一个徽标是在编造。
 
+### 5.5.1 R9 历史轮次与纯明细表现
+
+运行中只显示当前步骤标签；完成态按接收顺序列出全部步骤。历史助手消息从会话详情的脱敏
+`answer_payload` 组装 `ChatAnswer`，因此也展示同一份完整步骤、质量轨迹和可信的当前反馈状态。
+历史载荷没有完整明细行时，表格区展示列数、总行数、截断状态和“历史明细未保留，重新提问可查看完整数据”，
+不得渲染空白助手消息或过期导出链接。详情契约不保存 `analysis_sources`，历史质量轨迹不得伪造来源标签；
+只有 `answer_id` 与反馈状态同时存在时才开放历史反馈操作。
+
+纯明细的 `answer` 是空字符串，组件只渲染表格与元数据；不得因为空正文而把它当作错误、加载中或历史空消息。
+只有 `answer_id`、`is_adopted` 和 `reaction` 同时来自服务端时，历史消息才开放反馈操作。
+
 ### 5.6 指标口径
 
 ```ts
@@ -291,8 +302,8 @@ interface MetricDefinition {
   metricCode: string        // 稳定英文标识，接口路径和内部引用都用它
   displayName: string       // 中文展示名，只用于展示
   unit: string
-  businessDefinition: string          // ← metric_business_definition，业务口径，必填
-  sqlDefinition?: string              // ← metric_sql_definition，SQL 口径，可缺失
+  businessDefinition: string          // 由 OpenAPI Adapter 映射的业务口径，必填
+  sqlDefinition?: string              // 由 OpenAPI Adapter 映射的 SQL 口径，可缺失
   dimensions?: string[]               // ← metric_dimensions，可缺失
   databaseName?: string               // ← metric_database_name，可缺失
   tableName?: string                  // ← metric_table_name，可缺失

@@ -316,9 +316,17 @@ describe('回答反馈', () => {
       return feedbackResponse(request)
     })
     const store = useChatStore()
-    await store.submitMessage('昨天总 GMV 是多少？')
-    await store.loadConversation(store.sessionId!)
-    const assistant = store.messages.find((message) => message.role === 'assistant')!
+    store.messages.push({
+      localId: 'history-without-answer',
+      clientRequestId: 'history-without-answer-request',
+      role: 'assistant',
+      text: '旧版历史回答',
+      createdAt: '2026-08-01T00:00:00Z',
+      status: 'complete',
+      steps: [],
+      origin: 'history',
+    })
+    const assistant = store.messages[0]
 
     await store.sendFeedback(assistant.localId, { type: 'ADOPT' })
 
@@ -498,7 +506,7 @@ describe('消息 origin 与历史消息重试', () => {
     expect(assistant.messageId).toBeUndefined()
   })
 
-  it('历史消息把 Message.id 存入 messageId，且不伪造回答载荷', async () => {
+  it('历史助手消息装配服务端回答载荷、步骤和当前反馈状态', async () => {
     const store = useChatStore()
     await store.submitMessage('昨天总 GMV 是多少？')
 
@@ -507,7 +515,24 @@ describe('消息 origin 与历史消息重试', () => {
     expect(store.messages.every((message) => Boolean(message.messageId))).toBe(true)
     const assistant = store.messages.find((message) => message.role === 'assistant')!
     expect(assistant.messageId).toBeTruthy()
-    expect(assistant.answer).toBeUndefined()
+    expect(assistant.answer?.thinkingSteps.length).toBeGreaterThan(0)
+    expect(assistant.steps).toEqual([])
+    expect(assistant.feedback).toEqual({ isAdopted: false, reaction: null })
+    expect(assistant.feedbackPersisted).toBe(true)
+  })
+
+  it('历史会话重载后保留服务端确认的反馈状态', async () => {
+    const store = useChatStore()
+    await store.submitMessage('昨天总 GMV 是多少？')
+    const sessionId = store.sessionId!
+    const liveAssistant = store.messages.find((message) => message.role === 'assistant')!
+
+    await store.sendFeedback(liveAssistant.localId, { type: 'ADOPT' })
+    await store.loadConversation(sessionId)
+
+    const historyAssistant = store.messages.find((message) => message.role === 'assistant')!
+    expect(historyAssistant.feedback).toEqual({ isAdopted: true, reaction: null })
+    expect(historyAssistant.feedbackPersisted).toBe(true)
   })
 
   it('历史消息不可重试', async () => {
