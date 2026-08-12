@@ -8,6 +8,8 @@
 
 **技术栈：** FastAPI、Pydantic v2、SQLAlchemy Async、pytest、Vue 3、TypeScript、Zod、Vitest、Vue Test Utils。
 
+**执行状态（2026-08-12）：** ✅ 已完成。后端全量 737 passed，前端全量 253 passed；OpenAPI、生成类型与 fixture 一致。仅保留既有 LangGraph 第三方弃用警告和 Vite 的 ECharts chunk 体积提示，均非失败条件。
+
 ## 全局约束
 
 - 面向用户的文案、日志与文档使用中文；代码标识符保持英文。

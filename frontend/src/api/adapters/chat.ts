@@ -78,8 +78,9 @@ const METRIC_FIELDS = [
  */
 const semanticGuard = z
   .object({
-    answer: z.string().trim().min(1, '回答正文为空，后端返回了不完整的结果'),
+    answer: z.string(),
     answer_mode: z.enum(ANSWER_MODES, { message: 'answer_mode 不在约定的取值范围内' }),
+    recommendations: z.array(z.unknown()).nullable().optional(),
     analysis_sources: z
       .array(z.enum(ANALYSIS_SOURCES, { message: 'analysis_sources 含未知来源' }))
       .min(1, 'analysis_sources 至少要有一个元素'),
@@ -96,6 +97,21 @@ const semanticGuard = z
     const fail = (message: string) => ctx.addIssue({ code: 'custom', message })
     const sources = value.analysis_sources
     const hasNone = sources.includes('NONE')
+    const recommendations = value.recommendations ?? []
+    const isTableOnlyDetail = value.answer_mode === 'DETAIL' && value.answer === ''
+
+    if (isTableOnlyDetail && recommendations.length > 0) {
+      fail('纯明细不得提供 recommendations')
+    }
+    if (value.answer_mode === 'DETAIL' && value.answer !== '' && !value.answer.trim()) {
+      fail('纯明细 answer 必须为精确空字符串')
+    }
+    if (!isTableOnlyDetail && !value.answer.trim()) {
+      fail('非纯明细的回答正文不能为空')
+    }
+    if (value.answer_mode === 'DETAIL' && value.answer !== '' && recommendations.length < 2) {
+      fail('带分析正文的 DETAIL 至少需要两条 recommendations')
+    }
 
     if (hasNone && sources.length > 1) {
       fail('analysis_sources 中的 NONE 只能单独出现')

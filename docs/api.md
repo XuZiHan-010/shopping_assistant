@@ -771,7 +771,6 @@
           },
           "answer": {
             "type": "string",
-            "minLength": 1,
             "title": "Answer"
           },
           "answer_mode": {

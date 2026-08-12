@@ -189,6 +189,30 @@ describe('ChatMessage', () => {
     expect(wrapper.find('[data-testid="detail-table"]').exists()).toBe(true)
   })
 
+  it('纯明细保留表格和导出，但不渲染空正文按钮', () => {
+    const tableOnly = toChatAnswer({
+      ...(detailOrder as components['schemas']['ChatResponse']),
+      answer: '',
+      recommendations: [],
+      export: {
+        ...detailOrder.export!,
+        expires_at: '2026-08-30T00:00:00Z',
+      },
+    })
+    const wrapper = mount(ChatMessage, {
+      props: {
+        message: makeMessage({ status: 'complete', text: '', answer: tableOnly }),
+      },
+    })
+
+    expect(wrapper.get('[data-testid="detail-table"]').text()).toContain('共 2 行')
+    expect(wrapper.get('[data-testid="download-export"]').attributes('href')).toContain(
+      '/api/exports/',
+    )
+    expect(wrapper.find('[data-testid="select-round"]').exists()).toBe(false)
+    expect(wrapper.find('.chat-message__text').exists()).toBe(false)
+  })
+
   it('历史明细回答不重新渲染表格，改为提示重新提问', () => {
     const wrapper = mount(ChatMessage, {
       props: {

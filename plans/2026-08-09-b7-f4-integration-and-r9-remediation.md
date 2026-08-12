@@ -1081,7 +1081,7 @@ Expected: 全部通过；前端总数为 205 + 本任务新增用例数。
 
 ---
 
-### Task 10: 产出并执行纯明细模式子计划
+### Task 10: 产出并执行纯明细模式子计划（✅ 已完成，2026-08-12）
 
 **Files:**
 - Create child plan: `plans/2026-08-09-table-only-detail.md`

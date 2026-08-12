@@ -160,6 +160,22 @@ describe('toChatAnswer · 无数据模式不被编造默认值填充', () => {
 describe('toChatAnswer · 语义守卫', () => {
   const clone = (patch: Partial<RawChatResponse>): RawChatResponse => ({ ...refund, ...patch })
 
+  it('接受仅含表格的空正文 DETAIL，并保留导出与行数', () => {
+    const tableOnly = {
+      ...orderDetail,
+      answer: '',
+      recommendations: [],
+    } as RawChatResponse
+
+    const answer = toChatAnswer(tableOnly)
+
+    expect(answer.answer).toBe('')
+    expect(answer.mode).toBe('DETAIL')
+    expect(answer.data?.totalRows).toBe(2)
+    expect(answer.export?.url).toBe(orderDetail.export?.url)
+    expect(answer.recommendations).toEqual([])
+  })
+
   it('拒绝空回答', () => {
     expect(() => toChatAnswer(clone({ answer: '   ' }))).toThrow(ChatContractError)
   })

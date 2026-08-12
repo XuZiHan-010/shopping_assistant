@@ -76,15 +76,20 @@ grep `cross_business` / `plan_type` 在 `backend/app` 与 `frontend/src` 下零�
 
 ### 3.4 「纯明细只出表格」的行为缺失
 
+**状态：✅ 已修复（R9 Task 10，2026-08-12）。** `QueryIntent.analysis_requested` 仅作为内部
+结构化意图字段；`DETAIL && !analysis_requested` 不调用回答 / Reviewer 生成路径，强制 `answer == ""`、
+建议为空，同时保留既有安全查询、表格、截断和导出。`ChatResponse`、前端 Adapter 与 `ChatMessage` 均校验或
+渲染该形态；Answer payload 正常保存以支持幂等重放，但不创建空 `ASSISTANT` 会话消息，历史详情没有空白卡片。
+回归入口：`backend/tests/unit/schemas/test_chat.py`、`backend/tests/unit/agent/test_graph_query_data.py`、
+`backend/tests/unit/services/test_chat_service.py`、`frontend/src/api/adapters/chat.spec.ts`、
+`frontend/src/components/chat/ChatMessage.spec.ts`。
+
 **参考**：`QuestionIntent.tableOnlyDetail` / `analysisRequested`，
 `SemanticLayerService.inspectInput()` 对 `DETAIL` 分流：
 用户没要求分析时置 `tableOnlyDetail=true`，`outputMatchesIntent()` 进一步**强制此时 `answer` 必须为空**，
 `repairAnswer()` 把非空正文清成空串。
 
-**我们**：`DETAIL` 模式恒定输出分析正文，尚无“是否要求分析”的结构化意图字段。
-
-差异是用户可见的：参考项目里「给我看最近 20 笔订单」只返回表格，我们会额外附一段模型生成的
-分析文字。PRD §11.3 目前也没有区分这两种 `DETAIL`。
+**我们**：已按上述语义还原；「给我看最近 20 笔订单」只显示表格，「分析最近 20 笔订单」才生成正文与建议。
 
 ### 3.5 LLM 生成指标（按维度分组的临时指标）缺失
 
@@ -163,10 +168,9 @@ PRD §10 Metric Catalog 与 §6.2。
 
 1. **§3.6 思考过程渲染** — 数据已经在 store 里，纯前端改动，成本最低、可见性最高。
 2. **§3.1 + §3.2 指标口径** — 文档已改齐，实现链路明确（迁移 → Seed → 三个 Pydantic 模型 → codegen → 面板）。
-3. **§3.4 纯明细只出表格** — 需要先在 PRD §11.3 区分两种 `DETAIL`，再改意图契约与回答组装。
-4. **§3.3 跨业务查询计划** — 需要先补 PRD 条款（当前 PRD 完全没写），是四项里唯一需要新增产品需求的。
-5. **§3.5 生成指标** — 与 §3.3 共享意图契约设计，但不依赖跨业务查询实现，建议同批设计后独立切片实施。
-6. **§6 待核实项** — 建议在各自阶段开工前各做一轮，而不是现在一次性做完。
+3. **§3.3 跨业务查询计划** — 需要先补 PRD 条款（当前 PRD 完全没写），是四项里唯一需要新增产品需求的。
+4. **§3.5 生成指标** — 与 §3.3 共享意图契约设计，但不依赖跨业务查询实现，建议同批设计后独立切片实施。
+5. **§6 待核实项** — 建议在各自阶段开工前各做一轮，而不是现在一次性做完。
 
 ---
 
@@ -185,7 +189,7 @@ PRD §10 Metric Catalog 与 §6.2。
 
 | 能力 | 参考证据（均已只读核对） | 输入、校验、输出与失败语义 | 我方状态 |
 | --- | --- | --- | --- |
-| 纯明细 | `QuestionIntent`、`LlmIntentAnalysisService`、`SemanticLayerService`、`MerchantQaLangGraph` | 模型仅声明是否要求分析；`DETAIL` 且未要求分析时设 table-only；`repairAnswer()` 清空正文，`outputMatchesIntent()` 强制正文为空。 | 🔴 缺“是否要求分析”的意图字段与“正文必须为空”不变量。 |
+| 纯明细 | `QuestionIntent`、`LlmIntentAnalysisService`、`SemanticLayerService`、`MerchantQaLangGraph` | 模型仅声明是否要求分析；`DETAIL` 且未要求分析时设 table-only；`repairAnswer()` 清空正文，`outputMatchesIntent()` 强制正文为空。 | ✅ `analysis_requested` 内部字段 + 响应空正文不变量、表格/导出保留、历史无空助手消息均已实现。 |
 | 跨业务计划 | `QuestionIntent`、`SemanticLayerService`、`DorisQueryService` | 仅 `ORDER_TO_REFUND`、`ORDER_TO_GOODS`、`ORDER_REFUND_GOODS`；以商家范围和子订单号串行查订单、退款、商品；计划参数非法时移除该计划并记录说明，基础意图继续执行。无订单/无关联记录返回明确 notice。 | 🔴 缺结构化计划、受控路由与可见回退说明。 |
 | 临时分组指标 | `QuestionIntent`、`LlmIntentAnalysisService`、`SemanticLayerService`、`DorisQueryService`、`MetricDefinitionService`、`VisualizationService`，以及 `DorisQueryServiceTest`、`LlmIntentAnalysisServiceTest`、`MetricDefinitionServiceTest`、`VisualizationServiceTest` | 白名单仅 `spu_id`、`address_city_name`；按交易/退款类别选择固定聚合；城市筛选可替代分组；金额由分转元；非法维度整体 `INVALID`；截断时生成 CSV 与提示；图表只取查询结果已有字段。 | 🔴 缺受控计划与重放型导出；不得引入自由公式、自由列名或 `measure` 枚举。 |
 | 会话上下文 | `ConversationContextStore`、`ConversationContextStoreTest`、`MerchantQaLangGraph` | 内存中按 `(merchant_id, session_id)` 隔离，TTL 30 分钟；复制意图、查询包、数据行、计划步骤和导出字段；只缓存有效且有数据的轮次；上文分析复用数据但不重新查库。 | ⚪ 我方持久会话优于内存 TTL；但历史详情必须脱敏返回执行载荷，不能返回完整明细行或过期签名 URL。 |

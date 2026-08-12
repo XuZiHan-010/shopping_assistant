@@ -122,6 +122,9 @@ const canSendFeedback = computed(
 const isSelectableRound = computed(
   () => props.message.role === 'assistant' && props.message.status === 'complete',
 )
+// 纯明细的 answer 按后端契约是精确空串；表格仍独立渲染，但不能留下一个可聚焦的
+// 空按钮或空文本段落。用户消息与分析型回答则继续按原样展示正文。
+const hasAnswerText = computed(() => props.message.text.trim().length > 0)
 // METRIC 回答的 `data` 只是趋势行的附带数据来源（图表面板自己的 <details> 已经
 // 用它渲染过一份可访问数据表），不按 answer_mode 过滤的话，同一批行会在聊天
 // 消息里又完整渲染一次「经营明细」表格——两张表、没有下载入口，纯粹是重复。
@@ -257,6 +260,7 @@ const showHistoricalDataNotice = computed(
           </div>
         </section>
         <button
+          v-if="hasAnswerText"
           class="chat-message__select"
           type="button"
           data-testid="select-round"
@@ -282,7 +286,7 @@ const showHistoricalDataNotice = computed(
           }}行的元数据；重新提问可查看最新的数据表格与下载链接。
         </p>
       </template>
-      <p v-else class="chat-message__text">{{ message.text }}</p>
+      <p v-else-if="hasAnswerText" class="chat-message__text">{{ message.text }}</p>
 
       <section
         v-if="canSendFeedback"

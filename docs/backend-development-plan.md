@@ -788,7 +788,7 @@ B2 的 Fake Agent 只覆盖 `TRADE`、`REFUND`、`PLATFORM_RULE` 三类场景与
 | `truncated` | `bool` | `METRIC`、`DETAIL`、`IDENTITY` |
 | `export` | `ExportInfo` | `DETAIL` |
 | `visualization` | `Visualization` | `METRIC` 必填；`DETAIL`、`ATTACHMENT` 可选 |
-| `recommendations` | `list[Recommendation]`（至少两条） | `METRIC`、`DETAIL`、`ATTACHMENT` |
+| `recommendations` | `list[Recommendation]`（至少两条） | `METRIC`、要求分析的 `DETAIL`、`ATTACHMENT`；纯明细必须为空列表 |
 
 `metric_source`、`metric_owner`、`metric_status` 是 PRD 要求指标口径面板展示的三项，缺一前端就只能显示空白，因此列为 `METRIC` 必填。
 
@@ -806,7 +806,8 @@ B2 的 Fake Agent 只覆盖 `TRADE`、`REFUND`、`PLATFORM_RULE` 三类场景与
 
 Pydantic 模型**不得**把按模式必填的字段设为无条件必填，否则 `CHAT` 等模式的正常响应会校验失败。正确做法是模型级校验器：按 `answer_mode` 分支检查，`METRIC` 缺 `metric_owner` 必须报错，`CHAT` 缺 `data_rows` 必须放行。
 
-R9 补充约束：纯明细模式的 `answer` **必须是空字符串**；其他模式必须是非空字符串。违反者由
+R9 补充约束：纯明细模式的 `answer` **必须是空字符串**且 `recommendations` 必须为空；要求分析的
+`DETAIL` 与其他模式的 `answer` 必须非空，要求分析的 `DETAIL` 仍至少两条建议。违反者由
 `ChatResponse` 模型级校验拒绝，不能仅靠前端隐藏正文。`export` 除成功且未降级的 DETAIL 外，也允许
 出现在结果被截断的受控临时 METRIC；下载服务须按存储的受控查询规格重放该指标查询。
 
@@ -830,7 +831,7 @@ R9 补充约束：纯明细模式的 `answer` **必须是空字符串**；其他
 - `METRIC` 缺 `metric_source` / `metric_owner` / `metric_status` / `metric_definition` / `metric_generated` 校验失败；
 - `metric_generated` 为 `true` 但缺 `metric_notice` 校验失败；
 - `METRIC` 缺 `metric_sql_definition`、维度或来源库表时校验失败；
-- `DETAIL` 缺 `export` 校验失败；
+- `DETAIL` 缺 `export` 校验失败；纯明细非空正文或建议、分析型 DETAIL 缺两条建议均校验失败；
 - `analysis_sources` 为空数组时校验失败；
 - `CHAT`、`INVALID` 返回 `["NONE"]` 且 `degraded=false` 时校验通过；
 - `NONE` 与其他来源共存时校验失败；
