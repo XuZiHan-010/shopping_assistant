@@ -156,6 +156,10 @@ async def test_detail_returns_redacted_assistant_payload_with_feedback_and_steps
     assert payload["answer_mode"] == chat.json()["answer_mode"]
     assert payload["thinking_steps"] == chat.json()["thinking_steps"]
     assert payload["quality_status"] == chat.json()["quality_status"]
+    assert payload["quality_attempts"] == chat.json()["quality_attempts"]
+    assert payload["quality_notes"] == chat.json()["quality_notes"]
+    assert payload["degraded"] == chat.json()["degraded"]
+    assert payload["degraded_reason"] == chat.json()["degraded_reason"]
     assert payload["is_adopted"] is True
     assert payload["reaction"] == "LIKE"
     assert payload["columns"] == ["order_no", "buyer_phone"]
