@@ -80,6 +80,7 @@ DATABASE_URL                  [P0]
 LLM_API_KEY                   [P0] DeepSeek API Key
 LLM_BASE_URL                  [P0] 固定为 https://api.deepseek.com
 DEMO_MERCHANT_TOKENS          [P0] 演示 Token 到 merchant_id 的映射
+DEMO_DEPLOYMENT_MODE          [P0] 对外演示部署时显式开放生产环境的演示商家端点，默认 false
 ADMIN_TOKEN                   [P0] 运维端点；[P1] 兼作知识库后台管理员令牌；请求头 X-Admin-Token
 REDIS_URL                     [P1]
 OBJECT_STORAGE_ACCESS_KEY     [P1]
@@ -444,6 +445,7 @@ merchant_assistant/
 ├── docker-compose.yml
 ├── frontend/
 │   ├── Dockerfile
+│   ├── railway.json
 │   ├── package.json
 │   ├── package-lock.json
 │   ├── vite.config.ts
@@ -464,6 +466,7 @@ merchant_assistant/
 │       └── assets/
 ├── backend/
 │   ├── Dockerfile
+│   ├── railway.json
 │   ├── pyproject.toml
 │   ├── uv.lock
 │   ├── alembic.ini
@@ -495,15 +498,11 @@ merchant_assistant/
 │   ├── database.md
 │   ├── api.md
 │   ├── metrics.md
-│   └── deploy-railway.md
+│   └── deployment.md
 ├── plans/                       # 当前为空，供后续整改计划使用
 ├── scripts/
 │   ├── seed_demo_data.py
 │   └── import_legacy_wiki.py
-└── railway/
-    ├── frontend.json
-    ├── backend.json
-    └── worker.json
 ```
 
 ---
@@ -546,7 +545,7 @@ merchant_assistant/
 | `frontend/src/components/insights/MetricChartPanel.vue` | 折线图、柱状图和饼图 |
 | `frontend/src/components/insights/RecommendationPanel.vue` | 经营建议和行动项 |
 | `frontend/src/components/insights/DetailTable.vue` | 明细表、分页、截断说明和 CSV 下载 |
-| `frontend/src/components/insights/QualityTrace.vue` | Reviewer 状态和降级信息 |
+| `frontend/src/components/chat/ChatMessage.vue` | 消息正文、质量轨迹与回答反馈；质量轨迹不另建独立组件 |
 
 ### 7.5 状态、API 与类型
 
@@ -557,6 +556,8 @@ merchant_assistant/
 | `frontend/src/stores/knowledge.ts` | 知识库目录和编辑状态 |
 | `frontend/src/api/client.ts` | API 基础地址的唯一读取点 [P0/F0]；HTTP 客户端、鉴权和统一错误处理 [F3]。**不提供同源 `/api` 回退**——静态镜像不代理 `/api`，配置缺失必须报错而非静默 404 |
 | `frontend/scripts/check-generated.mjs` | `generated.ts` 漂移检查：重新生成到临时文件并与提交版本比对。构建期不跑 codegen，全靠它兜住脱节 |
+| `frontend/scripts/check-first-paint.mjs` | 生产构建的首屏静态依赖门禁：阻止 ECharts 被预加载或经入口静态 import 链带入首屏 |
+| `frontend/scripts/check-no-secrets.mjs` | 递归扫描 `dist/` 的 JS、CSS、HTML、JSON 与 source map，阻止密钥形态字符串进入构建产物 |
 | `frontend/src/api/sse.ts` | `fetch` + `ReadableStream` 的 SSE 解析器（不使用 `EventSource`） |
 | `frontend/src/api/chat.ts` | 聊天、反馈、日报和导出接口 |
 | `frontend/src/api/attachments.ts` | 附件上传和解析状态接口 |
@@ -773,7 +774,7 @@ GET    /api/admin/ops/status
 ```
 
 - `/api/metrics/{code}` 的路径参数是 `metric_code`，不是中文指标名；
-- `/api/demo/merchants` 仅用于演示环境，必须可通过配置关闭，生产环境禁用；
+- `/api/demo/merchants` 仅用于演示环境，默认可通过配置关闭且在生产环境关闭；只有对外演示部署显式设置 `DEMO_DEPLOYMENT_MODE=true` 时才可在生产环境开放；
 - `/api/ready` 可选，只在需要数据库 readiness 探针时提供；`/api/health` 不查库、不调 LLM；
 - `/api/admin/ops/status` 需要 `ADMIN_TOKEN`，返回预算余量、限流命中和降级计数，**禁止返回 Token、Prompt、商家经营数据或完整请求正文**。
 
@@ -1000,7 +1001,7 @@ docker compose up --build
 详细步骤写入：
 
 ```text
-docs/deploy-railway.md
+docs/deployment.md
 ```
 
 ---
@@ -1021,7 +1022,7 @@ docs/deploy-railway.md
 | 修改附件处理 | `attachment_service.py`、附件 API 和 `ChatComposer.vue` |
 | 修改知识库 | `knowledge_service.py`、知识 API 和 `KnowledgeBaseView.vue` |
 | 修改数据库表 | ORM Model、Alembic Migration、Repository 和 `docs/database.md` |
-| 修改部署 | Dockerfile、Railway 配置和 `docs/deploy-railway.md` |
+| 修改部署 | Dockerfile、Railway 配置和 `docs/deployment.md` |
 
 ---
 

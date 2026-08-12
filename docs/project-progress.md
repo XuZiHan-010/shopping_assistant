@@ -2,10 +2,14 @@
 
 > 本文件只保留当前可继续开发的事实快照，不追加每日流水账。每次完成一段可验证工作后，更新日期、状态、验证结果、下一步和风险。
 
-**最后更新：2026-08-09**
+**最后更新：2026-08-12**
 
-> **当前集成验收快照（2026-08-09，优先于下方历史阶段摘要）**：B7 + F4 集成工作已在
-> `feature/integrate-b7-f4` 完成，尚未提交或推送。后端在专用 PostgreSQL（55442）上为
+> **当前集成验收快照（2026-08-11，优先于下方历史阶段摘要）**：B7 + F4 集成工作已在
+> `feature/integrate-b7-f4` 完成**并提交**（`3faef8a`…`ac042a0`），**尚未推送到
+> `origin`**。仓库根工作目录当前直接签出该分支（不再是独立 worktree）；
+> `.worktrees/feature-b5-b6-answer-feedback-export` 与
+> `.worktrees/feature-f3-real-api-integration` 仍各自保留，供比对但不再是主线。
+> 集成验收当时（2026-08-10）的实测数字：后端在专用 PostgreSQL（55442）上为
 > **707 passed / 0 skipped / 1 个第三方弃用警告**；非数据库路径为 **591 passed / 116 skipped /
 > 1 warning**。`ruff check`、`ruff format --check` 与获批的 `mypy app`（88 个源文件）均通过。
 > 前端 lint、格式、OpenAPI/fixture/mock 边界、类型检查、构建均通过，Vitest 为
@@ -13,8 +17,46 @@
 > 全程使用 Fake/确定性 LLM 覆盖，DeepSeek 调用 **0**、费用 **0**；仅使用
 > `borough-int-postgres`（55442）与 `borough-int-f4-postgres`（55443），未操作共享 Compose
 > 或 `borough_borough_postgres_data`。后续类型债务为 `tests/`/`scripts/` 的 103 项既有 Mypy
-> 错误（32 个文件）；ECharts 仍有非阻塞的 556.46 kB chunk-size 提示。下一步为在用户授权下
-> 决定集成/发布路径，以及用户在 Railway 控制台完成真实部署。
+> 错误（32 个文件）；ECharts 仍有非阻塞的 556.46 kB chunk-size 提示。
+>
+> **集成完成之后（2026-08-10 起）**：
+> 1. 按 `AGENTS.md` R10，`docs/superpowers/plans/`（10 份）与 `docs/superpowers/specs/`
+>    （13 份）迁至 `plans/` 与 `docs/specs/`，`docs/superpowers/` 已删除，交叉引用已修复
+>    （提交 `40cb282`）。
+> 2. 未等待用户就集成整改计划「阶段 B」（R9 差异整改，Task 5–15）表态，转而开始下一个
+>    前端 MVP 阶段 **F5「质量轨迹、反馈与无障碍基础」**：设计说明
+>    `docs/specs/2026-08-10-frontend-f5-design.md` 首版已提交（`caca1e9`），经第一轮评审后的
+>    修订版与实施代码已于 2026-08-12 追加提交（`414d267`）。F5 已按 TDD 实现并完成前端门禁：
+>    Vitest **238 passed**、Mock Playwright **25 passed**；lint、格式、OpenAPI/fixture/mock
+>    边界、类型检查和构建均通过。DeepSeek 调用 **0**、费用 **0**。
+> 3. 集成整改计划（`plans/2026-08-09-b7-f4-integration-and-r9-remediation.md`）的 SDD 账本
+>    （`.superpowers/sdd/2026-08-09-b7-f4-integration-and-r9-remediation/progress.md`）只记
+>    到 Task 4（阶段 A 出口）；Task 5–15（阶段 B）未开工。
+> 4. **计划勾选状态已对齐（2026-08-11）**：该计划正文此前 94 个 step 全部未勾选，与实际进度脱节。
+>    已按 SDD 账本、逐 Task 报告与 Git 提交回填——阶段 A（Task 1–4 及执行期追加的 Task 3.5）共 35 项
+>    勾为完成，阶段 B 的 62 项保持未勾。计划开头新增「执行状态」一节，记录阶段 A 的四个提交
+>    （`b32fe99`、`cd4b75d`、`e2c9829`、`ac042a0`）、出口实测数字，以及四项偏离：集成 worktree 已移除
+>    改在仓库根、追加 Task 3.5、`mypy` 门禁经批准收窄为 `app`（`tests/`+`scripts/` 103 项类型债务未还）、
+>    `gate-helpers.ps1` 曾被 PowerShell 执行策略拦下。阶段 A 出口要求的「停下来向用户汇报」当时被跳过，
+>    已于 2026-08-11 补上。
+> 5. **进入前端 F6「Railway 部署就绪」（2026-08-11 起，2026-08-12 更新）**：用户已决定在 F5 之后
+>    直接推进 F6，而不是先返回阶段 B。按 `plans/2026-08-11-frontend-f6-railway-mvp-closeout.md`
+>    （对应设计说明 `docs/specs/2026-08-11-frontend-f6-design.md`），计划拆成 F6-0（两个后端前置
+>    切片）→ F6-A（纯前端与构建配置，本地可完成）→ F6-B（依赖用户在 Railway 控制台操作）共 12 个
+>    Task。**Task 1–7（F6-0 全部 + F6-A 本地收口）已完成，并于 2026-08-12 分别提交为
+>    `d0dcace`（F6-0）与 `49fadc4`（F6-A）**：Task 1 显式演示部署模式
+>    （`demo_deployment_mode` 配置项 + 运维状态字段）；Task 2 修正未配置 LLM 客户端时仍会预扣预算
+>    的缺陷；Task 3 用生产构建 + preview 复现「ECharts chunk 出现在首屏请求」的红灯证据；Task 4 用
+>    显式 `chartMountable` 挂载开关把 ECharts 移出首屏，并把静态门禁增强为三层检查；Task 5 生产
+>    构建 Mock 硬防线；Task 6 前端 `railway.json` 与构建产物密钥扫描。全程零 DeepSeek 调用、零费用。
+>    **F6 的 SDD 账本（`.superpowers/sdd/2026-08-11-frontend-f6-railway-mvp-closeout/progress.md`）
+>    只记到 Task 4，Task 5/6 的完成状态目前只体现在各自的 `task-5-report.md`/`task-6-report.md`，
+>    账本尚未回填**——核对 F6 真实进度时以逐 Task 报告为准，不要只看账本。
+>
+> Task 1–8 与 Task 12 已完成：F6 的代码、部署配置、部署手册和出口证据矩阵均已就绪；Task 9–11
+> （Railway 控制台部署与两轮线上验收）仍完全待用户操作。详见
+> `docs/specs/2026-08-11-mvp-exit-evidence-matrix.md`：**前端 F0–F6 代码与文档已完成，Railway 部署就绪；
+> Railway 尚未部署，MVP 尚未宣告完成。**
 
 ## 产品裁决：参考项目是需求基准（2026-08-09）
 
@@ -57,9 +99,10 @@
 - 后端：**B4「安全经营数据查询」已收口并完成终审修复轮**，分支为 `feature/b4-safe-analytics-query`。Task 1–10 均已实现、复查并提交（Task 10 在 `72b2190`，REFUND 明细路由修复在 `7d28552`）。终审修复轮已提交（`b174bd9` 修掉 1 Critical + 6 Important，`50a28e6` 清理指向本阶段的过期文案并加机械防线）。
 - 后端：**B5「回答、图表和 Reviewer」、B6「反馈与 CSV 导出」代码已完成并提交**，分支 `feature/b5-b6-answer-feedback-export`（提交 `7c60b12`/`18ba978`/`b494277`/`acc7efa`，2026-08-06）。之前这批工作只存在于本地 worktree 且未提交；本轮先修完 `ruff check`/`ruff format` 未通过的 10 处问题（都在下面提到的 B7 附带代码里），再按 Task 边界拆成 4 个提交落地。分支去向（合并/开 PR/保留）尚未决定。
 - 后端：**B7「Railway、费用防护与 MVP 收口」代码层面已完成并提交**，分支 `feature/b5-b6-answer-feedback-export`（提交 `1efb79c`…`310fc42`，2026-08-06）。费用守卫、限流、可信 IP 补齐了必测；Docker 优雅关闭、`OperationalMetrics` 可观测性、`GET /api/admin/ops/status` 运维端点、`railway.json`、`docs/deployment.md` 均已实现。`REQUIRE_INTEGRATION_DB=1 pytest` 在真实 PostgreSQL 上跑通 **703 passed、0 skipped、0 failed**（首次跑通时发现一个真实 bug 并已修复，见「最近验证」）；`ruff`/`ruff format`/`mypy`（88 源文件）全绿。**未完成的只剩需要人工在 Railway 控制台操作的部分**：实际创建 Railway 项目、连接 PostgreSQL、填写环境变量、执行部署，以及依赖真实部署环境的验收项（见 `docs/backend-development-plan.md` §B7「验收（MVP 出口）」）。
-- 前端：F0、F1、F2「Mock 会话闭环」已完成；下一阶段为 F3「API 契约与真实会话接入」。F3 开工前仍需补充设计说明与逐 Task 实施计划。前端目前仍对接 Mock，尚未消费 B5/B6 的新接口。
+- 前端：F0–F5 均已完成并集成于 `feature/integrate-b7-f4`。F5 的质量轨迹、实时回答反馈和无障碍回归已在本地提交 `414d267`；历史会话质量轨迹和反馈受会话详情契约限制，归阶段 B Task 8。
+- 前端：**前端 F0–F6 代码与文档已完成，Railway 部署就绪；Railway 尚未部署，MVP 尚未宣告完成。** F6 Task 1–8 与 Task 12 已完成：生产演示模式、未配置 LLM 的费用守卫、首屏 ECharts 显式挂载、生产 Mock/密钥门禁、前端 `railway.json`、文档同步、部署手册与出口证据矩阵均已落地。前端本地命令中 lint、格式、codegen、fixtures、类型检查、Vitest（**26 文件 / 245 passed**）、构建、Mock、首屏静态与密钥门禁均已通过；专用首屏 Playwright 的测试断言输出 `ok 1`，但同样因 Windows `webServer` 清理挂起以 exit 124 结束，不能计为全绿门禁。常规 Playwright 的 **26/26** 断言亦均输出 `ok`，但 CLI 随后清理超时（exit 124），因此该命令不能记为成功退出。后端 `ruff`、格式与 `mypy app`（**88 source files**）通过；Docker 引擎不可用，未运行 `REQUIRE_INTEGRATION_DB=1 pytest`。Task 9–11（用户控制台部署、无 LLM 线上验收、经 R3 授权后的真实模型验收）尚未执行。逐项证据与未验证缺口见 `docs/specs/2026-08-11-mvp-exit-evidence-matrix.md`。
 - F1 遗留：1440×1000 人工视觉比对待本地 Windows Computer Use helper 可用后补做；不影响已通过的结构、几何和无障碍自动化验收。
-- **仓库结构提示（本轮确认）**：本机同时存在多个 worktree——主目录当前签出 `feature/b4-safe-analytics-query`；`.worktrees/feature-b5-b6-answer-feedback-export/` 签出 `feature/b5-b6-answer-feedback-export`（已推到 `origin`）。`plans/2026-08-05-backend-b5-b6.md`、`docs/specs/2026-08-05-backend-b5-b6-design.md` 是当初驱动 B5/B6/B7 实施的计划与设计文档，留在主目录未提交；它们描述的工作已经在另一个 worktree 里全部完成并提交，不要误读成「B5/B6 尚未开工」。
+- **仓库结构提示（本轮确认，2026-08-11）**：主目录现直接签出 `feature/integrate-b7-f4`（不再是独立 worktree）。仍保留的历史 worktree 只剩 `.worktrees/feature-b5-b6-answer-feedback-export/`（`feature/b5-b6-answer-feedback-export`，已推到 `origin`）与 `.worktrees/feature-f3-real-api-integration/`（`feature/f3-real-api-integration`）；两者内容已分别并入集成分支，留作对照，不再是主线。`feature/b4-safe-analytics-query` 的独立 worktree 已不存在。
 
 ## 已完成
 
@@ -78,8 +121,63 @@
 - 后端 B5（`7c60b12`）：`VisualizationService`（只用 `QueryResult` 已登记的维度/指标列生成图表，不信任模型字段名）、`AnswerService`（结构化回答草稿 + 本地确定性校验：数字幻觉、非加和指标合计、内部标识符泄露三类拦截）、`ReviewService`（独立 Reviewer，只出「通过/问题列表」，不改写回答，最多两轮）均已接入 `MerchantQaGraph`；`quality_status` 覆盖 `PASSED`/`DEGRADED`/`FAILED`/`NOT_RUN`，`quality_attempts`/`quality_notes` 如实记录。
 - 后端 B6（`18ba978`/`b494277`/`acc7efa`）：`POST /api/answers/{id}/feedback`（商家范围内幂等采纳/点赞点踩，跨商家 403 + 审计）、`GET /api/exports/{id}`（HMAC 签名 URL、15 分钟过期、下载时重新执行受控明细查询、UTF-8 BOM、公式注入防护、`Referrer-Policy: no-referrer`）、`export_files` 迁移与 `ChatService` 导出接线（只在 DETAIL 成功且未降级时创建导出记录）均已实现。此前一轮复审已修过 5 处问题（导出 CSV 双重 BOM、本地校验缺两条方案要求的检查、导出记录未排除降级回答、签名密钥兜底值重复、feedback/exports 路由完全没有 HTTP 层测试），新增 24 条测试后全量后端测试从 628 涨到 652 passed；随后 B7 Task 1-18 又新增测试，2026-08-06 用真实 PostgreSQL 复核全分支得到 703 passed、0 failed，见「最近验证」。
 - 后端 B7（`1efb79c`…`310fc42`，2026-08-06）：`LlmCostGuard`/`SlidingWindowRateLimiter`/`resolve_client_ip` 补齐单元测试，新增伪造 `X-Forwarded-For` 的端到端信任边界测试和 `LlmBudgetRepository` 并发原子扣减的真实库回归；`app/run.py` 显式声明 30 秒优雅关闭窗口并记录「保持单 worker」的架构决策；新增 `OperationalMetrics`（进程内运维指标：路由/Agent 节点耗时、错误码分布、限流命中、降级计数）并接入请求中间件、异常处理器、`ChatService`、`MerchantQaGraph`；新增 `require_admin_token` 依赖（只认 `X-Admin-Token`）与 `GET /api/admin/ops/status`（未配置 `ADMIN_TOKEN` 时整体不挂载路由）；新增 `railway.json` 与 `docs/deployment.md`；`CURRENT_STAGE` 推进到 `"B7"`。**实际 Railway 部署未执行**——按计划约束本轮只产出配置产物，创建项目/连接数据库/填写环境变量/验证部署留给用户。
+- B7/F4 分支整合「阶段 A」（`3faef8a`…`ac042a0`，2026-08-10）：按 `plans/2026-08-09-b7-f4-integration-and-r9-remediation.md` Task 1–4，以 B7（`feature/b5-b6-answer-feedback-export`）为后端基线、按路径移植 F3/F4 前端（不引入 F3 的替代 analytics/export 后端），以集成后端重新生成 OpenAPI/`generated.ts`/Chat fixture，新增 `e2e_app.py`/`seed_f4_e2e.py` 装配 B7 的 `SafeQueryService`/`ExportService` 供真实数据库 Playwright 使用；结果即上方「当前集成验收快照」的数字。SDD 账本见 `.superpowers/sdd/2026-08-09-b7-f4-integration-and-r9-remediation/progress.md`（只记到 Task 4，Task 5–15「阶段 B」未开工）。
+- 文档目录整改 R10（`40cb282`，2026-08-10）：按用户裁决，技能产出的计划与设计文档改用项目自己的目录——`docs/superpowers/plans/`（10 份）迁至 `plans/`，`docs/superpowers/specs/`（13 份）迁至 `docs/specs/`，`docs/superpowers/` 已删除，修复 7 处因移动断链的交叉引用；`AGENTS.md` 新增 R10 固化此规则；新增 `CLAUDE.md`（内容为 `@AGENTS.md`）。
+- 前端 F5（2026-08-11，提交 `414d267`）：按 `docs/specs/2026-08-10-frontend-f5-design.md` 与 `plans/2026-08-11-frontend-f5-implementation.md` 实现质量轨迹、反馈与无障碍收口。`ChatMessage.vue` 展示四种质量状态、校验次数、备注和中文来源；反馈通过 Adapter/API/Store 分层接入 B6，覆盖失败保留、同值重试、持久化粘性和 reset 中止；新增仅用键盘完成提问与采纳的 Playwright。历史消息因会话详情缺 `answer_id` 与当前反馈状态而不开放反馈，边界已登记到阶段 B Task 8。
+- 前端 F6 Task 1–6（2026-08-11～2026-08-12，提交 `d0dcace` 与 `49fadc4`）：Task 1 新增 `Settings.demo_deployment_mode`，生产环境默认关闭演示商家端点、只在显式开启时放行，`GET /api/admin/ops/status` 同步返回该布尔字段；OpenAPI/`docs/api.md`/前端生成类型已重新导出同步。Task 2 修正 `LlmCostGuard.complete()`：未配置底层 LLM 客户端时直接抛 `LlmUnavailableError`，不再先预扣预算和用量计数。Task 3 新增 `frontend/e2e/first-paint.spec.ts` 与独立的 `playwright.first-paint.config.ts`（生产构建 + preview），先立证据证明 `AssistantView` 静态引入 `MetricChartPanel` 会让 `echarts-*.js` 出现在首屏请求里。Task 4 把图表面板改为 `defineAsyncComponent` + 显式 `chartMountable` 挂载开关（空闲回调或收到图表回答才挂载），首屏改渲染带无障碍属性的占位；`scripts/check-first-paint.mjs` 经用户同意增强为「预加载检测 + 入口静态 import 链 + `v-if` 存在性」三层静态门禁，并修复了组件卸载时未清理空闲回调/回退计时器、导致测试销毁后仍触发图表 loader 的缺陷。Task 5 新增 `frontend/src/build/mock-flag.ts`（`assertMockDisabledInProduction`），在 `vite.config.ts` 用 `loadEnv` 于配置解析期调用，`VITE_USE_MOCK=true` 时生产构建直接报错拒绝；`Dockerfile` 同步声明并透传该构建参数；经用户授权在根 `.gitignore` 为 `frontend/src/build/` 新增最窄反忽略规则使新源文件可追踪。Task 6 新增 `frontend/railway.json`（前端 Railway 配置即代码）与 `frontend/scripts/check-no-secrets.mjs`（扫描 `dist/` 拦截 DeepSeek Key、PostgreSQL 连接串、`DEMO_MERCHANT_TOKENS`、`ADMIN_TOKEN`、`EXPORT_SIGNING_SECRET` 形态字符串），均用真实构建产物做过变异验证（人为注入密钥后扫描能命中，清理后恢复通过）。
+- 前端 F6 Task 7（2026-08-12）：完成路径与 F6 文档同步；`DEMO_DEPLOYMENT_MODE`、Service Root 内的 `backend/railway.json`/`frontend/railway.json`、`docs/deployment.md` 及两个新增构建门禁均已登记。全量前端本地门禁的成功退出结果为 lint、格式、codegen、fixtures、类型检查、Vitest（**26 文件 / 245 passed**）、构建、Mock、`firstpaint:check`、密钥扫描。专用首屏 Playwright 的测试断言输出 `ok 1`，但 Windows `webServer` 清理挂起使命令以 exit 124 结束，**不计为全绿门禁**；常规 Playwright 的 **26/26** 测试也均输出 `ok`，但同样在清理超时（exit 124），仅记录断言结果。`REQUIRE_INTEGRATION_DB=1 pytest` 也未运行：`borough-int-postgres` 不可用，Docker npipe 不存在。两项变异验证仍有效：无条件图表挂载会被首屏静态门禁拦截，构建产物临时注入密钥后会被密钥扫描拦截；均已恢复干净状态。全程 DeepSeek 调用 **0**、费用 **0**。
 
 ## 最近验证
+
+- **前端 F6 Task 1–7 定向与门禁验证（2026-08-11～2026-08-12）**：后端 Task 1 定向回归
+  `tests/unit/core`、`tests/api/test_demo_merchants.py`、`tests/api/test_admin_ops.py` 共
+  **28 passed、1 skipped**（跳过项是本机无真实 PostgreSQL 导致的既有集成用例，非新增缺陷）；
+  `ruff check`、`ruff format --check`、`mypy app` 全绿。Task 2 定向 `tests/unit/llm`、
+  `tests/api/test_chat.py` 共 **30 passed、4 skipped**（同样因本机无真实库跳过），guard 单测
+  **6 passed**；两个 Task 均做过变异验证（临时改回原实现，对应新测试真实失败，验证后已还原）。
+  前端 Task 3 用生产构建 + preview 独立复现红灯（`echarts-*.js` 出现在首屏请求），随后由 Task 4
+  修复；Task 4 直接单测 **27 passed**（`AssistantView.spec.ts` + `InsightPanels.spec.ts`），静态
+  门禁 `firstpaint:check` 变异验证：无条件渲染时被增强后的三层检查拦下（`exit 1`），恢复 `v-if`
+  后放行（`exit 0`）；同轮修复了组件卸载未清理回退计时器导致的测试间干扰。Task 5/6 完成后于
+  2026-08-12 重新执行前端完整门禁：**Vitest 26 文件、245/245 passed**，`typecheck`/`build`/
+  `mock:check`/`secrets:check` 全部通过；`secrets:check` 做过真实构建变异验证（临时注入密钥字符串
+  后命中，清理后恢复通过）。全程 DeepSeek 调用 **0**、费用 **0**。**已知不属于本轮修复范围的环境
+  噪音**：Playwright CLI 在本机执行完用例后不主动退出，需靠外层超时结束进程（不影响断言结果本身）；
+  常规 E2E 曾观察到的 `responsive.spec.ts › 输入提示和侧栏说明文字达到 WCAG AA 对比度` 已定位并修正为
+  F6 图表显式挂载后失效的计数断言（首屏不再存在 `chart-empty` 的两项文本）；现有五项文字均为
+  `rgb(89, 101, 121)`，对白背景约 **5.95:1**，满足 AA。修复后常规 E2E 26/26 断言均为 `ok`，但 CLI
+  清理超时仍是环境限制。
+
+- **集成分支全量复核 + 测试隔离缺陷修复（2026-08-11，仓库根实跑）**：在专用容器
+  `borough-int-postgres`（55442）/`borough-int-f4-postgres`（55443）上重跑全部门禁。首轮后端真实库
+  pytest 为 **702 passed、5 failed**，5 条全部报 `生产环境配置 LLM_API_KEY 时必须设置 ADMIN_TOKEN`。
+  根因**不是产品代码回归**，而是测试没有与开发者的 `backend/.env` 隔离：`Settings.model_config` 声明
+  `env_file=(".env", "../.env")`，这些用例故意不传 `llm_api_key`/`admin_token` 来验证生产禁令，却被
+  仓库根 `backend/.env` 里的 `LLM_API_KEY`（且该文件无 `ADMIN_TOKEN`）污染。**2026-08-10 那次
+  707 passed 是在没有 `.env` 的 worktree 里跑的，缺陷一直存在、被环境掩盖**，与 B7 的
+  `llm_daily_budget` 漏 TRUNCATE 属同一类。已按 TDD 修复：`tests/conftest.py` 新增 session 级 autouse
+  fixture `isolate_settings_from_dotenv`，测试期关闭 Settings 的 dotenv 来源并在结束后还原；
+  `tests/unit/core/test_config.py` 新增 `test_settings_in_tests_ignore_ambient_dotenv`，用 `tmp_path`
+  自造 `.env` 复现，不依赖本机文件。变异验证：停掉 fixture 该测试真实失败，还原后无残留。
+  修复后全量真实库 **708 passed、0 skipped、0 failed**；`ruff check`、`ruff format --check`（198 files）、
+  `mypy app`（88 源文件）全绿。前端 lint/format/codegen:check/fixtures:check/typecheck/build/mock:check
+  全部通过，Vitest **238 passed**（25 文件），Mock Playwright **25 passed**，真实库 Playwright
+  **3 passed**。DeepSeek 调用 **0**、费用 **0**；共享卷 `borough_borough_postgres_data` 执行后核验仍在。
+  **同轮补齐环境变量向量（R9 依据）**：初版只关闭 dotenv 来源，进程环境变量仍可污染测试。核对参考
+  项目后按 R9 补齐——`yshopping-merchant-ai 4/` 的 12 个测试一律 `new AppProperties()` 手工赋值，
+  既无 `application-test.yml`，也无 `@SpringBootTest`/`@TestPropertySource`，测试与主代码均零处
+  `System.getenv`，配置解析只发生在 Spring 运行时路径上，测试根本不走那条路径。因此「只堵 `.env`
+  而放行环境变量」只还原了一半。fixture 已改名为 `isolate_settings_from_ambient_config`，通过覆盖
+  `Settings.settings_customise_sources` 把来源链裁到只剩 `init_settings`，语义等价于参考项目的
+  `new AppProperties()`；`tests/unit/core/test_config.py` 相应新增
+  `test_settings_in_tests_ignore_ambient_environment_variables`。变异验证：只放回 env 来源时，
+  环境变量那条真实失败而 dotenv 那条仍通过，证明两条测试各守一个来源。补齐后全量真实库
+  **709 passed、0 skipped、0 failed**；`ruff check`、`ruff format --check`、`mypy app` 全绿。
+  该隔离同时消除了一个此前存在的费用风险面：修复前测试构造的 Settings 会拿到 `backend/.env` 里的
+  真实 `LLM_API_KEY`，而 `app/api/dependencies.py:142` 正是「有 key 就用 `DeepSeekLlmClient`」，
+  只要有测试路径未覆盖 LLM 依赖就可能发出真实调用；现在测试永远拿不到该 key。
+
+- 前端 F5（2026-08-11）：`lint`、`format:check`、`codegen:check`、`fixtures:check`、`mock:check`、`typecheck`、`build` 全部通过；Vitest **238 passed**（25 个文件），Mock Playwright **25 passed**。构建仅有既有 ECharts 556.46 kB chunk-size 提示；全程未调用 DeepSeek。
 
 - B4 Task 5 的聚合修复：目标 PostgreSQL 集成测试 12 项通过；全量后端测试 510 项通过。
 - B4 Task 7 修复后：目标测试 15 项通过；全量后端测试 528 项通过。
@@ -117,39 +215,42 @@
 
 ## 下一步
 
-1. **实际执行 Railway 部署**：`railway.json` 与 `docs/deployment.md` 已就绪，但创建 Railway 项目、
-   连接 PostgreSQL Service、填写 `docs/deployment.md`「必填环境变量」表里的真实值（`ADMIN_TOKEN`、
-   `EXPORT_SIGNING_SECRET`、`LLM_API_KEY` 等）、触发首次部署，都需要用户在 Railway 控制台手动操作——
-   不是本地能完成的工作。部署后按 `docs/backend-development-plan.md` §B7「验收（MVP 出口）」逐条验收
-   （重启后数据仍在、健康检查、SIGTERM 优雅关闭、伪造转发头无法绕过限流、演示商家端点生产下不可访问等）。
-2. **决定分支去向**：仓库当前有四个相关分支/worktree——`main`、`feature/f2-mock-conversation`（前端
-   F0–F2）、`feature/b4-safe-analytics-query`（B4，已通过终审）、`feature/b5-b6-answer-feedback-export`
-   （已含 B5/B6/B7，真实库回归 703 passed，是四者中最新最完整的一支）。是否合并、开 PR 还是保留，
-   尚未决定；合并前建议先确认 `feature/b5-b6-answer-feedback-export` 是否基于 `feature/b4-safe-analytics-query`
-   的最新提交（`c8efd1d`）而非更早的祖先，避免合并时丢掉终审修复轮的内容。
-3. **前端 F3「API 契约与真实会话接入」**：依赖的后端契约（B0–B7）均已就绪，不必等 Railway 部署完成
-   才开工；开工前先补设计说明与逐 Task 实施计划，接入真实 HTTP 传输、`Authorization` 头与统一错误
-   处理，不重写已交付的 SSE、Adapter 和 Store 主路径。
-4. **可观测性的已知小缺口**：SQL 查询本身的独立耗时尚未单独记录（目前只随 Agent 节点整体耗时被
-   间接计入），不阻塞 MVP 出口，但补查询耗时对定位慢查询有帮助，可在 B7 部署验收后顺手补上。
+1. **完成阶段 0 的本地全量门禁与主线裁定**：F5 与 F6 Task 1–8、12 的本地成果已分组提交；接下来按
+   `plans/2026-08-12-post-f6-execution-roadmap.md` 重跑后端真实 PostgreSQL 与前端全量门禁，再由用户裁定
+   唯一主线（`main` 目前停在 `003cbc7`；`feature/f2-mock-conversation` 只是事实默认分支）以及是否推送。
+2. **执行 R9 阶段 B Task 5–8**：阶段 0 出口达标并获用户确认后，先校正文档与契约、修复思考步骤展示和
+   历史会话装配；本顺序取代 2026-08-12 前「先部署 Railway」的安排。
+3. **执行 R9 阶段 B Task 9–15 与可信客户端 IP 契约整改**：四个能力切片先分别成文、经用户审阅后实施，
+   随后修复 Railway 的 `X-Real-IP` 信任链并由用户裁定 `TRUSTED_PROXY_IPS` 策略。
+4. **最后才进入 Railway 部署与线上验收**：完成 R9 与可信 IP 契约整改后，用户在控制台执行 F6 Task 9–10；
+   真实 DeepSeek 验收仍须另行按 R3 说明模型、调用次数与费用并取得明确同意。
 
 ## 风险与约束
 
 - 未获用户明确同意，不得调用真实 DeepSeek API、收费 OCR 或日报生成；单元测试必须 mock LLM。真实模型调用前须先说明模型、调用次数和预期费用。
 - 商家身份只可由 Bearer Token 解析；后端所有经营查询必须强制注入 `merchant_id`，不得信任前端传入的商家编号。
-- `backend/tests/unit/agent/test_stage_reference_hygiene.py` 的 `CURRENT_STAGE` 常量在 `feature/b5-b6-answer-feedback-export`
-  分支上已推进到 `"B7"`；`feature/b4-safe-analytics-query` 分支上仍是 `"B4"`。**分支合并时要以更晚阶段的值为准**，
-  否则该防线会继续只挡旧阶段字样而放过新的过期文案。
+- `backend/tests/unit/agent/test_stage_reference_hygiene.py` 的 `CURRENT_STAGE` 常量在集成分支
+  `feature/integrate-b7-f4` 上是 `"B7"`（随集成保留 B5/B6/B7 收口时的值，未随之后的整合/文档提交改动）。
+  该常量只扫 `app/agent/**` 的字符串字面量，F5 是纯前端阶段，预计不需要为它推进这个常量；若后续
+  「阶段 B」（R9 整改）引入新的后端 stage，记得同步推进，否则该防线会继续只挡旧阶段字样。
 - **Docker Desktop 在本机环境偶发无法启动**：曾出现引擎持续返回 `500 Internal Server Error`（不是
   常见的「还在启动」connection-refused 现象），完全重启 Docker Desktop 进程后仍未恢复，等了将近
   20 分钟后才自行恢复正常。如果下次又遇到真实 PostgreSQL 集成测试连不上库，先确认这不是环境本身的
   瞬时故障，必要时重启 Docker Desktop 并耐心等待，而不是假设代码或配置有问题。
+- **本机 Playwright CLI 执行完用例后不会自行退出**：需要依赖外层超时（60–180 秒）结束进程；这是
+  本机环境噪音，不代表测试挂起或断言未完成，但每次跑 E2E 都会看到看似「超时」的收尾，不要误判为
+  用例失败。F6 Task 3/4 的报告已多次记录此现象。
+- **`responsive.spec.ts` 存在一条与 F6 改动无关的既有失败**：`输入提示和侧栏说明文字达到 WCAG AA
+  对比度`，F6 Task 3/4 验证常规 E2E 时观察到，尚未定位归因，不阻塞 F6 出口但需要单独排查。
+- **F6 的 SDD 账本落后于实际执行**：`.superpowers/sdd/2026-08-11-frontend-f6-railway-mvp-closeout/
+  progress.md` 只记到 Task 4，Task 5/6 已完成但账本未回填，核对进度时必须同时查看各 Task 的
+  report 文件，不能只信账本本身。
 - **`GET /api/admin/ops/status` 是新增的敏感面**：只认 `X-Admin-Token`（`hmac.compare_digest` 比较），
   `Authorization` 头一律忽略；`ADMIN_TOKEN` 未配置时端点整体不挂载路由（404，而非 401/403），避免
   「路由存在但认证总是失败」暴露端点存在性。修改这块代码时留意 `tests/api/test_admin_ops.py` 的
   401/403/404/200 四态断言仍然成立。
 - `yshopping-merchant-ai 4/` 与 `yshopping-prototype/` 只读；新代码、文案和资源必须使用 Borough。
-- 后端 B4 的具体 Task 状态以 `.superpowers/sdd/2026-08-04-backend-b4-safe-analytics-query/progress.md` 和 Git 提交记录为准；该目录被 `.gitignore` 忽略，只存在于产出它的那个工作副本里，不会随分支/worktree 一起出现。B5/B6/B7 本轮没有对应的 SDD 账本，本文件是这段工作的权威摘要。
+- 后端 B4 的具体 Task 状态以 `.superpowers/sdd/2026-08-04-backend-b4-safe-analytics-query/progress.md` 和 Git 提交记录为准；该目录被 `.gitignore` 忽略，只存在于产出它的那个工作副本里，不会随分支/worktree 一起出现。B5/B6/B7 本轮没有对应的 SDD 账本，本文件是这段工作的权威摘要。B7/F4 集成（阶段 A）有对应账本，见下方「关键入口」。
 - 本机存在多个 git worktree（见「当前阶段」末尾一条），核对进度前先用 `git worktree list` 和
   `git log <branch> --oneline` 确认自己看的是哪个分支的状态，不要只看主目录当前签出分支的文件是否存在
   就下结论。
@@ -173,3 +274,12 @@
 - `backend/tests/api/test_exports.py`、`test_feedback.py`：B6 端点的 HTTP 契约测试（签名、过期、跨商家、公式注入、BOM）。
 - `.superpowers/sdd/2026-08-04-backend-b4-safe-analytics-query/progress.md`：B4 逐 Task 账本、复查和延后项。
 - `.superpowers/sdd/2026-08-04-backend-b4-safe-analytics-query/task-10-report.md`：B4 §验收清单逐条对照表、真实库端到端验收记录和文档改动说明。
+- `plans/2026-08-09-b7-f4-integration-and-r9-remediation.md`：B7/F4 分支整合（阶段 A，已完成）与 R9 差异整改（阶段 B，未开工）的执行计划；阶段 A 的实测基线数字都以此计划 Task 4 为准。
+- `.superpowers/sdd/2026-08-09-b7-f4-integration-and-r9-remediation/progress.md`：上述整合计划的逐 Task 账本，只记到 Task 4。
+- `docs/specs/2026-08-10-frontend-f5-design.md`：前端 F5（质量轨迹、反馈与无障碍基础）设计说明，当前工作树有未提交的评审修订。
+- `plans/2026-08-11-frontend-f5-implementation.md`：F5 的 TDD 实施计划与验证命令。
+- `plans/2026-08-11-frontend-f6-railway-mvp-closeout.md`：F6「Railway 部署就绪」实施计划（12 个 Task，第 2 稿），Task 1–8 与 Task 12 已完成；Task 9–11 均待用户在 Railway 控制台或线上环境执行，尚未开始。前端 F0–F6 代码与文档已完成、Railway 部署就绪，但 Railway 尚未部署，MVP 尚未宣告完成。
+- `docs/specs/2026-08-11-frontend-f6-design.md`：F6 对应设计说明，状态待用户审阅。
+- `.superpowers/sdd/2026-08-11-frontend-f6-railway-mvp-closeout/`：F6 逐 Task brief/report/review 账本目录；`progress.md` 只记到 Task 4，以逐 Task report 为准。
+- `frontend/src/build/mock-flag.ts`、`frontend/scripts/check-first-paint.mjs`、`frontend/scripts/check-no-secrets.mjs`、`frontend/railway.json`：F6 新增的生产构建门禁与前端 Railway 配置即代码。
+- `backend/app/core/config.py` 的 `demo_deployment_mode`、`backend/app/llm/guard.py` 的客户端可用性前置检查：F6 Task 1–2 触碰的后端生产代码。

@@ -1911,6 +1911,7 @@ LLM_ENABLED=false
 BUSINESS_TIMEZONE=Asia/Shanghai
 DEMO_MERCHANT_TOKENS=<token:merchant_id,token:merchant_id,token:merchant_id>
 DEMO_MERCHANTS_ENDPOINT_ENABLED=true
+DEMO_DEPLOYMENT_MODE=false             # 仅对外演示部署时显式开启
 ADMIN_TOKEN=<development-placeholder>   # P0 起必需（运维端点），P1 知识库后台复用；请求头 X-Admin-Token
 EXPORT_URL_TTL_MINUTES=15
 MAX_QUERY_DAYS=180
@@ -1937,7 +1938,7 @@ Chat Completions API；`LLM_BASE_URL` 和 `LLM_MODEL` 采用上面的固定默�
 已弃用的 `deepseek-chat` 或 `deepseek-reasoner`，也不在此阶段引入双模型路由；如需升级为
 `deepseek-v4-pro`，必须先完成真实模型离线验收与 R3 费用确认。
 
-生产环境必须把 `DEMO_MERCHANTS_ENDPOINT_ENABLED` 置为 `false`。
+生产环境默认关闭演示商家端点：`DEMO_MERCHANTS_ENDPOINT_ENABLED` 在生产环境不具备开启效果；仅当 `DEMO_DEPLOYMENT_MODE=true` 时才会显式开放，且不降低其余生产安全校验。
 
 生产环境对弱占位值必须拒绝启动。
 

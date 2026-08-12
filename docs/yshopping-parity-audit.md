@@ -18,8 +18,8 @@
 | ⚪ **有意偏离** | 我们与参考项目不同且判断为改进或等价替代，需登记理由 |
 | ❓ **待核实** | 本轮未逐行读完，需要专门一轮才能下结论 |
 
-阶段基线：后端 B0–B7 已收口，前端 F0–F4 已收口（F4 在 `feature/f3-real-api-integration`）。
-B8/B9、F5–F9 尚未开工。
+阶段基线：后端 B0–B7 已收口，前端 F0–F5 已在 `feature/integrate-b7-f4` 收口。
+B8/B9、F6–F9 尚未开工。
 
 ---
 
@@ -115,7 +115,7 @@ grep `cross_business` / `plan_type` 在 `backend/app` 与 `frontend/src` 下零�
 | `MemoryConsolidationService`（商家记忆固化） | B8 |
 | `WikiAdminService` / `WikiAdminController` / `KnowledgeBaseApp.vue` | B9 / F8（我方已有 `KnowledgeBaseView.vue` 骨架，完成度见 ❓5.5） |
 
-`ChatMessage.vue` 的 `quality-audit` 质检块与 `message-actions` 反馈操作属于 F5，同样未到。
+`ChatMessage.vue` 的 `quality-audit` 质检块与 `message-actions` 反馈操作已在 F5 实现：四种质量状态、校验次数、备注和全部来源均如实展示；采纳、点赞、点踩已接入 B6 反馈端点，并覆盖失败保留、同值重试与并发中止。当前会话详情仍不返回完整助手回答载荷、`answer_id` 和已有反馈状态，因此历史消息不显示质量轨迹与反馈按钮；该契约边界归阶段 B Task 8 修复，且必须同时补 `answer_id` 与当前反馈状态，避免覆盖已有反馈。
 
 ---
 
