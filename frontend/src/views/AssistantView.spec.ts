@@ -1,5 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
 import { AppError } from '@/api/errors'
@@ -20,6 +20,11 @@ describe('AssistantView', () => {
     sessionStorage.clear()
     // useAppError 是模块级单例，不清会把上一条断言的提示带进下一个用例。
     useAppError().clearError()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
   })
 
   /**
@@ -230,5 +235,63 @@ describe('AssistantView', () => {
     )
     expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('昨天的 GMV 是多少')
     expect(router.currentRoute.value.path).toBe('/')
+  })
+
+  it('首屏只渲染图表占位，不挂载图表面板', () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(AssistantView, {
+      global: { plugins: [pinia], stubs: { RouterLink: { template: '<a><slot /></a>' } } },
+    })
+
+    const placeholder = wrapper.find('[data-testid="chart-placeholder"]')
+    expect(placeholder.exists()).toBe(true)
+    expect(placeholder.attributes('aria-busy')).toBe('false')
+    expect(wrapper.find('[data-testid="chart-empty"]').exists()).toBe(false)
+  })
+
+  it('空闲回调触发后挂载图表面板', async () => {
+    let idleCallback: (() => void) | undefined
+    vi.stubGlobal('requestIdleCallback', (callback: () => void) => {
+      idleCallback = callback
+      return 1
+    })
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(AssistantView, {
+      global: {
+        plugins: [pinia],
+        stubs: {
+          MetricChartPanel: { template: '<section data-testid="chart-mounted" />' },
+          RouterLink: { template: '<a><slot /></a>' },
+        },
+      },
+    })
+
+    expect(idleCallback).toBeTypeOf('function')
+    idleCallback!()
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('[data-testid="chart-mounted"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('不支持 requestIdleCallback 时回退到定时器，并在卸载时取消', () => {
+    vi.stubGlobal('requestIdleCallback', undefined)
+    const setTimeoutSpy = vi.fn(() => 42)
+    const clearTimeoutSpy = vi.fn()
+    vi.stubGlobal('setTimeout', setTimeoutSpy)
+    vi.stubGlobal('clearTimeout', clearTimeoutSpy)
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(AssistantView, {
+      global: { plugins: [pinia], stubs: { RouterLink: { template: '<a><slot /></a>' } } },
+    })
+
+    expect(setTimeoutSpy).toHaveBeenCalled()
+    wrapper.unmount()
+    expect(clearTimeoutSpy).toHaveBeenCalledWith(42)
   })
 })

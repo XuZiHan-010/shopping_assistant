@@ -12,6 +12,8 @@ export default defineConfigWithVueTs(
     name: 'app/files-to-ignore',
     ignores: [
       '**/dist/**',
+      // 首屏 production-preview 的专用构建目录；它与 dist 一样是 Vite 生成物。
+      '**/dist-first-paint/**',
       '**/node_modules/**',
       '**/playwright-report/**',
       '**/test-results/**',

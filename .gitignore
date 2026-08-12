@@ -2,6 +2,9 @@
 node_modules/
 dist/
 build/
+# 前端构建配置的源码与测试，不是构建产物。
+!frontend/src/build/
+!frontend/src/build/**
 target/
 *.local
 

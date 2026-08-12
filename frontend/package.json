@@ -10,6 +10,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "test:e2e:first-paint": "playwright test --config playwright.first-paint.config.ts",
+    "firstpaint:check": "node scripts/check-first-paint.mjs",
     "test:e2e:real": "playwright test --config playwright.real-api.config.ts",
     "lint": "eslint .",
     "format:check": "prettier --check .",
@@ -18,7 +20,8 @@
     "codegen:check": "node scripts/check-generated.mjs",
     "fixtures": "node scripts/sync-fixtures.mjs",
     "fixtures:check": "node scripts/check-fixtures.mjs",
-    "mock:check": "node scripts/check-no-mock-payload.mjs"
+    "mock:check": "node scripts/check-no-mock-payload.mjs",
+    "secrets:check": "node scripts/check-no-secrets.mjs"
   },
   "dependencies": {
     "@lucide/vue": "^1.28.0",

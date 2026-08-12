@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { BookOpen, MessageSquarePlus, PanelLeft } from '@lucide/vue'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import ConversationColumn from '@/components/chat/ConversationColumn.vue'
-import MetricChartPanel from '@/components/insights/MetricChartPanel.vue'
 import MetricDefinitionPanel from '@/components/insights/MetricDefinitionPanel.vue'
 import RecommendationPanel from '@/components/insights/RecommendationPanel.vue'
 import ConversationDrawer from '@/components/layout/ConversationDrawer.vue'
@@ -15,6 +14,59 @@ import { useChatStore } from '@/stores/chat'
 const authStore = useAuthStore()
 const chatStore = useChatStore()
 const { showError } = useAppError()
+
+const MetricChartPanel = defineAsyncComponent(
+  () => import('@/components/insights/MetricChartPanel.vue'),
+)
+
+// defineAsyncComponent 的 loader 在组件首次渲染时就会执行，所以单靠它无法延迟
+// 请求——必须用 v-if 控制挂载时机。首屏先渲染静态占位，等空闲时段或真的来了
+// 带图表的回答再挂载，让 ECharts 退出首屏网络路径。
+const chartMountable = ref(false)
+let chartIdleCallbackId: number | undefined
+let chartMountTimer: ReturnType<typeof setTimeout> | undefined
+
+function clearChartMountSchedule(): void {
+  if (chartIdleCallbackId !== undefined) {
+    if (typeof cancelIdleCallback === 'function') cancelIdleCallback(chartIdleCallbackId)
+    chartIdleCallbackId = undefined
+  }
+
+  if (chartMountTimer !== undefined) {
+    clearTimeout(chartMountTimer)
+    chartMountTimer = undefined
+  }
+}
+
+function mountChartPanel(): void {
+  clearChartMountSchedule()
+  chartMountable.value = true
+}
+
+onMounted(() => {
+  if (typeof requestIdleCallback === 'function') {
+    chartIdleCallbackId = requestIdleCallback(() => {
+      chartIdleCallbackId = undefined
+      mountChartPanel()
+    })
+  } else {
+    // Safari 较老版本没有 requestIdleCallback。
+    chartMountTimer = setTimeout(() => {
+      chartMountTimer = undefined
+      mountChartPanel()
+    }, 1000)
+  }
+})
+
+onBeforeUnmount(clearChartMountSchedule)
+
+// 空闲回调还没轮到就先来了图表回答时，立即挂载，不让用户等待空闲。
+watch(
+  () => chatStore.currentAnswer?.chart,
+  (chart) => {
+    if (chart) mountChartPanel()
+  },
+)
 
 // 列表到达前没有可显示的商家名；给切换器一个占位文案，避免触发按钮空着。
 const merchantLabel = computed(() => authStore.selected?.displayName ?? '加载中')
@@ -153,7 +205,16 @@ function startNewConversation(): void {
         aria-label="指标与洞察"
       >
         <MetricDefinitionPanel :answer="chatStore.currentAnswer" />
-        <MetricChartPanel :answer="chatStore.currentAnswer" />
+        <MetricChartPanel v-if="chartMountable" :answer="chatStore.currentAnswer" />
+        <section
+          v-else
+          class="chart-panel"
+          aria-label="指标图表"
+          aria-busy="false"
+          data-testid="chart-placeholder"
+        >
+          <p>发起可视化类问题后，这里会显示图表。</p>
+        </section>
       </aside>
 
       <ConversationColumn id="main-content" data-testid="workspace-column" />

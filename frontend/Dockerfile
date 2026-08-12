@@ -16,6 +16,11 @@ COPY . .
 # 缺失时 src/api/client.ts 会抛出可展示的中文配置错误。
 ARG VITE_API_BASE_URL
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+# 刻意声明这个 ARG：不是为了让生产开启 Mock，而是让 src/build/mock-flag.ts
+# 的防线在镜像构建里也能看到它。不声明的话，误配 VITE_USE_MOCK=true 会被
+# 静默忽略，防线形同虚设。
+ARG VITE_USE_MOCK
+ENV VITE_USE_MOCK=$VITE_USE_MOCK
 RUN npm run build
 
 FROM caddy:2-alpine AS runtime
