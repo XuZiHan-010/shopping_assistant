@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     business_timezone: str = "Asia/Shanghai"
     demo_merchant_tokens: dict[str, UUID] = Field(default_factory=dict)
     demo_merchants_endpoint_enabled: bool = True
+    # 生产环境默认关闭演示端点。演示部署（对外展示用）必须显式开启这一项，
+    # 而不是靠把 APP_ENV 降级成非生产来绕过——后者会同时关掉导出签名密钥必填、
+    # 管理员令牌必填等一整组生产校验。
+    demo_deployment_mode: bool = False
     db_connect_max_attempts: int = Field(default=5, ge=1, le=20)
     db_connect_retry_seconds: float = Field(default=1.0, ge=0, le=60)
     db_statement_timeout_ms: int = Field(default=5_000, ge=100, le=60_000)
@@ -109,7 +113,7 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def enforce_environment_safety(self) -> Settings:
         if self.app_env is AppEnvironment.PRODUCTION:
-            self.demo_merchants_endpoint_enabled = False
+            self.demo_merchants_endpoint_enabled = self.demo_deployment_mode
             if not self.export_signing_secret:
                 raise ValueError("生产环境必须配置 EXPORT_SIGNING_SECRET")
             if self._is_weak_secret(self.export_signing_secret):

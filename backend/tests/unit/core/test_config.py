@@ -1,3 +1,4 @@
+from pathlib import Path
 from uuid import UUID
 
 import pytest
@@ -24,6 +25,36 @@ def test_production_disables_demo_merchant_endpoint() -> None:
     )
 
     assert settings.demo_merchants_endpoint_enabled is False
+
+
+def test_production_keeps_demo_endpoint_closed_by_default() -> None:
+    settings = make_settings(
+        app_env=AppEnvironment.PRODUCTION,
+        export_signing_secret="a-secure-export-signing-secret",
+        demo_merchants_endpoint_enabled=True,
+    )
+
+    assert settings.demo_merchants_endpoint_enabled is False
+
+
+def test_production_opens_demo_endpoint_only_with_explicit_deployment_mode() -> None:
+    settings = make_settings(
+        app_env=AppEnvironment.PRODUCTION,
+        export_signing_secret="a-secure-export-signing-secret",
+        demo_deployment_mode=True,
+    )
+
+    assert settings.demo_deployment_mode is True
+    assert settings.demo_merchants_endpoint_enabled is True
+
+
+def test_demo_deployment_mode_defaults_to_false() -> None:
+    settings = make_settings(
+        app_env=AppEnvironment.PRODUCTION,
+        export_signing_secret="a-secure-export-signing-secret",
+    )
+
+    assert settings.demo_deployment_mode is False
 
 
 def test_production_requires_export_signing_secret() -> None:
@@ -104,3 +135,55 @@ def test_trusted_proxy_ips_parses_comma_separated_env_value() -> None:
     settings = make_settings(trusted_proxy_ips=" 203.0.113.7, 198.51.100.9 ,, ")
 
     assert settings.trusted_proxy_ip_set == frozenset({"203.0.113.7", "198.51.100.9"})
+
+
+def test_settings_in_tests_ignore_ambient_dotenv(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """测试构造的 Settings 不得读取运行目录下的 `.env`。
+
+    `Settings.model_config` 声明了 `env_file=(".env", "../.env")`，生产运行时
+    需要它；但在测试里它会让结果取决于开发者本机 `.env` 的内容——例如本仓库根
+    的 `backend/.env` 有 `LLM_API_KEY` 而无 `ADMIN_TOKEN`，就会让所有构造生产
+    Settings 的用例撞上「生产环境配置 LLM_API_KEY 时必须设置 ADMIN_TOKEN」而集体
+    失败。这个缺陷此前被「在无 `.env` 的 worktree 里跑回归」掩盖过一次，因此用
+    临时目录自造 `.env` 把它钉死，不依赖任何本机文件是否存在。
+    """
+
+    (tmp_path / ".env").write_text(
+        "LLM_API_KEY=ambient-key-must-not-leak\nLLM_MODEL=ambient-model-must-not-leak\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    settings = make_settings(
+        app_env=AppEnvironment.PRODUCTION,
+        export_signing_secret="a-secure-export-signing-secret",
+    )
+
+    assert settings.llm_api_key is None
+    assert settings.llm_model != "ambient-model-must-not-leak"
+
+
+def test_settings_in_tests_ignore_ambient_environment_variables(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """测试构造的 Settings 也不得读取进程环境变量。
+
+    与 dotenv 那条同源：参考项目 `yshopping-merchant-ai 4/` 的测试一律
+    `new AppProperties()` 手工赋值，从不走 Spring 的配置解析路径，因此环境变量和
+    配置文件都影响不到测试结果。按 R9 以参考项目为基准，我们的测试也必须做到
+    「配置只能来自显式传参」——只堵 `.env` 而放行环境变量，等于只还原了一半。
+    """
+
+    monkeypatch.setenv("LLM_API_KEY", "ambient-env-key-must-not-leak")
+    monkeypatch.setenv("LLM_MODEL", "ambient-env-model-must-not-leak")
+
+    settings = make_settings(
+        app_env=AppEnvironment.PRODUCTION,
+        export_signing_secret="a-secure-export-signing-secret",
+    )
+
+    assert settings.llm_api_key is None
+    assert settings.llm_model != "ambient-env-model-must-not-leak"

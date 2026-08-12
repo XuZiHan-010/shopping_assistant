@@ -9,7 +9,14 @@ from uuid import UUID
 import pytest
 
 from app.core.config import AppEnvironment, Settings
-from app.llm.client import LlmBudget, LlmClient, LlmDailyBudgetExceededError, LlmResult
+from app.llm.client import (
+    LlmBudget,
+    LlmClient,
+    LlmDailyBudgetExceededError,
+    LlmResult,
+    LlmUnavailableError,
+)
+from app.llm.fake import FakeLlmClient
 from app.llm.guard import LlmCostGuard
 
 MERCHANT_ID = UUID("00000000-0000-0000-0000-000000000001")
@@ -119,6 +126,25 @@ def _guard(
         request_id="req-1",
         merchant_id=MERCHANT_ID,
     )
+
+
+@pytest.mark.asyncio
+async def test_complete_does_not_reserve_budget_when_inner_client_unconfigured() -> None:
+    repository = FakeLlmBudgetRepository(reserve_returns=[])
+    guard = LlmCostGuard(
+        FakeLlmClient(configured=False),
+        repository,  # type: ignore[arg-type]
+        _settings(),
+        request_id="req-unconfigured",
+        merchant_id=MERCHANT_ID,
+    )
+    budget = LlmBudget(max_calls=6, max_tokens=1_000)
+
+    with pytest.raises(LlmUnavailableError):
+        await guard.complete(system="s", user="u", fallback="f", budget=budget)
+
+    assert repository.reserve_calls == []
+    assert repository.record_usage_calls == []
 
 
 @pytest.mark.asyncio

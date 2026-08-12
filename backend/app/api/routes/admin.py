@@ -28,6 +28,7 @@ class OpsStatusResponse(BaseModel):
     degraded_count: int
     error_code_counts: dict[str, int]
     agent_node_average_ms: dict[str, float]
+    demo_deployment_mode: bool
 
 
 @router.get(
@@ -55,4 +56,5 @@ async def ops_status(
         degraded_count=metrics.degraded_count,
         error_code_counts=metrics.error_code_counts,
         agent_node_average_ms=metrics.agent_node_average_ms,
+        demo_deployment_mode=settings.demo_deployment_mode,
     )

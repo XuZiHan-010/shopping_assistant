@@ -8,7 +8,13 @@ from uuid import UUID
 
 from app.analytics.dates import business_today
 from app.core.config import Settings
-from app.llm.client import LlmBudget, LlmClient, LlmDailyBudgetExceededError, LlmResult
+from app.llm.client import (
+    LlmBudget,
+    LlmClient,
+    LlmDailyBudgetExceededError,
+    LlmResult,
+    LlmUnavailableError,
+)
 from app.repositories.llm_budget import LlmBudgetRepository
 
 
@@ -51,6 +57,8 @@ class LlmCostGuard:
     async def complete(
         self, *, system: str, user: str, fallback: str, budget: LlmBudget
     ) -> LlmResult:
+        if not self._inner.is_configured():
+            raise LlmUnavailableError("LLM 客户端未配置")
         estimated = estimate_call_tokens(
             system=system,
             user=user,
