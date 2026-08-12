@@ -1,4 +1,4 @@
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
@@ -15,6 +15,14 @@ import type { ChatMessage } from '@/types/chat'
 import AssistantView from './AssistantView.vue'
 
 describe('AssistantView', () => {
+  /**
+   * 每个用例都 attachTo document.body，不卸载就不会触发 onBeforeUnmount。
+   * AssistantView 的图表挂载兜底定时器（jsdom 没有 requestIdleCallback，走 setTimeout 分支）
+   * 会一直挂着，等环境拆除之后才 fire，进而发起 MetricChartPanel 的动态 import，
+   * 报出 "caught after test environment was torn down"。
+   */
+  const mountedWrappers: VueWrapper[] = []
+
   beforeEach(() => {
     setChatTransport(createMockTransport({ chunkSizes: [16], stepDelayMs: 0 }))
     sessionStorage.clear()
@@ -23,6 +31,7 @@ describe('AssistantView', () => {
   })
 
   afterEach(() => {
+    while (mountedWrappers.length > 0) mountedWrappers.pop()?.unmount()
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
   })
@@ -39,6 +48,7 @@ describe('AssistantView', () => {
       attachTo: document.body,
       global: { plugins: [pinia], stubs: { RouterLink: { template: '<a><slot /></a>' } } },
     })
+    mountedWrappers.push(wrapper)
     await flushPromises()
     return wrapper
   }
@@ -243,6 +253,7 @@ describe('AssistantView', () => {
     const wrapper = mount(AssistantView, {
       global: { plugins: [pinia], stubs: { RouterLink: { template: '<a><slot /></a>' } } },
     })
+    mountedWrappers.push(wrapper)
 
     const placeholder = wrapper.find('[data-testid="chart-placeholder"]')
     expect(placeholder.exists()).toBe(true)
