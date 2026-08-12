@@ -257,8 +257,21 @@ export interface components {
             metric_unit?: string | null;
             /** Metric Definition */
             metric_definition?: string | null;
-            /** Metric Source */
-            metric_source?: string | null;
+            /** Metric Sql Definition */
+            metric_sql_definition?: string | null;
+            /** Metric Dimensions */
+            metric_dimensions?: string[] | null;
+            /** Metric Source Database */
+            metric_source_database?: string | null;
+            /** Metric Source Table */
+            metric_source_table?: string | null;
+            /** Metric Report Url */
+            metric_report_url?: string | null;
+            metric_source?: components["schemas"]["MetricDefinitionSource"] | null;
+            /** Metric Generated */
+            metric_generated?: boolean | null;
+            /** Metric Notice */
+            metric_notice?: string | null;
             /** Metric Owner */
             metric_owner?: string | null;
             metric_status?: components["schemas"]["MetricStatus"] | null;
@@ -482,12 +495,30 @@ export interface components {
             unit: string;
             /** Definition */
             definition: string;
-            /** Source */
-            source: string;
+            /** Sql Definition */
+            sql_definition: string;
+            /** Dimensions */
+            dimensions: string[];
+            /** Source Database */
+            source_database: string;
+            /** Source Table */
+            source_table: string;
+            /** Report Url */
+            report_url: string | null;
+            source: components["schemas"]["MetricDefinitionSource"];
+            /** Generated */
+            generated: boolean;
+            /** Notice */
+            notice: string | null;
             /** Owner */
             owner: string;
             status: components["schemas"]["MetricStatus"];
         };
+        /**
+         * MetricDefinitionSource
+         * @enum {string}
+         */
+        MetricDefinitionSource: "METRIC_CATALOG" | "FIELD_COMMENT" | "AI_GENERATED";
         /**
          * MetricStatus
          * @enum {string}

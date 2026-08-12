@@ -10,6 +10,7 @@ from app.intent.models import QueryIntent
 from app.llm.client import LlmBudget
 from app.llm.fake import FakeLlmClient
 from app.metrics.catalog import GENERATED_NOTICE, MetricCatalog
+from app.metrics.field_comments import FIELD_COMMENT_DEFINITIONS
 from app.schemas.chat import AnswerMode, QuestionCategory
 
 
@@ -72,8 +73,28 @@ async def test_generated_metric_is_explicitly_unverified() -> None:
     assert payload is not None
     assert payload.generated is True
     assert payload.status == "UNVERIFIED"
+    assert payload.source == "AI_GENERATED"
     assert payload.notice == GENERATED_NOTICE
     assert "yshopping" not in payload.notice.lower()
+
+
+@pytest.mark.asyncio
+async def test_field_comment_is_used_before_llm() -> None:
+    """目录缺失时，二级字段注释优先于模型候选，且不消耗模型调用。"""
+
+    llm = FakeLlmClient(responses=["不应调用"])
+    payload = await MetricCatalog(_FakeMetricRepository({}), llm).resolve(
+        _intent("gmv"), "", _budget()
+    )
+
+    assert payload is not None
+    assert payload.source == "FIELD_COMMENT"
+    assert payload.generated is False
+    assert payload.display_name == "成交 GMV"
+    assert payload.unit == "元"
+    assert payload.source_table == "orders"
+    assert payload.dimensions == FIELD_COMMENT_DEFINITIONS["gmv"].dimensions
+    assert llm.calls == []
 
 
 @pytest.mark.asyncio

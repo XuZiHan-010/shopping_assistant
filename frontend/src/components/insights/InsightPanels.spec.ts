@@ -38,7 +38,7 @@ describe('MetricDefinitionPanel', () => {
     const wrapper = mount(MetricDefinitionPanel, { props: { answer: metricAnswer } })
 
     expect(wrapper.text()).toContain(metricAnswer.metric!.displayName)
-    expect(wrapper.text()).toContain(metricAnswer.metric!.source)
+    expect(wrapper.text()).toContain('正式指标目录')
     expect(wrapper.text()).toContain(metricAnswer.metric!.owner)
   })
 
@@ -47,6 +47,21 @@ describe('MetricDefinitionPanel', () => {
 
     expect(wrapper.text()).toContain('查询计划摘要')
     expect(wrapper.text()).toContain(metricAnswer.data!.queryPlan!)
+  })
+
+  it('仅为通过 Adapter 校验的报表链接渲染安全新窗口链接', () => {
+    const safeAnswer: ChatAnswer = {
+      ...metricAnswer,
+      metric: { ...metricAnswer.metric!, reportUrl: 'https://reports.example.com/gmv' },
+    }
+    const wrapper = mount(MetricDefinitionPanel, { props: { answer: safeAnswer } })
+
+    expect(wrapper.get('[data-testid="metric-report-link"]').attributes('href')).toBe(
+      'https://reports.example.com/gmv',
+    )
+    expect(wrapper.get('[data-testid="metric-report-link"]').attributes('rel')).toBe(
+      'noopener noreferrer',
+    )
   })
 
   it('RULE 模式没有指标时显示空状态而不是零值', () => {

@@ -62,7 +62,12 @@ const METRIC_FIELDS = [
   'metric_display_name',
   'metric_unit',
   'metric_definition',
+  'metric_sql_definition',
+  'metric_dimensions',
+  'metric_source_database',
+  'metric_source_table',
   'metric_source',
+  'metric_generated',
   'metric_owner',
   'metric_status',
 ] as const
@@ -162,27 +167,52 @@ function toSuggestions(raw: RawChatResponse): SuggestedQuestions {
 }
 
 /** 按模式缺省时返回 undefined，绝不编造默认值（§5.0）。 */
-function toMetric(raw: RawChatResponse): MetricDefinition | undefined {
+function toMetric(raw: RawChatResponse, warnings: string[]): MetricDefinition | undefined {
   if (
     raw.metric_code == null ||
     raw.metric_display_name == null ||
     raw.metric_unit == null ||
     raw.metric_definition == null ||
+    raw.metric_sql_definition == null ||
+    raw.metric_dimensions == null ||
+    raw.metric_source_database == null ||
+    raw.metric_source_table == null ||
     raw.metric_source == null ||
+    raw.metric_generated == null ||
     raw.metric_owner == null ||
     raw.metric_status == null
   ) {
     return undefined
   }
+  const reportUrl = toSafeReportUrl(raw.metric_report_url, warnings)
   return {
     code: raw.metric_code,
     displayName: raw.metric_display_name,
     unit: raw.metric_unit,
     definition: raw.metric_definition,
+    sqlDefinition: raw.metric_sql_definition,
+    dimensions: raw.metric_dimensions,
+    sourceDatabase: raw.metric_source_database,
+    sourceTable: raw.metric_source_table,
+    reportUrl,
     source: raw.metric_source,
+    generated: raw.metric_generated,
+    notice: raw.metric_notice ?? undefined,
     owner: raw.metric_owner,
     status: raw.metric_status,
   }
+}
+
+function toSafeReportUrl(value: string | null | undefined, warnings: string[]): string | undefined {
+  if (value == null) return undefined
+  try {
+    const url = new URL(value)
+    if (url.protocol === 'http:' || url.protocol === 'https:') return url.href
+  } catch {
+    // 不把不安全或相对 URL 交给组件渲染。
+  }
+  warnings.push('metric_report_url 不是安全的 HTTP/HTTPS 绝对链接，已隐藏。')
+  return undefined
 }
 
 function toData(raw: RawChatResponse): DataResult | undefined {
@@ -247,7 +277,7 @@ export function toChatAnswer(raw: RawChatResponse): ChatAnswer {
     thinkingSteps: toThinkingSteps(raw),
     quality: toQuality(raw),
     suggestions: toSuggestions(raw),
-    metric: toMetric(raw),
+    metric: toMetric(raw, contractWarnings),
     data: toData(raw),
     chart: toChart(raw),
     recommendations: toRecommendations(raw),

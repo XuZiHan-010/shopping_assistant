@@ -909,7 +909,7 @@
             ],
             "title": "Metric Definition"
           },
-          "metric_source": {
+          "metric_sql_definition": {
             "anyOf": [
               {
                 "type": "string"
@@ -918,7 +918,86 @@
                 "type": "null"
               }
             ],
-            "title": "Metric Source"
+            "title": "Metric Sql Definition"
+          },
+          "metric_dimensions": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric Dimensions"
+          },
+          "metric_source_database": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric Source Database"
+          },
+          "metric_source_table": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric Source Table"
+          },
+          "metric_report_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric Report Url"
+          },
+          "metric_source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MetricDefinitionSource"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "metric_generated": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric Generated"
+          },
+          "metric_notice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric Notice"
           },
           "metric_owner": {
             "anyOf": [
@@ -1507,9 +1586,53 @@
             "type": "string",
             "title": "Definition"
           },
-          "source": {
+          "sql_definition": {
             "type": "string",
-            "title": "Source"
+            "title": "Sql Definition"
+          },
+          "dimensions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Dimensions"
+          },
+          "source_database": {
+            "type": "string",
+            "title": "Source Database"
+          },
+          "source_table": {
+            "type": "string",
+            "title": "Source Table"
+          },
+          "report_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Report Url"
+          },
+          "source": {
+            "$ref": "#/components/schemas/MetricDefinitionSource"
+          },
+          "generated": {
+            "type": "boolean",
+            "title": "Generated"
+          },
+          "notice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notice"
           },
           "owner": {
             "type": "string",
@@ -1525,11 +1648,27 @@
           "display_name",
           "unit",
           "definition",
+          "sql_definition",
+          "dimensions",
+          "source_database",
+          "source_table",
+          "report_url",
           "source",
+          "generated",
+          "notice",
           "owner",
           "status"
         ],
         "title": "MetricDefinitionResponse"
+      },
+      "MetricDefinitionSource": {
+        "type": "string",
+        "enum": [
+          "METRIC_CATALOG",
+          "FIELD_COMMENT",
+          "AI_GENERATED"
+        ],
+        "title": "MetricDefinitionSource"
       },
       "MetricStatus": {
         "type": "string",

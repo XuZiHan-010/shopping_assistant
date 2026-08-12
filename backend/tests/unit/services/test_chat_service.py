@@ -20,7 +20,7 @@ from app.core.errors import (
 )
 from app.core.security import MerchantContext
 from app.schemas.chat import ChatRequest
-from app.services.chat_service import ChatService, _request_digest
+from app.services.chat_service import ChatService, _request_digest, _stored_response
 from tests.support.agent import DeterministicAgent
 
 MERCHANT_ID = UUID("00000000-0000-0000-0000-000000000041")
@@ -175,6 +175,33 @@ async def test_succeeded_request_replays_saved_response_without_running_agent() 
     assert replay.replayed is True
     assert replay.response == first.response
     assert agent.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_historical_metric_payload_replays_with_traceability_defaults() -> None:
+    """历史 JSONB 在新契约下仍可重放，但不得虚构来源库表。"""
+
+    result = await DeterministicAgent().run("昨天 GMV", uuid4())
+    payload = result.response.model_dump(mode="json")
+    for field in (
+        "metric_sql_definition",
+        "metric_dimensions",
+        "metric_source_database",
+        "metric_source_table",
+        "metric_report_url",
+        "metric_generated",
+        "metric_notice",
+    ):
+        payload.pop(field)
+
+    replayed = _stored_response(payload)
+
+    assert replayed.metric_dimensions == []
+    assert replayed.metric_sql_definition == ""
+    assert replayed.metric_source_database == ""
+    assert replayed.metric_source_table == ""
+    assert replayed.metric_report_url is None
+    assert replayed.metric_generated is False
 
 
 @pytest.mark.asyncio

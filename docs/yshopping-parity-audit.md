@@ -49,12 +49,12 @@ Railway 控制台部署与线上验收、B8/B9、F7–F9 尚未完成。R9 阶�
 `dimensions`、`reportUrl`、`databaseName`、`tableName`、`generated`、`notice`。
 另有一处语义降级：`source` 在参考项目是命中层级枚举，我们退化成了自由文本。
 
-**状态：文档已按 R9 改齐（PRD §6.3/§10/§11.3、前后端计划），代码未动。** 详见 `docs/project-progress.md`。
+**状态：已修复。** 正式目录、受控字段注释和模型候选均返回双口径、维度、来源库表、来源枚举、生成标记与链接；链接经后端与前端双重 HTTP/HTTPS 校验，历史 JSONB 回放只补安全默认值。
 
 ### 3.2 指标口径三级检索缺中间一级
 
 **参考**：`MetricDefinitionService.resolve()` 依次尝试 指标平台元数据 → Doris 字段 `COLUMN_COMMENT` → LLM 生成。
-**我们**：`catalog.py` 只有 正式目录 → LLM 两级。
+**我们**：`catalog.py` 已按 正式目录 → 受控字段注释 → LLM 候选三级解析；字段注释键、表名与 B4 白名单同源校验，前两级均不调用 LLM。
 
 第二级的价值不是兜底，而是**它产出的 SQL 口径由后端确定性拼装、不经过模型**。少了这一级，
 目录未命中时会直接掉到 LLM，把本可以确定性回答的口径交给模型编，与 PRD §10「不把生成口径

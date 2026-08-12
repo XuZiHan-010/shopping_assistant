@@ -24,6 +24,7 @@ from app.core.errors import (
 from app.core.metrics import OperationalMetrics
 from app.core.security import MerchantContext
 from app.llm.guard import CostGuardProtocol
+from app.metrics.report_url import upgrade_payload
 from app.models.answer import Answer
 from app.models.conversation import Conversation
 from app.repositories.conversation import ConversationRepository
@@ -326,7 +327,7 @@ def _stored_response(payload: dict[str, Any] | None) -> ChatResponse:
             status_code=500,
             retryable=True,
         )
-    return ChatResponse.model_validate(payload)
+    return ChatResponse.model_validate(upgrade_payload(payload))
 
 
 def _stored_error(payload: dict[str, Any] | None) -> AppError:

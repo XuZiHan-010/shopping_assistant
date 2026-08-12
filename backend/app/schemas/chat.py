@@ -46,6 +46,21 @@ class MetricStatus(StrEnum):
     UNVERIFIED = "UNVERIFIED"
 
 
+class MetricDefinitionSource(StrEnum):
+    METRIC_CATALOG = "METRIC_CATALOG"
+    FIELD_COMMENT = "FIELD_COMMENT"
+    AI_GENERATED = "AI_GENERATED"
+
+    @classmethod
+    def _missing_(cls, value: object) -> MetricDefinitionSource | None:
+        # 兼容 0009 迁移前保存的来源文本；新响应只输出枚举值。
+        legacy = {
+            "Borough 指标目录": cls.METRIC_CATALOG,
+            "大模型生成": cls.AI_GENERATED,
+        }
+        return legacy.get(value) if isinstance(value, str) else None
+
+
 class ChartType(StrEnum):
     """后端允许的图表类型。
 
@@ -162,7 +177,14 @@ class ChatResponse(BaseModel):
     metric_display_name: str | None = None
     metric_unit: str | None = None
     metric_definition: str | None = None
-    metric_source: str | None = None
+    metric_sql_definition: str | None = None
+    metric_dimensions: list[str] | None = None
+    metric_source_database: str | None = None
+    metric_source_table: str | None = None
+    metric_report_url: str | None = None
+    metric_source: MetricDefinitionSource | None = None
+    metric_generated: bool | None = None
+    metric_notice: str | None = None
     metric_owner: str | None = None
     metric_status: MetricStatus | None = None
     data_rows: list[dict[str, Any]] | None = None
@@ -212,12 +234,27 @@ class ChatResponse(BaseModel):
                 ("metric_display_name", self.metric_display_name),
                 ("metric_unit", self.metric_unit),
                 ("metric_definition", self.metric_definition),
+                ("metric_sql_definition", self.metric_sql_definition),
+                ("metric_dimensions", self.metric_dimensions),
+                ("metric_source_database", self.metric_source_database),
+                ("metric_source_table", self.metric_source_table),
                 ("metric_source", self.metric_source),
+                ("metric_generated", self.metric_generated),
                 ("metric_owner", self.metric_owner),
                 ("metric_status", self.metric_status),
                 ("visualization", self.visualization),
             ):
                 self._require(field_name, value)
+            if self.metric_generated:
+                if self.metric_status is not MetricStatus.UNVERIFIED:
+                    raise ValueError("metric_generated 为 true 时 metric_status 必须为 UNVERIFIED")
+                if self.metric_source is not MetricDefinitionSource.AI_GENERATED:
+                    raise ValueError(
+                        "metric_generated 为 true 时 metric_source 必须为 AI_GENERATED"
+                    )
+                self._require("metric_notice", self.metric_notice)
+            elif self.metric_notice is not None:
+                raise ValueError("metric_generated 为 false 时 metric_notice 必须为 null")
             self._require_recommendations()
         if self.answer_mode is AnswerMode.DETAIL:
             self._require("export", self.export)

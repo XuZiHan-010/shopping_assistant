@@ -772,11 +772,11 @@ B2 的 Fake Agent 只覆盖 `TRADE`、`REFUND`、`PLATFORM_RULE` 三类场景与
 | `metric_code` | `str` | `METRIC` |
 | `metric_display_name` | `str` | `METRIC` |
 | `metric_unit` | `str` | `METRIC` |
-| `metric_business_definition` | `str` | `METRIC`，业务口径 |
-| `metric_sql_definition` | `str \| None` | `METRIC` 可选，SQL 口径 |
-| `metric_dimensions` | `list[str] \| None` | `METRIC` 可选，维度集合 |
-| `metric_database_name` | `str \| None` | `METRIC` 可选，来源库名 |
-| `metric_table_name` | `str \| None` | `METRIC` 可选，来源表名 |
+| `metric_definition` | `str` | `METRIC`，业务口径 |
+| `metric_sql_definition` | `str` | `METRIC`，SQL 口径 |
+| `metric_dimensions` | `list[str]` | `METRIC`，维度集合 |
+| `metric_source_database` | `str` | `METRIC`，来源库名 |
+| `metric_source_table` | `str` | `METRIC`，来源表名 |
 | `metric_report_url` | `str \| None` | `METRIC` 可选，关联报表链接 |
 | `metric_source` | `MetricDefinitionSource` | `METRIC`，口径来源枚举 |
 | `metric_generated` | `bool` | `METRIC`，口径是否由模型生成 |
@@ -792,13 +792,12 @@ B2 的 Fake Agent 只覆盖 `TRADE`、`REFUND`、`PLATFORM_RULE` 三类场景与
 
 `metric_source`、`metric_owner`、`metric_status` 是 PRD 要求指标口径面板展示的三项，缺一前端就只能显示空白，因此列为 `METRIC` 必填。
 
-**`metric_business_definition` 与 `metric_sql_definition` 必须并列存在，不得合并成单个 `metric_definition`。**
+**`metric_definition`（业务口径）与 `metric_sql_definition` 必须并列存在，不得合并为单一文本字段。**
 参考项目的指标平台元数据表把它们分列为 `metrics_biz_meaning` / `metrics_sql_meaning`，
-面向读者不同（见 PRD §6.3）。旧契约里的 `metric_definition` 是这次并列化之前的遗留命名，
-迁移时按语义改名为 `metric_business_definition`，不保留别名——保留别名会让前端有两个入口，
-迟早出现一个分区读旧名、一个读新名。
+面向读者不同（见 PRD §6.3）。为兼容已保存的 `answers.response_payload`，业务口径继续使用
+`metric_definition`；升级器只为历史 JSONB 补齐安全默认值，前端没有第二个业务口径入口。
 
-`metric_source` 是三取一的枚举 `METRIC_CATALOG` / `COLUMN_COMMENT` / `AI_GENERATED`，
+`metric_source` 是三取一的枚举 `METRIC_CATALOG` / `FIELD_COMMENT` / `AI_GENERATED`，
 对应 PRD §10 Metric Catalog 的三级检索命中层级，**不是自由文本**：前端要据此渲染来源徽标，
 自由文本会让徽标映射退化成字符串匹配。中文标签由前端负责，后端只给枚举。
 
@@ -828,9 +827,9 @@ R9 补充约束：纯明细模式的 `answer` **必须是空字符串**；其他
 
 - 一份 Schema 同时生成 Pydantic 与 TypeScript 类型，字段名零差异；
 - `CHAT`、`INVALID`、`RULE` 无数据模式正常通过校验；
-- `METRIC` 缺 `metric_source` / `metric_owner` / `metric_status` / `metric_business_definition` / `metric_generated` 校验失败；
+- `METRIC` 缺 `metric_source` / `metric_owner` / `metric_status` / `metric_definition` / `metric_generated` 校验失败；
 - `metric_generated` 为 `true` 但缺 `metric_notice` 校验失败；
-- `METRIC` 缺 `metric_sql_definition` 等可选口径字段时**校验通过**（缺失是合法状态，前端隐藏分区）；
+- `METRIC` 缺 `metric_sql_definition`、维度或来源库表时校验失败；
 - `DETAIL` 缺 `export` 校验失败；
 - `analysis_sources` 为空数组时校验失败；
 - `CHAT`、`INVALID` 返回 `["NONE"]` 且 `degraded=false` 时校验通过；
