@@ -162,7 +162,10 @@ class ChatService:
             if (
                 result.query_result is not None
                 and result.query_result.export_spec is not None
-                and response.answer_mode is AnswerMode.DETAIL
+                and (
+                    response.answer_mode is AnswerMode.DETAIL
+                    or result.query_result.export_spec.kind == "generated_metric"
+                )
                 and not response.degraded
             ):
                 if self._export_service is None:

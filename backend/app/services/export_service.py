@@ -17,10 +17,10 @@ from app.core.errors import (
     MerchantScopeViolationError,
     ResourceNotFoundError,
 )
-from app.intent.models import CrossBusinessPlan
+from app.intent.models import CrossBusinessPlan, GeneratedMetricPlan
 from app.repositories.analytics import AnalyticsRepository, DetailResult
 from app.repositories.export import ExportRepository
-from app.schemas.chat import ExportInfo
+from app.schemas.chat import ExportInfo, QuestionCategory
 from app.services.safe_query import ExportSpec
 
 
@@ -93,13 +93,29 @@ class ExportService:
             raise ResourceNotFoundError("导出文件")
         if record.expires_at <= current:
             raise ExportLinkExpiredError
-        spec = _deserialize_spec(record.export_spec)
+        try:
+            spec = _deserialize_spec(record.export_spec)
+        except ValueError as exc:
+            raise ResourceNotFoundError("导出文件") from exc
         if spec.kind == "cross_business":
             if spec.cross_business_plan is None:
                 raise ResourceNotFoundError("导出文件")
             result = await self._analytics.export_cross_business(
                 merchant_id=merchant_id,
                 plan=spec.cross_business_plan,
+            )
+            if tuple(column.key for column in result.columns) != spec.columns:
+                raise ResourceNotFoundError("导出文件")
+        elif spec.kind == "generated_metric":
+            if spec.generated_metric_plan is None or spec.generated_metric_category is None:
+                raise ResourceNotFoundError("导出文件")
+            result = await self._analytics.generated_metric(
+                merchant_id=merchant_id,
+                category=spec.generated_metric_category,
+                plan=spec.generated_metric_plan,
+                start=spec.start,
+                end=spec.end,
+                limit=None,
             )
             if tuple(column.key for column in result.columns) != spec.columns:
                 raise ResourceNotFoundError("导出文件")
@@ -148,6 +164,16 @@ def _serialize_spec(spec: ExportSpec) -> dict[str, object]:
         "cross_business_plan": (
             spec.cross_business_plan.model_dump() if spec.cross_business_plan is not None else None
         ),
+        "generated_metric_plan": (
+            spec.generated_metric_plan.model_dump()
+            if spec.generated_metric_plan is not None
+            else None
+        ),
+        "generated_metric_category": (
+            spec.generated_metric_category.value
+            if spec.generated_metric_category is not None
+            else None
+        ),
     }
 
 
@@ -160,15 +186,33 @@ def _deserialize_spec(value: dict[str, object]) -> ExportSpec:
         not isinstance(table, str)
         or not isinstance(columns, list)
         or not isinstance(filters, list)
-        or kind not in {"detail", "cross_business"}
+        or kind not in {"detail", "cross_business", "generated_metric"}
     ):
         raise ValueError("invalid export specification")
     raw_plan = value.get("cross_business_plan")
+    raw_generated_plan = value.get("generated_metric_plan")
+    raw_generated_category = value.get("generated_metric_category")
     try:
         plan = CrossBusinessPlan.model_validate(raw_plan) if raw_plan is not None else None
+        generated_plan = (
+            GeneratedMetricPlan.model_validate(raw_generated_plan)
+            if raw_generated_plan is not None
+            else None
+        )
+        generated_category = (
+            QuestionCategory(str(raw_generated_category))
+            if raw_generated_category is not None
+            else None
+        )
     except ValueError as exc:
         raise ValueError("invalid export specification") from exc
     if kind == "cross_business" and plan is None:
+        raise ValueError("invalid export specification")
+    if kind == "generated_metric" and (
+        table != "generated_metric"
+        or generated_plan is None
+        or generated_category not in {QuestionCategory.TRADE, QuestionCategory.REFUND}
+    ):
         raise ValueError("invalid export specification")
     return ExportSpec(
         table=table,
@@ -181,8 +225,10 @@ def _deserialize_spec(value: dict[str, object]) -> ExportSpec:
             if isinstance(item, list) and len(item) == 2
         ),
         date_filtered=bool(value.get("date_filtered", True)),
-        kind=cast(Literal["detail", "cross_business"], kind),
+        kind=cast(Literal["detail", "cross_business", "generated_metric"], kind),
         cross_business_plan=plan,
+        generated_metric_plan=generated_plan,
+        generated_metric_category=generated_category,
     )
 
 

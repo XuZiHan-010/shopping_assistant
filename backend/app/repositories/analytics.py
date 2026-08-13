@@ -25,8 +25,9 @@ from app.analytics.contract import (
     UnknownFieldError,
     dimension_spec,
 )
-from app.intent.models import CrossBusinessPlan, CrossBusinessPlanType
+from app.intent.models import CrossBusinessPlan, CrossBusinessPlanType, GeneratedMetricPlan
 from app.models.analytics import Order, OrderItem, Product, Refund, ReturnRecord, SupportTicket
+from app.schemas.chat import QuestionCategory
 
 # 值类型写成 type[Any]：这些 ORM 类各自的列集合不同，取公共父类会丢掉列信息；
 # 反正后续都是按 contract 里登记的列名 getattr，不需要静态精确到具体子类。
@@ -190,6 +191,230 @@ class AnalyticsRepository:
                 metric, specs, filters, via_order_items=via_order_items
             ),
         )
+
+    async def generated_metric(
+        self,
+        *,
+        merchant_id: UUID,
+        category: QuestionCategory,
+        plan: GeneratedMetricPlan,
+        start: date,
+        end: date,
+        limit: int | None,
+    ) -> DetailResult:
+        """执行临时分组指标的类别驱动固定模板。
+
+        ``GeneratedMetricPlan`` 只能决定两种已登记的维度是否出现；指标表达式、
+        join、筛选列和排序全在这里固定，永远不接受 LLM 给出的列名、公式或 SQL。
+        """
+
+        if category is QuestionCategory.TRADE:
+            return await self._generated_trade_metric(
+                merchant_id=merchant_id,
+                plan=plan,
+                start=start,
+                end=end,
+                limit=limit,
+            )
+        if category is QuestionCategory.REFUND:
+            return await self._generated_refund_metric(
+                merchant_id=merchant_id,
+                plan=plan,
+                start=start,
+                end=end,
+                limit=limit,
+            )
+        raise ValueError("generated metric category is not supported")
+
+    async def _generated_trade_metric(
+        self,
+        *,
+        merchant_id: UUID,
+        plan: GeneratedMetricPlan,
+        start: date,
+        end: date,
+        limit: int | None,
+    ) -> DetailResult:
+        paid_statuses = ("PAID", "SHIPPED", "COMPLETED")
+        order_count = (
+            func.count(func.distinct(Order.id))
+            .filter(Order.order_status.in_(paid_statuses))
+            .label("order_count")
+        )
+        order_user_count = (
+            func.count(func.distinct(Order.buyer_key))
+            .filter(Order.order_status.in_(paid_statuses))
+            .label("order_user_count")
+        )
+        quantity = (
+            func.sum(OrderItem.quantity)
+            .filter(Order.order_status.in_(paid_statuses))
+            .label("quantity")
+        )
+        paid_amount = (
+            func.sum(OrderItem.item_amount)
+            .filter(Order.order_status.in_(paid_statuses))
+            .label("paid_amount")
+        )
+        metrics = (order_count, order_user_count, quantity, paid_amount)
+        statement: Select[Any] = (
+            select(*metrics)
+            .select_from(Order)
+            .join(
+                OrderItem,
+                and_(OrderItem.order_id == Order.id, OrderItem.merchant_id == merchant_id),
+            )
+            .join(
+                Product,
+                and_(Product.id == OrderItem.product_id, Product.merchant_id == merchant_id),
+            )
+            .where(
+                Order.merchant_id == merchant_id,
+                Order.business_date >= start,
+                Order.business_date <= end,
+            )
+        )
+        statement = self._apply_generated_filter(statement, plan)
+        group_columns, dimensions = self._generated_dimensions(plan)
+        if group_columns:
+            statement = (
+                statement.with_only_columns(*dimensions, *metrics)
+                .group_by(*group_columns)
+                .order_by(order_count.desc(), paid_amount.desc())
+            )
+        total = await self._session.scalar(
+            select(func.count()).select_from(statement.order_by(None).subquery())
+        )
+        if group_columns and limit is not None:
+            statement = statement.limit(limit)
+        result = await self._session.execute(statement)
+        rows = [dict(row) for row in result.mappings()]
+        total_rows = int(total or 0)
+        return DetailResult(
+            columns=(
+                *self._generated_result_columns(plan),
+                *self._trade_generated_metric_columns(),
+            ),
+            rows=rows,
+            total_rows=total_rows,
+            truncated=total_rows > len(rows),
+            source_tables=("orders", "order_items", "products"),
+        )
+
+    async def _generated_refund_metric(
+        self,
+        *,
+        merchant_id: UUID,
+        plan: GeneratedMetricPlan,
+        start: date,
+        end: date,
+        limit: int | None,
+    ) -> DetailResult:
+        refund_count = func.count(func.distinct(Refund.id)).label("refund_count")
+        refund_user_count = func.count(func.distinct(Order.buyer_key)).label("refund_user_count")
+        refund_amount = func.sum(Refund.refund_amount).label("refund_amount")
+        metrics = (refund_count, refund_user_count, refund_amount)
+        statement: Select[Any] = (
+            select(*metrics)
+            .select_from(Refund)
+            .join(
+                OrderItem,
+                and_(OrderItem.id == Refund.order_item_id, OrderItem.merchant_id == merchant_id),
+            )
+            .join(Order, and_(Order.id == OrderItem.order_id, Order.merchant_id == merchant_id))
+            .where(
+                Refund.merchant_id == merchant_id,
+                Refund.business_date >= start,
+                Refund.business_date <= end,
+            )
+        )
+        includes_product = plan.group_by == "spu_id" or plan.filter_column == "spu_id"
+        if includes_product:
+            statement = statement.join(
+                Product,
+                and_(Product.id == OrderItem.product_id, Product.merchant_id == merchant_id),
+            )
+        statement = self._apply_generated_filter(statement, plan)
+        group_columns, dimensions = self._generated_dimensions(plan)
+        if group_columns:
+            statement = (
+                statement.with_only_columns(*dimensions, *metrics)
+                .group_by(*group_columns)
+                .order_by(refund_count.desc(), refund_amount.desc())
+            )
+        total = await self._session.scalar(
+            select(func.count()).select_from(statement.order_by(None).subquery())
+        )
+        if group_columns and limit is not None:
+            statement = statement.limit(limit)
+        result = await self._session.execute(statement)
+        source_tables: tuple[str, ...] = ("refunds", "order_items", "orders")
+        if includes_product:
+            source_tables = (*source_tables, "products")
+        rows = [dict(row) for row in result.mappings()]
+        total_rows = int(total or 0)
+        return DetailResult(
+            columns=(
+                *self._generated_result_columns(plan),
+                *self._refund_generated_metric_columns(),
+            ),
+            rows=rows,
+            total_rows=total_rows,
+            truncated=total_rows > len(rows),
+            source_tables=source_tables,
+        )
+
+    @staticmethod
+    def _generated_dimensions(
+        plan: GeneratedMetricPlan,
+    ) -> tuple[tuple[ColumnElement[Any], ...], tuple[ColumnElement[Any], ...]]:
+        if plan.group_by == "spu_id":
+            spu_id = func.coalesce(Product.spu_id, Product.product_code).label("spu_id")
+            return (spu_id,), (spu_id, func.max(Product.title).label("spu_name"))
+        if plan.group_by == "address_city_name":
+            city = func.coalesce(Order.address_city_name, "未知城市").label("address_city_name")
+            return (city,), (city,)
+        return (), ()
+
+    @staticmethod
+    def _generated_result_columns(plan: GeneratedMetricPlan) -> tuple[ResultColumn, ...]:
+        if plan.group_by == "spu_id":
+            return (
+                ResultColumn("spu_id", "SPU ID", "DIMENSION"),
+                ResultColumn("spu_name", "SPU 名称", "DIMENSION"),
+            )
+        if plan.group_by == "address_city_name":
+            return (ResultColumn("address_city_name", "收货城市", "DIMENSION"),)
+        return ()
+
+    @staticmethod
+    def _trade_generated_metric_columns() -> tuple[ResultColumn, ...]:
+        return (
+            ResultColumn("order_count", "成交订单数", "METRIC"),
+            ResultColumn("order_user_count", "成交用户数", "METRIC"),
+            ResultColumn("quantity", "成交件数", "METRIC"),
+            ResultColumn("paid_amount", "成交金额", "METRIC"),
+        )
+
+    @staticmethod
+    def _refund_generated_metric_columns() -> tuple[ResultColumn, ...]:
+        return (
+            ResultColumn("refund_count", "退款笔数", "METRIC"),
+            ResultColumn("refund_user_count", "退款用户数", "METRIC"),
+            ResultColumn("refund_amount", "退款金额", "METRIC"),
+        )
+
+    @staticmethod
+    def _apply_generated_filter(statement: Select[Any], plan: GeneratedMetricPlan) -> Select[Any]:
+        if plan.filter_column == "spu_id":
+            assert plan.filter_value is not None
+            return statement.where(
+                func.coalesce(Product.spu_id, Product.product_code) == plan.filter_value
+            )
+        if plan.filter_column == "address_city_name":
+            assert plan.filter_value is not None
+            return statement.where(Order.address_city_name == plan.filter_value)
+        return statement
 
     async def detail(
         self,

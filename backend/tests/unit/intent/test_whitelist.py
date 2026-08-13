@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import date
 
+import pytest
+
 from app.intent.models import CrossBusinessPlanType, DateRange, QueryIntent
 from app.intent.whitelist import MAX_DETAIL_LIMIT, MAX_QUERY_DAYS, validate_intent
 from app.schemas.chat import AnswerMode, QuestionCategory
@@ -110,6 +112,100 @@ def test_cross_business_plan_is_optional_without_rejection_note() -> None:
 
     assert result.intent.cross_business_plan is None
     assert not any("跨业务" in note for note in result.adjusted)
+
+
+def test_generated_metric_plan_with_spu_group_is_preserved() -> None:
+    result = validate_intent(
+        _intent(
+            generated_metric_plan={
+                "name": "SPU 成交表现",
+                "unit": "元",
+                "group_by": "spu_id",
+            }
+        ),
+        today=TODAY,
+    )
+
+    assert result.rejected == ()
+    assert result.intent.generated_metric_plan is not None
+    assert result.intent.generated_metric_plan.group_by == "spu_id"
+
+
+def test_city_only_generated_metric_filter_is_preserved() -> None:
+    result = validate_intent(
+        _intent(
+            generated_metric_plan={
+                "name": "杭州成交表现",
+                "unit": "元",
+                "filter_column": "address_city_name",
+                "filter_value": "杭州市",
+            }
+        ),
+        today=TODAY,
+    )
+
+    assert result.rejected == ()
+    assert result.intent.generated_metric_plan is not None
+
+
+def test_invalid_generated_metric_plan_invalidates_the_whole_intent() -> None:
+    intent = _intent(
+        generated_metric_plan={
+            "name": "任意公式",
+            "unit": "元",
+            "group_by": "merchant_secret",
+        }
+    )
+
+    result = validate_intent(intent, today=TODAY)
+
+    assert result.intent.answer_mode is AnswerMode.INVALID
+    assert result.intent.category is QuestionCategory.UNKNOWN
+    assert result.intent.generated_metric_plan is None
+    assert any("临时分组指标" in note for note in result.rejected)
+
+
+def test_generated_metric_plan_requires_paired_filter_fields() -> None:
+    intent = _intent(
+        generated_metric_plan={
+            "name": "不完整筛选",
+            "unit": "元",
+            "filter_column": "address_city_name",
+        }
+    )
+
+    result = validate_intent(intent, today=TODAY)
+
+    assert result.intent.answer_mode is AnswerMode.INVALID
+    assert result.intent.category is QuestionCategory.UNKNOWN
+
+
+@pytest.mark.parametrize(
+    ("answer_mode", "category"),
+    [
+        (AnswerMode.DETAIL, QuestionCategory.TRADE),
+        (AnswerMode.METRIC, QuestionCategory.SCM),
+    ],
+)
+def test_generated_metric_plan_requires_metric_trade_or_refund_context(
+    answer_mode: AnswerMode, category: QuestionCategory
+) -> None:
+    result = validate_intent(
+        _intent(
+            answer_mode=answer_mode,
+            category=category,
+            generated_metric_plan={
+                "name": "受控分组指标",
+                "unit": "元",
+                "group_by": "spu_id",
+            },
+        ),
+        today=TODAY,
+    )
+
+    assert result.intent.answer_mode is AnswerMode.INVALID
+    assert result.intent.category is QuestionCategory.UNKNOWN
+    assert any("临时分组指标" in note for note in result.rejected)
 
 
 def test_sql_in_metric_is_rejected() -> None:

@@ -22,12 +22,27 @@ CROSS_BUSINESS_GUIDANCE = (
     "join \u6761\u4ef6\u6216\u5176\u4ed6\u67e5\u8be2\u6807\u8bc6\u7b26\u3002\n"
 )
 
+GENERATED_METRIC_GUIDANCE = (
+    "generated_metric_plan 仅在 answer_mode=METRIC 时可选输出；"
+    "仅限类别 TRADE 或 REFUND：TRADE 使用固定成交聚合模板，"
+    "REFUND 使用固定退款聚合模板。"
+    "格式为 {name: 展示名称, unit: 单位, group_by?: spu_id|address_city_name, "
+    "filter_column?: spu_id|address_city_name, filter_value?: 筛选值}。"
+    "filter_column 与 filter_value 必须同时出现；没有 group_by 时仅允许按 "
+    "address_city_name 筛选。不得输出 measure、自由公式、表名、列名、SQL "
+    "或其他查询标识符。\n"
+)
+
 
 def understand_user_prompt(question: str, category: str, knowledge_text: str) -> str:
-    return CROSS_BUSINESS_GUIDANCE + (
-        f"业务域：{category}\n业务知识：{knowledge_text}\n商家问题：{question}\n"
-        f"输出完整 QueryIntent JSON；metric={sorted(METRIC_WHITELIST)}；"
-        f"dimensions={sorted(DIMENSION_WHITELIST)}；filters={sorted(FILTER_WHITELIST)}；"
-        "必须输出 analysis_requested 布尔值：仅当用户明确要求分析、解读、原因或建议时为 true，"
-        "只要求查看明细时为 false。不得输出 SQL、表名或自由查询文本。"
+    return (
+        CROSS_BUSINESS_GUIDANCE
+        + GENERATED_METRIC_GUIDANCE
+        + (
+            f"业务域：{category}\n业务知识：{knowledge_text}\n商家问题：{question}\n"
+            f"输出完整 QueryIntent JSON；metric={sorted(METRIC_WHITELIST)}；"
+            f"dimensions={sorted(DIMENSION_WHITELIST)}；filters={sorted(FILTER_WHITELIST)}；"
+            "必须输出 analysis_requested 布尔值：仅当用户明确要求分析、解读、原因或建议时为 true，"
+            "只要求查看明细时为 false。不得输出 SQL、表名或自由查询文本。"
+        )
     )

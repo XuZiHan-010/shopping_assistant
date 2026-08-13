@@ -73,3 +73,10 @@ def test_returns_track_quantity_and_logistics_separately_from_refund_amount() ->
     assert "return_quantity" in ReturnRecord.__table__.c
     assert "logistics_status" in ReturnRecord.__table__.c
     assert "refund_amount" not in ReturnRecord.__table__.c
+
+
+def test_generated_grouped_metrics_have_spu_and_city_source_columns() -> None:
+    """临时分组只能读明细事实表已有的受控字段，不能临时拼 SQL 标识符。"""
+
+    assert "spu_id" in Product.__table__.c
+    assert "address_city_name" in Order.__table__.c

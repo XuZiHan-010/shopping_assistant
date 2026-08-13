@@ -73,6 +73,24 @@ def _metric_result() -> QueryResult:
     )
 
 
+def _generated_metric_result() -> QueryResult:
+    return QueryResult(
+        columns=(
+            ResultColumn("spu_id", "SPU ID", "DIMENSION"),
+            ResultColumn("spu_name", "SPU 名称", "DIMENSION"),
+            ResultColumn("paid_amount", "成交金额", "METRIC"),
+        ),
+        rows=[{"spu_id": "SPU-1", "spu_name": "商品 1", "paid_amount": Decimal("120.00")}],
+        total_rows=1,
+        truncated=False,
+        source_tables=("orders", "order_items", "products"),
+        plan_steps=("按商家范围检索按 SPU 看成交表现",),
+        export_spec=None,
+        notes=(),
+        non_additive=True,
+    )
+
+
 def _llm() -> FakeLlmClient:
     return FakeLlmClient(
         responses=[
@@ -89,6 +107,33 @@ def _llm() -> FakeLlmClient:
                     "limit": None,
                     "followup_reference": False,
                     "needs_attachment": False,
+                }
+            ),
+        ]
+    )
+
+
+def _generated_metric_llm() -> FakeLlmClient:
+    return FakeLlmClient(
+        responses=[
+            json.dumps({"answer_mode": "METRIC", "category": "TRADE", "intent_keywords": ["SPU"]}),
+            json.dumps(
+                {
+                    "answer_mode": "METRIC",
+                    "category": "TRADE",
+                    "metric": "gmv",
+                    "dimensions": [],
+                    "filters": {},
+                    "date_range": {"start": "2026-08-03", "end": "2026-08-03"},
+                    "sort": None,
+                    "limit": None,
+                    "followup_reference": False,
+                    "needs_attachment": False,
+                    "generated_metric_plan": {
+                        "name": "按 SPU 看成交表现",
+                        "unit": "元",
+                        "group_by": "spu_id",
+                    },
                 }
             ),
         ]
@@ -173,6 +218,27 @@ async def test_metric_answer_carries_real_rows_and_drops_the_b4_fallback() -> No
     assert result.response.total_rows == 1
     assert result.response.analysis_sources == [AnalysisSource.DATABASE]
     assert result.response.degraded is False
+
+
+@pytest.mark.asyncio
+async def test_generated_metric_response_has_a_controlled_definition_and_chart() -> None:
+    llm = _generated_metric_llm()
+    graph = MerchantQaGraph(
+        retrieval=KnowledgeRetrieval(_Documents()),
+        intent_service_llm=llm,
+        catalog=MetricCatalog(_NoMetric(), llm),
+        query_service=_StubQueryService(_generated_metric_result()),
+        merchant_id=uuid4(),
+    )
+
+    response = (await graph.run("按 SPU 看成交表现", uuid4())).response
+
+    assert response.metric_generated is True
+    assert response.metric_display_name == "按 SPU 看成交表现"
+    assert response.metric_status is not None and response.metric_status.value == "UNVERIFIED"
+    assert response.metric_notice is not None
+    assert response.visualization is not None and response.visualization.enabled is True
+    assert response.visualization.metric_key == "paid_amount"
 
 
 @pytest.mark.asyncio

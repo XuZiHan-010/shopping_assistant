@@ -68,3 +68,34 @@ def test_unknown_or_missing_metric_column_disables_chart() -> None:
 
     assert chart.enabled is False
     assert chart.data == []
+
+
+def test_generated_trade_metric_uses_the_fixed_paid_amount_column() -> None:
+    from app.services.visualization_service import VisualizationService
+
+    generated = MetricPayload(
+        metric_code="generated_trade_metric",
+        display_name="按 SPU 看成交表现",
+        unit="元",
+        definition="由交易固定聚合模板计算。",
+        source="AI_GENERATED",
+        owner="待认领",
+        status="UNVERIFIED",
+        generated=True,
+        notice="展示名称待人工核验。",
+    )
+    result = _result(
+        columns=(
+            ResultColumn("spu_id", "SPU ID", "DIMENSION"),
+            ResultColumn("paid_amount", "成交金额", "METRIC"),
+        ),
+        rows=[{"spu_id": "SPU-1", "paid_amount": Decimal("12.00")}],
+    )
+
+    chart = VisualizationService().build(result, generated)
+
+    assert chart.enabled is True
+    assert chart.type.value == "BAR"
+    assert chart.dimension_key == "spu_id"
+    assert chart.metric_key == "paid_amount"
+    assert chart.data == [{"spu_id": "SPU-1", "paid_amount": "12.00"}]

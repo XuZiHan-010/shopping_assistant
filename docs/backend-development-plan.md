@@ -1156,10 +1156,8 @@ B3 的三个意图白名单已经与 B4 第一批受控查询契约对齐，不�
 - [x] 创建订单、订单项、**退款、退货**、商品和工单表；
 - [x] 创建 **180 天**演示数据 Seed（含退款与退货两类记录，且存在"只退款不退货""退货并退款"两种样本）；
 - [x] 实现 `GET /api/metrics/{code}` 指标口径接口，返回 `metric_source`、`metric_owner`、`metric_status`；
-  - [ ] **未完成（2026-08-09 按 AGENTS.md R9 登记）**：该端点只返回 `business_definition`，
-        `sql_definition`（库里已有值）、维度、来源库表、关联报表、`generated` / `notice`
-        都没有出口，参考项目 `MetricDefinitionPayload` 的 13 个字段我们只兑现了 7 个。
-        补齐范围见 §8.2 字段表；三级检索缺第二级（字段注释）见 PRD §10 Metric Catalog。
+  - [x] **已完成（2026-08-12，R9 Task 9）**：端点与聊天响应均返回双口径、维度、来源库表、关联报表、
+        `generated` / `notice`；三级检索按正式目录、受控字段注释、明确标记的 LLM 候选执行，详见 §8.2。
 - [x] 实现 Analytics Repository；
 - [x] 实现 Safe Query Service；
 - [x] 将 B3 建立的三套白名单接入查询路由；

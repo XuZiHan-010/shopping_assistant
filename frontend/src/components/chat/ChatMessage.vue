@@ -125,14 +125,14 @@ const isSelectableRound = computed(
 // 纯明细的 answer 按后端契约是精确空串；表格仍独立渲染，但不能留下一个可聚焦的
 // 空按钮或空文本段落。用户消息与分析型回答则继续按原样展示正文。
 const hasAnswerText = computed(() => props.message.text.trim().length > 0)
-// METRIC 回答的 `data` 只是趋势行的附带数据来源（图表面板自己的 <details> 已经
-// 用它渲染过一份可访问数据表），不按 answer_mode 过滤的话，同一批行会在聊天
-// 消息里又完整渲染一次「经营明细」表格——两张表、没有下载入口，纯粹是重复。
+// 常规 METRIC 的 `data` 只是趋势行的附带数据来源（图表面板自己的 <details> 已经
+// 用它渲染过一份可访问数据表），不按 answer_mode 过滤会产生重复表格。受控生成
+// 指标例外：它可能被截断并带签名 CSV，必须在消息中复用 DetailTable 露出完整下载入口。
 const showDetailTable = computed(
   () =>
     props.message.origin === 'live' &&
     props.message.status === 'complete' &&
-    props.message.answer?.mode === 'DETAIL' &&
+    (props.message.answer?.mode === 'DETAIL' || props.message.answer?.metric?.generated === true) &&
     props.message.answer?.data,
 )
 // 历史会话不重放明细数据（后端不落库整张明细表），但仍应说明「为什么这轮

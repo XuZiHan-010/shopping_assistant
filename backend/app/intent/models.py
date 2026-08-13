@@ -4,8 +4,16 @@ from __future__ import annotations
 
 from datetime import date
 from enum import StrEnum
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    ValidationError,
+    model_validator,
+)
 from pydantic.json_schema import SkipJsonSchema
 
 from app.schemas.chat import AnswerMode, QuestionCategory
@@ -39,6 +47,29 @@ class CrossBusinessPlan(BaseModel):
     )
 
 
+class GeneratedMetricPlan(BaseModel):
+    """受控临时分组指标的展示信息和唯一允许的分组/筛选列。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
+    unit: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=32)]
+    group_by: Literal["spu_id", "address_city_name"] | None = None
+    filter_column: Literal["spu_id", "address_city_name"] | None = None
+    filter_value: (
+        Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
+        | None
+    ) = None
+
+    @model_validator(mode="after")
+    def _check_shape(self) -> GeneratedMetricPlan:
+        if (self.filter_column is None) != (self.filter_value is None):
+            raise ValueError("filter_column 与 filter_value 必须同时存在")
+        if self.group_by is None and self.filter_column != "address_city_name":
+            raise ValueError("无分组时仅允许按城市筛选")
+        return self
+
+
 class QueryIntent(BaseModel):
     """模型输出的唯一查询计划落点，额外字段一律拒绝。"""
 
@@ -60,25 +91,38 @@ class QueryIntent(BaseModel):
     cross_business_plan_rejected: SkipJsonSchema[bool] = Field(
         default=False, exclude=True, repr=False
     )
+    generated_metric_plan: GeneratedMetricPlan | None = None
+    generated_metric_plan_rejected: SkipJsonSchema[bool] = Field(
+        default=False, exclude=True, repr=False
+    )
     # 兼容 Task 10 前写入的 fixture：缺失时维持原有的「明细带分析」行为；
     # 正式提示词要求模型每次明确输出，且这个字段绝不参与 SQL 或字段选择。
     analysis_requested: bool = True
 
     @model_validator(mode="before")
     @classmethod
-    def _clear_invalid_cross_business_plan(cls, value: object) -> object:
+    def _recover_nested_plans(cls, value: object) -> object:
         if not isinstance(value, dict):
             return value
 
         data = dict(value)
         # 不信任模型自行提交的内部状态；只有本校验器可设置拒绝标记。
         data.pop("cross_business_plan_rejected", None)
+        data.pop("generated_metric_plan_rejected", None)
         raw_plan = data.get("cross_business_plan")
-        if raw_plan is None:
-            return data
-        try:
-            data["cross_business_plan"] = CrossBusinessPlan.model_validate(raw_plan)
-        except ValidationError:
-            data["cross_business_plan"] = None
-            data["cross_business_plan_rejected"] = True
+        if raw_plan is not None:
+            try:
+                data["cross_business_plan"] = CrossBusinessPlan.model_validate(raw_plan)
+            except ValidationError:
+                data["cross_business_plan"] = None
+                data["cross_business_plan_rejected"] = True
+        raw_generated_plan = data.get("generated_metric_plan")
+        if raw_generated_plan is not None:
+            try:
+                data["generated_metric_plan"] = GeneratedMetricPlan.model_validate(
+                    raw_generated_plan
+                )
+            except ValidationError:
+                data["generated_metric_plan"] = None
+                data["generated_metric_plan_rejected"] = True
         return data

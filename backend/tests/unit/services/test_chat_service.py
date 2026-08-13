@@ -4,6 +4,7 @@
 竞态由 `tests/integration/services/test_chat_service.py` 在真实 PostgreSQL 上验。
 """
 
+from datetime import date, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -19,8 +20,17 @@ from app.core.errors import (
     RequestInProgressError,
 )
 from app.core.security import MerchantContext
-from app.schemas.chat import AnswerMode, ChatRequest, ChatResponse
+from app.repositories.analytics import ResultColumn
+from app.schemas.chat import (
+    AnalysisSource,
+    AnswerMode,
+    ChatRequest,
+    ChatResponse,
+    ExportInfo,
+    QualityStatus,
+)
 from app.services.chat_service import ChatService, _request_digest, _stored_response
+from app.services.safe_query import ExportSpec, QueryResult
 from tests.support.agent import DeterministicAgent
 
 MERCHANT_ID = UUID("00000000-0000-0000-0000-000000000041")
@@ -171,6 +181,58 @@ class TableOnlyAgent:
         return AgentRunResult(response=response, steps=response.thinking_steps)
 
 
+class GeneratedMetricAgent:
+    async def run(self, message: str, session_id: UUID) -> AgentRunResult:
+        result = await DeterministicAgent().run(message, session_id)
+        response_data = result.response.model_dump(mode="json")
+        response_data.update(
+            {
+                "quality_status": QualityStatus.NOT_RUN,
+                "quality_notes": [],
+                "analysis_sources": [AnalysisSource.DATABASE],
+                "degraded": False,
+                "degraded_reason": None,
+                "data_rows": [{"spu_id": "SPU-1", "paid_amount": 100}],
+                "total_rows": 1,
+            }
+        )
+        response = ChatResponse.model_validate(response_data)
+        query_result = QueryResult(
+            columns=(
+                ResultColumn("spu_id", "SPU ID", "DIMENSION"),
+                ResultColumn("paid_amount", "成交金额", "METRIC"),
+            ),
+            rows=[{"spu_id": "SPU-1", "paid_amount": 100}],
+            total_rows=1,
+            truncated=False,
+            source_tables=("orders", "order_items", "products"),
+            plan_steps=("固定分组聚合",),
+            export_spec=ExportSpec(
+                table="generated_metric",
+                columns=("spu_id", "paid_amount"),
+                start=date(2026, 8, 1),
+                end=date(2026, 8, 1),
+                kind="generated_metric",
+            ),
+            notes=(),
+            non_additive=True,
+        )
+        return AgentRunResult(
+            response=response,
+            steps=result.steps,
+            query_result=query_result,
+        )
+
+
+class _ExportService:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    async def create(self, **kwargs: object) -> ExportInfo:
+        self.calls.append(kwargs)
+        return ExportInfo(id=uuid4(), url="/api/exports/generated", expires_at=datetime(2026, 8, 2))
+
+
 def build_service(
     agent: Any = None,
 ) -> tuple[ChatService, FakeConversationRepository, FakeSession, Any]:
@@ -224,6 +286,25 @@ async def test_historical_metric_payload_replays_with_traceability_defaults() ->
     assert replayed.metric_source_table == ""
     assert replayed.metric_report_url is None
     assert replayed.metric_generated is False
+
+
+@pytest.mark.asyncio
+async def test_generated_metric_with_a_verified_export_spec_gets_a_signed_link() -> None:
+    session = FakeSession()
+    repository = FakeConversationRepository()
+    exports = _ExportService()
+    service = ChatService(
+        session,
+        repository,
+        GeneratedMetricAgent(),
+        export_service=exports,  # type: ignore[arg-type]
+    )
+
+    execution = await service.submit(CONTEXT, chat_request(), request_id="generated-export")
+
+    assert len(exports.calls) == 1
+    assert execution.response.export is not None
+    assert execution.response.export.url == "/api/exports/generated"
 
 
 @pytest.mark.asyncio

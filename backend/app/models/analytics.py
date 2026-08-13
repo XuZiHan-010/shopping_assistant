@@ -54,6 +54,8 @@ class Product(_MerchantScopedMixin, UuidPrimaryKeyMixin, CreatedAtMixin, Updated
     )
 
     product_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    #: 与旧版明细宽表对齐的 SPU 标识；早期演示数据可为空，由查询回退到商品编码。
+    spu_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     category: Mapped[str] = mapped_column(String(64), nullable=False)
     price: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
@@ -71,11 +73,14 @@ class Order(_MerchantScopedMixin, UuidPrimaryKeyMixin, CreatedAtMixin, UpdatedAt
         UniqueConstraint("merchant_id", "order_no", name="uq_orders_merchant_no"),
         Index("ix_orders_merchant_business_date", "merchant_id", "business_date"),
         Index("ix_orders_merchant_status", "merchant_id", "order_status"),
+        Index("ix_orders_merchant_address_city", "merchant_id", "address_city_name"),
     )
 
     order_no: Mapped[str] = mapped_column(String(64), nullable=False)
     #: 去重买家用的稳定标识。演示数据不含真实身份信息，只是一个稳定的假名。
     buyer_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    #: 收货城市只用于固定的城市聚合模板；允许旧数据为空。
+    address_city_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
     order_status: Mapped[str] = mapped_column(String(16), nullable=False)
     total_amount: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
     paid_amount: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)

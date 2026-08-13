@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AppError } from '@/api/errors'
 import { toChatAnswer } from '@/api/adapters/chat'
 import detailOrder from '@fixtures/chat/detail-order.json'
+import metricGmv from '@fixtures/chat/metric-gmv.json'
 import type { components } from '@/api/generated'
 import type { ChatMessage as ChatMessageModel, QualityStatus } from '@/types/chat'
 
@@ -211,6 +212,41 @@ describe('ChatMessage', () => {
     )
     expect(wrapper.find('[data-testid="select-round"]').exists()).toBe(false)
     expect(wrapper.find('.chat-message__text').exists()).toBe(false)
+  })
+
+  it('受控生成指标被截断时在消息内展示表格和导出', () => {
+    const generatedMetric = toChatAnswer({
+      ...(metricGmv as components['schemas']['ChatResponse']),
+      metric_code: 'generated_trade_metric',
+      metric_display_name: '临时成交指标',
+      metric_source: 'AI_GENERATED',
+      metric_generated: true,
+      metric_notice: '该临时指标仍需人工确认。',
+      metric_owner: '待认领',
+      metric_status: 'UNVERIFIED',
+      data_rows: [{ spu_id: 'SPU-001', paid_amount: 10 }],
+      total_rows: 201,
+      truncated: true,
+      export: {
+        id: '00000000-0000-0000-0000-000000000099',
+        url: '/api/exports/00000000-0000-0000-0000-000000000099',
+        expires_at: '2026-08-30T00:00:00Z',
+      },
+    })
+    const wrapper = mount(ChatMessage, {
+      props: {
+        message: makeMessage({
+          status: 'complete',
+          text: '临时指标已查询完成',
+          answer: generatedMetric,
+        }),
+      },
+    })
+
+    expect(wrapper.get('[data-testid="detail-table"]').text()).toContain('已展示前 1 行')
+    expect(wrapper.get('[data-testid="download-export"]').attributes('href')).toContain(
+      '/api/exports/',
+    )
   })
 
   it('历史明细回答不重新渲染表格，改为提示重新提问', () => {
