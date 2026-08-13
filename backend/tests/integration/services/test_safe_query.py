@@ -10,8 +10,8 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import MerchantContext
-from app.intent.models import DateRange, QueryIntent
-from app.models.analytics import Order, OrderItem, Product, ReturnRecord, SupportTicket
+from app.intent.models import CrossBusinessPlanType, DateRange, QueryIntent
+from app.models.analytics import Order, OrderItem, Product, Refund, ReturnRecord, SupportTicket
 from app.repositories.analytics import AnalyticsRepository
 from app.schemas.chat import AnswerMode, QuestionCategory
 from app.services import safe_query
@@ -119,6 +119,68 @@ async def _return_record(
     await session.flush()
 
 
+async def _cross_business_records(
+    session: AsyncSession,
+    merchant_id: UUID,
+    order_no: str,
+    *,
+    item_count: int = 1,
+    include_refund: bool = True,
+) -> None:
+    product = Product(
+        merchant_id=merchant_id,
+        business_date=DAY,
+        product_code=f"SKU-{order_no}",
+        title="关联商品",
+        category="女装",
+        price=Decimal("100.00"),
+        status="ONLINE",
+        listed_at=NOW,
+    )
+    session.add(product)
+    await session.flush()
+
+    order = Order(
+        merchant_id=merchant_id,
+        business_date=DAY,
+        order_no=order_no,
+        buyer_key="cross-business-buyer",
+        order_status="COMPLETED",
+        total_amount=Decimal("100.00"),
+        paid_amount=Decimal("88.00"),
+        placed_at=NOW,
+        paid_at=NOW,
+    )
+    session.add(order)
+    await session.flush()
+
+    for index in range(item_count):
+        item = OrderItem(
+            merchant_id=merchant_id,
+            business_date=DAY,
+            order_id=order.id,
+            product_id=product.id,
+            quantity=1,
+            item_amount=Decimal("88.00"),
+        )
+        session.add(item)
+        await session.flush()
+
+        if include_refund:
+            session.add(
+                Refund(
+                    merchant_id=merchant_id,
+                    business_date=DAY,
+                    order_item_id=item.id,
+                    refund_amount=Decimal("20.00") + Decimal(index),
+                    refund_reason="质量问题",
+                    refund_status="REFUNDED",
+                    refunded_at=NOW,
+                )
+            )
+    await session.flush()
+
+
 @pytest.mark.asyncio
 async def test_metric_intent_returns_rows_and_a_plan_summary(
     db_session: AsyncSession, merchant_one_id: UUID
@@ -149,6 +211,119 @@ async def test_detail_intent_routes_by_category_and_carries_export_spec(
     assert result.export_spec is not None
     assert result.export_spec.table == "orders"
     assert result.total_rows == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("plan_type", "expected_source_tables"),
+    [
+        (CrossBusinessPlanType.ORDER_TO_REFUND, ("orders", "order_items", "refunds")),
+        (CrossBusinessPlanType.ORDER_TO_GOODS, ("orders", "order_items", "products")),
+        (
+            CrossBusinessPlanType.ORDER_REFUND_GOODS,
+            ("orders", "order_items", "products", "refunds"),
+        ),
+    ],
+)
+async def test_cross_business_plan_returns_only_fixed_related_data(
+    db_session: AsyncSession,
+    merchant_one_id: UUID,
+    plan_type: CrossBusinessPlanType,
+    expected_source_tables: tuple[str, ...],
+) -> None:
+    await _cross_business_records(db_session, merchant_one_id, "NO-CROSS-OWNER")
+
+    result = await _service(db_session).execute(
+        MerchantContext(merchant_id=merchant_one_id),
+        _intent(
+            answer_mode=AnswerMode.DETAIL,
+            metric=None,
+            cross_business_plan={"plan_type": plan_type, "sub_order_no": "NO-CROSS-OWNER"},
+        ),
+        now=NOW,
+    )
+
+    assert result.rows
+    assert result.rows[0]["order_no"] == "NO-CROSS-OWNER"
+    assert result.source_tables == expected_source_tables
+    assert result.export_spec is not None
+    assert result.export_spec.kind == "cross_business"
+
+
+@pytest.mark.asyncio
+async def test_cross_merchant_order_plan_falls_back_to_normal_scoped_detail(
+    db_session: AsyncSession,
+    merchant_one_id: UUID,
+    merchant_two_id: UUID,
+) -> None:
+    await _cross_business_records(db_session, merchant_two_id, "NO-CROSS-OTHER")
+    await _order(db_session, merchant_one_id)
+
+    result = await _service(db_session).execute(
+        MerchantContext(merchant_id=merchant_one_id),
+        _intent(
+            answer_mode=AnswerMode.DETAIL,
+            metric=None,
+            cross_business_plan={
+                "plan_type": "ORDER_REFUND_GOODS",
+                "sub_order_no": "NO-CROSS-OTHER",
+            },
+        ),
+        now=NOW,
+    )
+
+    assert result.source_tables == ("orders",)
+    assert all(row["order_no"] != "NO-CROSS-OTHER" for row in result.rows)
+    assert any("当前商家范围" in note for note in result.notes)
+
+
+@pytest.mark.asyncio
+async def test_cross_business_preview_reports_the_real_total_when_truncated(
+    db_session: AsyncSession, merchant_one_id: UUID
+) -> None:
+    await _cross_business_records(db_session, merchant_one_id, "NO-CROSS-TRUNCATED", item_count=201)
+
+    result = await _service(db_session).execute(
+        MerchantContext(merchant_id=merchant_one_id),
+        _intent(
+            answer_mode=AnswerMode.DETAIL,
+            metric=None,
+            cross_business_plan={
+                "plan_type": "ORDER_TO_REFUND",
+                "sub_order_no": "NO-CROSS-TRUNCATED",
+            },
+        ),
+        now=NOW,
+    )
+
+    assert len(result.rows) == 200
+    assert result.total_rows == 201
+    assert result.truncated is True
+
+
+@pytest.mark.asyncio
+async def test_order_to_refund_explains_when_the_order_has_no_refund(
+    db_session: AsyncSession, merchant_one_id: UUID
+) -> None:
+    await _cross_business_records(
+        db_session, merchant_one_id, "NO-CROSS-NO-REFUND", include_refund=False
+    )
+
+    result = await _service(db_session).execute(
+        MerchantContext(merchant_id=merchant_one_id),
+        _intent(
+            answer_mode=AnswerMode.DETAIL,
+            metric=None,
+            cross_business_plan={
+                "plan_type": "ORDER_TO_REFUND",
+                "sub_order_no": "NO-CROSS-NO-REFUND",
+            },
+        ),
+        now=NOW,
+    )
+
+    assert result.rows
+    assert any("暂无退款记录" in note for note in result.notes)
 
 
 @pytest.mark.asyncio

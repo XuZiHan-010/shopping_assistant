@@ -771,7 +771,6 @@
           },
           "answer": {
             "type": "string",
-            "minLength": 1,
             "title": "Answer"
           },
           "answer_mode": {
@@ -909,7 +908,7 @@
             ],
             "title": "Metric Definition"
           },
-          "metric_source": {
+          "metric_sql_definition": {
             "anyOf": [
               {
                 "type": "string"
@@ -918,7 +917,86 @@
                 "type": "null"
               }
             ],
-            "title": "Metric Source"
+            "title": "Metric Sql Definition"
+          },
+          "metric_dimensions": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric Dimensions"
+          },
+          "metric_source_database": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric Source Database"
+          },
+          "metric_source_table": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric Source Table"
+          },
+          "metric_report_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric Report Url"
+          },
+          "metric_source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MetricDefinitionSource"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "metric_generated": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric Generated"
+          },
+          "metric_notice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric Notice"
           },
           "metric_owner": {
             "anyOf": [
@@ -1030,6 +1108,113 @@
         "title": "ChatResponse",
         "description": "§8.2 的扁平响应；按模式字段由模型级校验控制。"
       },
+      "ConversationAnswerPayload": {
+        "properties": {
+          "answer_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Answer Id"
+          },
+          "answer_mode": {
+            "$ref": "#/components/schemas/AnswerMode"
+          },
+          "thinking_steps": {
+            "items": {
+              "$ref": "#/components/schemas/ThinkingStep"
+            },
+            "type": "array",
+            "title": "Thinking Steps"
+          },
+          "quality_status": {
+            "$ref": "#/components/schemas/QualityStatus"
+          },
+          "quality_attempts": {
+            "type": "integer",
+            "maximum": 2.0,
+            "minimum": 0.0,
+            "title": "Quality Attempts"
+          },
+          "quality_notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Quality Notes"
+          },
+          "degraded": {
+            "type": "boolean",
+            "title": "Degraded"
+          },
+          "degraded_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Degraded Reason"
+          },
+          "is_adopted": {
+            "type": "boolean",
+            "title": "Is Adopted"
+          },
+          "reaction": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FeedbackReaction"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "columns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Columns"
+          },
+          "total_rows": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Rows"
+          },
+          "truncated": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Truncated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "answer_id",
+          "answer_mode",
+          "quality_status",
+          "quality_attempts",
+          "degraded",
+          "degraded_reason",
+          "is_adopted",
+          "reaction"
+        ],
+        "title": "ConversationAnswerPayload",
+        "description": "会话详情中的助手回答脱敏载荷，不携带明细行和导出 URL。"
+      },
       "ConversationDetailResponse": {
         "properties": {
           "id": {
@@ -1124,6 +1309,16 @@
             "type": "string",
             "format": "date-time",
             "title": "Created At"
+          },
+          "answer_payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConversationAnswerPayload"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -1390,9 +1585,53 @@
             "type": "string",
             "title": "Definition"
           },
-          "source": {
+          "sql_definition": {
             "type": "string",
-            "title": "Source"
+            "title": "Sql Definition"
+          },
+          "dimensions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Dimensions"
+          },
+          "source_database": {
+            "type": "string",
+            "title": "Source Database"
+          },
+          "source_table": {
+            "type": "string",
+            "title": "Source Table"
+          },
+          "report_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Report Url"
+          },
+          "source": {
+            "$ref": "#/components/schemas/MetricDefinitionSource"
+          },
+          "generated": {
+            "type": "boolean",
+            "title": "Generated"
+          },
+          "notice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notice"
           },
           "owner": {
             "type": "string",
@@ -1408,11 +1647,27 @@
           "display_name",
           "unit",
           "definition",
+          "sql_definition",
+          "dimensions",
+          "source_database",
+          "source_table",
+          "report_url",
           "source",
+          "generated",
+          "notice",
           "owner",
           "status"
         ],
         "title": "MetricDefinitionResponse"
+      },
+      "MetricDefinitionSource": {
+        "type": "string",
+        "enum": [
+          "METRIC_CATALOG",
+          "FIELD_COMMENT",
+          "AI_GENERATED"
+        ],
+        "title": "MetricDefinitionSource"
       },
       "MetricStatus": {
         "type": "string",

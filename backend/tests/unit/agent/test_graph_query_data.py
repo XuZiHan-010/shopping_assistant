@@ -120,7 +120,7 @@ def _detail_result() -> QueryResult:
     )
 
 
-def _llm_detail() -> FakeLlmClient:
+def _llm_detail(*, analysis_requested: bool = True) -> FakeLlmClient:
     return FakeLlmClient(
         responses=[
             json.dumps({"answer_mode": "DETAIL", "category": "TRADE", "intent_keywords": ["订单"]}),
@@ -136,14 +136,17 @@ def _llm_detail() -> FakeLlmClient:
                     "limit": None,
                     "followup_reference": False,
                     "needs_attachment": False,
+                    "analysis_requested": analysis_requested,
                 }
             ),
         ]
     )
 
 
-def _detail_graph(service: _StubQueryService) -> MerchantQaGraph:
-    llm = _llm_detail()
+def _detail_graph(
+    service: _StubQueryService, *, analysis_requested: bool = True
+) -> MerchantQaGraph:
+    llm = _llm_detail(analysis_requested=analysis_requested)
     return MerchantQaGraph(
         retrieval=KnowledgeRetrieval(_Documents()),
         intent_service_llm=llm,
@@ -275,6 +278,21 @@ async def test_successful_detail_response_never_denies_the_query_happened() -> N
     assert result.response.degraded is False
     assert result.response.data_rows
     _assert_no_denial(result.response)
+
+
+@pytest.mark.asyncio
+async def test_table_only_detail_returns_the_same_query_result_without_analysis() -> None:
+    """只要求查看时，查询仍受同一白名单保护，但响应不应附带分析正文。"""
+
+    service = _StubQueryService(_detail_result())
+
+    result = await _detail_graph(service, analysis_requested=False).run("查看最近订单明细", uuid4())
+
+    assert service.calls == 1
+    assert result.response.data_rows == [{"order_no": "BR20260803-0001"}]
+    assert result.response.total_rows == 1
+    assert result.response.answer == ""
+    assert result.response.recommendations == []
 
 
 @pytest.mark.asyncio

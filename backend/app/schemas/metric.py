@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from app.schemas.chat import MetricStatus
+from app.schemas.chat import MetricDefinitionSource, MetricStatus
 
 
 class MetricDefinitionResponse(BaseModel):
@@ -12,6 +12,13 @@ class MetricDefinitionResponse(BaseModel):
     display_name: str
     unit: str
     definition: str
-    source: str
+    sql_definition: str
+    dimensions: list[str]
+    source_database: str
+    source_table: str
+    report_url: str | None
+    source: MetricDefinitionSource
+    generated: bool
+    notice: str | None
     owner: str
     status: MetricStatus

@@ -24,6 +24,7 @@ from app.core.errors import (
 from app.core.metrics import OperationalMetrics
 from app.core.security import MerchantContext
 from app.llm.guard import CostGuardProtocol
+from app.metrics.report_url import upgrade_payload
 from app.models.answer import Answer
 from app.models.conversation import Conversation
 from app.repositories.conversation import ConversationRepository
@@ -189,6 +190,8 @@ class ChatService:
                 )
             if self._metrics is not None and response.degraded:
                 self._metrics.degraded_count += 1
+            # 历史详情从 ASSISTANT message 装配 Answer payload。纯明细正文虽为空，
+            # 仍必须保存该消息，前端据 payload 展示表格而不会渲染空正文卡片。
             await self._conversations.create_message(
                 context.merchant_id,
                 conversation_id,
@@ -326,7 +329,7 @@ def _stored_response(payload: dict[str, Any] | None) -> ChatResponse:
             status_code=500,
             retryable=True,
         )
-    return ChatResponse.model_validate(payload)
+    return ChatResponse.model_validate(upgrade_payload(payload))
 
 
 def _stored_error(payload: dict[str, Any] | None) -> AppError:

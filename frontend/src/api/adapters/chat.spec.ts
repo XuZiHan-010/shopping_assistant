@@ -46,7 +46,12 @@ describe('toChatAnswer · 真实载荷', () => {
       displayName: '退货量',
       unit: '件',
       definition: '统计周期内创建的有效退货退款单数量。',
-      source: 'Borough 指标目录',
+      sqlDefinition: '',
+      dimensions: [],
+      sourceDatabase: '',
+      sourceTable: '',
+      source: 'METRIC_CATALOG',
+      generated: false,
       owner: '经营分析组',
       status: 'ACTIVE',
     })
@@ -155,6 +160,22 @@ describe('toChatAnswer · 无数据模式不被编造默认值填充', () => {
 describe('toChatAnswer · 语义守卫', () => {
   const clone = (patch: Partial<RawChatResponse>): RawChatResponse => ({ ...refund, ...patch })
 
+  it('接受仅含表格的空正文 DETAIL，并保留导出与行数', () => {
+    const tableOnly = {
+      ...orderDetail,
+      answer: '',
+      recommendations: [],
+    } as RawChatResponse
+
+    const answer = toChatAnswer(tableOnly)
+
+    expect(answer.answer).toBe('')
+    expect(answer.mode).toBe('DETAIL')
+    expect(answer.data?.totalRows).toBe(2)
+    expect(answer.export?.url).toBe(orderDetail.export?.url)
+    expect(answer.recommendations).toEqual([])
+  })
+
   it('拒绝空回答', () => {
     expect(() => toChatAnswer(clone({ answer: '   ' }))).toThrow(ChatContractError)
   })
@@ -224,6 +245,15 @@ describe('toChatAnswer · 语义守卫', () => {
 
     expect(answer.chart).toBeUndefined()
     expect(answer.contractWarnings).toEqual(['METRIC 回答缺少 visualization，图表面板将显示空状态'])
+  })
+
+  it('不把非 HTTP/HTTPS 的报表链接交给面板渲染', () => {
+    const answer = toChatAnswer(clone({ metric_report_url: 'javascript:alert(1)' }))
+
+    expect(answer.metric?.reportUrl).toBeUndefined()
+    expect(answer.contractWarnings).toContain(
+      'metric_report_url 不是安全的 HTTP/HTTPS 绝对链接，已隐藏。',
+    )
   })
 
   it('语义不变量违反时仍然抛 CONTRACT', () => {

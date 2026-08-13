@@ -66,6 +66,8 @@ def validate_intent(intent: QueryIntent, *, today: date) -> IntentValidation:
 
     rejected: list[str] = []
     adjusted: list[str] = []
+    if intent.cross_business_plan_rejected:
+        adjusted.append("LLM 跨业务计划缺少安全路由参数，已拒绝该计划并按普通查询处理")
     data = intent.model_dump()
 
     if (metric := intent.metric) is not None:

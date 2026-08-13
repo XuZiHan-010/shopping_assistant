@@ -13,7 +13,13 @@ class MetricSeedItem:
     unit: str
     business_definition: str
     sql_definition: str
-    source: str = "Borough 指标目录"
+    dimensions: tuple[str, ...]
+    source_database: str
+    source_table: str
+    report_url: str | None = None
+    generated: bool = False
+    notice: str | None = None
+    source: str = "METRIC_CATALOG"
     owner: str = "经营分析组"
 
 
@@ -24,14 +30,29 @@ METRIC_SEED: Final[tuple[MetricSeedItem, ...]] = (
         "元",
         "统计周期内已支付订单金额之和。",
         "SUM(orders.paid_amount) WHERE order_status IN ('PAID','SHIPPED','COMPLETED')",
+        ("date", "product", "category"),
+        "public",
+        "orders",
     ),
-    MetricSeedItem("order_count", "订单量", "单", "统计周期内创建的订单数量。", "COUNT(orders.id)"),
+    MetricSeedItem(
+        "order_count",
+        "订单量",
+        "单",
+        "统计周期内创建的订单数量。",
+        "COUNT(orders.id)",
+        ("date", "product", "category", "order_status"),
+        "public",
+        "orders",
+    ),
     MetricSeedItem(
         "paying_user_count",
         "付款用户数",
         "人",
         "统计周期内完成付款的去重用户数。",
         "COUNT(DISTINCT orders.buyer_key) WHERE paid_at IS NOT NULL",
+        ("date", "product", "category"),
+        "public",
+        "orders",
     ),
     MetricSeedItem(
         "successful_order_count",
@@ -39,6 +60,9 @@ METRIC_SEED: Final[tuple[MetricSeedItem, ...]] = (
         "单",
         "统计周期内交易成功的订单数量。",
         "COUNT(orders.id) WHERE order_status = 'COMPLETED'",
+        ("date", "product", "category", "order_status"),
+        "public",
+        "orders",
     ),
     MetricSeedItem(
         "refund_count",
@@ -46,6 +70,9 @@ METRIC_SEED: Final[tuple[MetricSeedItem, ...]] = (
         "单",
         "统计周期内发起退款的订单数量。",
         "COUNT(refunds.id) WHERE refund_status IN ('APPROVED','REFUNDED')",
+        ("date", "refund_reason"),
+        "public",
+        "refunds",
     ),
     MetricSeedItem(
         "refund_amount",
@@ -53,6 +80,9 @@ METRIC_SEED: Final[tuple[MetricSeedItem, ...]] = (
         "元",
         "统计周期内退款总金额。",
         "SUM(refunds.refund_amount) WHERE refund_status = 'REFUNDED'",
+        ("date", "refund_reason"),
+        "public",
+        "refunds",
     ),
     MetricSeedItem(
         "return_count",
@@ -60,6 +90,9 @@ METRIC_SEED: Final[tuple[MetricSeedItem, ...]] = (
         "件",
         "统计周期内发起退货的商品件数。",
         "SUM(returns.return_quantity)",
+        ("date", "return_reason", "return_status"),
+        "public",
+        "returns",
     ),
     MetricSeedItem(
         "return_rate",
@@ -67,6 +100,9 @@ METRIC_SEED: Final[tuple[MetricSeedItem, ...]] = (
         "%",
         "退货件数除以同期订单项件数，按查询区间重新计算，不可跨日相加。",
         "SUM(returns.return_quantity) / NULLIF(SUM(order_items.quantity), 0)",
+        ("date", "product", "category"),
+        "public",
+        "order_items",
     ),
     MetricSeedItem(
         "support_ticket_count",
@@ -74,5 +110,8 @@ METRIC_SEED: Final[tuple[MetricSeedItem, ...]] = (
         "单",
         "统计周期内创建的客服工单数量。",
         "COUNT(support_tickets.id)",
+        ("date", "ticket_status"),
+        "public",
+        "support_tickets",
     ),
 )

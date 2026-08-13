@@ -25,9 +25,12 @@ async def _seed_deprecated_metric(session: AsyncSession) -> None:
             unit="元",
             business_definition="历史口径，已被 gmv 取代。",
             sql_definition="SUM(legacy_gmv)",
-            source="Borough 指标目录",
+            source="METRIC_CATALOG",
             owner="经营分析组",
             status="DEPRECATED",
+            dimensions=["date"],
+            source_database="public",
+            source_table="orders",
         )
     )
     await session.flush()

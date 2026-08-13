@@ -11,7 +11,7 @@ from app.api.dependencies import get_db_session, get_merchant_context
 from app.core.errors import ResourceNotFoundError, error_responses
 from app.core.security import MerchantContext
 from app.repositories.metric import MetricRepository
-from app.schemas.chat import MetricStatus
+from app.schemas.chat import MetricDefinitionSource, MetricStatus
 from app.schemas.metric import MetricDefinitionResponse
 
 router = APIRouter(tags=["metrics"])
@@ -41,7 +41,14 @@ async def get_metric_definition(
         display_name=definition.display_name,
         unit=definition.unit,
         definition=definition.business_definition,
-        source=definition.source,
+        sql_definition=definition.sql_definition,
+        dimensions=definition.dimensions,
+        source_database=definition.source_database,
+        source_table=definition.source_table,
+        report_url=definition.report_url,
+        source=MetricDefinitionSource(definition.source),
+        generated=definition.generated,
+        notice=definition.notice,
         owner=definition.owner,
         status=MetricStatus(definition.status),
     )

@@ -33,6 +33,11 @@ const emit = defineEmits<{
 }>()
 
 const latestStage = computed(() => props.message.steps.at(-1)?.label ?? '正在准备')
+const completedSteps = computed(() =>
+  props.message.answer?.thinkingSteps?.length
+    ? props.message.answer.thinkingSteps
+    : props.message.steps,
+)
 const isRunning = computed(
   () => props.message.status === 'pending' || props.message.status === 'streaming',
 )
@@ -97,15 +102,29 @@ const degradeNotice = computed(() => {
 
   return {
     reason: quality.degradedReason ?? '本次回答未接入真实数据源，仅供演示参考。',
-    sources: quality.sources.map((source) => SOURCE_LABELS[source]).join('、'),
+    sources:
+      quality.sources.length > 0
+        ? quality.sources.map((source) => SOURCE_LABELS[source]).join('、')
+        : undefined,
   }
 })
+
+// 历史回答的反馈状态必须由详情接口同时返回；只有回答 ID 与该状态都可信时才
+// 开放修改，避免用本地默认值覆盖服务端的真实反馈。
+const canSendFeedback = computed(
+  () =>
+    Boolean(props.message.answer?.id) &&
+    (props.message.origin !== 'history' || props.message.feedback !== undefined),
+)
 
 // 只有「已完成且带回答载荷」的助手消息才是可选中的轮次。用户消息没有回答，
 // 选中它只会让 currentAnswer 找不到目标而回落到最后一轮——看起来像点错了。
 const isSelectableRound = computed(
   () => props.message.role === 'assistant' && props.message.status === 'complete',
 )
+// 纯明细的 answer 按后端契约是精确空串；表格仍独立渲染，但不能留下一个可聚焦的
+// 空按钮或空文本段落。用户消息与分析型回答则继续按原样展示正文。
+const hasAnswerText = computed(() => props.message.text.trim().length > 0)
 // METRIC 回答的 `data` 只是趋势行的附带数据来源（图表面板自己的 <details> 已经
 // 用它渲染过一份可访问数据表），不按 answer_mode 过滤的话，同一批行会在聊天
 // 消息里又完整渲染一次「经营明细」表格——两张表、没有下载入口，纯粹是重复。
@@ -223,12 +242,25 @@ const showHistoricalDataNotice = computed(
         <span>
           <strong>演示数据</strong>
           {{ degradeNotice.reason }}
-          <span class="chat-message__degraded-sources">分析来源：{{ degradeNotice.sources }}</span>
+          <span v-if="degradeNotice.sources" class="chat-message__degraded-sources">
+            分析来源：{{ degradeNotice.sources }}
+          </span>
         </span>
       </p>
 
       <template v-if="isSelectableRound">
+        <section v-if="completedSteps.length" class="chat-message__thinking" aria-label="执行步骤">
+          <strong>执行完成</strong>
+          <div
+            v-for="(step, index) in completedSteps"
+            :key="`${step.node}-${index}`"
+            data-testid="thinking-step"
+          >
+            {{ step.label }}
+          </div>
+        </section>
         <button
+          v-if="hasAnswerText"
           class="chat-message__select"
           type="button"
           data-testid="select-round"
@@ -248,13 +280,16 @@ const showHistoricalDataNotice = computed(
           class="chat-message__history-notice"
           data-testid="history-detail-notice"
         >
-          历史明细数据未保留完整表格，重新提问可查看最新的数据表格与下载链接。
+          历史明细仅保留{{ message.answer?.data?.columns?.length ?? 0 }}列、
+          {{
+            message.answer?.data?.totalRows ?? 0
+          }}行的元数据；重新提问可查看最新的数据表格与下载链接。
         </p>
       </template>
-      <p v-else class="chat-message__text">{{ message.text }}</p>
+      <p v-else-if="hasAnswerText" class="chat-message__text">{{ message.text }}</p>
 
       <section
-        v-if="message.answer?.id"
+        v-if="canSendFeedback"
         class="chat-message__feedback"
         role="group"
         aria-label="回答反馈"
@@ -457,6 +492,22 @@ const showHistoricalDataNotice = computed(
   margin: var(--space-2) 0 0;
   color: var(--color-text-secondary);
   font-size: var(--font-size-caption);
+}
+
+.chat-message__thinking {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0 0 var(--space-2);
+  padding: var(--space-2) var(--space-2-5);
+  border-left: 3px solid #8ba9cb;
+  color: var(--color-text-secondary);
+  background: #f8fafc;
+  font-size: var(--font-size-caption);
+  line-height: var(--line-height-body);
+}
+
+.chat-message__thinking strong {
+  color: var(--color-text);
 }
 
 .chat-message__feedback {

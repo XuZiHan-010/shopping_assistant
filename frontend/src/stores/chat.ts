@@ -301,8 +301,8 @@ export const useChatStore = defineStore('chat', () => {
     // `Conversation` 表的 `id`。所以「会话 id 就是 session_id」这个假设成立，
     // 不需要额外的 id 映射。
     sessionId.value = detail.id
-    // 历史消息没有流式过程，直接落到终态；answer 留空，侧栏因此显示空状态而不是
-    // 上一轮的残留——重新提问才会有完整回答载荷。origin 标为 'history'：
+    // 历史消息没有流式过程，直接落到终态；助手消息由详情的脱敏载荷装配出
+    // answer、质量状态和反馈状态。origin 标为 'history'：
     // retryMessage 靠它拒绝对历史消息发起重试（这些消息在本次会话里从未真正
     // 发起过请求，没有可重放的上下文）。
     messages.value = detail.messages.map((item) => ({
@@ -314,6 +314,9 @@ export const useChatStore = defineStore('chat', () => {
       createdAt: item.createdAt,
       status: 'complete' as const,
       steps: [],
+      answer: item.answer,
+      feedback: item.feedback,
+      feedbackPersisted: item.answer ? true : undefined,
       origin: 'history' as const,
     }))
   }

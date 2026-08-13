@@ -8,7 +8,12 @@
 import type { components } from '@/api/generated'
 import type { ChatAnswer, FeedbackState, ThinkingStep } from '@/types/chat'
 
-import { toChatAnswer, toFeedbackRequestPayload, toFeedbackState } from './adapters/chat'
+import {
+  toChatAnswer,
+  toConversationAnswer,
+  toFeedbackRequestPayload,
+  toFeedbackState,
+} from './adapters/chat'
 import { AppError } from './errors'
 import { ChatStreamInterruptedError, readChatStream } from './sse'
 import { resolveTransport } from './transport'
@@ -103,7 +108,14 @@ export async function listConversations(
 export interface ConversationDetailView {
   id: string
   title: string
-  messages: Array<{ id: string; role: 'user' | 'assistant'; content: string; createdAt: string }>
+  messages: Array<{
+    id: string
+    role: 'user' | 'assistant'
+    content: string
+    createdAt: string
+    answer?: ChatAnswer
+    feedback?: FeedbackState
+  }>
 }
 
 export async function getConversation(
@@ -120,12 +132,25 @@ export async function getConversation(
   return {
     id: payload.id,
     title: payload.title ?? '未命名会话',
-    messages: payload.messages.map((item) => ({
-      id: item.id,
-      role: item.role === 'user' ? 'user' : 'assistant',
-      content: item.content,
-      createdAt: item.created_at,
-    })),
+    messages: payload.messages.map((item) => {
+      const answerPayload = item.answer_payload
+      return {
+        id: item.id,
+        role: item.role === 'user' ? 'user' : 'assistant',
+        content: item.content,
+        createdAt: item.created_at,
+        answer: answerPayload
+          ? toConversationAnswer(answerPayload, {
+              sessionId: payload.id,
+              content: item.content,
+              createdAt: item.created_at,
+            })
+          : undefined,
+        feedback: answerPayload
+          ? { isAdopted: answerPayload.is_adopted, reaction: answerPayload.reaction }
+          : undefined,
+      }
+    }),
   }
 }
 

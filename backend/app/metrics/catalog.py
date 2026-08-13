@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Final, Protocol
 
+from app.analytics.contract import metric_spec
 from app.intent.models import QueryIntent
 from app.llm.client import LlmBudget, LlmBudgetError, LlmClient, LlmUnavailableError
-from app.schemas.chat import AnswerMode
+from app.metrics.field_comments import find_field_comment
+from app.schemas.chat import AnswerMode, MetricDefinitionSource
 
 GENERATED_NOTICE: Final[str] = (
     "该指标口径未命中正式指标目录或字段注释，"
@@ -28,6 +30,11 @@ class MetricPayload:
     status: str
     generated: bool
     notice: str | None
+    sql_definition: str = ""
+    dimensions: tuple[str, ...] = ()
+    source_database: str = ""
+    source_table: str = ""
+    report_url: str | None = None
 
 
 class _MetricRowLike(Protocol):
@@ -35,6 +42,7 @@ class _MetricRowLike(Protocol):
     display_name: str
     unit: str
     business_definition: str
+    sql_definition: str
     source: str
     owner: str
     status: str
@@ -55,15 +63,37 @@ class MetricCatalog:
             return None
         if (row := await self._repository.get_by_code(intent.metric)) is not None:
             return MetricPayload(
-                row.metric_code,
-                row.display_name,
-                row.unit,
-                row.business_definition,
-                row.source,
-                row.owner,
-                row.status,
-                False,
-                None,
+                metric_code=row.metric_code,
+                display_name=row.display_name,
+                unit=row.unit,
+                definition=row.business_definition,
+                source=MetricDefinitionSource.METRIC_CATALOG.value,
+                owner=row.owner,
+                status=row.status,
+                generated=False,
+                notice=None,
+                sql_definition=getattr(row, "sql_definition", ""),
+                dimensions=tuple(getattr(row, "dimensions", ())),
+                source_database=getattr(row, "source_database", ""),
+                source_table=getattr(row, "source_table", ""),
+                report_url=getattr(row, "report_url", None),
+            )
+        if (comment := find_field_comment(intent.metric)) is not None:
+            spec = metric_spec(intent.metric)
+            return MetricPayload(
+                metric_code=intent.metric,
+                display_name=spec.label,
+                unit=spec.unit,
+                definition=comment.business_definition,
+                source=MetricDefinitionSource.FIELD_COMMENT.value,
+                owner="字段注释",
+                status="UNVERIFIED",
+                generated=False,
+                notice=None,
+                sql_definition=comment.sql_definition,
+                dimensions=comment.dimensions,
+                source_database=comment.source_database,
+                source_table=comment.source_table,
             )
         try:
             result = await self._llm.complete(
@@ -80,7 +110,7 @@ class MetricCatalog:
             return None
         if not isinstance(data, dict):
             return None
-        return MetricPayload(
+        generated = MetricPayload(
             intent.metric,
             str(data.get("display_name", intent.metric)),
             str(data.get("unit", "")),
@@ -91,3 +121,4 @@ class MetricCatalog:
             True,
             GENERATED_NOTICE,
         )
+        return replace(generated, source=MetricDefinitionSource.AI_GENERATED.value)

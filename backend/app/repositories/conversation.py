@@ -5,10 +5,10 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import exists, func, select, update
+from sqlalchemy import and_, exists, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.answer import Answer
+from app.models.answer import Answer, Feedback
 from app.models.conversation import Conversation, Message
 
 
@@ -115,6 +115,29 @@ class ConversationRepository:
             .order_by(Message.created_at.asc(), Message.id.asc())
         )
         return list(result)
+
+    async def list_succeeded_answers_for_conversation(
+        self,
+        merchant_id: UUID,
+        conversation_id: UUID,
+    ) -> list[tuple[Answer, Feedback | None]]:
+        result = await self._session.execute(
+            select(Answer, Feedback)
+            .outerjoin(
+                Feedback,
+                and_(
+                    Feedback.answer_id == Answer.id,
+                    Feedback.merchant_id == merchant_id,
+                ),
+            )
+            .where(
+                Answer.merchant_id == merchant_id,
+                Answer.conversation_id == conversation_id,
+                Answer.processing_status == "SUCCEEDED",
+            )
+            .order_by(Answer.created_at.asc(), Answer.id.asc())
+        )
+        return list(result.tuples())
 
     async def get_answer_by_client_request(
         self,

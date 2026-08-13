@@ -9,6 +9,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, StringConstraints, model_validator
 
+from app.schemas.feedback import FeedbackReaction
+
 
 class AnswerMode(StrEnum):
     """回答模式。ATTACHMENT 为 P1 预留值，B2 不产生该模式。"""
@@ -42,6 +44,21 @@ class MetricStatus(StrEnum):
     ACTIVE = "ACTIVE"
     DEPRECATED = "DEPRECATED"
     UNVERIFIED = "UNVERIFIED"
+
+
+class MetricDefinitionSource(StrEnum):
+    METRIC_CATALOG = "METRIC_CATALOG"
+    FIELD_COMMENT = "FIELD_COMMENT"
+    AI_GENERATED = "AI_GENERATED"
+
+    @classmethod
+    def _missing_(cls, value: object) -> MetricDefinitionSource | None:
+        # 兼容 0009 迁移前保存的来源文本；新响应只输出枚举值。
+        legacy = {
+            "Borough 指标目录": cls.METRIC_CATALOG,
+            "大模型生成": cls.AI_GENERATED,
+        }
+        return legacy.get(value) if isinstance(value, str) else None
 
 
 class ChartType(StrEnum):
@@ -141,7 +158,8 @@ class ChatResponse(BaseModel):
 
     id: UUID
     session_id: UUID
-    answer: Annotated[str, StringConstraints(min_length=1)]
+    # 纯 DETAIL 以精确空串表示「只出表格」。其它回答模式仍由模型校验强制非空。
+    answer: str
     answer_mode: AnswerMode
     category: QuestionCategory | None
     thinking_steps: list[ThinkingStep] = Field(default_factory=list)
@@ -160,7 +178,14 @@ class ChatResponse(BaseModel):
     metric_display_name: str | None = None
     metric_unit: str | None = None
     metric_definition: str | None = None
-    metric_source: str | None = None
+    metric_sql_definition: str | None = None
+    metric_dimensions: list[str] | None = None
+    metric_source_database: str | None = None
+    metric_source_table: str | None = None
+    metric_report_url: str | None = None
+    metric_source: MetricDefinitionSource | None = None
+    metric_generated: bool | None = None
+    metric_notice: str | None = None
     metric_owner: str | None = None
     metric_status: MetricStatus | None = None
     data_rows: list[dict[str, Any]] | None = None
@@ -172,6 +197,15 @@ class ChatResponse(BaseModel):
 
     @model_validator(mode="after")
     def validate_cross_field_contract(self) -> ChatResponse:
+        if self.answer_mode is AnswerMode.DETAIL:
+            if self.answer == "":
+                if self.recommendations not in (None, []):
+                    raise ValueError("纯明细不得提供 recommendations")
+            elif not self.answer.strip():
+                raise ValueError("纯明细 answer 必须为精确空字符串")
+        elif not self.answer.strip():
+            raise ValueError("非 DETAIL 回答的 answer 不能为空")
+
         sources = set(self.analysis_sources)
         if AnalysisSource.NONE in sources and sources != {AnalysisSource.NONE}:
             raise ValueError("analysis_sources 中的 NONE 只能单独出现")
@@ -210,16 +244,32 @@ class ChatResponse(BaseModel):
                 ("metric_display_name", self.metric_display_name),
                 ("metric_unit", self.metric_unit),
                 ("metric_definition", self.metric_definition),
+                ("metric_sql_definition", self.metric_sql_definition),
+                ("metric_dimensions", self.metric_dimensions),
+                ("metric_source_database", self.metric_source_database),
+                ("metric_source_table", self.metric_source_table),
                 ("metric_source", self.metric_source),
+                ("metric_generated", self.metric_generated),
                 ("metric_owner", self.metric_owner),
                 ("metric_status", self.metric_status),
                 ("visualization", self.visualization),
             ):
                 self._require(field_name, value)
+            if self.metric_generated:
+                if self.metric_status is not MetricStatus.UNVERIFIED:
+                    raise ValueError("metric_generated 为 true 时 metric_status 必须为 UNVERIFIED")
+                if self.metric_source is not MetricDefinitionSource.AI_GENERATED:
+                    raise ValueError(
+                        "metric_generated 为 true 时 metric_source 必须为 AI_GENERATED"
+                    )
+                self._require("metric_notice", self.metric_notice)
+            elif self.metric_notice is not None:
+                raise ValueError("metric_generated 为 false 时 metric_notice 必须为 null")
             self._require_recommendations()
         if self.answer_mode is AnswerMode.DETAIL:
             self._require("export", self.export)
-            self._require_recommendations()
+            if self.answer:
+                self._require_recommendations()
         if self.answer_mode is AnswerMode.ATTACHMENT:
             self._require_recommendations()
         return self
@@ -252,6 +302,25 @@ class ConversationMessage(BaseModel):
     role: str
     content: str
     created_at: datetime
+    answer_payload: ConversationAnswerPayload | None = None
+
+
+class ConversationAnswerPayload(BaseModel):
+    """会话详情中的助手回答脱敏载荷，不携带明细行和导出 URL。"""
+
+    answer_id: UUID
+    answer_mode: AnswerMode
+    thinking_steps: list[ThinkingStep] = Field(default_factory=list)
+    quality_status: QualityStatus
+    quality_attempts: int = Field(ge=0, le=2)
+    quality_notes: list[str] = Field(default_factory=list)
+    degraded: bool
+    degraded_reason: str | None
+    is_adopted: bool
+    reaction: FeedbackReaction | None
+    columns: list[str] = Field(default_factory=list)
+    total_rows: int | None = Field(default=None, ge=0)
+    truncated: bool | None = None
 
 
 class ConversationDetailResponse(BaseModel):

@@ -273,6 +273,9 @@ sort
 limit
 followup_reference
 needs_attachment
+analysis_requested
+cross_business_plan
+generated_metric_plan
 ```
 
 ### 规则
@@ -286,6 +289,22 @@ needs_attachment
 - 不允许输出 SQL 字符串；
 - 不允许输出任意表名；
 - 解析失败有限重试，仍失败则返回 INVALID 或显式降级。
+
+### R9 受控扩展
+
+`analysis_requested` 是模型输出的布尔值；后端据 `answer_mode == DETAIL and not analysis_requested`
+计算纯明细模式，模型不得直接输出 `table_only`。
+
+`cross_business_plan` 是可空的嵌套意图，只允许 `ORDER_TO_REFUND`、`ORDER_TO_GOODS`、
+`ORDER_REFUND_GOODS` 与长度受限的 `sub_order_no`。计划缺失时正常走基础查询；计划对象存在但子对象
+校验失败时，在 `QueryIntent` 的 before validator 中清空该计划并追加语义说明，基础意图仍保持 VALID，
+不得升级为 INVALID。
+
+`generated_metric_plan` 是可空的嵌套意图。`name`、`unit` 仅供展示；`group_by` 和 `filter_column`
+只允许 `spu_id`、`address_city_name`，筛选列和值必须同时出现。后端按业务类别选择固定 SQLAlchemy
+聚合模板，不接受模型给出的 SQL、公式、表名或任意列名，也不引入 `measure` 枚举。未命中白名单或形状
+非法时，整条意图必须为 INVALID（`answer_mode=INVALID`、`category=UNKNOWN`）；此处故意不同于跨业务计划的
+回退语义。
 
 ---
 
@@ -753,11 +772,11 @@ B2 的 Fake Agent 只覆盖 `TRADE`、`REFUND`、`PLATFORM_RULE` 三类场景与
 | `metric_code` | `str` | `METRIC` |
 | `metric_display_name` | `str` | `METRIC` |
 | `metric_unit` | `str` | `METRIC` |
-| `metric_business_definition` | `str` | `METRIC`，业务口径 |
-| `metric_sql_definition` | `str \| None` | `METRIC` 可选，SQL 口径 |
-| `metric_dimensions` | `list[str] \| None` | `METRIC` 可选，维度集合 |
-| `metric_database_name` | `str \| None` | `METRIC` 可选，来源库名 |
-| `metric_table_name` | `str \| None` | `METRIC` 可选，来源表名 |
+| `metric_definition` | `str` | `METRIC`，业务口径 |
+| `metric_sql_definition` | `str` | `METRIC`，SQL 口径 |
+| `metric_dimensions` | `list[str]` | `METRIC`，维度集合 |
+| `metric_source_database` | `str` | `METRIC`，来源库名 |
+| `metric_source_table` | `str` | `METRIC`，来源表名 |
 | `metric_report_url` | `str \| None` | `METRIC` 可选，关联报表链接 |
 | `metric_source` | `MetricDefinitionSource` | `METRIC`，口径来源枚举 |
 | `metric_generated` | `bool` | `METRIC`，口径是否由模型生成 |
@@ -769,17 +788,16 @@ B2 的 Fake Agent 只覆盖 `TRADE`、`REFUND`、`PLATFORM_RULE` 三类场景与
 | `truncated` | `bool` | `METRIC`、`DETAIL`、`IDENTITY` |
 | `export` | `ExportInfo` | `DETAIL` |
 | `visualization` | `Visualization` | `METRIC` 必填；`DETAIL`、`ATTACHMENT` 可选 |
-| `recommendations` | `list[Recommendation]`（至少两条） | `METRIC`、`DETAIL`、`ATTACHMENT` |
+| `recommendations` | `list[Recommendation]`（至少两条） | `METRIC`、要求分析的 `DETAIL`、`ATTACHMENT`；纯明细必须为空列表 |
 
 `metric_source`、`metric_owner`、`metric_status` 是 PRD 要求指标口径面板展示的三项，缺一前端就只能显示空白，因此列为 `METRIC` 必填。
 
-**`metric_business_definition` 与 `metric_sql_definition` 必须并列存在，不得合并成单个 `metric_definition`。**
+**`metric_definition`（业务口径）与 `metric_sql_definition` 必须并列存在，不得合并为单一文本字段。**
 参考项目的指标平台元数据表把它们分列为 `metrics_biz_meaning` / `metrics_sql_meaning`，
-面向读者不同（见 PRD §6.3）。旧契约里的 `metric_definition` 是这次并列化之前的遗留命名，
-迁移时按语义改名为 `metric_business_definition`，不保留别名——保留别名会让前端有两个入口，
-迟早出现一个分区读旧名、一个读新名。
+面向读者不同（见 PRD §6.3）。为兼容已保存的 `answers.response_payload`，业务口径继续使用
+`metric_definition`；升级器只为历史 JSONB 补齐安全默认值，前端没有第二个业务口径入口。
 
-`metric_source` 是三取一的枚举 `METRIC_CATALOG` / `COLUMN_COMMENT` / `AI_GENERATED`，
+`metric_source` 是三取一的枚举 `METRIC_CATALOG` / `FIELD_COMMENT` / `AI_GENERATED`，
 对应 PRD §10 Metric Catalog 的三级检索命中层级，**不是自由文本**：前端要据此渲染来源徽标，
 自由文本会让徽标映射退化成字符串匹配。中文标签由前端负责，后端只给枚举。
 
@@ -788,14 +806,32 @@ B2 的 Fake Agent 只覆盖 `TRADE`、`REFUND`、`PLATFORM_RULE` 三类场景与
 
 Pydantic 模型**不得**把按模式必填的字段设为无条件必填，否则 `CHAT` 等模式的正常响应会校验失败。正确做法是模型级校验器：按 `answer_mode` 分支检查，`METRIC` 缺 `metric_owner` 必须报错，`CHAT` 缺 `data_rows` 必须放行。
 
+R9 补充约束：纯明细模式的 `answer` **必须是空字符串**且 `recommendations` 必须为空；要求分析的
+`DETAIL` 与其他模式的 `answer` 必须非空，要求分析的 `DETAIL` 仍至少两条建议。违反者由
+`ChatResponse` 模型级校验拒绝，不能仅靠前端隐藏正文。`export` 除成功且未降级的 DETAIL 外，也允许
+出现在结果被截断的受控临时 METRIC；下载服务须按存储的受控查询规格重放该指标查询。
+
+### 会话详情助手载荷
+
+`ConversationDetailResponse.messages` 的 ASSISTANT 消息增加可空 `answer_payload`。该脱敏载荷包含
+`answer_id`、`answer_mode`、`thinking_steps`、`quality_status`、`quality_attempts`、`quality_notes`、
+`degraded`、`degraded_reason`、`is_adopted`、`reaction`、表格列定义、`total_rows` 与 `truncated`。
+`answer_id` 与两项反馈状态必须同时出现；用户消息及没有已保存回答的助手消息保持 `null`。
+载荷明确不含 `data_rows`、`export` 或任何签名 URL。装配层从 `answers.response_payload` 读取后脱敏，
+不把“前端不显示”当作数据保护。
+
+为保证升级前幂等回答可重放，采用内部 `upgrade_payload()`：`_stored_response()` 在 Pydantic 校验前以
+安全默认值补齐缺失字段。它必须有“旧 JSONB payload → 幂等重放 → 字段完整且不抛异常”的回归测试；
+不做一次性 JSONB 全表迁移，避免大表迁移风险。
+
 ### 必测
 
 - 一份 Schema 同时生成 Pydantic 与 TypeScript 类型，字段名零差异；
 - `CHAT`、`INVALID`、`RULE` 无数据模式正常通过校验；
-- `METRIC` 缺 `metric_source` / `metric_owner` / `metric_status` / `metric_business_definition` / `metric_generated` 校验失败；
+- `METRIC` 缺 `metric_source` / `metric_owner` / `metric_status` / `metric_definition` / `metric_generated` 校验失败；
 - `metric_generated` 为 `true` 但缺 `metric_notice` 校验失败；
-- `METRIC` 缺 `metric_sql_definition` 等可选口径字段时**校验通过**（缺失是合法状态，前端隐藏分区）；
-- `DETAIL` 缺 `export` 校验失败；
+- `METRIC` 缺 `metric_sql_definition`、维度或来源库表时校验失败；
+- `DETAIL` 缺 `export` 校验失败；纯明细非空正文或建议、分析型 DETAIL 缺两条建议均校验失败；
 - `analysis_sources` 为空数组时校验失败；
 - `CHAT`、`INVALID` 返回 `["NONE"]` 且 `degraded=false` 时校验通过；
 - `NONE` 与其他来源共存时校验失败；
@@ -1195,12 +1231,12 @@ ticket_status
 ### 实现说明（2026-08-05，B4 收口）
 
 **指标口径表**（`app/analytics/contract.py` 的 `METRIC_SPECS`，与迁移
-`20260804_0006_metric_sql_definition.py` 写入 `metric_definitions.sql_definition`
+20260804_0006 的指标 SQL 口径迁移写入 `metric_definitions.sql_definition`
 的文案逐字一致）。
 
 下表的「SQL 口径」列就是 `metric_definitions.sql_definition` 的内容，对应契约字段
-`metric_sql_definition`；业务口径是另一列 `business_definition`（契约字段
-`metric_business_definition`），两者并列存在，见 §8.2。**这张表在 B4 收口时还没有出口到
+SQL 口径对应 §8.2 的并列口径字段；业务口径是另一列 `business_definition`，两者并列存在，见 §8.2。
+**这张表在 B4 收口时还没有出口到
 API**——`sql_definition` 只落库未进 `MetricDefinitionResponse`，属于已登记的契约缺口，
 补齐范围见 §8.2 的字段表。
 

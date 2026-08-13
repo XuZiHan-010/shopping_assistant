@@ -34,6 +34,12 @@ async def seeded_client(
                 sql_definition=item.sql_definition,
                 source=item.source,
                 owner=item.owner,
+                dimensions=list(item.dimensions),
+                source_database=item.source_database,
+                source_table=item.source_table,
+                report_url=item.report_url,
+                generated=item.generated,
+                notice=item.notice,
             )
             for item in METRIC_SEED
         )
@@ -46,9 +52,12 @@ async def seeded_client(
                 unit="元",
                 business_definition="历史口径，已被 gmv 取代。",
                 sql_definition="SUM(legacy_gmv)",
-                source="Borough 指标目录",
+                source="METRIC_CATALOG",
                 owner="经营分析组",
                 status="DEPRECATED",
+                dimensions=["date"],
+                source_database="public",
+                source_table="orders",
             )
         )
         await session.commit()
@@ -64,9 +73,16 @@ async def test_known_metric_returns_the_full_definition(seeded_client: AsyncClie
     assert payload["metric_code"] == "gmv"
     assert payload["display_name"] == "成交 GMV"
     assert payload["unit"] == "元"
-    assert payload["source"]
+    assert payload["source"] == "METRIC_CATALOG"
     assert payload["owner"]
     assert payload["status"] in {"ACTIVE", "DEPRECATED", "UNVERIFIED"}
+    assert payload["sql_definition"].startswith("SUM(")
+    assert payload["dimensions"] == ["date", "product", "category"]
+    assert payload["source_database"] == "public"
+    assert payload["source_table"] == "orders"
+    assert payload["report_url"] is None
+    assert payload["generated"] is False
+    assert payload["notice"] is None
 
 
 @pytest.mark.asyncio

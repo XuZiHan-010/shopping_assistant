@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { AlertTriangle, Ruler } from '@lucide/vue'
+import { AlertTriangle, ExternalLink, Ruler } from '@lucide/vue'
 import { computed } from 'vue'
 
 import type { ChatAnswer } from '@/types/chat'
@@ -8,7 +8,22 @@ const props = defineProps<{ answer?: ChatAnswer }>()
 
 const metric = computed(() => props.answer?.metric)
 const queryPlan = computed(() => props.answer?.data?.queryPlan)
-const isUnverified = computed(() => metric.value?.status === 'UNVERIFIED')
+const isUnverified = computed(
+  () => metric.value?.status === 'UNVERIFIED' || metric.value?.generated === true,
+)
+
+const sourceLabel = computed(() => {
+  switch (metric.value?.source) {
+    case 'METRIC_CATALOG':
+      return '正式指标目录'
+    case 'FIELD_COMMENT':
+      return '受控字段注释'
+    case 'AI_GENERATED':
+      return '模型候选口径'
+    default:
+      return undefined
+  }
+})
 
 const statusLabel = computed(() => {
   switch (metric.value?.status) {
@@ -41,13 +56,17 @@ const statusLabel = computed(() => {
         role="status"
       >
         <AlertTriangle :size="13" aria-hidden="true" />
-        <span>该指标口径尚未核验，请谨慎参考。</span>
+        <span>{{ metric.notice ?? '该指标口径尚未核验，请谨慎参考。' }}</span>
       </p>
 
       <dl class="metric-panel__fields">
         <div class="metric-panel__field">
-          <dt>定义</dt>
+          <dt>业务口径</dt>
           <dd>{{ metric.definition }}</dd>
+        </div>
+        <div class="metric-panel__field">
+          <dt>SQL 口径</dt>
+          <dd>{{ metric.sqlDefinition }}</dd>
         </div>
         <div class="metric-panel__field">
           <dt>单位</dt>
@@ -55,7 +74,29 @@ const statusLabel = computed(() => {
         </div>
         <div class="metric-panel__field">
           <dt>来源</dt>
-          <dd>{{ metric.source }}</dd>
+          <dd>{{ sourceLabel }}</dd>
+        </div>
+        <div class="metric-panel__field">
+          <dt>来源库表</dt>
+          <dd>{{ metric.sourceDatabase }} · {{ metric.sourceTable }}</dd>
+        </div>
+        <div v-if="metric.dimensions.length" class="metric-panel__field">
+          <dt>可用维度</dt>
+          <dd>{{ metric.dimensions.join('、') }}</dd>
+        </div>
+        <div v-if="metric.reportUrl" class="metric-panel__field">
+          <dt>关联报表</dt>
+          <dd>
+            <a
+              :href="metric.reportUrl"
+              class="metric-panel__report-link"
+              data-testid="metric-report-link"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              打开关联报表 <ExternalLink :size="13" aria-hidden="true" />
+            </a>
+          </dd>
         </div>
         <div class="metric-panel__field">
           <dt>负责人</dt>
@@ -150,6 +191,19 @@ const statusLabel = computed(() => {
   color: var(--color-text-secondary);
   font-size: var(--font-size-body);
   line-height: var(--line-height-body);
+}
+
+.metric-panel__report-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-primary-strong);
+  font-weight: var(--font-weight-emphasis);
+  text-decoration: none;
+}
+
+.metric-panel__report-link:hover {
+  text-decoration: underline;
 }
 
 .metric-panel__query-plan {

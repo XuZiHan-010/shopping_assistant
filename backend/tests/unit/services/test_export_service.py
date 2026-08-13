@@ -8,6 +8,7 @@ import pytest
 
 from app.analytics.contract import DETAIL_SPECS
 from app.core.errors import AppError, ErrorCode
+from app.intent.models import CrossBusinessPlan, CrossBusinessPlanType
 from app.repositories.analytics import DetailResult, ResultColumn
 from app.services.export_service import ExportService
 from app.services.safe_query import ExportSpec
@@ -44,6 +45,15 @@ class _Analytics:
             total_rows=1,
             truncated=False,
             source_tables=("orders",),
+        )
+
+    async def export_cross_business(self, **kwargs: object) -> DetailResult:
+        return DetailResult(
+            columns=(ResultColumn("order_no", "订单号", "DIMENSION"),),
+            rows=[{"order_no": "NO-CROSS-1"}],
+            total_rows=1,
+            truncated=False,
+            source_tables=("orders", "order_items", "products"),
         )
 
 
@@ -96,3 +106,31 @@ async def test_tampered_or_expired_export_link_is_not_downloadable() -> None:
     with pytest.raises(AppError) as expired:
         await service.download_from_url(info.url, now=now + timedelta(minutes=2))
     assert expired.value.status_code == 410
+
+
+@pytest.mark.asyncio
+async def test_cross_business_export_replays_only_the_saved_fixed_plan() -> None:
+    now = datetime(2026, 8, 5, tzinfo=UTC)
+    exports = _Exports()
+    service = ExportService(exports, _Analytics(), signing_secret="test-secret", ttl_minutes=15)
+    info = await service.create(
+        merchant_id=uuid4(),
+        answer_id=uuid4(),
+        spec=ExportSpec(
+            table="cross_business",
+            columns=("order_no",),
+            start=date(2026, 8, 1),
+            end=date(2026, 8, 5),
+            date_filtered=False,
+            kind="cross_business",
+            cross_business_plan=CrossBusinessPlan(
+                plan_type=CrossBusinessPlanType.ORDER_TO_GOODS,
+                sub_order_no="NO-CROSS-1",
+            ),
+        ),
+        now=now,
+    )
+
+    csv_data = await service.download_from_url(info.url, now=now + timedelta(minutes=1))
+
+    assert "NO-CROSS-1" in csv_data

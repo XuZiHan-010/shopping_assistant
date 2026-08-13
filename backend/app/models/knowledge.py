@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from sqlalchemy import Boolean, CheckConstraint, Index, Integer, String, Text, text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import Mapped, mapped_column, validates
 
+from app.metrics.report_url import normalize_report_url
 from app.models.base import (
     Base,
     CreatedAtMixin,
@@ -27,13 +29,23 @@ class MetricDefinition(UuidPrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, Base
     unit: Mapped[str] = mapped_column(String(32), nullable=False)
     business_definition: Mapped[str] = mapped_column(Text, nullable=False)
     sql_definition: Mapped[str] = mapped_column(Text, nullable=False)
-    source: Mapped[str] = mapped_column(String(200), nullable=False)
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
     owner: Mapped[str] = mapped_column(String(120), nullable=False)
+    dimensions: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    source_database: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_table: Mapped[str] = mapped_column(String(64), nullable=False)
+    report_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    generated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    notice: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(
         String(16),
         nullable=False,
         server_default=text("'ACTIVE'"),
     )
+
+    @validates("report_url")
+    def normalize_report_url_value(self, _key: str, value: str | None) -> str | None:
+        return normalize_report_url(value)
 
 
 class KnowledgeDocument(UuidPrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, Base):

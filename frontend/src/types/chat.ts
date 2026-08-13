@@ -16,6 +16,7 @@ export type QuestionCategory = components['schemas']['QuestionCategory']
 export type QualityStatus = components['schemas']['QualityStatus']
 export type AnalysisSource = components['schemas']['AnalysisSource']
 export type MetricStatus = components['schemas']['MetricStatus']
+export type MetricDefinitionSource = components['schemas']['MetricDefinitionSource']
 export type FeedbackReaction = components['schemas']['FeedbackReaction']
 
 /** 一条回答的完整反馈状态；后端反馈端点以整条覆盖方式写入。 */
@@ -39,7 +40,14 @@ export interface MetricDefinition {
   displayName: string
   unit: string
   definition: string
-  source: string
+  sqlDefinition: string
+  dimensions: string[]
+  sourceDatabase: string
+  sourceTable: string
+  reportUrl?: string
+  source: MetricDefinitionSource
+  generated: boolean
+  notice?: string
   owner: string
   status: MetricStatus
 }
@@ -70,6 +78,8 @@ export interface ExportInfo {
 /** 数据结果。无数据模式下整个对象为 undefined，而不是空壳。 */
 export interface DataResult {
   rows: Array<Record<string, unknown>>
+  /** 历史回答只保留列定义，实时回答由 rows 推导。 */
+  columns?: string[]
   totalRows: number
   truncated: boolean
   queryPlan?: string

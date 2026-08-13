@@ -216,9 +216,10 @@ class _RecordingLlm:
 
 
 @pytest.mark.asyncio
-async def test_generated_metric_definition_is_built_from_the_domain_body() -> None:
+async def test_generated_metric_definition_is_built_from_the_domain_body(monkeypatch) -> None:
     """索引层只有目录词汇；用它生成口径等于让模型凭空编。"""
 
+    monkeypatch.setattr("app.metrics.catalog.find_field_comment", lambda _code: None)
     llm = _RecordingLlm(
         [
             json.dumps({"answer_mode": "METRIC", "category": "TRADE", "intent_keywords": ["GMV"]}),
@@ -244,9 +245,10 @@ async def test_generated_metric_definition_is_built_from_the_domain_body() -> No
 
 
 @pytest.mark.asyncio
-async def test_generated_metric_definition_carries_the_pending_review_notice() -> None:
+async def test_generated_metric_definition_carries_the_pending_review_notice(monkeypatch) -> None:
     """生成口径不标注待核验，用户会把模型猜的口径当成正式口径。"""
 
+    monkeypatch.setattr("app.metrics.catalog.find_field_comment", lambda _code: None)
     from app.metrics.catalog import GENERATED_NOTICE
 
     llm = FakeLlmClient(

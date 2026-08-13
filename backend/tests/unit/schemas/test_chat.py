@@ -21,7 +21,14 @@ METRIC_FIELDS: dict[str, object] = {
     "metric_display_name": "总 GMV 金额",
     "metric_unit": "元",
     "metric_definition": "统计周期内已提交订单的商品金额合计。",
-    "metric_source": "指标平台",
+    "metric_sql_definition": "SUM(orders.paid_amount)",
+    "metric_dimensions": ["date", "product", "category"],
+    "metric_source_database": "public",
+    "metric_source_table": "orders",
+    "metric_report_url": None,
+    "metric_source": "METRIC_CATALOG",
+    "metric_generated": False,
+    "metric_notice": None,
     "metric_owner": "交易数据组",
     "metric_status": "ACTIVE",
     "data_rows": [{"date": "2026-07-28", "value": 256920}],
@@ -210,7 +217,12 @@ def test_quality_notes_default_to_an_empty_list_not_null() -> None:
         "metric_display_name",
         "metric_unit",
         "metric_definition",
+        "metric_sql_definition",
+        "metric_dimensions",
+        "metric_source_database",
+        "metric_source_table",
         "metric_source",
+        "metric_generated",
         "metric_owner",
         "metric_status",
         "visualization",
@@ -223,6 +235,13 @@ def test_quality_notes_default_to_an_empty_list_not_null() -> None:
 def test_metric_requires_every_metric_field(missing: str) -> None:
     with pytest.raises(ValidationError, match=missing):
         ChatResponse.model_validate(_metric_response(**{missing: None}))
+
+
+def test_metric_requires_complete_traceability_definition() -> None:
+    """指标回答不能只给业务口径，必须给出完整的口径追溯信息。"""
+
+    with pytest.raises(ValidationError, match="metric_sql_definition"):
+        ChatResponse.model_validate(_metric_response(metric_sql_definition=None))
 
 
 def test_metric_requires_at_least_two_recommendations() -> None:
@@ -253,6 +272,51 @@ def test_detail_passes_once_export_is_present() -> None:
     )
 
     assert response.answer_mode is AnswerMode.DETAIL
+
+
+def test_table_only_detail_allows_an_empty_answer_without_recommendations() -> None:
+    """纯明细只有表格；把它当成不完整响应会迫使 Agent 伪造分析正文。"""
+
+    response = ChatResponse.model_validate(
+        _metric_response(
+            answer="",
+            answer_mode=AnswerMode.DETAIL,
+            export={
+                "id": str(uuid4()),
+                "url": "https://example.test/exports/1",
+                "expires_at": "2026-07-31T12:00:00Z",
+            },
+            recommendations=[],
+        )
+    )
+
+    assert response.answer == ""
+    assert response.recommendations == []
+
+
+@pytest.mark.parametrize("mode", [AnswerMode.CHAT, AnswerMode.METRIC, AnswerMode.RULE])
+def test_non_detail_modes_reject_an_empty_answer(mode: AnswerMode) -> None:
+    """非明细的空正文会让用户得到没有任何解释的回答卡片。"""
+
+    with pytest.raises(ValidationError, match="answer"):
+        ChatResponse.model_validate(_base_response(answer_mode=mode, answer=""))
+
+
+def test_detail_with_analysis_text_still_requires_two_recommendations() -> None:
+    """要求分析的明细不能借由放宽纯明细契约而丢掉行动建议。"""
+
+    with pytest.raises(ValidationError, match="recommendations"):
+        ChatResponse.model_validate(
+            _metric_response(
+                answer_mode=AnswerMode.DETAIL,
+                export={
+                    "id": str(uuid4()),
+                    "url": "https://example.test/exports/1",
+                    "expires_at": "2026-07-31T12:00:00Z",
+                },
+                recommendations=[],
+            )
+        )
 
 
 def test_identity_requires_query_plan_and_rows_but_not_metric_fields() -> None:

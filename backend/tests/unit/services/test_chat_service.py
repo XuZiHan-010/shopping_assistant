@@ -19,8 +19,8 @@ from app.core.errors import (
     RequestInProgressError,
 )
 from app.core.security import MerchantContext
-from app.schemas.chat import ChatRequest
-from app.services.chat_service import ChatService, _request_digest
+from app.schemas.chat import AnswerMode, ChatRequest, ChatResponse
+from app.services.chat_service import ChatService, _request_digest, _stored_response
 from tests.support.agent import DeterministicAgent
 
 MERCHANT_ID = UUID("00000000-0000-0000-0000-000000000041")
@@ -149,6 +149,28 @@ class ExplodingAgent:
         raise self.error
 
 
+class TableOnlyAgent:
+    """返回已由 ChatResponse 契约验证过的纯明细，用于测试持久化层。"""
+
+    async def run(self, message: str, session_id: UUID) -> AgentRunResult:
+        result = await DeterministicAgent().run(message, session_id)
+        base = result.response.model_dump(mode="json")
+        base.update(
+            {
+                "answer": "",
+                "answer_mode": AnswerMode.DETAIL,
+                "export": {
+                    "id": str(uuid4()),
+                    "url": "/api/exports/example",
+                    "expires_at": "2026-08-12T00:00:00Z",
+                },
+                "recommendations": [],
+            }
+        )
+        response = ChatResponse.model_validate(base)
+        return AgentRunResult(response=response, steps=response.thinking_steps)
+
+
 def build_service(
     agent: Any = None,
 ) -> tuple[ChatService, FakeConversationRepository, FakeSession, Any]:
@@ -175,6 +197,33 @@ async def test_succeeded_request_replays_saved_response_without_running_agent() 
     assert replay.replayed is True
     assert replay.response == first.response
     assert agent.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_historical_metric_payload_replays_with_traceability_defaults() -> None:
+    """历史 JSONB 在新契约下仍可重放，但不得虚构来源库表。"""
+
+    result = await DeterministicAgent().run("昨天 GMV", uuid4())
+    payload = result.response.model_dump(mode="json")
+    for field in (
+        "metric_sql_definition",
+        "metric_dimensions",
+        "metric_source_database",
+        "metric_source_table",
+        "metric_report_url",
+        "metric_generated",
+        "metric_notice",
+    ):
+        payload.pop(field)
+
+    replayed = _stored_response(payload)
+
+    assert replayed.metric_dimensions == []
+    assert replayed.metric_sql_definition == ""
+    assert replayed.metric_source_database == ""
+    assert replayed.metric_source_table == ""
+    assert replayed.metric_report_url is None
+    assert replayed.metric_generated is False
 
 
 @pytest.mark.asyncio
@@ -304,6 +353,23 @@ async def test_successful_turn_persists_both_messages_and_touches_conversation()
     assert repository.touched == [execution.response.session_id]
     # 一次提交 PROCESSING 的可见状态，一次提交最终结果。
     assert session.commits == 2
+
+
+@pytest.mark.asyncio
+async def test_table_only_turn_persists_an_assistant_message_for_history_replay() -> None:
+    """历史详情只从助手消息装配 Answer payload，纯表格轮次也必须可重放。"""
+
+    service, repository, _, _ = build_service(TableOnlyAgent())
+
+    execution = await service.submit(CONTEXT, chat_request(key="table-only-1"), request_id="r1")
+
+    assert execution.response.answer == ""
+    assert [message.role for message in repository.messages] == ["USER", "ASSISTANT"]
+    assert repository.messages[1].content == ""
+    stored = repository.answers["table-only-1"]
+    assert stored.processing_status == "SUCCEEDED"
+    assert stored.response_payload is not None
+    assert stored.response_payload["answer"] == ""
 
 
 @pytest.mark.asyncio
