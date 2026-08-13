@@ -547,9 +547,9 @@ uv run pytest tests/unit/core/test_client_ip.py -v
 
 - [x] `tests/unit/core/test_client_ip.py` 覆盖四种组合：仅 `X-Real-IP`、仅 `X-Forwarded-For`、两者都有、两者都无；每种都断言可信与不可信 peer 两条路径。
 - [x] `tests/api/test_rate_limit_trust_boundary.py` 补一条：**伪造 `X-Real-IP` 不能绕过限流**（既有用例只覆盖伪造 `X-Forwarded-For`）。
-- [ ] 变异验证：临时移除 `X-Real-IP` 分支，Task 2.5.1 Step 1 的测试必须真实失败；还原后 `git diff` 确认无残留。
+- [x] 变异验证：临时移除全部 `X-Real-IP` 支持（包括无 XFF 时的回退），Task 2.5.1 Step 1 的测试真实失败；还原后已确认无源码残留。
 - [ ] `TRUSTED_PROXY_IPS` 策略已由用户裁定并写入 `docs/deployment.md`。
-- [ ] 后端全量门禁（含真实数据库 pytest）重跑通过。
+- [x] 后端全量门禁（含真实数据库 pytest）重跑通过（2026-08-13：779 passed / 0 failed / 1 条第三方警告）。
 
 > **用户检查点 3.5：** 裁定 `TRUSTED_PROXY_IPS` 策略；确认可以进入阶段 3 部署。
 

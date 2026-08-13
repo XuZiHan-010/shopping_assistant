@@ -4,6 +4,11 @@
 
 **最后更新：2026-08-13**
 
+> **当前优先快照（2026-08-13，覆盖下方所有较早叙述）：**R9 阶段 B 的 Task 9–15 已实现并已快进合入本地 `main`（`6b16585`）；未推送远端。
+> 两个无卷隔离 PostgreSQL 容器（55442 / 55443）销毁重建后，后端真实数据库全量回归为 **779 passed / 0 failed / 1 条第三方警告**，Ruff 检查与格式检查通过。前端 Vitest 为 **26 文件 / 254 项通过**；Mock Playwright **25 passed**、生产 preview 首屏测试 **1 passed**，两条 E2E 命令均以退出码 0 正常结束。
+> 阶段 2.5 的 `X-Real-IP` 兼容与伪造防线已完成：单元/API 回归共 **12 项通过**；完整移除 `X-Real-IP` 支持的变异会使目标测试真实失败，恢复后无源码残留。所有测试使用 Fake/确定性 LLM，DeepSeek 调用 **0**、费用 **0**。
+> 当前唯一阻塞项是 Railway 的 `TRUSTED_PROXY_IPS` 来源策略：路线图要求用户在 A（留空并依赖 Railway 网络边界）、B（固定 Railway 出口网段）或 C（空集 fail closed）中裁定。未裁定前不会改变部署变量说明或进入 Railway 部署。
+
 > **当前优先快照（2026-08-13，覆盖下方较早的 R9 阶段 B 叙述）**：R9 阶段 B 的 Task 9–14 已完成。
 > 两个无卷隔离 PostgreSQL 容器已销毁重建后复验：后端 Ruff、格式、mypy 全绿，pytest
 > **767 passed / 0 failed / 1 条第三方警告**；前端生成契约、fixture、类型、lint、格式与 Vitest
