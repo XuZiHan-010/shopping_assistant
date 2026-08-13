@@ -61,11 +61,21 @@ Railway 的 Config File Path 不跟随 Root Directory。即使 Service Root 已�
 | `ADMIN_TOKEN` | 运维端点凭据，生产环境至少 16 字符且非占位值。 |
 | `EXPORT_SIGNING_SECRET` | CSV 导出签名密钥，生产环境必填且非占位值。 |
 | `TRUSTED_PROXY_HOPS=1` | Railway 单层代理。 |
-| `TRUSTED_PROXY_IPS` | 经核实的 Railway 代理直连 IP，逗号分隔。 |
+| `TRUSTED_PROXY_IPS` | **留空，不填任何值。** Railway 不发布稳定的边界代理地址；配置具体值会在重新部署后静默失效并导致限流退化，因此本项目明确不配置该变量。 |
 | `RATE_LIMIT_PER_MINUTE` | 单 Token 与可信 IP 的每分钟上限。 |
 | `LLM_DAILY_BUDGET_TOKENS` | 每日模型 token 预算。 |
 
 现有代码已强制精确 CORS、生产 JSON 日志、`create_app()` 不启用 Debug，以及数据库连接重试。B8 附件功能尚未实现，不得把正式附件写入容器临时磁盘。
+
+### Railway 转发头信任策略与回退条件
+
+本项目在 Railway 生产环境使用 `TRUSTED_PROXY_HOPS=1`、留空 `TRUSTED_PROXY_IPS`。留空时，`resolve_client_ip()` 中的 `trusted_proxy_ips and ...` 短路，跳过对直连 peer 的可信判定，即信任任何 peer 送来的转发头。
+
+采用此策略的原因是 Railway 不发布稳定的边界代理地址；静态白名单会在重新部署后静默过期，函数随后返回 peer，令限流无声退化。该策略成立的前提是 Railway 容器没有公网直连入口，公网流量只能经 Railway 边界代理进入。
+
+因此上线后必须完成「转发头伪造验收」：经 Railway 公网域名，使用同一演示 Token，连续发送超过 `RATE_LIMIT_PER_MINUTE` 的请求，并在每次请求中更换 `X-Real-IP`；超限后仍必须返回 429。再以 `X-Forwarded-For` 重复同一测试。记录 429 的实际触发次序。该验收不需要 LLM Key，费用为零。
+
+若任一伪造头能够获得新限流桶（超限后未返回 429），立即将 Railway 配置改为 `TRUSTED_PROXY_HOPS=0`，接受限流收敛为按 Token 的已知可用性限制，并在 `docs/project-progress.md` 记录；后续在 F6 之后改用「按 XFF 最右跳解析」或引入 Redis 限流解决。在得到该实测证据前，不得宣告线上部署验收通过。
 
 ## 运维验收
 
