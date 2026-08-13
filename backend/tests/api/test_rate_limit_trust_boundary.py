@@ -96,6 +96,35 @@ async def trusted_proxy_client() -> AsyncIterator[AsyncClient]:
 
 
 @pytest.mark.asyncio
+async def test_forged_forwarded_for_cannot_reset_limit_behind_real_ip_proxy(
+    trusted_proxy_client: AsyncClient,
+) -> None:
+    """代理注入 X-Real-IP 时，客户端自带的 XFF 不得换到新的限流桶。
+
+    Railway 只承诺注入 X-Real-IP，不管理 X-Forwarded-For；后者对公网客户端
+    完全可控，一旦让它盖过前者，每个请求都能拿到全新配额。
+    """
+
+    payload = {"message": "hi", "client_request_id": "req-forged-a"}
+    proxy_headers = {**AUTH, "Accept": "application/json", "X-Real-IP": "198.51.100.7"}
+
+    first = await trusted_proxy_client.post(
+        "/api/chat",
+        json=payload,
+        headers={**proxy_headers, "X-Forwarded-For": "1.1.1.1"},
+    )
+    second = await trusted_proxy_client.post(
+        "/api/chat",
+        json={**payload, "client_request_id": "req-forged-b"},
+        headers={**proxy_headers, "X-Forwarded-For": "2.2.2.2"},
+    )
+
+    assert first.status_code != 429
+    assert second.status_code == 429
+    assert second.json()["code"] == "RATE_LIMITED"
+
+
+@pytest.mark.asyncio
 async def test_trusted_chain_separates_distinct_downstream_clients(
     trusted_proxy_client: AsyncClient,
 ) -> None:

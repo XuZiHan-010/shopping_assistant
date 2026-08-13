@@ -164,6 +164,10 @@ async def integration_database(migrated_postgres: str) -> AsyncIterator[Database
 @pytest_asyncio.fixture
 async def db_session(integration_database: Database) -> AsyncIterator[AsyncSession]:
     async with integration_database.session() as session:
+        # 测试库的清空维护语句需要对所有业务表取得排他锁并同步 WAL；Docker Desktop
+        # 磁盘繁忙时可能超过应用请求的 5 秒 statement timeout。仅在当前清理事务中取消
+        # 超时，commit 后 SET LOCAL 自动还原，业务会话仍由集成测试验证 timeout 已启用。
+        await session.execute(text("SET LOCAL statement_timeout = 0"))
         await session.execute(text(TRUNCATE_ALL_TABLES))
         await session.commit()
         yield session

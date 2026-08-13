@@ -46,11 +46,41 @@ class VisualizationService:
         )
 
 
+# 生成指标的数值列只能出自两套固定模板；模型给的展示名称与单位只用于**挑选**
+# 其中一列，不能凭空造列。口径与参考项目 VisualizationService#generatedMetricValueField
+# 一致：先按单位判定，单位不明确时按展示名称关键词判定，仍不明确时按订单/退款笔数兜底。
+_GENERATED_METRIC_PREFERENCES: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = (
+    ("元", ("gmv", "金额", "销售额", "成交额", "实付", "收入"), ("paid_amount", "refund_amount")),
+    ("人", ("用户", "买家", "人数"), ("order_user_count", "refund_user_count")),
+    ("件", ("销量", "销售量", "商品件数", "sku"), ("quantity",)),
+)
+# 关键词与单位都没命中时的稳定顺序，保证任何模板都能挑出一列可画的数值。
+_GENERATED_METRIC_FALLBACK: tuple[str, ...] = (
+    "order_count",
+    "refund_count",
+    "paid_amount",
+    "refund_amount",
+    "quantity",
+    "order_user_count",
+    "refund_user_count",
+)
+
+
 def _metric_key(metric: MetricPayload, columns: set[str]) -> str | None:
     if not metric.generated:
         return metric.metric_code if metric.metric_code in columns else None
-    # 生成指标的展示名称、单位来自模型，但数值列只能是两种固定模板产生的字段。
-    for key in ("paid_amount", "refund_amount"):
+    return _generated_metric_key(metric, columns)
+
+
+def _generated_metric_key(metric: MetricPayload, columns: set[str]) -> str | None:
+    name = metric.display_name.lower()
+    for unit, keywords, candidates in _GENERATED_METRIC_PREFERENCES:
+        if metric.unit != unit and not any(keyword in name for keyword in keywords):
+            continue
+        for key in candidates:
+            if key in columns:
+                return key
+    for key in _GENERATED_METRIC_FALLBACK:
         if key in columns:
             return key
     return None

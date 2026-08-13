@@ -93,6 +93,8 @@ test('删除会话后列表同步移除', async ({ page }) => {
   await page.goto('/')
   await page.getByTestId('quick-question').first().click()
   await expect(page.getByTestId('chat-message')).toHaveCount(2)
+  // 用户消息先进入 DOM，回答持久化与会话目录更新仍在流式阶段尾部；必须等该轮结束。
+  await expect(page.getByTestId('stage-label')).toHaveCount(0, { timeout: 15_000 })
 
   await page.getByLabel('打开对话目录').click()
   await expect(page.getByTestId('conversation-item')).toHaveCount(1)

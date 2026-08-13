@@ -515,7 +515,7 @@ def test_untrusted_peer_cannot_spoof_x_real_ip():
 
 1. **可信判定不变**：仍然先校验 `peer` 是否在可信代理集合内，不可信一律返回 `peer`。新增头的读取**必须在可信判定之后**，否则等于允许任意客户端自称任意 IP；
 2. **`X-Real-IP` 与 `X-Forwarded-For` 同时支持**：Railway 用前者，本地 Docker Compose 与既有测试用后者，两条通路都要保留；
-3. **优先级必须显式**：约定 `X-Forwarded-For` 存在且长度足够时优先（保留既有多跳语义），否则回落到 `X-Real-IP`。该约定写进函数 docstring；
+3. **优先级必须显式**：单跳可信代理在存在 `X-Real-IP` 时优先使用它（Railway 覆写该头，客户端可自带 XFF）；多跳可信代理仍在 XFF 长度足够时按跳数解析。无 `X-Real-IP` 的本地单跳 XFF 路径保留。该约定写进函数 docstring；
 4. **两个头都取不到时返回 `peer`**，不得抛异常。
 
 - [x] **Step 2: 运行 Task 2.5.1 的四条测试，确认全部通过**
@@ -545,8 +545,8 @@ uv run pytest tests/unit/core/test_client_ip.py -v
 
 ### 阶段 2.5 出口判据
 
-- [ ] `tests/unit/core/test_client_ip.py` 覆盖四种组合：仅 `X-Real-IP`、仅 `X-Forwarded-For`、两者都有、两者都无；每种都断言可信与不可信 peer 两条路径。
-- [ ] `tests/api/test_rate_limit_trust_boundary.py` 补一条：**伪造 `X-Real-IP` 不能绕过限流**（既有用例只覆盖伪造 `X-Forwarded-For`）。
+- [x] `tests/unit/core/test_client_ip.py` 覆盖四种组合：仅 `X-Real-IP`、仅 `X-Forwarded-For`、两者都有、两者都无；每种都断言可信与不可信 peer 两条路径。
+- [x] `tests/api/test_rate_limit_trust_boundary.py` 补一条：**伪造 `X-Real-IP` 不能绕过限流**（既有用例只覆盖伪造 `X-Forwarded-For`）。
 - [ ] 变异验证：临时移除 `X-Real-IP` 分支，Task 2.5.1 Step 1 的测试必须真实失败；还原后 `git diff` 确认无残留。
 - [ ] `TRUSTED_PROXY_IPS` 策略已由用户裁定并写入 `docs/deployment.md`。
 - [ ] 后端全量门禁（含真实数据库 pytest）重跑通过。
