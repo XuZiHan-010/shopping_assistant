@@ -2,14 +2,18 @@ import { spawn } from 'node:child_process'
 
 const STARTUP_TIMEOUT_MS = 30_000
 const SHUTDOWN_TIMEOUT_MS = 5_000
+const POLL_TIMEOUT_MS = 500
 
 function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds))
 }
 
+// 显式给每次探测加超时：一个占着端口但挂死不响应的进程会让不带超时的
+// fetch 无限期悬挂，吃掉大半个 STARTUP_TIMEOUT_MS 预算，报出跟真实原因
+// （端口被占用/服务未启动）无关的超时错误。
 async function isListening(origin) {
   try {
-    const response = await fetch(origin)
+    const response = await fetch(origin, { signal: AbortSignal.timeout(POLL_TIMEOUT_MS) })
     return response.ok
   } catch {
     return false

@@ -848,6 +848,15 @@ def _unverified_metric(metric_code: str | None) -> MetricPayload:
     )
 
 
+# 受控临时分组指标只支持这两个类别（由 whitelist.py 强制），用字典而非
+# `"交易" if ... else "退款"` 的二选一三元表达式，未来若类别枚举出错会直接
+# KeyError 而不是把未知类别静默归到「退款」。
+_GENERATED_METRIC_CATEGORY_LABELS: Final[dict[str, tuple[str, str]]] = {
+    "TRADE": ("交易", "orders"),
+    "REFUND": ("退款", "refunds"),
+}
+
+
 def _generated_metric_payload(intent: QueryIntent) -> MetricPayload:
     """为受控临时分组指标生成可展示的、待核验的口径载荷。
 
@@ -858,8 +867,7 @@ def _generated_metric_payload(intent: QueryIntent) -> MetricPayload:
     plan = intent.generated_metric_plan
     assert plan is not None
     category = intent.category
-    category_label = "交易" if category.value == "TRADE" else "退款"
-    source_table = "orders" if category.value == "TRADE" else "refunds"
+    category_label, source_table = _GENERATED_METRIC_CATEGORY_LABELS[category.value]
     dimensions = tuple(item for item in (plan.group_by, plan.filter_column) if item is not None)
     return MetricPayload(
         metric_code=f"generated_{category.value.lower()}_metric",

@@ -206,6 +206,10 @@ def test_generated_metric_plan_requires_metric_trade_or_refund_context(
     assert result.intent.answer_mode is AnswerMode.INVALID
     assert result.intent.category is QuestionCategory.UNKNOWN
     assert any("临时分组指标" in note for note in result.rejected)
+    # 结构合法但用错模式/类别时也必须清空计划本身，不能只改 answer_mode/category：
+    # 否则这个「无效」意图仍带着一个看似已批准的计划对象，未来任何只判断
+    # `generated_metric_plan is not None`（不检查 answer_mode）的代码都会误执行它。
+    assert result.intent.generated_metric_plan is None
 
 
 def test_sql_in_metric_is_rejected() -> None:

@@ -11,6 +11,8 @@ from typing import Literal, Protocol, cast
 from urllib.parse import parse_qs, urlencode, urlparse
 from uuid import UUID
 
+from pydantic import BaseModel
+
 from app.analytics.contract import UnknownFieldError, detail_spec
 from app.core.errors import (
     ExportLinkExpiredError,
@@ -104,8 +106,7 @@ class ExportService:
                 merchant_id=merchant_id,
                 plan=spec.cross_business_plan,
             )
-            if tuple(column.key for column in result.columns) != spec.columns:
-                raise ResourceNotFoundError("导出文件")
+            _ensure_columns_unchanged(result, spec.columns)
         elif spec.kind == "generated_metric":
             if spec.generated_metric_plan is None or spec.generated_metric_category is None:
                 raise ResourceNotFoundError("导出文件")
@@ -117,8 +118,7 @@ class ExportService:
                 end=spec.end,
                 limit=None,
             )
-            if tuple(column.key for column in result.columns) != spec.columns:
-                raise ResourceNotFoundError("导出文件")
+            _ensure_columns_unchanged(result, spec.columns)
         else:
             try:
                 registered = detail_spec(spec.table)
@@ -152,6 +152,22 @@ class ExportService:
         return hmac.new(self._secret, payload, sha256).hexdigest()
 
 
+def _dump_optional(model: BaseModel | None) -> dict[str, object] | None:
+    return model.model_dump() if model is not None else None
+
+
+def _load_optional[ModelT: BaseModel](model_cls: type[ModelT], raw: object) -> ModelT | None:
+    return model_cls.model_validate(raw) if raw is not None else None
+
+
+def _ensure_columns_unchanged(result: DetailResult, expected: tuple[str, ...]) -> None:
+    """签名的 `ExportSpec` 只记列名；模板改过之后旧签名重放必须拒绝，而不是
+    返回一份列集合已经不一致（可能被篡改过 kind/plan/category）的 CSV。"""
+
+    if tuple(column.key for column in result.columns) != expected:
+        raise ResourceNotFoundError("导出文件")
+
+
 def _serialize_spec(spec: ExportSpec) -> dict[str, object]:
     return {
         "table": spec.table,
@@ -161,14 +177,8 @@ def _serialize_spec(spec: ExportSpec) -> dict[str, object]:
         "filters": [list(item) for item in spec.filters],
         "date_filtered": spec.date_filtered,
         "kind": spec.kind,
-        "cross_business_plan": (
-            spec.cross_business_plan.model_dump() if spec.cross_business_plan is not None else None
-        ),
-        "generated_metric_plan": (
-            spec.generated_metric_plan.model_dump()
-            if spec.generated_metric_plan is not None
-            else None
-        ),
+        "cross_business_plan": _dump_optional(spec.cross_business_plan),
+        "generated_metric_plan": _dump_optional(spec.generated_metric_plan),
         "generated_metric_category": (
             spec.generated_metric_category.value
             if spec.generated_metric_category is not None
@@ -189,16 +199,10 @@ def _deserialize_spec(value: dict[str, object]) -> ExportSpec:
         or kind not in {"detail", "cross_business", "generated_metric"}
     ):
         raise ValueError("invalid export specification")
-    raw_plan = value.get("cross_business_plan")
-    raw_generated_plan = value.get("generated_metric_plan")
-    raw_generated_category = value.get("generated_metric_category")
     try:
-        plan = CrossBusinessPlan.model_validate(raw_plan) if raw_plan is not None else None
-        generated_plan = (
-            GeneratedMetricPlan.model_validate(raw_generated_plan)
-            if raw_generated_plan is not None
-            else None
-        )
+        plan = _load_optional(CrossBusinessPlan, value.get("cross_business_plan"))
+        generated_plan = _load_optional(GeneratedMetricPlan, value.get("generated_metric_plan"))
+        raw_generated_category = value.get("generated_metric_category")
         generated_category = (
             QuestionCategory(str(raw_generated_category))
             if raw_generated_category is not None

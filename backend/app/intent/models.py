@@ -19,6 +19,25 @@ from pydantic.json_schema import SkipJsonSchema
 from app.schemas.chat import AnswerMode, QuestionCategory
 
 
+def _recover_optional_plan[PlanT: BaseModel](
+    data: dict[str, object], plan_key: str, rejected_key: str, model_cls: type[PlanT]
+) -> None:
+    """就地把 `data[plan_key]` 校验成 `model_cls`；校验失败则置空并打拒绝标记。
+
+    供 `QueryIntent._recover_nested_plans` 对每个可选的受控计划字段调用——
+    不信任模型给出的嵌套计划形状，失败必须降级而不是让 `ValidationError` 冒泡。
+    """
+
+    raw = data.get(plan_key)
+    if raw is None:
+        return
+    try:
+        data[plan_key] = model_cls.model_validate(raw)
+    except ValidationError:
+        data[plan_key] = None
+        data[rejected_key] = True
+
+
 class DateRange(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -109,20 +128,10 @@ class QueryIntent(BaseModel):
         # 不信任模型自行提交的内部状态；只有本校验器可设置拒绝标记。
         data.pop("cross_business_plan_rejected", None)
         data.pop("generated_metric_plan_rejected", None)
-        raw_plan = data.get("cross_business_plan")
-        if raw_plan is not None:
-            try:
-                data["cross_business_plan"] = CrossBusinessPlan.model_validate(raw_plan)
-            except ValidationError:
-                data["cross_business_plan"] = None
-                data["cross_business_plan_rejected"] = True
-        raw_generated_plan = data.get("generated_metric_plan")
-        if raw_generated_plan is not None:
-            try:
-                data["generated_metric_plan"] = GeneratedMetricPlan.model_validate(
-                    raw_generated_plan
-                )
-            except ValidationError:
-                data["generated_metric_plan"] = None
-                data["generated_metric_plan_rejected"] = True
+        _recover_optional_plan(
+            data, "cross_business_plan", "cross_business_plan_rejected", CrossBusinessPlan
+        )
+        _recover_optional_plan(
+            data, "generated_metric_plan", "generated_metric_plan_rejected", GeneratedMetricPlan
+        )
         return data

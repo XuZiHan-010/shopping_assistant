@@ -75,11 +75,10 @@ def _metric_key(metric: MetricPayload, columns: set[str]) -> str | None:
 def _generated_metric_key(metric: MetricPayload, columns: set[str]) -> str | None:
     name = metric.display_name.lower()
     for unit, keywords, candidates in _GENERATED_METRIC_PREFERENCES:
-        if metric.unit != unit and not any(keyword in name for keyword in keywords):
-            continue
-        for key in candidates:
-            if key in columns:
-                return key
+        if metric.unit == unit or any(keyword in name for keyword in keywords):
+            for key in candidates:
+                if key in columns:
+                    return key
     for key in _GENERATED_METRIC_FALLBACK:
         if key in columns:
             return key
