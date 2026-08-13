@@ -1185,27 +1185,27 @@ group/filter 列使用 Literal 白名单；filter value 使用绑定参数；日
 
 > Task 4 的 3 条真实库用例只覆盖阶段 A 的能力。阶段 B 加了四类新行为，不补 E2E 就等于这些能力从未在真实数据库上跑通过。
 
-- [ ] **Step 1: 补纯明细场景**
+- [x] **Step 1: 补纯明细场景（2026-08-13 完成）**
 
 真实库下提问“查看最近 20 笔订单”→ 断言页面只有表格、无正文容器；再提问“分析最近 20 笔订单”→ 断言有正文与建议。
 
-- [ ] **Step 2: 补跨业务场景（含跨商家反例）**
+- [x] **Step 2: 补跨业务场景（含跨商家反例，2026-08-13 完成）**
 
 合法子订单号 → 断言退款/商品关联结果渲染。**跨商家反例**：以商家 A 身份提交商家 B 的子订单号 → 断言看不到 B 的任何数据，且显示无结果或计划被拒绝的说明。这条是商家隔离的最后一道真实验证。
 
-- [ ] **Step 3: 补生成指标场景**
+- [x] **Step 3: 补生成指标场景（2026-08-13 完成）**
 
 按城市分组的生成指标 → 断言图表渲染、`generated` 徽标与 `notice` 可见、`metric_status=UNVERIFIED` 的提示存在。
 
-- [ ] **Step 4: 补生成指标导出场景**
+- [x] **Step 4: 补生成指标导出场景（2026-08-13 完成）**
 
 构造超出展示上限的生成指标结果 → 断言截断提示与签名下载链接出现，链接形如 `/api/exports/{uuid}?expires_at=...&signature=<64 位十六进制>`。
 
-- [ ] **Step 5: 补历史会话步骤场景**
+- [x] **Step 5: 补历史会话步骤场景（2026-08-13 完成）**
 
 完成一轮问答 → 刷新并从会话列表打开该会话 → 断言助手消息显示完整思考步骤列表，且页面上不出现任何 `signature=` 字符串（历史不返回签名 URL）。
 
-- [ ] **Step 6: 运行真实库 E2E**
+- [x] **Step 6: 运行真实库 E2E（2026-08-13，8 passed）**
 
 ```powershell
 . 'C:\Users\Penguin\AppData\Local\Temp\claude\gate-helpers.ps1'
@@ -1232,13 +1232,13 @@ Expected: 不少于 3 + 本任务新增场景数；DeepSeek 调用 0 次。
 **Interfaces:**
 - Produces: 通过全部门禁、可交付用户裁定 Git 操作的候选分支
 
-- [ ] **Step 1: 重跑 Task 4 全部门禁**
+- [x] **Step 1: 重跑 Task 4 全部门禁（2026-08-13；修复 Windows Playwright 收尾后，Docker 恢复时重建隔离库复验：后端 772、Mock 25、首屏 1、真实 API 8 条均退出码 0）**
 
 完整重跑 Task 4 Step 1–8，**包含两个容器的销毁重建**——阶段 B 新增了迁移，跑在旧库上不算数。所有命令走 `Invoke-Gate`。
 
 Expected: 后端 >703、前端 >205、Mock Playwright ≥24、真实库 Playwright ≥ Task 13 的场景数；每一项都必须**严格高于或等于**阶段 A 记录的数字，下降即视为回归。
 
-- [ ] **Step 2: 重跑生成物漂移检查**
+- [x] **Step 2: 重跑生成物漂移检查（2026-08-13，无漂移）**
 
 ```powershell
 . 'C:\Users\Penguin\AppData\Local\Temp\claude\gate-helpers.ps1'
@@ -1256,7 +1256,7 @@ Invoke-Gate 'fixtures:check' { npm run fixtures:check }
 
 Expected: 无漂移。
 
-- [ ] **Step 3: 危险 SQL 构造扫描**
+- [x] **Step 3: 危险 SQL 构造扫描（2026-08-13，无禁止拼接）**
 
 只扫真正能绕过 ORM 的构造。**不要**把 `execute(` 混进来——它在 `backend/app/repositories|services` 实测 15 处命中，全是合法的 SQLAlchemy 2.0 `session.execute(stmt)`：
 
@@ -1269,7 +1269,7 @@ Assert-NoMatch 'SQL 字符串拼接' @('-n', '-i', 'f"(SELECT|INSERT|UPDATE|DELE
 
 Expected: 第一条命中数不超过阶段 A 基线的 2 处，每一处新增都必须逐条说明为何不可用 ORM 表达；第二条零命中，否则视为 R9 安全红线失守，停止并回报用户。
 
-- [ ] **Step 4: 旧 IP 与模型名残留扫描**
+- [x] **Step 4: 旧 IP 与模型名残留扫描（2026-08-13；仅旧 Wiki 导入器的品牌清洗兼容例外）**
 
 ```powershell
 . 'C:\Users\Penguin\AppData\Local\Temp\claude\gate-helpers.ps1'
@@ -1281,7 +1281,7 @@ rg -n 'yshopping' docs AGENTS.md --glob '!docs/yshopping-parity-audit.md' | Meas
 
 Expected: 前两条零命中（模型名归配置）。第三条只作数量对照，命中数不应显著高于阶段 A 基线的 64。
 
-- [ ] **Step 5: 更新最终进度快照**
+- [x] **Step 5: 更新最终进度快照（2026-08-13）**
 
 `docs/project-progress.md` 记录统一分支、验证日期、各项通过数、剩余 Railway 人工步骤和仍为 ❓ 的审计项。
 
@@ -1297,15 +1297,15 @@ Expected: 前两条零命中（模型名归配置）。第三条只作数量对�
 
 > **顺序是有依赖的，不是并列选项。** 阶段 A/B 全程不提交，集成分支 HEAD 仍停在 `3faef8a`（B7 起点），所有成果都在工作区。此时直接快进 `feature/f2-mock-conversation` **拿不到任何集成改动**。必须先提交，才谈得上"可快进的候选分支"。
 
-- [ ] **Step 1: 请求提交授权**
+- [x] **Step 1: 请求提交授权（用户已授权所有提交）**
 
 向用户报告待提交的完整文件清单与分组建议（阶段 A 集成、阶段 B 各切片），请求授权本地提交。**不得**自行执行 `git commit`。
 
-- [ ] **Step 2: 授权后按阶段提交**
+- [x] **Step 2: 授权后按阶段提交（2026-08-13，`597a3b5`、`ddff714`）**
 
 获得明确授权后再执行。提交信息使用中文描述，按阶段与切片分开，不做单条巨型提交。
 
-- [ ] **Step 3: 验证集成分支 HEAD**
+- [x] **Step 3: 验证集成分支 HEAD（2026-08-13，工作区干净；HEAD `ddff714`）**
 
 ```powershell
 Set-Location 'd:\vscode html\merchant_assistant\.worktrees\feature-integrate-b7-f4'

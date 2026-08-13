@@ -2,7 +2,25 @@
 
 > 本文件只保留当前可继续开发的事实快照，不追加每日流水账。每次完成一段可验证工作后，更新日期、状态、验证结果、下一步和风险。
 
-**最后更新：2026-08-12**
+**最后更新：2026-08-13**
+
+> **当前优先快照（2026-08-13，覆盖下方较早的 R9 阶段 B 叙述）**：R9 阶段 B 的 Task 9–14 已完成。
+> 两个无卷隔离 PostgreSQL 容器已销毁重建后复验：后端 Ruff、格式、mypy 全绿，pytest
+> **767 passed / 0 failed / 1 条第三方警告**；前端生成契约、fixture、类型、lint、格式与 Vitest
+> **26 文件 / 254 项**通过；真实数据库 Playwright **8 passed**，覆盖纯明细、跨商家反例、生成指标图表/截断
+> 导出与历史会话脱敏回放。Mock Playwright **25 passed（22.4 秒、退出码 0）**；专用生产 preview
+> 首屏测试 **1 passed（3.2 秒、退出码 0）**。此前的退出挂起已定位为 Windows 下 `webServer` 的 shell
+> 进程树收尾问题：常规与首屏 E2E 均改由 globalSetup 按 Node 子进程 PID 启动和回收 Vite。构建、首屏静态依赖、
+> 密钥与 Mock 载荷门禁通过；OpenAPI/fixture 无漂移。DeepSeek 调用
+> **0**、费用 **0**。
+> Docker Engine 于 2026-08-13 恢复后，已销毁重建两个无卷隔离 PostgreSQL 容器（55442 / 55443），
+> 后端 Ruff、格式、mypy 与真实库 pytest 全绿：**772 passed / 0 failed / 1 条第三方警告**；真实 API
+> Playwright **8 passed**。全程使用 Fake/确定性 LLM，DeepSeek 调用 **0**、费用 **0**。本轮代码已具备
+> Task 15 的提交条件；部署前的 `TRUSTED_PROXY_IPS` 策略仍待用户裁定，未混入配置行为变更。
+> 阶段 2.5 的 `X-Real-IP` 兼容与伪造防线已按 TDD 落地：新增单元/API 回归共 **12 项通过**，并做过
+> 临时移除分支的变异验证（测试如预期失败后已还原）。当前只剩 `TRUSTED_PROXY_IPS` 的 Railway 来源策略，
+> 该项由路线图要求用户在 A（留空信任边界）、B（固定 Railway 出口网段）或 C（空集 fail closed）中裁定；
+> 未裁定前不会改变其现有行为或部署变量说明。随后执行 Task 15 的工作树整理与提交。
 
 > **当前优先快照（2026-08-12，覆盖下方较早的集成与 F6 叙述）**：用户已裁定 `main` 为唯一主线；
 > `feature/integrate-b7-f4` 是当前集成分支，已推送至 `origin/feature/integrate-b7-f4`。**PR #2 已创建

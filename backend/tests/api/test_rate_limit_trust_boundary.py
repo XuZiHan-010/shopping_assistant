@@ -65,6 +65,26 @@ async def test_varying_forwarded_for_does_not_reset_limit(untrusted_client: Asyn
     assert second.json()["code"] == "RATE_LIMITED"
 
 
+@pytest.mark.asyncio
+async def test_varying_real_ip_does_not_reset_limit(untrusted_client: AsyncClient) -> None:
+    payload = {"message": "hi", "client_request_id": "req-real-a"}
+
+    first = await untrusted_client.post(
+        "/api/chat",
+        json=payload,
+        headers={**AUTH, "Accept": "application/json", "X-Real-IP": "1.1.1.1"},
+    )
+    second = await untrusted_client.post(
+        "/api/chat",
+        json={**payload, "client_request_id": "req-real-b"},
+        headers={**AUTH, "Accept": "application/json", "X-Real-IP": "2.2.2.2"},
+    )
+
+    assert first.status_code != 429
+    assert second.status_code == 429
+    assert second.json()["code"] == "RATE_LIMITED"
+
+
 @pytest_asyncio.fixture
 async def trusted_proxy_client() -> AsyncIterator[AsyncClient]:
     app = create_app(_settings(trusted_proxy_hops=1, trusted_proxy_ips="127.0.0.1"))

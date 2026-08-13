@@ -404,16 +404,16 @@ Task 8 的验收要求**同时**补 `answer_id` 与当前反馈状态。只补 `
 
 ### Task 2.2: 按子计划执行四个切片
 
-- [ ] **Step 1: Task 9 — 指标口径**
+- [x] **Step 1: Task 9 — 指标口径（2026-08-12 完成；2026-08-13 重跑前后端门禁复核）**
 - [x] **Step 2: Task 10 — 纯明细模式（2026-08-12 完成）**
 - [x] **Step 3: Task 11 — 跨业务查询（2026-08-12 完成）**（**注意：本 Task 改 `QueryIntent`，是阶段 4 真实模型验收必须排在其后的原因**）
-- [ ] **Step 4: Task 12 — 受控临时分组指标**
+- [x] **Step 4: Task 12 — 受控临时分组指标（2026-08-13 完成）**
 
 ### Task 2.3: 收口
 
-- [ ] **Step 1: Task 13 — 补齐真实数据库 E2E 场景**（阶段 A 的 3 条真实库用例只覆盖阶段 A 的能力；四类新行为不补 E2E 等于从未在真实库上跑通）
-- [ ] **Step 2: Task 14 — 最终一致性验收**（要求**销毁重建两个 PostgreSQL 容器**后重跑，因为阶段 B 新增了迁移，跑在旧库上不算数）
-- [ ] **Step 3: Task 15 — Git 交付顺序与分支推进**（向用户报告完整文件清单与分组建议，请求授权提交；**不得自行 commit**）
+- [x] **Step 1: Task 13 — 补齐真实数据库 E2E 场景（2026-08-13 完成，8 条通过）**
+- [x] **Step 2: Task 14 — 最终一致性验收（2026-08-13 完成；Docker 恢复后重建无卷隔离容器，后端 772 条与真实 API E2E 8 条均以退出码 0 通过）**
+- [x] **Step 3: Task 15 — Git 交付顺序与分支推进（2026-08-13，本地提交 `597a3b5`、`ddff714`；未快进、未推送）**
 
 ### Task 2.4: 顺带清理类型债务
 
@@ -460,7 +460,7 @@ if len(chain) < trusted_proxy_hops:                 # → 成立
 - Consumes: `resolve_client_ip(request, *, trusted_proxy_hops, trusted_proxy_ips)`（现有签名）
 - Produces: 同名函数，新增对 `X-Real-IP` 的支持；签名是否变化由 Task 2.5.2 的设计决定，**变更后必须回到本文件更新此处**
 
-- [ ] **Step 1: 写失败测试——只有 `X-Real-IP` 时应解析出客户端地址**
+- [x] **Step 1: 写失败测试——只有 `X-Real-IP` 时应解析出客户端地址**
 
 ```python
 def test_resolves_client_ip_from_x_real_ip_when_forwarded_for_absent():
@@ -474,7 +474,7 @@ def test_resolves_client_ip_from_x_real_ip_when_forwarded_for_absent():
     assert resolved == "203.0.113.7"
 ```
 
-- [ ] **Step 2: 运行确认失败，且失败原因正确**
+- [x] **Step 2: 运行确认失败，且失败原因正确**
 
 ```powershell
 cd backend
@@ -483,7 +483,7 @@ uv run pytest tests/unit/core/test_client_ip.py -k x_real_ip -v
 
 预期 FAIL，实际返回 `"10.0.0.1"`（代理地址）。**必须确认失败原因是"读不到 X-Real-IP"而不是测试装配错误**——这正是线上会发生的退化。
 
-- [ ] **Step 3: 写失败测试——不可信来源的 `X-Real-IP` 必须被忽略**
+- [x] **Step 3: 写失败测试——不可信来源的 `X-Real-IP` 必须被忽略**
 
 ```python
 def test_untrusted_peer_cannot_spoof_x_real_ip():
@@ -497,7 +497,7 @@ def test_untrusted_peer_cannot_spoof_x_real_ip():
     assert resolved == "198.51.100.9"
 ```
 
-- [ ] **Step 4: 运行确认第 3 步的测试当前已通过**
+- [x] **Step 4: 运行确认第 3 步的测试当前已通过**
 
 当前实现在 peer 不可信时直接 `return peer`，所以这条本来就通过。**保留它作为回归护栏**——Task 2.5.2 修改解析逻辑时，它必须持续通过，否则就是把伪造防线改坏了。
 
@@ -509,7 +509,7 @@ def test_untrusted_peer_cannot_spoof_x_real_ip():
 - Modify: `.env.example`
 - Modify: `docs/deployment.md`
 
-- [ ] **Step 1: 实现 `X-Real-IP` 支持，保持伪造防线不变**
+- [x] **Step 1: 实现 `X-Real-IP` 支持，保持伪造防线不变**
 
 设计要求，缺一不可：
 
@@ -518,7 +518,7 @@ def test_untrusted_peer_cannot_spoof_x_real_ip():
 3. **优先级必须显式**：约定 `X-Forwarded-For` 存在且长度足够时优先（保留既有多跳语义），否则回落到 `X-Real-IP`。该约定写进函数 docstring；
 4. **两个头都取不到时返回 `peer`**，不得抛异常。
 
-- [ ] **Step 2: 运行 Task 2.5.1 的四条测试，确认全部通过**
+- [x] **Step 2: 运行 Task 2.5.1 的四条测试，确认全部通过**
 
 ```powershell
 cd backend
@@ -746,7 +746,7 @@ Railway 官方文档明确：配置文件**不跟随** Root Directory。必须�
 | --- | --- |
 | PowerShell 拦截 `npm.ps1`（`PSSecurityException`） | 一律使用 `npm.cmd` / `npx.cmd`。不得因此降级门禁语义。 |
 | PowerShell 5 不支持 `&&` | 用 `;` 或 `if ($?) { }` 分开执行，不要写成一行。 |
-| Playwright CLI 在本机跑完用例后不自行退出，外层超时以 exit 124 结束 | **测试断言输出 `ok` 才是结果，exit 124 不等于失败；但也不得把 exit 124 记为"命令成功退出"。** 报告时两者分开写。 |
+| Playwright CLI 在本机跑完用例后不自行退出，外层超时以 exit 124 结束 | 已定位并修复：常规与首屏 E2E 均不再使用 Windows `webServer` shell，而由 globalSetup 直接管理 Vite Node 子进程。两条门禁现均退出码 0。 |
 | Docker Desktop 偶发返回 `500 Internal Server Error` 且重启无效 | 曾等待近 20 分钟自行恢复。先确认是环境瞬时故障再怀疑代码；**不得因 Docker 不可用就跳过真实数据库门禁并声称通过**。 |
 | 首屏 preview 与常规构建争用 `dist/` | 已修为独立 `dist-first-paint/`，且 `reuseExistingServer: false`、专用 5285 端口。改动 Playwright 配置时不要退回共享 `dist/`。 |
 | ECharts chunk 556.46 kB 的 size 提示 | 既有非阻塞警告，不是失败条件。 |

@@ -7,10 +7,12 @@ from fastapi import Request
 from app.core.client_ip import resolve_client_ip
 
 
-def _request(*, peer: str, forwarded_for: str | None) -> Request:
+def _request(*, peer: str, forwarded_for: str | None = None, real_ip: str | None = None) -> Request:
     headers = []
     if forwarded_for is not None:
         headers.append((b"x-forwarded-for", forwarded_for.encode()))
+    if real_ip is not None:
+        headers.append((b"x-real-ip", real_ip.encode()))
     scope = {
         "type": "http",
         "headers": headers,
@@ -70,3 +72,43 @@ def test_falls_back_to_peer_when_chain_shorter_than_hops() -> None:
     )
 
     assert result == "10.0.0.1"
+
+
+def test_resolves_client_ip_from_x_real_ip_when_forwarded_for_absent() -> None:
+    request = _request(peer="10.0.0.1", real_ip="203.0.113.7")
+
+    result = resolve_client_ip(
+        request, trusted_proxy_hops=1, trusted_proxy_ips=frozenset({"10.0.0.1"})
+    )
+
+    assert result == "203.0.113.7"
+
+
+def test_prefers_forwarded_for_over_real_ip_for_a_trusted_peer() -> None:
+    request = _request(peer="10.0.0.1", forwarded_for="198.51.100.9", real_ip="203.0.113.7")
+
+    result = resolve_client_ip(
+        request, trusted_proxy_hops=1, trusted_proxy_ips=frozenset({"10.0.0.1"})
+    )
+
+    assert result == "198.51.100.9"
+
+
+def test_falls_back_to_peer_when_trusted_proxy_sets_neither_header() -> None:
+    request = _request(peer="10.0.0.1")
+
+    result = resolve_client_ip(
+        request, trusted_proxy_hops=1, trusted_proxy_ips=frozenset({"10.0.0.1"})
+    )
+
+    assert result == "10.0.0.1"
+
+
+def test_untrusted_peer_cannot_spoof_x_real_ip() -> None:
+    request = _request(peer="198.51.100.9", real_ip="203.0.113.7")
+
+    result = resolve_client_ip(
+        request, trusted_proxy_hops=1, trusted_proxy_ips=frozenset({"10.0.0.1"})
+    )
+
+    assert result == "198.51.100.9"
