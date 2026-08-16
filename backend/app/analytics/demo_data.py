@@ -23,6 +23,7 @@ _RETURN_STATUSES = ("REQUESTED", "APPROVED", "RECEIVED", "COMPLETED", "REJECTED"
 _LOGISTICS_STATUSES = ("PENDING", "SHIPPED", "DELIVERED", "LOST")
 _TICKET_STATUSES = ("OPEN", "PENDING", "RESOLVED", "CLOSED")
 _TICKET_REASONS = ("物流查询", "退款进度", "商品咨询", "投诉建议")
+_CITIES = ("杭州市", "深圳市", "广州市", "成都市", "武汉市")
 
 
 @dataclass(frozen=True)
@@ -75,6 +76,7 @@ def build_demo_dataset(
                 "merchant_id": merchant_id,
                 "business_date": listed_day,
                 "product_code": f"SKU{index:04d}",
+                "spu_id": f"SPU{index:04d}",
                 "title": f"演示商品 {index + 1:02d}",
                 "category": _CATEGORIES[index % len(_CATEGORIES)],
                 "price": _money(rng.uniform(39, 899)),
@@ -127,6 +129,7 @@ def build_demo_dataset(
                     "business_date": business_day,
                     "order_no": f"NO{business_day:%Y%m%d}{sequence:03d}",
                     "buyer_key": f"buyer-{rng.randrange(1, 240):03d}",
+                    "address_city_name": _CITIES[rng.randrange(len(_CITIES))],
                     "order_status": status,
                     "total_amount": total,
                     "paid_amount": total if paid else Decimal("0.00"),

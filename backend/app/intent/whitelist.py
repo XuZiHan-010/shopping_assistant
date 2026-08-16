@@ -12,7 +12,7 @@ from datetime import date, timedelta
 from typing import Final
 
 from app.intent.models import DateRange, QueryIntent
-from app.schemas.chat import AnswerMode
+from app.schemas.chat import AnswerMode, QuestionCategory
 
 MAX_QUERY_DAYS: Final[int] = 180
 MAX_DETAIL_LIMIT: Final[int] = 200
@@ -66,9 +66,28 @@ def validate_intent(intent: QueryIntent, *, today: date) -> IntentValidation:
 
     rejected: list[str] = []
     adjusted: list[str] = []
+    generated_plan_invalid = intent.generated_metric_plan_rejected
     if intent.cross_business_plan_rejected:
         adjusted.append("LLM 跨业务计划缺少安全路由参数，已拒绝该计划并按普通查询处理")
+    if intent.generated_metric_plan_rejected:
+        rejected.append("LLM 临时分组指标计划不符合受控白名单，拒绝执行")
     data = intent.model_dump()
+
+    # 下方 `if rejected: data["answer_mode"] = AnswerMode.INVALID` 已经覆盖
+    # `generated_metric_plan_rejected` 的情况，这里不重复设置 answer_mode。
+    # 但两种拒绝原因都必须清空 `generated_metric_plan` 本身：结构合法只是
+    # 用错了 answer_mode/category 时，若不清空，序列化后的计划字典仍会通过
+    # `_recover_nested_plans` 的重新校验，让一个已判定 INVALID 的意图继续
+    # 带着一个看似「已批准」的计划对象。
+    if intent.generated_metric_plan is not None and (
+        intent.generated_metric_plan_rejected
+        or intent.answer_mode is not AnswerMode.METRIC
+        or intent.category not in {QuestionCategory.TRADE, QuestionCategory.REFUND}
+    ):
+        generated_plan_invalid = True
+        data["generated_metric_plan"] = None
+        if not intent.generated_metric_plan_rejected:
+            rejected.append("临时分组指标仅支持交易或退款类的指标查询，拒绝执行")
 
     if (metric := intent.metric) is not None:
         if _SQL_PATTERN.search(metric):
@@ -109,6 +128,8 @@ def validate_intent(intent: QueryIntent, *, today: date) -> IntentValidation:
         adjusted.append(f"limit 超过上限，已覆盖为 {MAX_DETAIL_LIMIT}")
     if rejected:
         data["answer_mode"] = AnswerMode.INVALID
+    if generated_plan_invalid:
+        data["category"] = QuestionCategory.UNKNOWN
 
     return IntentValidation(
         intent=QueryIntent.model_validate(data),

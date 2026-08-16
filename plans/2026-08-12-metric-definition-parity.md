@@ -1,5 +1,6 @@
 # R9 指标口径还原实施计划
 
+> **状态：** 已完成（2026-08-12 实现；2026-08-13 重跑前后端门禁复核）
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 实现“正式目录 → 受控字段注释 → 明确标记的 LLM 候选”三级指标口径检索，补齐双口径、维度、来源库表、报表链接和历史 JSONB 兼容。
@@ -33,11 +34,11 @@
 
 **Produces:** ORM/API 字段 `dimensions`、`source_database`、`source_table`、`report_url`、`generated`、`notice`，以及 METRIC `ChatResponse` 对应的 `metric_*` 字段。
 
-- [ ] Step 1 — 在 `test_metrics.py` 写失败测试：`GET /api/metrics/gmv` 必须返回 `sql_definition`、`dimensions=['date','product','category']`、`source_database='public'`、`source_table='orders'`、`generated=false`、`notice=null`；在 `test_chat.py` 令 `metric_sql_definition=None`，断言 `ChatResponse` 校验失败。
-- [ ] Step 2 — 运行 `cd backend; uv run pytest tests/api/test_metrics.py tests/unit/schemas/test_chat.py -q`，预期因字段不存在失败。
-- [ ] Step 3 — 增加迁移：JSONB `dimensions`、字符串 `source_database/source_table`、可空 `report_url/notice`、布尔 `generated`；用九个 `METRIC_SEED` 回填（库 `public`、表来自 `METRIC_SPECS`、来源 `METRIC_CATALOG`），迁移末尾移除非空字段 server default。扩 ORM、Seed、端点和 Schema；METRIC 逐项要求新字段，`generated=true` 强制 `UNVERIFIED + AI_GENERATED + 非空 notice`，否则 `notice is None`。
-- [ ] Step 4 — 用隔离测试库运行 `tests/integration/test_migrations.py tests/api/test_metrics.py tests/unit/schemas/test_chat.py`，预期全部通过且迁移可升级/降级。
-- [ ] Step 5 — 提交范围为本任务列出的迁移、ORM、Schema、端点与三份测试，提交信息 `feat: extend metric definition contract`。
+- [x] Step 1 — 在 `test_metrics.py` 写失败测试：`GET /api/metrics/gmv` 必须返回 `sql_definition`、`dimensions=['date','product','category']`、`source_database='public'`、`source_table='orders'`、`generated=false`、`notice=null`；在 `test_chat.py` 令 `metric_sql_definition=None`，断言 `ChatResponse` 校验失败。
+- [x] Step 2 — 运行 `cd backend; uv run pytest tests/api/test_metrics.py tests/unit/schemas/test_chat.py -q`，预期因字段不存在失败。
+- [x] Step 3 — 增加迁移：JSONB `dimensions`、字符串 `source_database/source_table`、可空 `report_url/notice`、布尔 `generated`；用九个 `METRIC_SEED` 回填（库 `public`、表来自 `METRIC_SPECS`、来源 `METRIC_CATALOG`），迁移末尾移除非空字段 server default。扩 ORM、Seed、端点和 Schema；METRIC 逐项要求新字段，`generated=true` 强制 `UNVERIFIED + AI_GENERATED + 非空 notice`，否则 `notice is None`。
+- [x] Step 4 — 用隔离测试库运行 `tests/integration/test_migrations.py tests/api/test_metrics.py tests/unit/schemas/test_chat.py`，预期全部通过且迁移可升级/降级。
+- [x] Step 5 — 提交范围为本任务列出的迁移、ORM、Schema、端点与三份测试，提交信息 `feat: extend metric definition contract`。
 
 ### Task 2: 受控三级检索
 
@@ -49,11 +50,11 @@
 
 **Produces:** `MetricPayload` 增加全部治理字段；`MetricCatalog.resolve()` 依序查正式目录、字段注释、LLM。
 
-- [ ] Step 1 — 写失败矩阵：目录空但 `gmv` 注释命中时返回 `FIELD_COMMENT`、表为 `orders`、Fake LLM 的 `calls=[]`；猴子补丁使二级未命中后，Fake LLM JSON 候选必须为 `AI_GENERATED/UNVERIFIED/generated=true/GENERATED_NOTICE`。
-- [ ] Step 2 — 运行 `cd backend; uv run pytest tests/unit/metrics/test_catalog.py tests/unit/agent/test_graph.py -q`，预期因不存在字段注释目录失败。
-- [ ] Step 3 — 创建 `FieldCommentDefinition(metric_code, business_definition, sql_definition, dimensions, source_database, source_table)` 与不可变 `FIELD_COMMENT_DEFINITIONS`；九个键必须等于 `METRIC_SPECS`，每个表必须匹配 `MetricSpec.table`。正式目录命中映射 `METRIC_CATALOG`；目录未命中才查常量；两级均未命中时 LLM 仅读取 `display_name/unit/definition/sql_definition`，模型输出绝不参与库表、维度或 SQL 标识符选择。
-- [ ] Step 4 — 在 Graph 响应逐项写入新增 `metric_*` 字段，保留 LLM 不可用/JSON 非法的现有显式降级语义。
-- [ ] Step 5 — 运行 `test_catalog.py test_graph.py test_graph_review.py`，预期正式命中、注释命中、候选、LLM 失败四条路径独立通过；提交信息 `feat: add metric definition retrieval tiers`。
+- [x] Step 1 — 写失败矩阵：目录空但 `gmv` 注释命中时返回 `FIELD_COMMENT`、表为 `orders`、Fake LLM 的 `calls=[]`；猴子补丁使二级未命中后，Fake LLM JSON 候选必须为 `AI_GENERATED/UNVERIFIED/generated=true/GENERATED_NOTICE`。
+- [x] Step 2 — 运行 `cd backend; uv run pytest tests/unit/metrics/test_catalog.py tests/unit/agent/test_graph.py -q`，预期因不存在字段注释目录失败。
+- [x] Step 3 — 创建 `FieldCommentDefinition(metric_code, business_definition, sql_definition, dimensions, source_database, source_table)` 与不可变 `FIELD_COMMENT_DEFINITIONS`；九个键必须等于 `METRIC_SPECS`，每个表必须匹配 `MetricSpec.table`。正式目录命中映射 `METRIC_CATALOG`；目录未命中才查常量；两级均未命中时 LLM 仅读取 `display_name/unit/definition/sql_definition`，模型输出绝不参与库表、维度或 SQL 标识符选择。
+- [x] Step 4 — 在 Graph 响应逐项写入新增 `metric_*` 字段，保留 LLM 不可用/JSON 非法的现有显式降级语义。
+- [x] Step 5 — 运行 `test_catalog.py test_graph.py test_graph_review.py`，预期正式命中、注释命中、候选、LLM 失败四条路径独立通过；提交信息 `feat: add metric definition retrieval tiers`。
 
 ### Task 3: 报表 URL 与旧 JSONB 回放
 
@@ -65,9 +66,9 @@
 
 **Produces:** `normalize_report_url(value) -> str | None`；`upgrade_payload(payload) -> dict[str, Any]`。
 
-- [ ] Step 1 — 写失败测试：`javascript:alert(1)`、`data:text/html,x`、`/internal/report` 均被 URL 规范化器拒绝；删除旧 METRIC payload 的所有新增键后，`_stored_response()` 仍返回 `metric_report_url is None`、`metric_generated is False`、`metric_dimensions == []`。
-- [ ] Step 2 — 实现 `urlsplit` 检查：仅 `http/https` 且 `netloc` 非空才保留；ORM `@validates('report_url')` 在写入调用它。`_stored_response()` 先调用不修改入参、两次结果相同的 `upgrade_payload()`，仅为旧 METRIC payload `setdefault` 新字段。
-- [ ] Step 3 — 运行 `cd backend; uv run pytest tests/unit/services/test_chat_service.py tests/unit/schemas/test_chat.py -q`，预期非法 URL 被拒绝、HTTPS 保留、旧 payload 可重放；提交信息 `fix: secure metric reports and payload replay`。
+- [x] Step 1 — 写失败测试：`javascript:alert(1)`、`data:text/html,x`、`/internal/report` 均被 URL 规范化器拒绝；删除旧 METRIC payload 的所有新增键后，`_stored_response()` 仍返回 `metric_report_url is None`、`metric_generated is False`、`metric_dimensions == []`。
+- [x] Step 2 — 实现 `urlsplit` 检查：仅 `http/https` 且 `netloc` 非空才保留；ORM `@validates('report_url')` 在写入调用它。`_stored_response()` 先调用不修改入参、两次结果相同的 `upgrade_payload()`，仅为旧 METRIC payload `setdefault` 新字段。
+- [x] Step 3 — 运行 `cd backend; uv run pytest tests/unit/services/test_chat_service.py tests/unit/schemas/test_chat.py -q`，预期非法 URL 被拒绝、HTTPS 保留、旧 payload 可重放；提交信息 `fix: secure metric reports and payload replay`。
 
 ### Task 4: 前端领域映射与可追溯面板
 
@@ -78,10 +79,10 @@
 - Modify: `docs/fixtures/chat/metric-gmv.json`、`docs/fixtures/chat/metric-refund.json`
 - Generate: `docs/api.json`、`docs/api.md`、`frontend/src/api/generated.ts`、`frontend/src/api/mock/fixtures.generated.ts`
 
-- [ ] Step 1 — 写失败测试：Adapter 将 `metric_sql_definition`、维度、库表和 generated 映射到 `MetricDefinition`；输入 `metric_report_url='javascript:alert(1)'` 时面板没有 `metric-report-link`。
-- [ ] Step 2 — `MetricDefinition` 扩为 `sqlDefinition/dimensions/sourceDatabase/sourceTable/reportUrl?/generated/notice?`；Adapter 用 `new URL()` 二次仅接受 http/https，否则加入 `contractWarnings` 且不传组件。
-- [ ] Step 3 — 面板依次展示业务口径、SQL 口径、维度、来源库表、来源、负责人、状态；候选显示 notice；安全外链固定使用 `target="_blank" rel="noopener noreferrer"`。
-- [ ] Step 4 — 依次运行后端 `export_openapi.py`、前端 codegen 与 fixtures 同步，再运行两个前端定向测试，预期通过且生成文件未手改；提交信息 `feat: show traceable metric definitions`。
+- [x] Step 1 — 写失败测试：Adapter 将 `metric_sql_definition`、维度、库表和 generated 映射到 `MetricDefinition`；输入 `metric_report_url='javascript:alert(1)'` 时面板没有 `metric-report-link`。
+- [x] Step 2 — `MetricDefinition` 扩为 `sqlDefinition/dimensions/sourceDatabase/sourceTable/reportUrl?/generated/notice?`；Adapter 用 `new URL()` 二次仅接受 http/https，否则加入 `contractWarnings` 且不传组件。
+- [x] Step 3 — 面板依次展示业务口径、SQL 口径、维度、来源库表、来源、负责人、状态；候选显示 notice；安全外链固定使用 `target="_blank" rel="noopener noreferrer"`。
+- [x] Step 4 — 依次运行后端 `export_openapi.py`、前端 codegen 与 fixtures 同步，再运行两个前端定向测试，预期通过且生成文件未手改；提交信息 `feat: show traceable metric definitions`。
 
 ### Task 5: 全量门禁与文档收口
 
@@ -89,10 +90,10 @@
 
 - Modify: `docs/PRD.md`、`docs/backend-development-plan.md`、`docs/frontend-development-plan.md`、`docs/yshopping-parity-audit.md`、`docs/project-progress.md`、`plans/2026-08-09-b7-f4-integration-and-r9-remediation.md`
 
-- [ ] Step 1 — 后端依次运行 `ruff check app tests`、`ruff format --check app tests`、`mypy app`、隔离数据库 `pytest`；预期全绿，只有已有第三方弃用警告，DeepSeek 调用 0。
-- [ ] Step 2 — 前端依次运行 `codegen:check`、`fixtures:check`、`typecheck`、`lint`、`format:check`、`test`；预期全绿。
-- [ ] Step 3 — 文档登记三级顺序、字段注释白名单、双层 URL 防护、payload 升级器与实际测试数；审计标记“指标口径”已修复但不得宣称复刻自由 SQL；下一步改为 Task 10 子计划审阅。
-- [ ] Step 4 — 运行 `git diff --check`，确认未改参考项目、未提交密钥或测试库地址；提交文档收口，信息 `docs: close metric definition parity task`。
+- [x] Step 1 — 后端依次运行 `ruff check app tests`、`ruff format --check app tests`、`mypy app`、隔离数据库 `pytest`；预期全绿，只有已有第三方弃用警告，DeepSeek 调用 0。
+- [x] Step 2 — 前端依次运行 `codegen:check`、`fixtures:check`、`typecheck`、`lint`、`format:check`、`test`；预期全绿。
+- [x] Step 3 — 文档登记三级顺序、字段注释白名单、双层 URL 防护、payload 升级器与实际测试数；审计标记“指标口径”已修复但不得宣称复刻自由 SQL；下一步改为 Task 10 子计划审阅。
+- [x] Step 4 — 运行 `git diff --check`，确认未改参考项目、未提交密钥或测试库地址；提交文档收口，信息 `docs: close metric definition parity task`。
 
 ## 自检
 

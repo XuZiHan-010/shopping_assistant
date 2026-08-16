@@ -14,8 +14,10 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analytics.contract import METRIC_SPECS
+from app.intent.models import GeneratedMetricPlan
 from app.models.analytics import Order, OrderItem, Product, Refund, ReturnRecord
 from app.repositories.analytics import AnalyticsRepository
+from app.schemas.chat import QuestionCategory
 
 DAY = date(2026, 8, 3)
 NEXT_DAY = date(2026, 8, 4)
@@ -525,3 +527,306 @@ async def test_gmv_by_category_still_excludes_disqualifying_order_status(
 
     by_category = {row["category"]: row["gmv"] for row in result.rows}
     assert by_category == {"女装": Decimal("100.00")}
+
+
+async def _generated_metric_row(
+    session: AsyncSession,
+    merchant_id: UUID,
+    *,
+    spu_id: str,
+    city: str,
+    paid_amount: Decimal,
+    refund_amount: Decimal | None = None,
+    order_status: str = "COMPLETED",
+    refund_status: str = "REFUNDED",
+) -> None:
+    product = Product(
+        merchant_id=merchant_id,
+        business_date=DAY,
+        product_code=f"SKU-{spu_id}",
+        spu_id=spu_id,
+        title=f"商品 {spu_id}",
+        category="女装",
+        price=paid_amount,
+        status="ONLINE",
+        listed_at=datetime(2026, 8, 3, 2, 0, tzinfo=UTC),
+    )
+    session.add(product)
+    await session.flush()
+    order = Order(
+        merchant_id=merchant_id,
+        business_date=DAY,
+        order_no=f"NO-{spu_id}-{uuid4().hex[:6]}",
+        buyer_key=f"buyer-{spu_id}",
+        address_city_name=city,
+        order_status=order_status,
+        total_amount=paid_amount,
+        paid_amount=paid_amount,
+        placed_at=datetime(2026, 8, 3, 2, 0, tzinfo=UTC),
+        paid_at=datetime(2026, 8, 3, 3, 0, tzinfo=UTC),
+    )
+    session.add(order)
+    await session.flush()
+    item = OrderItem(
+        merchant_id=merchant_id,
+        business_date=DAY,
+        order_id=order.id,
+        product_id=product.id,
+        quantity=2,
+        item_amount=paid_amount,
+    )
+    session.add(item)
+    await session.flush()
+    if refund_amount is not None:
+        session.add(
+            Refund(
+                merchant_id=merchant_id,
+                business_date=DAY,
+                order_item_id=item.id,
+                refund_amount=refund_amount,
+                refund_reason="尺码不合适",
+                refund_status=refund_status,
+                refunded_at=datetime(2026, 8, 3, 4, 0, tzinfo=UTC),
+            )
+        )
+        await session.flush()
+
+
+@pytest.mark.asyncio
+async def test_generated_metric_uses_fixed_trade_and_refund_templates_with_merchant_scope(
+    db_session: AsyncSession, merchant_one_id: UUID, merchant_two_id: UUID
+) -> None:
+    await _generated_metric_row(
+        db_session,
+        merchant_one_id,
+        spu_id="SPU-ONE",
+        city="杭州市",
+        paid_amount=Decimal("120.00"),
+        refund_amount=Decimal("30.00"),
+    )
+    await _generated_metric_row(
+        db_session,
+        merchant_two_id,
+        spu_id="SPU-TWO",
+        city="北京市",
+        paid_amount=Decimal("999.00"),
+        refund_amount=Decimal("99.00"),
+    )
+    repository = AnalyticsRepository(db_session)
+
+    trade = await repository.generated_metric(
+        merchant_id=merchant_one_id,
+        category=QuestionCategory.TRADE,
+        plan=GeneratedMetricPlan(
+            name="按 SPU 看成交表现",
+            unit="元",
+            group_by="spu_id",
+        ),
+        start=DAY,
+        end=DAY,
+        limit=200,
+    )
+    refund = await repository.generated_metric(
+        merchant_id=merchant_one_id,
+        category=QuestionCategory.REFUND,
+        plan=GeneratedMetricPlan(
+            name="按城市看退款表现",
+            unit="元",
+            group_by="address_city_name",
+        ),
+        start=DAY,
+        end=DAY,
+        limit=200,
+    )
+
+    assert trade.rows == [
+        {
+            "spu_id": "SPU-ONE",
+            "spu_name": "商品 SPU-ONE",
+            "order_count": 1,
+            "order_user_count": 1,
+            "quantity": 2,
+            "paid_amount": Decimal("120.00"),
+        }
+    ]
+    assert refund.rows == [
+        {
+            "address_city_name": "杭州市",
+            "refund_count": 1,
+            "refund_user_count": 1,
+            "refund_amount": Decimal("30.00"),
+        }
+    ]
+    assert trade.source_tables == ("orders", "order_items", "products")
+    assert refund.source_tables == ("refunds", "order_items", "orders")
+
+
+@pytest.mark.asyncio
+async def test_generated_metric_allows_city_filter_without_a_group(
+    db_session: AsyncSession, merchant_one_id: UUID
+) -> None:
+    await _generated_metric_row(
+        db_session,
+        merchant_one_id,
+        spu_id="SPU-HZ",
+        city="杭州市",
+        paid_amount=Decimal("100.00"),
+    )
+    await _generated_metric_row(
+        db_session,
+        merchant_one_id,
+        spu_id="SPU-SZ",
+        city="深圳市",
+        paid_amount=Decimal("200.00"),
+    )
+
+    result = await AnalyticsRepository(db_session).generated_metric(
+        merchant_id=merchant_one_id,
+        category=QuestionCategory.TRADE,
+        plan=GeneratedMetricPlan(
+            name="杭州成交表现",
+            unit="元",
+            filter_column="address_city_name",
+            filter_value="杭州市",
+        ),
+        start=DAY,
+        end=DAY,
+        limit=200,
+    )
+
+    assert result.rows == [
+        {
+            "order_count": 1,
+            "order_user_count": 1,
+            "quantity": 2,
+            "paid_amount": Decimal("100.00"),
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_generated_metric_reports_the_exact_total_when_preview_is_truncated(
+    db_session: AsyncSession, merchant_one_id: UUID
+) -> None:
+    for index in range(201):
+        await _generated_metric_row(
+            db_session,
+            merchant_one_id,
+            spu_id=f"SPU-{index:03d}",
+            city="杭州市",
+            paid_amount=Decimal("1.00"),
+        )
+
+    result = await AnalyticsRepository(db_session).generated_metric(
+        merchant_id=merchant_one_id,
+        category=QuestionCategory.TRADE,
+        plan=GeneratedMetricPlan(
+            name="按 SPU 看成交表现",
+            unit="元",
+            group_by="spu_id",
+        ),
+        start=DAY,
+        end=DAY,
+        limit=200,
+    )
+
+    assert len(result.rows) == 200
+    assert result.total_rows == 201
+    assert result.truncated is True
+
+
+@pytest.mark.asyncio
+async def test_generated_refund_metric_excludes_pending_and_rejected_refunds(
+    db_session: AsyncSession, merchant_one_id: UUID
+) -> None:
+    """未真正退款的申请不能被算进临时分组指标的退款金额/笔数。"""
+
+    await _generated_metric_row(
+        db_session,
+        merchant_one_id,
+        spu_id="SPU-DONE",
+        city="杭州市",
+        paid_amount=Decimal("100.00"),
+        refund_amount=Decimal("30.00"),
+        refund_status="REFUNDED",
+    )
+    await _generated_metric_row(
+        db_session,
+        merchant_one_id,
+        spu_id="SPU-PENDING",
+        city="杭州市",
+        paid_amount=Decimal("100.00"),
+        refund_amount=Decimal("50.00"),
+        refund_status="PENDING",
+    )
+    await _generated_metric_row(
+        db_session,
+        merchant_one_id,
+        spu_id="SPU-REJECTED",
+        city="杭州市",
+        paid_amount=Decimal("100.00"),
+        refund_amount=Decimal("70.00"),
+        refund_status="REJECTED",
+    )
+
+    result = await AnalyticsRepository(db_session).generated_metric(
+        merchant_id=merchant_one_id,
+        category=QuestionCategory.REFUND,
+        plan=GeneratedMetricPlan(
+            name="按城市看退款表现",
+            unit="元",
+            group_by="address_city_name",
+        ),
+        start=DAY,
+        end=DAY,
+        limit=200,
+    )
+
+    assert result.rows == [
+        {
+            "address_city_name": "杭州市",
+            "refund_count": 1,
+            "refund_user_count": 1,
+            "refund_amount": Decimal("30.00"),
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_generated_trade_metric_excludes_unpaid_orders_entirely(
+    db_session: AsyncSession, merchant_one_id: UUID
+) -> None:
+    """从未付款的订单不能在临时分组指标里凭空产出一行全零/全空的分组。"""
+
+    await _generated_metric_row(
+        db_session,
+        merchant_one_id,
+        spu_id="SPU-PAID",
+        city="杭州市",
+        paid_amount=Decimal("100.00"),
+        order_status="COMPLETED",
+    )
+    await _generated_metric_row(
+        db_session,
+        merchant_one_id,
+        spu_id="SPU-CANCELLED",
+        city="杭州市",
+        paid_amount=Decimal("999.00"),
+        order_status="CANCELLED",
+    )
+
+    result = await AnalyticsRepository(db_session).generated_metric(
+        merchant_id=merchant_one_id,
+        category=QuestionCategory.TRADE,
+        plan=GeneratedMetricPlan(
+            name="按 SPU 看成交表现",
+            unit="元",
+            group_by="spu_id",
+        ),
+        start=DAY,
+        end=DAY,
+        limit=200,
+    )
+
+    assert [row["spu_id"] for row in result.rows] == ["SPU-PAID"]
+    assert result.total_rows == 1

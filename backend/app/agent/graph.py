@@ -31,6 +31,7 @@ from app.schemas.chat import (
     AnswerMode,
     ChatResponse,
     ExportInfo,
+    MetricDefinitionSource,
     MetricStatus,
     QualityStatus,
     QueryPlanSummary,
@@ -274,7 +275,11 @@ class MerchantQaGraph:
         # 而索引层只有目录词汇。节点顺序由计划 §10 固定，正文层在此才可用。
         metric: MetricPayload | None = None
         if intent.answer_mode is AnswerMode.METRIC:
-            metric = await self._catalog.resolve(intent, detail.text, state["budget"])
+            metric = (
+                _generated_metric_payload(intent)
+                if intent.generated_metric_plan is not None
+                else await self._catalog.resolve(intent, detail.text, state["budget"])
+            )
         return {
             **self._step(state, "retrieve_knowledge_detail"),
             "knowledge_detail": detail,
@@ -473,6 +478,9 @@ class MerchantQaGraph:
             if metric.generated and metric.notice is not None:
                 # 生成口径必须带待核验说明，否则用户会把模型猜的口径当成正式口径。
                 notes.append(metric.notice)
+            visualization = state["visualization"]
+            if visualization is None and state["query_result"] is not None:
+                visualization = self._visualization_service.build(state["query_result"], metric)
             return ChatResponse(
                 id=uuid4(),
                 session_id=state["session_id"],
@@ -506,7 +514,7 @@ class MerchantQaGraph:
                 data_rows=outcome.data_rows,
                 total_rows=outcome.total_rows,
                 truncated=outcome.truncated,
-                visualization=state["visualization"] or Visualization(enabled=False),
+                visualization=visualization or Visualization(enabled=False),
                 recommendations=state["recommendations"]
                 or _metric_recommendations(outcome, metric),
             )
@@ -837,4 +845,43 @@ def _unverified_metric(metric_code: str | None) -> MetricPayload:
         dimensions=(),
         source_database="",
         source_table="",
+    )
+
+
+# 受控临时分组指标只支持这两个类别（由 whitelist.py 强制），用字典而非
+# `"交易" if ... else "退款"` 的二选一三元表达式，未来若类别枚举出错会直接
+# KeyError 而不是把未知类别静默归到「退款」。
+_GENERATED_METRIC_CATEGORY_LABELS: Final[dict[str, tuple[str, str]]] = {
+    "TRADE": ("交易", "orders"),
+    "REFUND": ("退款", "refunds"),
+}
+
+
+def _generated_metric_payload(intent: QueryIntent) -> MetricPayload:
+    """为受控临时分组指标生成可展示的、待核验的口径载荷。
+
+    展示名称与单位来自已校验的结构化计划；实际数值只来自
+    ``AnalyticsRepository.generated_metric`` 的交易/退款固定模板。
+    """
+
+    plan = intent.generated_metric_plan
+    assert plan is not None
+    category = intent.category
+    category_label, source_table = _GENERATED_METRIC_CATEGORY_LABELS[category.value]
+    dimensions = tuple(item for item in (plan.group_by, plan.filter_column) if item is not None)
+    return MetricPayload(
+        metric_code=f"generated_{category.value.lower()}_metric",
+        display_name=plan.name,
+        unit=plan.unit,
+        definition=f"按{category_label}明细的后端固定聚合模板计算。",
+        source=MetricDefinitionSource.AI_GENERATED.value,
+        owner="待认领",
+        status=MetricStatus.UNVERIFIED.value,
+        generated=True,
+        notice="展示名称和单位由模型提出，聚合口径已由后端固定模板执行，仍需人工确认。",
+        sql_definition="由后端受控聚合模板生成，不接受模型提供的 SQL 或公式。",
+        dimensions=dimensions,
+        source_database="public",
+        source_table=source_table,
+        report_url=None,
     )

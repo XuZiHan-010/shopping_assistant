@@ -17,7 +17,12 @@ from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from app.core.security import MerchantContext
 from app.intent.models import DateRange, QueryIntent
 from app.intent.whitelist import validate_intent
-from app.repositories.analytics import AggregateResult, AnalyticsRepository, DetailResult
+from app.repositories.analytics import (
+    AggregateResult,
+    AnalyticsRepository,
+    DetailResult,
+    ResultColumn,
+)
 from app.schemas.chat import AnswerMode, QuestionCategory
 from app.services.safe_query import SafeQueryService, UnsupportedQueryError
 
@@ -28,9 +33,13 @@ DAY = date(2026, 8, 3)
 class _RecordingRepository:
     """记录调用参数的假仓储；`error` 非空时模拟数据库层抛错。"""
 
-    def __init__(self, *, error: Exception | None = None) -> None:
+    def __init__(
+        self, *, error: Exception | None = None, generated_result: DetailResult | None = None
+    ) -> None:
         self._error = error
+        self._generated_result = generated_result
         self.aggregate_calls: list[dict[str, Any]] = []
+        self.generated_metric_calls: list[dict[str, Any]] = []
         self.detail_calls: list[dict[str, Any]] = []
 
     async def aggregate(self, **kwargs: Any) -> AggregateResult:
@@ -45,6 +54,20 @@ class _RecordingRepository:
             raise self._error
         return DetailResult(
             columns=(), rows=[], total_rows=0, truncated=False, source_tables=("orders",)
+        )
+
+    async def generated_metric(self, **kwargs: Any) -> DetailResult:
+        self.generated_metric_calls.append(kwargs)
+        if self._error is not None:
+            raise self._error
+        if self._generated_result is not None:
+            return self._generated_result
+        return DetailResult(
+            columns=(),
+            rows=[],
+            total_rows=0,
+            truncated=False,
+            source_tables=("orders", "order_items"),
         )
 
 
@@ -168,6 +191,57 @@ async def test_detail_export_spec_keeps_the_verified_query_scope() -> None:
     assert result.export_spec.table == "orders"
     assert result.export_spec.filters == (("order_status", "PAID"),)
     assert result.export_spec.date_filtered is True
+
+
+@pytest.mark.asyncio
+async def test_generated_metric_uses_its_fixed_repository_route() -> None:
+    repository = _RecordingRepository()
+
+    await _service(repository).execute(
+        _context(),
+        _intent(
+            generated_metric_plan={
+                "name": "按 SPU 看成交表现",
+                "unit": "元",
+                "group_by": "spu_id",
+            }
+        ),
+        now=NOW,
+    )
+
+    assert repository.aggregate_calls == []
+    assert repository.generated_metric_calls[0]["category"] is QuestionCategory.TRADE
+    assert repository.generated_metric_calls[0]["plan"].group_by == "spu_id"
+
+
+@pytest.mark.asyncio
+async def test_generated_metric_truncates_exactly_at_the_preview_limit() -> None:
+    rows = [{"spu_id": f"SPU-{index:03d}", "paid_amount": 10} for index in range(201)]
+    repository = _RecordingRepository(
+        generated_result=DetailResult(
+            columns=(
+                ResultColumn("spu_id", "SPU", "DIMENSION"),
+                ResultColumn("paid_amount", "支付金额", "METRIC"),
+            ),
+            rows=rows,
+            total_rows=201,
+            truncated=False,
+            source_tables=("orders", "order_items", "products"),
+        )
+    )
+
+    result = await _service(repository).execute(
+        _context(),
+        _intent(
+            generated_metric_plan={"name": "按 SPU 看成交表现", "unit": "元", "group_by": "spu_id"}
+        ),
+        now=NOW,
+    )
+
+    assert len(result.rows) == 200
+    assert result.total_rows == 201
+    assert result.truncated is True
+    assert result.export_spec is not None
 
 
 @pytest.mark.asyncio

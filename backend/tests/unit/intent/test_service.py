@@ -5,6 +5,7 @@ from datetime import date
 
 import pytest
 
+from app.intent.prompts import understand_user_prompt
 from app.intent.service import MAX_INTENT_RETRIES, IntentService
 from app.llm.client import LlmBudget
 from app.llm.fake import FakeLlmClient
@@ -34,6 +35,18 @@ def _understand(**changes: object) -> str:
     }
     value.update(changes)
     return json.dumps(value)
+
+
+def test_understand_prompt_constrains_generated_metric_plan_to_fixed_templates() -> None:
+    prompt = understand_user_prompt("按 SPU 看成交表现", "TRADE", "交易知识")
+
+    assert "generated_metric_plan" in prompt
+    assert "spu_id" in prompt
+    assert "address_city_name" in prompt
+    assert "TRADE" in prompt
+    assert "REFUND" in prompt
+    assert "自由公式" in prompt
+    assert "表名" in prompt
 
 
 @pytest.mark.asyncio

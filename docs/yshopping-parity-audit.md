@@ -102,9 +102,7 @@ Railway 控制台部署与线上验收、B8/B9、F7–F9 尚未完成。R9 阶�
 （或带值的城市筛选），否则整条意图打成 `INVALID`。
 `MetricDefinitionService.metricSourceTable()` 据此把口径来源表从画像表切到明细表。
 
-**我们**：完全没有这个概念。指标只能来自 `METRIC_SPECS` 白名单，模型无法请求「按商品分组的临时指标」。
-
-这与我们的 R4 并不冲突——参考项目同样是白名单校验、模型不写 SQL——但确实少了一类问题的支持能力。
+**我们**：已实现 `GeneratedMetricPlan`。模型仅可给出展示名称、单位和受限的分组/筛选形状；后端按已验证的交易或退款类别选择固定 SQLAlchemy 聚合模板，所有商家范围和参数均由后端注入。计划形状非法时整条意图固定为 `INVALID` / `UNKNOWN`，不会降级为普通指标查询。
 
 ### 3.6 思考步骤在完成态和历史态回放
 
@@ -173,7 +171,7 @@ PRD §10 Metric Catalog 与 §6.2。
 1. **§3.6 思考过程渲染** — 数据已经在 store 里，纯前端改动，成本最低、可见性最高。
 2. **§3.1 + §3.2 指标口径** — 文档已改齐，实现链路明确（迁移 → Seed → 三个 Pydantic 模型 → codegen → 面板）。
 3. **§3.3 跨业务查询计划** — 需要先补 PRD 条款（当前 PRD 完全没写），是四项里唯一需要新增产品需求的。
-4. **§3.5 生成指标** — 与 §3.3 共享意图契约设计，但不依赖跨业务查询实现，建议同批设计后独立切片实施。
+4. **§3.5 生成指标** — 已于 2026-08-13 实施：受控计划、交易/退款固定聚合、精确截断、签名 CSV 重放及图表字段映射均已覆盖；全链路 E2E 与最终一致性验收仍由后续 Task 13–14 统一执行。
 5. **§6 待核实项** — 建议在各自阶段开工前各做一轮，而不是现在一次性做完。
 
 ---
@@ -195,11 +193,11 @@ PRD §10 Metric Catalog 与 §6.2。
 | --- | --- | --- | --- |
 | 纯明细 | `QuestionIntent`、`LlmIntentAnalysisService`、`SemanticLayerService`、`MerchantQaLangGraph` | 模型仅声明是否要求分析；`DETAIL` 且未要求分析时设 table-only；`repairAnswer()` 清空正文，`outputMatchesIntent()` 强制正文为空。 | ✅ `analysis_requested` 内部字段 + 响应空正文不变量、表格/导出保留、历史 Answer payload 可重放均已实现；空正文助手消息不会渲染为空白卡片。 |
 | 跨业务计划 | `QuestionIntent`、`SemanticLayerService`、`DorisQueryService` | 仅 `ORDER_TO_REFUND`、`ORDER_TO_GOODS`、`ORDER_REFUND_GOODS`；以商家范围和子订单号串行查订单、退款、商品；计划参数非法时移除该计划并记录说明，基础意图继续执行。 | ✅ 已实现受控计划、固定 ORM 路由、商家范围解析、可见降级说明与 CSV 重放；不存在与跨商家订单统一回退，避免存在性探测。 |
-| 临时分组指标 | `QuestionIntent`、`LlmIntentAnalysisService`、`SemanticLayerService`、`DorisQueryService`、`MetricDefinitionService`、`VisualizationService`，以及 `DorisQueryServiceTest`、`LlmIntentAnalysisServiceTest`、`MetricDefinitionServiceTest`、`VisualizationServiceTest` | 白名单仅 `spu_id`、`address_city_name`；按交易/退款类别选择固定聚合；城市筛选可替代分组；金额由分转元；非法维度整体 `INVALID`；截断时生成 CSV 与提示；图表只取查询结果已有字段。 | 🔴 缺受控计划与重放型导出；不得引入自由公式、自由列名或 `measure` 枚举。 |
+| 临时分组指标 | `QuestionIntent`、`LlmIntentAnalysisService`、`SemanticLayerService`、`DorisQueryService`、`MetricDefinitionService`、`VisualizationService`，以及 `DorisQueryServiceTest`、`LlmIntentAnalysisServiceTest`、`MetricDefinitionServiceTest`、`VisualizationServiceTest` | 白名单仅 `spu_id`、`address_city_name`；按交易/退款类别选择固定聚合；城市筛选可替代分组；金额由分转元；非法维度整体 `INVALID`；截断时生成 CSV 与提示；图表只取查询结果已有字段。 | ✅ 已实现受控计划、类别驱动固定 SQLAlchemy 模板、精确截断、签名 CSV 重放与安全图表字段映射；2026-08-13 已由真实 PostgreSQL 浏览器场景验证截断下载、图表和待核验提示；不接受自由公式、自由列名或 `measure` 枚举。 |
 | 会话上下文 | `ConversationContextStore`、`ConversationContextStoreTest`、`MerchantQaLangGraph` | 内存中按 `(merchant_id, session_id)` 隔离，TTL 30 分钟；复制意图、查询包、数据行、计划步骤和导出字段；只缓存有效且有数据的轮次；上文分析复用数据但不重新查库。 | ⚪ 我方持久会话优于内存 TTL；但历史详情必须脱敏返回执行载荷，不能返回完整明细行或过期签名 URL。 |
 | Reviewer 循环 | `PromptLoopAnalysisService`、`PromptLoopAnalysisServiceTest`、`MerchantQaLangGraph` | 本地校验与独立 reviewer 均通过才 PASS；最多 3 次总尝试后确定性 FALLBACK；loop notes 记录每轮退回原因；纯明细不允许被 loop 生成正文。 | ✅ 我方已有质量状态/次数/备注，R9 Task 8 已随脱敏历史助手载荷回放。 |
-| CSV 导出 | `QueryBundle`、`CsvExportService`、`DorisQueryService` | 截断时保存文件名、URL、notice；文件名净化、UTF-8 BOM、列顺序稳定；参考实现未实现公式注入和签名过期。 | ⚪ 我方签名、过期、公式防护更强；需补生成指标的安全重放导出。 |
-| 图表 | `VisualizationService`、`VisualizationServiceTest` | 仅 METRIC 且有行时启用；趋势用 `pt/value`，分组用白名单维度；金额优先金额列，单一筛选值禁用饼图。 | ✅ 我方安全图表原则一致；生成指标实施时需补字段映射测试。 |
+| CSV 导出 | `QueryBundle`、`CsvExportService`、`DorisQueryService` | 截断时保存文件名、URL、notice；文件名净化、UTF-8 BOM、列顺序稳定；参考实现未实现公式注入和签名过期。 | ✅ 我方签名、过期、公式防护更强；生成指标下载会重放已签名的受控计划，拒绝被篡改的计划、类别或列集合。 |
+| 图表 | `VisualizationService`、`VisualizationServiceTest` | 仅 METRIC 且有行时启用；趋势用 `pt/value`，分组用白名单维度；金额优先金额列，单一筛选值禁用饼图。 | ✅ 安全图表原则一致；生成指标仅从固定结果列选择金额字段，字段映射已有测试。 |
 
 `SemanticLayerService`、`CsvExportService`、`QueryBundle` 与 `MerchantQaLangGraph` 在参考测试目录没有同名单测；
 已如实记录为“源代码行为已核对”，未把不存在的测试虚构为证据。其余表列测试只证明已覆盖的样例，

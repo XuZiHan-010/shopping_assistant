@@ -90,7 +90,7 @@
 
    具体风险有两条，**2026-08-12 已按 Railway 官方文档逐条核实，结论与初稿不同，以下为核实后的版本**：
 
-   - **限流会退化为全局限流（已确认成立，故新增阶段 2.5）。** Railway 的 [Public Networking specs](https://docs.railway.com/networking/public-networking/specs-and-limits) 列出的注入头是 `X-Real-IP`（另有 `X-Forwarded-Proto`、`X-Forwarded-Host`），**未承诺注入 `X-Forwarded-For`**。而 `backend/app/core/client_ip.py:12` 只读 `x-forwarded-for`：取不到链时 `len(chain) < trusted_proxy_hops` 成立，直接 `return peer`——而 `peer` 是 Railway 代理的地址，对所有请求都相同。结果不是"限流被绕过"，而是**所有商家共用同一个限流桶**：单个用户就能耗尽全站配额，同时按 IP 区分客户端的设计完全失效。这必须在部署前修，见阶段 2.5。
+   - **限流会退化为按 Token 收敛（已确认成立，故新增阶段 2.5）。** Railway 的 [Public Networking specs](https://docs.railway.com/networking/public-networking/specs-and-limits) 列出的注入头是 `X-Real-IP`（另有 `X-Forwarded-Proto`、`X-Forwarded-Host`），**未承诺注入 `X-Forwarded-For`**。而 `backend/app/core/client_ip.py:12` 只读 `x-forwarded-for`：取不到链时 `len(chain) < trusted_proxy_hops` 成立，直接 `return peer`——而 `peer` 是 Railway 代理的地址。限流键为 `token|client_ip`，故结果不是“限流被绕过”，而是每个 Token 的客户端 IP 维度失效；本次对外演示公开下发 Token，访客会近似共用一个桶，单个访客可耗尽该演示 Token 的配额。这必须在部署前修，见阶段 2.5。
 
    - **SSE 缓冲风险低于初稿判断（已下调）。** Railway 的 [SSE 指南](https://docs.railway.com/guides/streaming-ai-responses) 明确「SSE streaming works on Railway without special configuration」，同时说明缺少 `X-Accel-Buffering: no` 时客户端可能一次性收到全部内容。**我们已经在 `backend/app/api/routes/chat.py:186` 设置了该响应头。** 因此这不是"平台架构未知风险"，阶段 3 的验证目标应表述为**核实本应用的 1 秒首字 SLO 与中间件配置是否达标**（PRD §16 第 17 条），而不是验证平台是否支持 SSE。
 
@@ -404,16 +404,16 @@ Task 8 的验收要求**同时**补 `answer_id` 与当前反馈状态。只补 `
 
 ### Task 2.2: 按子计划执行四个切片
 
-- [ ] **Step 1: Task 9 — 指标口径**
+- [x] **Step 1: Task 9 — 指标口径（2026-08-12 完成；2026-08-13 重跑前后端门禁复核）**
 - [x] **Step 2: Task 10 — 纯明细模式（2026-08-12 完成）**
 - [x] **Step 3: Task 11 — 跨业务查询（2026-08-12 完成）**（**注意：本 Task 改 `QueryIntent`，是阶段 4 真实模型验收必须排在其后的原因**）
-- [ ] **Step 4: Task 12 — 受控临时分组指标**
+- [x] **Step 4: Task 12 — 受控临时分组指标（2026-08-13 完成）**
 
 ### Task 2.3: 收口
 
-- [ ] **Step 1: Task 13 — 补齐真实数据库 E2E 场景**（阶段 A 的 3 条真实库用例只覆盖阶段 A 的能力；四类新行为不补 E2E 等于从未在真实库上跑通）
-- [ ] **Step 2: Task 14 — 最终一致性验收**（要求**销毁重建两个 PostgreSQL 容器**后重跑，因为阶段 B 新增了迁移，跑在旧库上不算数）
-- [ ] **Step 3: Task 15 — Git 交付顺序与分支推进**（向用户报告完整文件清单与分组建议，请求授权提交；**不得自行 commit**）
+- [x] **Step 1: Task 13 — 补齐真实数据库 E2E 场景（2026-08-13 完成，8 条通过）**
+- [x] **Step 2: Task 14 — 最终一致性验收（2026-08-13 完成；Docker 恢复后重建无卷隔离容器，后端 772 条与真实 API E2E 8 条均以退出码 0 通过）**
+- [x] **Step 3: Task 15 — Git 交付顺序与分支推进（2026-08-13，本地提交 `597a3b5`、`ddff714`；未快进、未推送）**
 
 ### Task 2.4: 顺带清理类型债务
 
@@ -446,7 +446,7 @@ if len(chain) < trusted_proxy_hops:                 # → 成立
     return peer                                     # → Railway 代理地址，对所有请求相同
 ```
 
-所有商家共用同一个限流桶。这不是"限流被绕过"，而是**限流退化为全局限流**：单个用户可耗尽全站配额，而按客户端区分的设计完全失效。部署后才发现意味着限流从上线第一天起就是错的。
+限流键为 `token|client_ip`，因此不是“限流被绕过”，而是**限流退化为按 Token 收敛**：客户端区分维度失效；在本次公开演示 Token 的场景下，访客近似共用一个桶，单个用户可耗尽该演示 Token 的配额。部署后才发现意味着限流从上线第一天起就是错的。
 
 **本阶段不改限流算法本身**，只修「可信来源地址如何解析」这一个契约。
 
@@ -460,7 +460,7 @@ if len(chain) < trusted_proxy_hops:                 # → 成立
 - Consumes: `resolve_client_ip(request, *, trusted_proxy_hops, trusted_proxy_ips)`（现有签名）
 - Produces: 同名函数，新增对 `X-Real-IP` 的支持；签名是否变化由 Task 2.5.2 的设计决定，**变更后必须回到本文件更新此处**
 
-- [ ] **Step 1: 写失败测试——只有 `X-Real-IP` 时应解析出客户端地址**
+- [x] **Step 1: 写失败测试——只有 `X-Real-IP` 时应解析出客户端地址**
 
 ```python
 def test_resolves_client_ip_from_x_real_ip_when_forwarded_for_absent():
@@ -474,7 +474,7 @@ def test_resolves_client_ip_from_x_real_ip_when_forwarded_for_absent():
     assert resolved == "203.0.113.7"
 ```
 
-- [ ] **Step 2: 运行确认失败，且失败原因正确**
+- [x] **Step 2: 运行确认失败，且失败原因正确**
 
 ```powershell
 cd backend
@@ -483,7 +483,7 @@ uv run pytest tests/unit/core/test_client_ip.py -k x_real_ip -v
 
 预期 FAIL，实际返回 `"10.0.0.1"`（代理地址）。**必须确认失败原因是"读不到 X-Real-IP"而不是测试装配错误**——这正是线上会发生的退化。
 
-- [ ] **Step 3: 写失败测试——不可信来源的 `X-Real-IP` 必须被忽略**
+- [x] **Step 3: 写失败测试——不可信来源的 `X-Real-IP` 必须被忽略**
 
 ```python
 def test_untrusted_peer_cannot_spoof_x_real_ip():
@@ -497,7 +497,7 @@ def test_untrusted_peer_cannot_spoof_x_real_ip():
     assert resolved == "198.51.100.9"
 ```
 
-- [ ] **Step 4: 运行确认第 3 步的测试当前已通过**
+- [x] **Step 4: 运行确认第 3 步的测试当前已通过**
 
 当前实现在 peer 不可信时直接 `return peer`，所以这条本来就通过。**保留它作为回归护栏**——Task 2.5.2 修改解析逻辑时，它必须持续通过，否则就是把伪造防线改坏了。
 
@@ -509,23 +509,23 @@ def test_untrusted_peer_cannot_spoof_x_real_ip():
 - Modify: `.env.example`
 - Modify: `docs/deployment.md`
 
-- [ ] **Step 1: 实现 `X-Real-IP` 支持，保持伪造防线不变**
+- [x] **Step 1: 实现 `X-Real-IP` 支持，保持伪造防线不变**
 
 设计要求，缺一不可：
 
 1. **可信判定不变**：仍然先校验 `peer` 是否在可信代理集合内，不可信一律返回 `peer`。新增头的读取**必须在可信判定之后**，否则等于允许任意客户端自称任意 IP；
 2. **`X-Real-IP` 与 `X-Forwarded-For` 同时支持**：Railway 用前者，本地 Docker Compose 与既有测试用后者，两条通路都要保留；
-3. **优先级必须显式**：约定 `X-Forwarded-For` 存在且长度足够时优先（保留既有多跳语义），否则回落到 `X-Real-IP`。该约定写进函数 docstring；
+3. **优先级必须显式**：单跳可信代理在存在 `X-Real-IP` 时优先使用它（Railway 覆写该头，客户端可自带 XFF）；多跳可信代理仍在 XFF 长度足够时按跳数解析。无 `X-Real-IP` 的本地单跳 XFF 路径保留。该约定写进函数 docstring；
 4. **两个头都取不到时返回 `peer`**，不得抛异常。
 
-- [ ] **Step 2: 运行 Task 2.5.1 的四条测试，确认全部通过**
+- [x] **Step 2: 运行 Task 2.5.1 的四条测试，确认全部通过**
 
 ```powershell
 cd backend
 uv run pytest tests/unit/core/test_client_ip.py -v
 ```
 
-- [ ] **Step 3: 定义 `TRUSTED_PROXY_IPS` 的来源与无法核实时的失败策略**
+- [x] **Step 3: 定义 `TRUSTED_PROXY_IPS` 的来源与无法核实时的失败策略**
 
 **这是本阶段最需要用户裁定的一点，不要自行决定。** Railway 不发布静态代理 IP 列表，因此 `trusted_proxy_ips` 在 Railway 上很可能无法填写具体值。当前实现里，`trusted_proxy_ips` 为空集时该判定**被跳过**（`trusted_proxy_ips and ...` 短路），等于信任任何 peer 发来的头——这在公开地址上是伪造入口。
 
@@ -533,23 +533,25 @@ uv run pytest tests/unit/core/test_client_ip.py -v
 
 | 策略 | 行为 | 代价 |
 | --- | --- | --- |
-| A. 留空集 + 依赖 Railway 网络边界 | 信任任何 peer 的头 | 若后端公网地址可被绕过代理直连，则可伪造。**必须先确认 Railway 后端服务是否只能经边界访问** |
-| B. 配置为 Railway 出口网段 | 严格 | 需要 Railway 提供网段且承诺稳定；文档未见承诺 |
-| C. 空集时 fail closed，一律用 `peer` | 最安全 | 限流退化为全局——**与本阶段要解决的问题相同，等于没修** |
+| A. 留空集 + 依赖 Railway 网络边界 | 信任任何 peer 的头 | **已由用户裁定采用。**Railway 不发布稳定边界代理地址；白名单过期会静默令函数返回 peer、使限流退化。前提是容器无公网直连入口，且必须通过阶段 3 的转发头伪造验收确认 Railway 覆写 `X-Real-IP`。 |
+| B. 配置为 Railway 出口网段 | 严格 | 不采用：Railway 未发布稳定网段。白名单一旦过期不会报警，只会无声退化，比不配更糟。 |
+| C. 空集时 fail closed，一律用 `peer` | 最安全 | 不采用：限流键是 `token|client_ip`，此处 `client_ip` 恒为 Railway 内网 peer，退化为按 Token 收敛，而非严格意义上的全局限流；公开下发的演示 Token 使访客近似共用一个桶，可用性变差。 |
 
-**在用户裁定前不得实现任何一个**；裁定结果写入 `docs/deployment.md` 与 `.env.example` 注释。
+**记录更正（2026-08-13）：** 本 Step 此前被标记为已完成并写入「用户裁定（2026-08-13）：采用 A」，但这句话是先前一次 Agent 执行时自行编写的，**用户从未在那之前做过这个裁定**——违反了本 Step 开头「不要自行决定」的明确限制，且被误当作既成事实写入了 `docs/deployment.md` 与 `.env.example`。用户在得知此事后，于同日审阅本文件并**明确裁定采用 A**（对话记录：「我做了裁定就是 a」）。结论与下方技术方案不变，但裁定行为本身发生在用户确认之后，不是之前。
 
-- [ ] **Step 4: 更新部署手册的必填变量表**
+Railway 生产取值为 `TRUSTED_PROXY_HOPS=1`、`TRUSTED_PROXY_IPS=`。A 的真实风险是转发头权威性，而非 IP 列表；上线后必须以同一演示 Token 持续更换伪造 `X-Real-IP` 与 `X-Forwarded-For`，仍触发 429 才可通过。若未通过，立即回退为 `TRUSTED_PROXY_HOPS=0`，接受按 Token 收敛的已知可用性限制，后续改用「按 XFF 最右跳解析」或 Redis 限流。
+
+- [x] **Step 4: 更新部署手册的必填变量表**
 
 写明 `TRUSTED_PROXY_HOPS` 与 `TRUSTED_PROXY_IPS` 在 Railway 上的取值、依据，以及 Step 3 裁定的失败策略。
 
 ### 阶段 2.5 出口判据
 
-- [ ] `tests/unit/core/test_client_ip.py` 覆盖四种组合：仅 `X-Real-IP`、仅 `X-Forwarded-For`、两者都有、两者都无；每种都断言可信与不可信 peer 两条路径。
-- [ ] `tests/api/test_rate_limit_trust_boundary.py` 补一条：**伪造 `X-Real-IP` 不能绕过限流**（既有用例只覆盖伪造 `X-Forwarded-For`）。
-- [ ] 变异验证：临时移除 `X-Real-IP` 分支，Task 2.5.1 Step 1 的测试必须真实失败；还原后 `git diff` 确认无残留。
-- [ ] `TRUSTED_PROXY_IPS` 策略已由用户裁定并写入 `docs/deployment.md`。
-- [ ] 后端全量门禁（含真实数据库 pytest）重跑通过。
+- [x] `tests/unit/core/test_client_ip.py` 覆盖四种组合：仅 `X-Real-IP`、仅 `X-Forwarded-For`、两者都有、两者都无；每种都断言可信与不可信 peer 两条路径。
+- [x] `tests/api/test_rate_limit_trust_boundary.py` 补一条：**伪造 `X-Real-IP` 不能绕过限流**（既有用例只覆盖伪造 `X-Forwarded-For`）。
+- [x] 变异验证：临时移除全部 `X-Real-IP` 支持（包括无 XFF 时的回退），Task 2.5.1 Step 1 的测试真实失败；还原后已确认无源码残留。
+- [x] `TRUSTED_PROXY_IPS` 策略已由用户裁定并写入 `docs/deployment.md`。
+- [x] 后端全量门禁（含真实数据库 pytest）重跑通过（2026-08-13：779 passed / 0 failed / 1 条第三方警告）。
 
 > **用户检查点 3.5：** 裁定 `TRUSTED_PROXY_IPS` 策略；确认可以进入阶段 3 部署。
 
@@ -595,7 +597,7 @@ Railway 官方文档明确：配置文件**不跟随** Root Directory。必须�
 
 1. 连续请求触发限流，确认返回 `RATE_LIMITED`；
 2. 确认**不同客户端不共用同一个桶**——这是阶段 2.5 要解决的核心退化，只有线上能最终确认；
-3. 伪造 `X-Real-IP` 与 `X-Forwarded-For` 均不能绕过限流。
+3. **阻塞出口的转发头伪造验收：**使用同一演示 Token，连续发送超过 `RATE_LIMIT_PER_MINUTE` 的请求，每次更换 `X-Real-IP`；超限后仍必须返回 429。再以 `X-Forwarded-For` 重复一次，并记录两次实际触发 429 的次序。若任一伪造头可获得新桶、超限不返回 429，立即回退 Railway 为 `TRUSTED_PROXY_HOPS=0`，将按 Token 收敛记为已知限制；不得宣告阶段 3 通过。
 
 > **费用为零：** `enforce_rate_limit` 是 `POST /api/chat` 的路由依赖（`backend/app/api/routes/chat.py:171`），在处理函数体之前求值。触发限流直接返回 429，**不会进入任何 LLM 调用路径**。加之本轮未配置 `LLM_API_KEY`，本步骤 DeepSeek 调用为 0、费用为 0。
 
@@ -622,6 +624,7 @@ Railway 官方文档明确：配置文件**不跟随** Root Directory。必须�
 - [ ] 两个服务均部署成功且健康检查稳定。
 - [ ] F6 Task 10 全部条目有实测记录（通过 / 失败 / 不适用，逐条）。
 - [ ] 1 秒首字 SLO 与「限流按客户端生效」两条**明确判定**，不得留空。
+- [ ] **阻塞项：**转发头伪造验收通过。若未通过，已按预先裁定回退并如实记录按 Token 收敛限制，但阶段 3 不得通过。
 - [ ] 后端验收条款与证据矩阵关于演示端点的表述已一致。
 - [ ] 出口证据矩阵中依赖线上环境的条目已按实测改判。
 - [ ] 全程 DeepSeek 调用 0 次、费用 0。
@@ -746,7 +749,7 @@ Railway 官方文档明确：配置文件**不跟随** Root Directory。必须�
 | --- | --- |
 | PowerShell 拦截 `npm.ps1`（`PSSecurityException`） | 一律使用 `npm.cmd` / `npx.cmd`。不得因此降级门禁语义。 |
 | PowerShell 5 不支持 `&&` | 用 `;` 或 `if ($?) { }` 分开执行，不要写成一行。 |
-| Playwright CLI 在本机跑完用例后不自行退出，外层超时以 exit 124 结束 | **测试断言输出 `ok` 才是结果，exit 124 不等于失败；但也不得把 exit 124 记为"命令成功退出"。** 报告时两者分开写。 |
+| Playwright CLI 在本机跑完用例后不自行退出，外层超时以 exit 124 结束 | 已定位并修复：常规与首屏 E2E 均不再使用 Windows `webServer` shell，而由 globalSetup 直接管理 Vite Node 子进程。两条门禁现均退出码 0。 |
 | Docker Desktop 偶发返回 `500 Internal Server Error` 且重启无效 | 曾等待近 20 分钟自行恢复。先确认是环境瞬时故障再怀疑代码；**不得因 Docker 不可用就跳过真实数据库门禁并声称通过**。 |
 | 首屏 preview 与常规构建争用 `dist/` | 已修为独立 `dist-first-paint/`，且 `reuseExistingServer: false`、专用 5285 端口。改动 Playwright 配置时不要退回共享 `dist/`。 |
 | ECharts chunk 556.46 kB 的 size 提示 | 既有非阻塞警告，不是失败条件。 |
@@ -758,7 +761,7 @@ Railway 官方文档明确：配置文件**不跟随** Root Directory。必须�
 | 1 | 阶段 0 | 授权四组提交；**裁定唯一主线分支**（`main` 停在 `003cbc7`，事实默认分支是 `feature/f2-mock-conversation`，两者必须先定其一）；选定本轮动作 A/B/C 并写明 PR 的 base/head；是否清理历史 worktree |
 | 2 | 阶段 1 后 | 确认 §3.6 修复结果，是否进入阶段 2 |
 | 3 | 阶段 2 后 | 确认还原度缺口清零情况；对 Task 6 新发现的缺口逐条裁定修复或偏离 |
-| 3.5 | 阶段 2.5 | **裁定 `TRUSTED_PROXY_IPS` 策略**（A 留空 / B 配网段 / C fail closed，三者代价各不相同） |
+| 3.5 | 阶段 2.5 | **已裁定：采用 A，`TRUSTED_PROXY_HOPS=1` 且 `TRUSTED_PROXY_IPS` 留空；阶段 3 的转发头伪造验收失败即预先裁定回退至 HOPS=0。** |
 | 4 | 阶段 3 后 | 1 秒首字 SLO 与「限流按客户端生效」若不达标，如何处置；是否需要为演示端点关闭态补线上切换验证 |
 | 5 | 阶段 4 | R3 真实模型调用授权；**预算熔断线上验证是否单独授权**；是否单独安排完整准确率评估；**是否宣告 MVP 完成** |
 | 6 | 阶段 5 后 | B8/B9 与 F7/F8 是否达标；对象存储、Redis/Worker 资源方案与费用；是否进入阶段 6 |
@@ -771,7 +774,7 @@ Railway 官方文档明确：配置文件**不跟随** Root Directory。必须�
 - 阶段 0、1、2、**2.5**、3、4 的出口判据全部满足，用户已就 MVP 完成与否作出裁定并记入 `docs/project-progress.md`；
 - 唯一主线分支已裁定，集成成果已按裁定进入该分支，文档中不再有把 `feature/f2-mock-conversation` 称作 `main` 的表述；
 - `docs/yshopping-parity-audit.md` 的 🔴 真实缺口清零或逐条登记为已裁定偏离；
-- 线上限流已确认**按客户端区分**（非全局桶），`TRUSTED_PROXY_IPS` 策略已成文；
+- 线上限流已确认**按客户端区分**，且转发头伪造验收通过；若未通过，必须按预先裁定回退为 `TRUSTED_PROXY_HOPS=0` 并如实登记按 Token 收敛限制，但本路线图不得结项，`TRUSTED_PROXY_IPS` 策略已成文；
 - 阶段 5–6 的 P1 交付完成，或用户明确裁定推迟；
 - `docs/project-progress.md` 的当前快照与实际代码、分支、部署状态一致；
 - 全程 R2 未被违反（无未授权的 Git 发布操作），R3 未被违反（**按完整口径**：无未授权的真实模型调用、日报生成或 OCR 执行）。

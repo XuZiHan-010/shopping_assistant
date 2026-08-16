@@ -65,6 +65,26 @@ async def test_varying_forwarded_for_does_not_reset_limit(untrusted_client: Asyn
     assert second.json()["code"] == "RATE_LIMITED"
 
 
+@pytest.mark.asyncio
+async def test_varying_real_ip_does_not_reset_limit(untrusted_client: AsyncClient) -> None:
+    payload = {"message": "hi", "client_request_id": "req-real-a"}
+
+    first = await untrusted_client.post(
+        "/api/chat",
+        json=payload,
+        headers={**AUTH, "Accept": "application/json", "X-Real-IP": "1.1.1.1"},
+    )
+    second = await untrusted_client.post(
+        "/api/chat",
+        json={**payload, "client_request_id": "req-real-b"},
+        headers={**AUTH, "Accept": "application/json", "X-Real-IP": "2.2.2.2"},
+    )
+
+    assert first.status_code != 429
+    assert second.status_code == 429
+    assert second.json()["code"] == "RATE_LIMITED"
+
+
 @pytest_asyncio.fixture
 async def trusted_proxy_client() -> AsyncIterator[AsyncClient]:
     app = create_app(_settings(trusted_proxy_hops=1, trusted_proxy_ips="127.0.0.1"))
@@ -73,6 +93,35 @@ async def trusted_proxy_client() -> AsyncIterator[AsyncClient]:
         transport=ASGITransport(app=app), base_url="http://testserver"
     ) as client:
         yield client
+
+
+@pytest.mark.asyncio
+async def test_forged_forwarded_for_cannot_reset_limit_behind_real_ip_proxy(
+    trusted_proxy_client: AsyncClient,
+) -> None:
+    """代理注入 X-Real-IP 时，客户端自带的 XFF 不得换到新的限流桶。
+
+    Railway 只承诺注入 X-Real-IP，不管理 X-Forwarded-For；后者对公网客户端
+    完全可控，一旦让它盖过前者，每个请求都能拿到全新配额。
+    """
+
+    payload = {"message": "hi", "client_request_id": "req-forged-a"}
+    proxy_headers = {**AUTH, "Accept": "application/json", "X-Real-IP": "198.51.100.7"}
+
+    first = await trusted_proxy_client.post(
+        "/api/chat",
+        json=payload,
+        headers={**proxy_headers, "X-Forwarded-For": "1.1.1.1"},
+    )
+    second = await trusted_proxy_client.post(
+        "/api/chat",
+        json={**payload, "client_request_id": "req-forged-b"},
+        headers={**proxy_headers, "X-Forwarded-For": "2.2.2.2"},
+    )
+
+    assert first.status_code != 429
+    assert second.status_code == 429
+    assert second.json()["code"] == "RATE_LIMITED"
 
 
 @pytest.mark.asyncio

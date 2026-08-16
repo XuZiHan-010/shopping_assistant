@@ -28,10 +28,10 @@ from app.analytics.contract import (
 )
 from app.analytics.dates import FutureRangeError, resolve_range
 from app.core.security import MerchantContext
-from app.intent.models import CrossBusinessPlan, DateRange, QueryIntent
+from app.intent.models import CrossBusinessPlan, DateRange, GeneratedMetricPlan, QueryIntent
 from app.intent.whitelist import MAX_DETAIL_LIMIT
 from app.repositories.analytics import AnalyticsRepository, ResultColumn
-from app.schemas.chat import CATEGORY_DISPLAY_NAMES, AnswerMode
+from app.schemas.chat import CATEGORY_DISPLAY_NAMES, AnswerMode, QuestionCategory
 
 # 明细预览与指标预览各自独立设置：明细走 B3 的 MAX_DETAIL_LIMIT（也是导出的
 # 行数上限），指标预览是本服务自己的"够画一张图/一张表"的阈值，两者取值目前
@@ -77,8 +77,10 @@ class ExportSpec:
     end: date
     filters: tuple[tuple[str, str], ...] = ()
     date_filtered: bool = True
-    kind: Literal["detail", "cross_business"] = "detail"
+    kind: Literal["detail", "cross_business", "generated_metric"] = "detail"
     cross_business_plan: CrossBusinessPlan | None = None
+    generated_metric_plan: GeneratedMetricPlan | None = None
+    generated_metric_category: QuestionCategory | None = None
 
 
 @dataclass(frozen=True)
@@ -127,6 +129,8 @@ class SafeQueryService:
         if intent.answer_mode is AnswerMode.DETAIL:
             return await self._detail(context, intent, date_range, notes, keywords)
         if intent.answer_mode is AnswerMode.METRIC:
+            if intent.generated_metric_plan is not None:
+                return await self._generated_metric(context, intent, date_range, notes)
             return await self._metric(context, intent, date_range, notes)
         raise UnsupportedQueryError(f"{intent.answer_mode.value} 模式不执行经营数据查询")
 
@@ -260,6 +264,54 @@ class SafeQueryService:
             export_spec=None,
             notes=notes,
             non_additive=not metric.additive,
+        )
+
+    async def _generated_metric(
+        self,
+        context: MerchantContext,
+        intent: QueryIntent,
+        date_range: DateRange,
+        notes: tuple[str, ...],
+    ) -> QueryResult:
+        """只把已验证的临时计划交给类别驱动的固定聚合模板。"""
+
+        plan = intent.generated_metric_plan
+        assert plan is not None
+        if intent.category not in {QuestionCategory.TRADE, QuestionCategory.REFUND}:
+            raise UnsupportedQueryError("临时分组指标仅支持交易或退款类的指标查询")
+        try:
+            result = await self._repository.generated_metric(
+                merchant_id=context.merchant_id,
+                category=intent.category,
+                plan=plan,
+                start=date_range.start,
+                end=date_range.end,
+                limit=_METRIC_PREVIEW_LIMIT + 1,
+            )
+        except SQLAlchemyError as error:
+            raise UnsupportedQueryError(_QUERY_FAILED_REASON) from error
+        # 仓储以预览上限加一行探测精确总数；即使它拿到了 201 行而标记未截断，
+        # 对外预览仍只能展示前 200 行，导出规格必须随之生成。
+        truncated = result.truncated or result.total_rows > _METRIC_PREVIEW_LIMIT
+        rows = result.rows[:_METRIC_PREVIEW_LIMIT] if truncated else result.rows
+        return QueryResult(
+            columns=result.columns,
+            rows=rows,
+            total_rows=result.total_rows,
+            truncated=truncated,
+            source_tables=result.source_tables,
+            plan_steps=self._plan_steps(plan.name, result.source_tables, date_range, notes),
+            export_spec=ExportSpec(
+                table="generated_metric",
+                columns=tuple(column.key for column in result.columns),
+                start=date_range.start,
+                end=date_range.end,
+                kind="generated_metric",
+                generated_metric_plan=plan,
+                generated_metric_category=intent.category,
+            ),
+            notes=notes,
+            non_additive=True,
         )
 
     async def _detail(
