@@ -100,7 +100,9 @@ class IntentService:
             try:
                 result = await self._llm.complete(
                     system=UNDERSTAND_SYSTEM,
-                    user=understand_user_prompt(question, initial.category.value, knowledge_text),
+                    user=understand_user_prompt(
+                        question, initial.category.value, knowledge_text, today=today
+                    ),
                     fallback="",
                     budget=budget,
                 )

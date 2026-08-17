@@ -4,7 +4,9 @@
 
 ## 服务与构建
 
-在同一个 Railway 项目中创建 PostgreSQL 和 Backend 两个 Service。Backend 的 Root Directory 为 `/backend`，使用其中的 `railway.json` 与 Dockerfile。将 Backend 的 `DATABASE_URL` 引用 PostgreSQL Service，例如 `${{Postgres.DATABASE_URL}}`。发布前的 `python -m alembic upgrade head` 由 `railway.json` 的 release command 执行一次，健康检查为 `/api/health`。
+在同一个 Railway 项目中创建 PostgreSQL 和 Backend 两个 Service。Backend 的 Root Directory 为 `/backend`，使用其中的 `railway.json` 与 Dockerfile。将 Backend 的 `DATABASE_URL` 引用 PostgreSQL Service，例如 `${{Postgres.DATABASE_URL}}`。发布前的 `python -m alembic upgrade head` 由 `railway.json` 的 `deploy.preDeployCommand` 执行一次，健康检查为 `/api/health`。
+
+字段名必须是 `preDeployCommand`：Railway 的配置 schema 里**没有** `releaseCommand`，写成后者不会报错，只会被静默忽略，导致迁移从不执行、线上库始终缺表。
 
 ## 前端服务
 
@@ -16,7 +18,7 @@ Caddy 不代理 `/api`。因此前端域名下不存在任何 API 路径，这�
 
 Railway 的 Config File Path 不跟随 Root Directory。即使 Service Root 已设为 `/frontend`，仍必须由用户在前端服务设置中显式填入 `/frontend/railway.json`；后端服务同理显式填入 `/backend/railway.json`。
 
-不得省略此设置：否则两份 `railway.json` 都不会生效，前端健康检查以及后端的 `releaseCommand`（`alembic upgrade head`）都会静默失效。
+不得省略此设置：否则两份 `railway.json` 都不会生效，前端健康检查以及后端的 `preDeployCommand`（`alembic upgrade head`）都会静默失效。
 
 ## 前端环境变量
 
@@ -63,7 +65,10 @@ Railway 的 Config File Path 不跟随 Root Directory。即使 Service Root 已�
 | `TRUSTED_PROXY_HOPS=1` | Railway 单层代理。 |
 | `TRUSTED_PROXY_IPS` | **留空，不填任何值。** Railway 不发布稳定的边界代理地址；配置具体值会在重新部署后静默失效并导致限流退化，因此本项目明确不配置该变量。 |
 | `RATE_LIMIT_PER_MINUTE` | 单 Token 与可信 IP 的每分钟上限。 |
-| `LLM_DAILY_BUDGET_TOKENS` | 每日模型 token 预算。 |
+| `LLM_DAILY_BUDGET_TOKENS` | **全局**每日模型 token 预算——`llm_daily_budget` 表只按 `usage_date` 聚合，不分商家、不分访客，公开演示时所有人共用这一个池子，它是唯一的总量闸门。默认 `500000` = 单请求上限 `20000` × 25，最坏情况也保证 25 个完整问题；按真实模型实测（每问约 6000 token）实际约 80 个。耗尽后所有人收到 `LLM_BUDGET_EXCEEDED` 的可见降级，不会静默继续扣费。 |
+| `LLM_MAX_OUTPUT_TOKENS_PER_CALL` | 默认 `4096`。**推理模型不得低于此值**：`deepseek-v4-flash` 单次结构化意图的 `reasoning_tokens` 就要 1400–2200，设为 1024 时正文返回空串，三次重试全废、回落 CHAT 模式——每次提问真实扣费却只得到兜底文案。这是上限不是花费。 |
+| `MAX_LLM_TOKENS_PER_REQUEST` | 默认 `20000`，覆盖一轮问答 5–6 次推理调用。 |
+| `LLM_TIMEOUT_SECONDS` | 默认 `90`。推理模型出一次意图耗时明显；超时会被 `DeepSeekLlmClient` 吞成 fallback + degraded，表现为「模型没理解」而不是「超时」，很难查。 |
 
 现有代码已强制精确 CORS、生产 JSON 日志、`create_app()` 不启用 Debug，以及数据库连接重试。B8 附件功能尚未实现，不得把正式附件写入容器临时磁盘。
 

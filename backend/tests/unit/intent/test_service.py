@@ -38,7 +38,9 @@ def _understand(**changes: object) -> str:
 
 
 def test_understand_prompt_constrains_generated_metric_plan_to_fixed_templates() -> None:
-    prompt = understand_user_prompt("按 SPU 看成交表现", "TRADE", "交易知识")
+    prompt = understand_user_prompt(
+        "按 SPU 看成交表现", "TRADE", "交易知识", today=date(2026, 8, 17)
+    )
 
     assert "generated_metric_plan" in prompt
     assert "spu_id" in prompt

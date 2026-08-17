@@ -115,6 +115,47 @@ Railway 控制台部署与线上验收、B8/B9、F7–F9 尚未完成。R9 阶�
 不会用本地默认值覆盖既有反馈。回归覆盖位于 `backend/tests/api/test_conversations.py`、
 `frontend/src/components/chat/ChatMessage.spec.ts` 和 `frontend/src/stores/chat.spec.ts`。
 
+### 3.7 两阶段意图提示词丢失了输出契约
+
+**状态：✅ 已修复（2026-08-17）。** 本条是第 6 节「❓ 待核实」中 `LlmIntentAnalysisService`
+一项完成逐条对照后的结论，已从待核实升级为真实缺口并修复。
+
+**参考项目**：`LlmIntentAnalysisService` 用**同一个提示词**服务两个阶段
+（`recognize()` 与 `understand()` 都走 `analyze()` → `buildPrompt()`），差别只在注入的
+`baseIntent`（首轮为空，二轮是上一阶段结果且标注「仅供复核」）与 wiki（索引层 vs 业务域正文）。
+该提示词完整声明了输出契约：逐个列出 `intentType` / `category` / `answerMode` 的可选值
+（`buildPrompt` 第 191–193 行）、给出含全部字段的 JSON 示例（第 207–234 行）、附 6 条编号约束
+（第 236–247 行）；系统提示词写明「必须只输出 JSON 对象，不要输出 Markdown」。
+
+**我们（修复前）**：移植时把它拆成 `CLASSIFY_SYSTEM` + `UNDERSTAND_SYSTEM` 两个独立提示词，
+契约整套丢失。`classify` 只剩一句「输出 answer_mode、category、intent_keywords JSON」，
+`understand` 只剩「输出完整 QueryIntent JSON」。所有自动化测试用 `FakeLlmClient` 返回预写好的
+合法 JSON，因此这个缺口在测试里完全不可见。
+
+**线上后果（2026-08-17 首次真实 `deepseek-v4-flash` 调用实测）**：
+
+- `classify` 返回 `answer_mode="trend_query"`、`category="退款退货域"`；`_answer_mode` /
+  `_category` 遇非法值**静默回落**成 `CHAT` / `UNKNOWN`，不抛异常。而 `llm_analyzed=False`
+  时 `understand` 直接短路，第二阶段根本不执行；
+- `understand` 返回 `{"intent":…,"business_domain":…,"metrics":[…],"filters":[…]}`，
+  `QueryIntent` 的 `extra="forbid"` 判出 5 条校验错误，三次重试全废；
+- 模型不知道当天日期，问「最近 7 天」返回 2025-03-14~2025-03-20。`validate_intent` 只钳制
+  上界与跨度、不纠正合法但错误的历史区间，查询落在无数据时段，表现为「查不到」而非报错。
+
+净效果：每次提问都真实计费（`llm_usage` 全部记 `SUCCEEDED`，DeepSeek 确实正常响应），
+用户却只得到兜底文案「已完成结构化理解。」。
+
+**修复**：按参考项目的形式补齐两个提示词——枚举取值表、完整 JSON 示例、系统提示词禁 Markdown，
+并把业务当天日期注入 `understand`。字段名仍用我方 `QueryIntent` 的 snake_case：那是内部 LLM
+契约，与 `docs/backend-development-plan.md` §8 管辖的对外 API 契约无关。
+
+回归覆盖：`backend/tests/unit/intent/test_prompts.py`（8 条，期望值全部从 `QueryIntent`
+字段定义与枚举推导，并把提示词里的 JSON 示例抠出来真正校验，防止示例与 schema 脱节）。
+真实模型验收：METRIC / DETAIL / RULE 三类问题两阶段全部通过，日期区间正确。
+
+**遗留**：指标口径 catalog 的提示词（`app/metrics/catalog.py`）只声明了三个字段名、未列枚举，
+未做真实模型验收；`knowledge_documents` 线上为 0 行，规则类问题没有知识依据。
+
 ---
 
 ## 4. 🟡 阶段未到（与计划一致，无需处置）
@@ -154,7 +195,7 @@ PRD §10 Metric Catalog 与 §6.2。
 | 参考项目 | 行数 | 我方对应 | 未核实原因 |
 | --- | --- | --- | --- |
 | `DorisQueryService` | 1050 | `repositories/analytics.py` + `services/safe_query.py` | 数据源不同（Doris vs PostgreSQL），需按「查询能力」而非按代码逐条比 |
-| `LlmIntentAnalysisService` | 603 | `app/intent/` | 两阶段意图识别的提示词与重试策略未逐条比对 |
+| ~~`LlmIntentAnalysisService`~~ | 603 | `app/intent/` | **提示词部分已于 2026-08-17 完成对照，结论见 §3.7（真实缺口，已修复）。** 重试策略仍未逐条比对 |
 | `WikiMemoryService` | 441 | `app/knowledge/` | 知识检索分层与记忆写入策略未比对 |
 | `PromptLoopAnalysisService` | 354 | `services/answer_service.py` + `services/review_service.py` | 已确认 `loopStatus`/`loopAttempts`/`loopNotes` 三元组在我方有对应（`quality_status`/`quality_attempts`/`quality_notes`），但校验规则清单未逐条比 |
 | `WikiAdminService` | 498 | F8/B9 未开工 | 阶段未到，但需在开工前先做一次逐条对照 |

@@ -50,7 +50,10 @@ class Settings(BaseSettings):
     llm_api_key: str | None = None
     llm_base_url: str = "https://api.deepseek.com"
     llm_model: str = "deepseek-v4-flash"
-    llm_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
+    # 推理模型出一次结构化意图要生成 1000+ 个 token（大部分是 reasoning），30 秒
+    # 偏紧；超时在 DeepSeekLlmClient 里被吞成 fallback + degraded，表现为「模型没理解」
+    # 而不是「超时了」，很难查。
+    llm_timeout_seconds: float = Field(default=90.0, gt=0, le=120)
     llm_max_calls_per_request: int = Field(
         default=6,
         ge=1,
@@ -58,13 +61,20 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("MAX_LLM_CALLS_PER_REQUEST", "llm_max_calls_per_request"),
     )
     llm_max_tokens_per_request: int = Field(
-        default=8_000,
+        default=20_000,
         ge=100,
         le=200_000,
         validation_alias=AliasChoices("MAX_LLM_TOKENS_PER_REQUEST", "llm_max_tokens_per_request"),
     )
-    llm_daily_budget_tokens: int = Field(default=20_000, ge=1_000, le=100_000_000)
-    llm_max_output_tokens_per_call: int = Field(default=1_024, ge=64, le=8_000)
+    # 全局每日预算（`llm_daily_budget` 只按 usage_date 聚合，不分商家、不分访客，
+    # 公开演示时所有人共用同一个池子）。500_000 = 单请求上限 20_000 × 25 个问题，
+    # 即最坏情况也保证 25 个完整问题。2026-08-17 真实 `deepseek-v4-flash` 实测每个
+    # 完整问题约 6_000 token，因此实际可支撑约 80 个。
+    llm_daily_budget_tokens: int = Field(default=500_000, ge=1_000, le=100_000_000)
+    # 1024 对推理模型是错的：2026-08-17 实测单次结构化意图光 reasoning_tokens 就要
+    # 1400–2200，正文一个字都吐不出来，content 返回空串，三次重试全部失败后回落
+    # CHAT 模式——每次提问真实扣费却只得到兜底文案。这是上限不是花费，留足即可。
+    llm_max_output_tokens_per_call: int = Field(default=4_096, ge=64, le=8_000)
     rate_limit_per_minute: int = Field(default=10, ge=1, le=10_000)
     trusted_proxy_hops: int = Field(default=0, ge=0, le=4)
     trusted_proxy_ips: str = ""

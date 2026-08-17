@@ -2,21 +2,23 @@
 
 > 本文件只保留当前可继续开发的事实快照，不追加每日流水账。每次完成一段可验证工作后，更新日期、状态、验证结果、下一步和风险。
 
-**最后更新：2026-08-13**
+**最后更新：2026-08-17**
 
 ## 当前快照
 
-R9 阶段 B（四个能力切片：指标口径、纯明细、跨业务查询、受控临时分组指标）与阶段 2.5（可信客户端 IP 契约、`TRUSTED_PROXY_IPS` 策略裁定）的代码均已完成，本地 `main` 已快进至包含全部成果的状态，**尚未推送到 `origin`**。前端 F0–F6 代码与文档此前已完成、Railway 部署就绪；Railway 本身仍未部署，MVP 尚未宣告完成。
+R9 阶段 B（四个能力切片：指标口径、纯明细、跨业务查询、受控临时分组指标）与阶段 2.5（可信客户端 IP 契约、`TRUSTED_PROXY_IPS` 策略裁定）的代码均已完成；前端 F0–F6 代码与文档已完成、Railway 部署配置就绪。当前 `main` 已包含全部成果，并与本地远端跟踪引用 `origin/main` 一致（ahead 0 / behind 0）。Railway 本身仍未部署，MVP 尚未宣告完成。
 
 **代码质量**：本轮 code review 在生成指标功能（R9 Task 12）里发现并已用 TDD 修复 3 个正确性缺陷；此前一轮 review 已修复 2 个（`X-Real-IP` 头优先级、生成指标图表选列）。详见「已完成」。
 
 **治理**：本项目累计出现 4 次「绕过用户审阅门」问题，第 4 次是编造用户决策原文并写入部署文档，已发现并更正（详见「已完成」的治理记录条目）。核对任何标注「用户已裁定」「用户已确认」的条目时，应能在对话记录或本文件中找到对应的真实用户发言，找不到则视为未裁定。
 
-**真实数据库全量测试可复现性（2026-08-13 更新）**：本轮 code review 修复完成后连续三次独立重跑均干净通过（**781 passed / 0 failed**，66.95s、74.64s、211.70s——第三次因与前端 E2E 并发抢占本机资源而变慢，但结果仍是零失败），均在单 Agent 独占访问测试容器期间执行；此前三次出现死锁/超时报错（260–360s）都发生在有另一 Agent 并发访问同一容器期间。证据支持「失败与多 Agent 并发写同一容器有关，而非代码缺陷」；`tests/conftest.py` 里已有的 `SET LOCAL statement_timeout = 0` 可能也起到了作用。**尚不能 100% 确定死锁不会在并发场景下复现**（三次干净结果都是单 Agent 场景，没有专门做过并发压力复现），建议单 Agent 独占运行 `REQUIRE_INTEGRATION_DB=1 pytest` 时可信任其结果，但仍需在无并发写入的前提下作为部署前置证据。详见「风险与约束」。
+**真实数据库全量测试可复现性**：最近一次完整真实 PostgreSQL 证据仍是 2026-08-13 的连续三次独立通过（**781 passed / 0 failed**，66.95s、74.64s、211.70s），均在单 Agent 独占访问测试容器期间执行；此前三次死锁/超时报错都发生在另一 Agent 并发访问同一容器期间。2026-08-17 复核时本机 `127.0.0.1:55432` 测试库未运行，因此默认 pytest 结果为 **653 passed / 128 skipped**，不能当作新的全量真实库绿灯。部署前仍需在无并发写入的独立测试库上重跑 `REQUIRE_INTEGRATION_DB=1 pytest`。详见「风险与约束」。
 
-**分支状态**：本地 `main` 领先 `origin/main` 87 个提交、落后 0 个，未推送；`feature/integrate-b7-f4` 落后 `main` 若干提交。`plans/2026-08-12-post-f6-execution-roadmap.md` 阶段 0（提交前核对、分组提交授权、分支去向裁定）与阶段 1（基线校正确认）的检查框仍未勾选，与 `main` 已包含相应成果的事实不一致——账本落后于实际执行，核对进度时不要只看这两处检查框。Task 2.4（清理 `tests/`/`scripts/` 既有 mypy 债务）也仍未开始。
+**分支状态**：主目录签出 `main`，HEAD 为 `407dfa2`；除本次 `docs/project-progress.md` 快照更新外无其他未提交改动，`main` 与本地 `origin/main` ahead 0 / behind 0。`feature/integrate-b7-f4` 及两个历史 worktree 只作对照，不再是主线。`plans/2026-08-12-post-f6-execution-roadmap.md` 的阶段 0/1 状态和多处检查框仍停留在执行前，与 Git 事实脱节；读取路线图时应把阶段 0、1、2、2.5 视为已经由当前 `main` 的代码与提交完成，尚未完成的是阶段 3 之后的 Railway/真实模型/P1 工作。Task 2.4（清理 `tests/`/`scripts/` 既有 mypy 债务）仍未开始。
 
-**全程使用 Fake/确定性 LLM，DeepSeek 调用 0、费用 0。**
+**Railway 已部署并完成首次真实模型验收（2026-08-17）**：前后端与 Neon PostgreSQL 均已上线，演示数据已灌入，`/api/health`、`/api/ready`、`/api/demo/merchants`、CORS 正反例、`/api/admin/ops/status` 均实测通过。首次真实 `deepseek-v4-flash` 调用暴露两个从未被测试覆盖的缺陷，已用 TDD 修复（见「已完成 · 首次真实模型验收」）。
+
+**自动化测试仍全部使用 Fake/确定性 LLM；真实 DeepSeek 调用只发生在 2026-08-17 的人工排查与验收中，累计约 3 万 token。**
 
 ## 产品裁决：参考项目是需求基准（2026-08-09）
 
@@ -30,9 +32,10 @@ R9 阶段 B（四个能力切片：指标口径、纯明细、跨业务查询、
 
 - 后端：**B4–B7 代码均已收口并完成终审修复轮**；`REQUIRE_INTEGRATION_DB=1 pytest` 历次在真实 PostgreSQL 上跑通（数字随后续切片增长，见「最近验证」）；`ruff`/`ruff format`/`mypy app` 全绿。**未完成的只剩需要人工在 Railway 控制台操作的部分**。
 - 后端：**R9 阶段 B（Task 9–15，四个能力切片）与阶段 2.5（可信 IP 契约）代码均已完成**，`TRUSTED_PROXY_IPS` 策略已由用户裁定（采用留空方案，依赖 Railway 单跳代理边界）。
-- 前端：**F0–F6 代码与文档已完成，Railway 部署就绪；Railway 尚未部署，MVP 尚未宣告完成。** 逐项证据与未验证缺口见 `docs/specs/2026-08-11-mvp-exit-evidence-matrix.md`（该矩阵尚未回填 R9 阶段 B / 阶段 2.5 的完成状态，下次更新时需要同步）。
+- 前端：**F0–F6 代码与文档已完成，Railway 部署就绪；Railway 尚未部署，MVP 尚未宣告完成。** `docs/specs/2026-08-11-mvp-exit-evidence-matrix.md` 仍停在 2026-08-12：其中 R9 未完成、Playwright `exit 124` 和 Vitest 245 条等记录均已过期，不能直接作为当前完成度结论；Railway 未验证项仍然有效。
 - F1 遗留：1440×1000 人工视觉比对待本地 Windows Computer Use helper 可用后补做；不影响已通过的结构、几何和无障碍自动化验收。
-- **仓库结构（2026-08-13 确认）**：主目录当前签出分支为 `main`（本地已快进，含 `feature/integrate-b7-f4` 全部内容），尚未推送到 `origin`。历史 worktree `.worktrees/feature-b5-b6-answer-feedback-export/`、`.worktrees/feature-f3-real-api-integration/` 内容均已并入主线，留作对照，不再是主线。
+- **P1 状态**：B8–B9、F7–F9 基本未开工。`ATTACHMENT`/`MEMORY` 目前只有枚举或契约占位，附件、日报、商家记忆闭环、对象存储、异步 Worker、知识库 CRUD 均无正式实现；`KnowledgeBaseView.vue` 仍是占位页，`worker/` 尚未创建。
+- **仓库结构（2026-08-17 确认）**：主目录当前签出分支为 `main`，已包含 `feature/integrate-b7-f4` 全部内容，并与本地 `origin/main` 一致。历史 worktree `.worktrees/feature-b5-b6-answer-feedback-export/`、`.worktrees/feature-f3-real-api-integration/` 内容均已并入主线，留作对照，不再是主线。
 
 ## 已完成
 
@@ -89,7 +92,24 @@ R9 阶段 B（四个能力切片：指标口径、纯明细、跨业务查询、
 
 以上均为行为保持的重构，验证方式是重跑既有测试而非新增测试：`tests/integration/repositories/test_analytics_repository.py`（17 passed）、`tests/integration/services/test_safe_query.py`（28 passed，含跨业务查询全部场景）、`tests/unit/intent/`（31 passed）、`tests/unit/services/test_export_service.py`（5 passed）、`tests/api/test_exports.py`（7 passed，真实库）、`tests/unit/agent/test_graph_query_data.py`（11 passed）、`tests/unit/services/test_visualization_service.py`（7 passed）均在改动后保持全绿；Mock E2E 单条 `isolation.spec.ts` 验证 `e2e-process.mjs` 改动后仍能正常启停。
 
+### 首次真实模型验收与 Railway 上线（2026-08-17）
+
+**Railway 部署**：Backend + Frontend + Neon PostgreSQL 已上线。迁移由 `preDeployCommand` 执行到 `20260813_0010`；演示数据从本机对 Neon 公网端点灌入（3 个商家 + 17,955 行经营数据，覆盖 2026-02-19~2026-08-17）。实测通过：`/api/health`、`/api/ready`、`/api/demo/merchants`（返回 3 个商家）、CORS 正例（精确回显前端 Origin）与反例（伪造 Origin 返回 400 且不带 `access-control-allow-origin`）、`/api/admin/ops/status`（只认 `X-Admin-Token`，不泄漏敏感字段）。
+
+**Seed 的部署缺口（未修复，当前靠手工绕过）**：`scripts/seed_demo_data.py` 与 `backend/scripts/seed_demo_analytics.py` 都不在后端镜像里（Dockerfile 只 COPY `app`/`alembic.ini`/`migrations`），且 `APP_ENV=production` 时会 `raise RuntimeError`。目前只能从本机设 `APP_ENV=development` + 生产 `DATABASE_URL` 执行，等于有意绕过那道护栏。**另外经营数据以「灌入当天」为终点生成 180 天，随真实日期推移会逐渐失效——每次正式演示前需重跑 `seed_demo_analytics.py`（幂等，约 40 秒）。**
+
+**首次真实 `deepseek-v4-flash` 调用暴露两个缺陷**（提交 `0bb53a0`，TDD 修复，新增 `backend/tests/unit/intent/test_prompts.py` 4 条）。二者都被 `FakeLlmClient` 掩盖——它返回预写好的合法 JSON，永远不会走到这两条路径：
+
+1. **提示词未声明输出契约**：`understand_user_prompt` 只列允许取值、不说字段名与形状，真实模型自造 `intent`/`business_domain`/`metrics` 且 `filters` 给成 list、`category` 缺失，`QueryIntent` 的 `extra="forbid"` 一律拒绝 → 三次重试全废 → 回落 CHAT。**现象是每次提问真实扣费却只返回「已完成结构化理解。」**，且 `llm_usage` 全部记为 `SUCCEEDED`（DeepSeek 确实正常响应，是我方用不上）。
+2. **模型不知道今天几号**：问「最近 7 天」返回 2025-03-14~2025-03-20；`validate_intent` 只钳制上界与跨度、不纠正合法但错误的历史区间，查询落在无数据时段，表现为「查不到」而非报错。
+
+**token 参数与推理模型不兼容**（提交 `45b9a4c`）：`LLM_MAX_OUTPUT_TOKENS_PER_CALL=1024` 时 `reasoning_tokens` 独占全部配额、`content` 返回空串。已重新标定为 4096 / 20000 / 500000 / 90s，依据见提交说明。
+
+**验收结果**：METRIC / METRIC / DETAIL / CHAT 四类问题全部 `finish_reason=stop`、`QueryIntent` 校验通过、日期区间正确。契约写清后单次调用从 2265–2778 token 降到 971–1191。**注意：仅覆盖 `understand` 这一步，`classify`/指标口径/回答/Reviewer 四个 LLM 环节尚未做真实模型验收。**
+
 ## 最近验证
+
+- **当前工作树复核（2026-08-17）**：复核开始时 Git 工作区干净；完成复核后仅 `docs/project-progress.md` 因本次快照同步产生未提交改动。`main` 与本地 `origin/main` ahead 0 / behind 0。后端默认 pytest **653 passed / 128 skipped**，128 条均因 `127.0.0.1:55432` 真实 PostgreSQL 测试库未运行而跳过；`ruff check`、`ruff format --check`、`mypy app`（90 个源文件）全绿。前端 Vitest **26 文件 / 254 passed**，ESLint、Prettier、TypeScript、OpenAPI 生成类型漂移、fixture 漂移、生产构建、生产 Mock 载荷、构建产物密钥与首屏静态依赖门禁均通过；Mock Playwright **25 passed**，生产首屏 Playwright **1 passed**，两条命令均以退出码 0 正常结束。生产构建仍有 ECharts chunk 超过 500 kB 的 Vite 警告，但首屏测试确认入口不会请求该 chunk。全程使用 Fake/确定性 LLM，DeepSeek 调用 0、费用 0。
 
 - **本轮 code review 修复验证（2026-08-13，含三轮修复：3 个正确性缺陷 + 文档整理 + 低优先级复用/效率清理）**：`tests/integration/repositories/test_analytics_repository.py` 全量 17 passed（含 2 条新增）；`tests/integration/services/test_safe_query.py` 全量 45 passed（跨业务查询全部场景覆盖 `_fetch_with_total` 重构）；`tests/unit/intent/` 全量 31 passed（含 1 条新增断言）；`tests/unit/services/test_export_service.py` 5 passed；`tests/api/test_exports.py` 真实库 7 passed；`tests/unit/agent/test_graph_query_data.py` 11 passed；`tests/unit/services/test_visualization_service.py` 7 passed；后端非数据库全量 pytest **653 passed / 128 skipped**；`ruff check`/`ruff format --check`/`mypy app` 全绿。真实数据库全量回归**连续三次干净通过**：**781 passed / 0 failed**（66.95s、74.64s、211.70s——第三次耗时明显更长是因为与前端 Mock Playwright 并发抢占本机资源，但结果仍是零失败，进一步支持「此前的死锁只与多 Agent 并发写同一容器相关」的判断）。前端 Vitest **26 文件 / 254 passed**、`format:check` 通过、Mock Playwright `--workers=1` **25 passed**。
 
@@ -109,16 +129,19 @@ R9 阶段 B（四个能力切片：指标口径、纯明细、跨业务查询、
 
 ## 下一步
 
-1. **确认真实数据库测试隔离缺陷是否已解决**：连续两次单 Agent 独占运行均干净通过（781 passed），证据倾向于此前的死锁/超时与多 Agent 并发访问同一容器相关，而非代码缺陷本身；但未做过专门的并发压力复现，建议再跑几次巩固信心后再正式解除「进入阶段 3 前的前置阻塞」标记。
-2. **分支收口**：本地 `main` 已包含全部成果但未推送；`plans/2026-08-12-post-f6-execution-roadmap.md` 阶段 0 的提交前核对、分组提交授权、分支去向裁定仍待正式走完（或由用户明确裁定简化跳过）。
-3. **回填账本**：路线图阶段 0/1 的检查框与 `main` 实际内容脱节，需要回填，避免下一位 Agent 读到矛盾状态。
-4. **进入阶段 3：Railway 部署与零成本线上验收**（F6 Task 9–10，用户在控制台操作）：部署后必须完成部署手册中约定的「转发头伪造验收」（同一演示 Token、连续更换 `X-Real-IP`/`X-Forwarded-For`，超限仍应返回 429），验证策略 A 在真实 Railway 网络边界下确实有效。
-5. **真实模型验收**（阶段 4）：仍须另行按 R3 说明模型、调用次数与费用并取得明确同意，且必须排在阶段 3 之后。
+1. **取得当前提交的真实数据库绿灯**：启动独立 PostgreSQL 测试库，在无其他 Agent 并发写入的前提下运行 `REQUIRE_INTEGRATION_DB=1 pytest`；必须得到 0 failed / 0 skipped 后，才能把 2026-08-13 的历史 781/781 更新为当前证据。
+2. **补 F1 人工视觉证据**：按 1440×1000 对照 Prototype，记录布局、间距、字体、颜色和主要交互差异；自动化响应式测试不能替代这一项。
+3. **同步剩余进度文档**：更新 `docs/specs/2026-08-11-mvp-exit-evidence-matrix.md` 的 R9、Vitest、Playwright 与当前未验证项；校正 `docs/yshopping-parity-audit.md` 的旧分支基线；回填 `plans/2026-08-12-post-f6-execution-roadmap.md` 阶段 0–2.5 的实际状态。
+4. **补完阶段 3 的剩余线上验收项**：Railway 部署本身已完成（见「已完成 · 首次真实模型验收与 Railway 上线」），仍未做的是**转发头伪造验收**（同一演示 Token 连续更换 `X-Real-IP`/`X-Forwarded-For`，超限仍须返回 429；零费用）、SIGTERM 收尾验收、日志脱敏抽查。
+5. **把 `0bb53a0` / `45b9a4c` 部署上线并复验**：这两个修复推送后 Railway 需重新部署，且必须同步把 `LLM_MAX_OUTPUT_TOKENS_PER_CALL` 调到 `4096`（旧值 1024 会让修复完全不生效）。部署后重跑一次 METRIC 问题，确认返回真实数据行与图表而非兜底文案。
+6. **完成剩余四个 LLM 环节的真实模型验收**（阶段 4）：目前只验了 `understand`。`classify`、指标口径、回答生成、Reviewer 四处仍只有 Fake 覆盖，很可能存在同类的「提示词未声明输出契约」缺陷。之后再按完整问题集评估意图准确率是否 ≥90% 并裁定 MVP；执行前必须按 R3 说明调用次数与预计费用。
+7. **MVP 完成后进入 P1**：按 B8 → F7、B9 → F8、F9 推进附件与日报、商家记忆、对象存储/Worker、知识库后台和内部可用版收口；P2 的真实 SSO/登录页仍不提前实施。
 
 ## 风险与约束
 
 - **（倾向于已解决，未完全确认，2026-08-13）真实数据库全量 pytest 此前不是可复现绿灯**：`TRUNCATE_ALL_TABLES` 与其他测试连接之间曾出现死锁/超时竞争，三次运行报错的具体用例都不同，但那三次都发生在有另一 Agent 并发访问同一测试容器期间。本轮在确认无并发访问后连续两次干净通过（781 passed / 0 failed，见「最近验证」）。**结论：单 Agent 独占运行时可信任结果；多 Agent 并发跑同一容器时不要信任「XXX passed / 0 failed」为稳定基线**，未来若在并发场景下再次复现死锁，应视为该假设被推翻，需要专项排查而非归因于环境噪音。
 - **治理：本项目已出现 4 次同类「绕过用户审阅门」问题**（详见「已完成」的治理记录条目），其中第 4 次是编造用户决策原文并写入部署文档。核对任何标注「用户已裁定」「用户已确认」的条目时，应能在对话记录或本文件中找到对应的真实用户发言，找不到则视为未裁定。
+- **`FakeLlmClient` 会掩盖整类缺陷**：它返回预写好的合法 JSON，因此「提示词有没有告诉模型该输出什么」这件事在自动化测试里完全不可见。2026-08-17 首次真实模型调用一次暴露两个此类缺陷（见「已完成」）。新增或修改任何 LLM 提示词时，**必须同时加一条从 Pydantic 模型推导期望值的提示词契约测试**（范式见 `backend/tests/unit/intent/test_prompts.py`），否则 Fake 全绿而线上必挂。`classify`、指标口径、回答、Reviewer 四处目前都还没有这类测试。
 - 未获用户明确同意，不得调用真实 DeepSeek API、收费 OCR 或日报生成；单元测试必须 mock LLM。真实模型调用前须先说明模型、调用次数和预期费用。
 - 商家身份只可由 Bearer Token 解析；后端所有经营查询必须强制注入 `merchant_id`，不得信任前端传入的商家编号。
 - `backend/tests/unit/agent/test_stage_reference_hygiene.py` 的 `CURRENT_STAGE` 常量停在 `"B7"`（随 B5/B6/B7 收口时的值）。该常量只扫 `app/agent/**` 的字符串字面量；若后续引入新的后端 stage 标记，记得同步推进，否则该防线会继续只挡旧阶段字样。
