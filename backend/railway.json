@@ -7,7 +7,7 @@
   "deploy": {
     "healthcheckPath": "/api/health",
     "healthcheckTimeout": 30,
-    "releaseCommand": "python -m alembic upgrade head",
+    "preDeployCommand": "python -m alembic upgrade head",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 3
   }

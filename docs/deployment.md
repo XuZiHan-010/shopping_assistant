@@ -4,7 +4,9 @@
 
 ## 服务与构建
 
-在同一个 Railway 项目中创建 PostgreSQL 和 Backend 两个 Service。Backend 的 Root Directory 为 `/backend`，使用其中的 `railway.json` 与 Dockerfile。将 Backend 的 `DATABASE_URL` 引用 PostgreSQL Service，例如 `${{Postgres.DATABASE_URL}}`。发布前的 `python -m alembic upgrade head` 由 `railway.json` 的 release command 执行一次，健康检查为 `/api/health`。
+在同一个 Railway 项目中创建 PostgreSQL 和 Backend 两个 Service。Backend 的 Root Directory 为 `/backend`，使用其中的 `railway.json` 与 Dockerfile。将 Backend 的 `DATABASE_URL` 引用 PostgreSQL Service，例如 `${{Postgres.DATABASE_URL}}`。发布前的 `python -m alembic upgrade head` 由 `railway.json` 的 `deploy.preDeployCommand` 执行一次，健康检查为 `/api/health`。
+
+字段名必须是 `preDeployCommand`：Railway 的配置 schema 里**没有** `releaseCommand`，写成后者不会报错，只会被静默忽略，导致迁移从不执行、线上库始终缺表。
 
 ## 前端服务
 
@@ -16,7 +18,7 @@ Caddy 不代理 `/api`。因此前端域名下不存在任何 API 路径，这�
 
 Railway 的 Config File Path 不跟随 Root Directory。即使 Service Root 已设为 `/frontend`，仍必须由用户在前端服务设置中显式填入 `/frontend/railway.json`；后端服务同理显式填入 `/backend/railway.json`。
 
-不得省略此设置：否则两份 `railway.json` 都不会生效，前端健康检查以及后端的 `releaseCommand`（`alembic upgrade head`）都会静默失效。
+不得省略此设置：否则两份 `railway.json` 都不会生效，前端健康检查以及后端的 `preDeployCommand`（`alembic upgrade head`）都会静默失效。
 
 ## 前端环境变量
 
