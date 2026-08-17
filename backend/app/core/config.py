@@ -63,7 +63,13 @@ class Settings(BaseSettings):
         le=200_000,
         validation_alias=AliasChoices("MAX_LLM_TOKENS_PER_REQUEST", "llm_max_tokens_per_request"),
     )
-    llm_daily_budget_tokens: int = Field(default=20_000, ge=1_000, le=100_000_000)
+    # 默认值按「一天至少能完整问 25 个问题」反推：单请求实际 token 由
+    # `llm_max_tokens_per_request`（默认 8000）硬性封顶，25 × 8000 = 200_000；
+    # `LlmCostGuard` 的预留是按字符数的悲观估算、调用结束后才 reconcile 回实际值，
+    # 峰值会比实际多出约一次调用的估算量，因此再留 50_000 余量。
+    # 这是**全局**每日预算（`llm_daily_budget` 只按 usage_date 聚合，不分商家），
+    # 公开演示时所有访客共用这一个池子。
+    llm_daily_budget_tokens: int = Field(default=250_000, ge=1_000, le=100_000_000)
     llm_max_output_tokens_per_call: int = Field(default=1_024, ge=64, le=8_000)
     rate_limit_per_minute: int = Field(default=10, ge=1, le=10_000)
     trusted_proxy_hops: int = Field(default=0, ge=0, le=4)

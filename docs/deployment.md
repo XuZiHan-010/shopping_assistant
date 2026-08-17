@@ -65,7 +65,7 @@ Railway 的 Config File Path 不跟随 Root Directory。即使 Service Root 已�
 | `TRUSTED_PROXY_HOPS=1` | Railway 单层代理。 |
 | `TRUSTED_PROXY_IPS` | **留空，不填任何值。** Railway 不发布稳定的边界代理地址；配置具体值会在重新部署后静默失效并导致限流退化，因此本项目明确不配置该变量。 |
 | `RATE_LIMIT_PER_MINUTE` | 单 Token 与可信 IP 的每分钟上限。 |
-| `LLM_DAILY_BUDGET_TOKENS` | 每日模型 token 预算。 |
+| `LLM_DAILY_BUDGET_TOKENS` | **全局**每日模型 token 预算——`llm_daily_budget` 表只按 `usage_date` 聚合，不分商家、不分访客，公开演示时所有人共用这一个池子，它是唯一的总量闸门。默认 `250000`，按「一天至少 25 个完整问题」反推（单请求实际 token 由 `MAX_LLM_TOKENS_PER_REQUEST` 封顶为 8000，25 × 8000 = 200000，其余为预留估算余量）。耗尽后所有人收到 `LLM_BUDGET_EXCEEDED` 的可见降级，不会静默继续扣费。 |
 
 现有代码已强制精确 CORS、生产 JSON 日志、`create_app()` 不启用 Debug，以及数据库连接重试。B8 附件功能尚未实现，不得把正式附件写入容器临时磁盘。
 
