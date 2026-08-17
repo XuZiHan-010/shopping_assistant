@@ -65,7 +65,10 @@ Railway 的 Config File Path 不跟随 Root Directory。即使 Service Root 已�
 | `TRUSTED_PROXY_HOPS=1` | Railway 单层代理。 |
 | `TRUSTED_PROXY_IPS` | **留空，不填任何值。** Railway 不发布稳定的边界代理地址；配置具体值会在重新部署后静默失效并导致限流退化，因此本项目明确不配置该变量。 |
 | `RATE_LIMIT_PER_MINUTE` | 单 Token 与可信 IP 的每分钟上限。 |
-| `LLM_DAILY_BUDGET_TOKENS` | **全局**每日模型 token 预算——`llm_daily_budget` 表只按 `usage_date` 聚合，不分商家、不分访客，公开演示时所有人共用这一个池子，它是唯一的总量闸门。默认 `250000`，按「一天至少 25 个完整问题」反推（单请求实际 token 由 `MAX_LLM_TOKENS_PER_REQUEST` 封顶为 8000，25 × 8000 = 200000，其余为预留估算余量）。耗尽后所有人收到 `LLM_BUDGET_EXCEEDED` 的可见降级，不会静默继续扣费。 |
+| `LLM_DAILY_BUDGET_TOKENS` | **全局**每日模型 token 预算——`llm_daily_budget` 表只按 `usage_date` 聚合，不分商家、不分访客，公开演示时所有人共用这一个池子，它是唯一的总量闸门。默认 `500000` = 单请求上限 `20000` × 25，最坏情况也保证 25 个完整问题；按真实模型实测（每问约 6000 token）实际约 80 个。耗尽后所有人收到 `LLM_BUDGET_EXCEEDED` 的可见降级，不会静默继续扣费。 |
+| `LLM_MAX_OUTPUT_TOKENS_PER_CALL` | 默认 `4096`。**推理模型不得低于此值**：`deepseek-v4-flash` 单次结构化意图的 `reasoning_tokens` 就要 1400–2200，设为 1024 时正文返回空串，三次重试全废、回落 CHAT 模式——每次提问真实扣费却只得到兜底文案。这是上限不是花费。 |
+| `MAX_LLM_TOKENS_PER_REQUEST` | 默认 `20000`，覆盖一轮问答 5–6 次推理调用。 |
+| `LLM_TIMEOUT_SECONDS` | 默认 `90`。推理模型出一次意图耗时明显；超时会被 `DeepSeekLlmClient` 吞成 fallback + degraded，表现为「模型没理解」而不是「超时」，很难查。 |
 
 现有代码已强制精确 CORS、生产 JSON 日志、`create_app()` 不启用 Debug，以及数据库连接重试。B8 附件功能尚未实现，不得把正式附件写入容器临时磁盘。
 
