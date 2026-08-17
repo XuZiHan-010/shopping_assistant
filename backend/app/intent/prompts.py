@@ -1,6 +1,44 @@
 from __future__ import annotations
 
+from datetime import date
+
 from app.intent.whitelist import DIMENSION_WHITELIST, FILTER_WHITELIST, METRIC_WHITELIST
+from app.schemas.chat import AnswerMode, QuestionCategory
+
+# 业务日界固定为 Asia/Shanghai（Settings.require_business_timezone 强制），这里只是
+# 把这件事告诉模型，不重新读配置——提示词模块不该依赖运行期配置。
+BUSINESS_TIMEZONE_LABEL = "Asia/Shanghai"
+
+
+def _values(enum: type[AnswerMode] | type[QuestionCategory]) -> str:
+    return "|".join(member.value for member in enum)
+
+
+# `QueryIntent` 是 extra="forbid"：少一个必填字段或多一个自造字段都会整条拒绝。
+# 只写「输出完整 QueryIntent JSON」时，真实模型会按常识编出 intent/business_domain/
+# metrics 这类字段，三次重试全部 ValidationError（2026-08-17 线上实测）。所以字段名、
+# 类型和取值集合必须逐条写进提示词。
+#
+# 刻意不含 cross_business_plan_rejected / generated_metric_plan_rejected：它们是
+# 校验器的内部状态（exclude=True），写进来等于邀请模型伪造拒绝标记。
+OUTPUT_CONTRACT = (
+    "输出必须是**单个 JSON 对象**，且只允许以下字段——多一个未列出的字段整条作废：\n"
+    f"  answer_mode           必填  枚举，取值之一：{_values(AnswerMode)}\n"
+    f"  category              必填  枚举，取值之一：{_values(QuestionCategory)}\n"
+    "  analysis_requested    必填  布尔\n"
+    "  metric                可选  单个字符串，不是数组\n"
+    "  dimensions            可选  字符串数组\n"
+    '  filters               可选  对象，不是数组，形如 {"筛选字段":"筛选值"}\n'
+    '  date_range            可选  对象 {"start":"YYYY-MM-DD","end":"YYYY-MM-DD"}\n'
+    "  sort                  可选  字符串\n"
+    "  limit                 可选  整数\n"
+    "  followup_reference    可选  布尔\n"
+    "  needs_attachment      可选  布尔\n"
+    "  cross_business_plan   可选  见上方跨业务说明\n"
+    "  generated_metric_plan 可选  见上方生成指标说明\n"
+    "不得输出 intent、business_domain、metrics 等上表之外的字段，"
+    "也不得输出 JSON 以外的解释文字或 markdown 代码围栏。\n"
+)
 
 CLASSIFY_SYSTEM = "你是 Borough 商家 AI 助手的意图分类器。只输出 JSON。"
 UNDERSTAND_SYSTEM = "你是 Borough 商家 AI 助手的结构化理解器。只输出 JSON，禁止 SQL。"
@@ -34,15 +72,28 @@ GENERATED_METRIC_GUIDANCE = (
 )
 
 
-def understand_user_prompt(question: str, category: str, knowledge_text: str) -> str:
+def understand_user_prompt(
+    question: str, category: str, knowledge_text: str, *, today: date
+) -> str:
+    """`today` 必须由调用方按业务时区注入。
+
+    模型没有时钟：不告诉它今天几号，「最近 7 天」这类相对表述只能靠猜。实测会返回
+    一年多以前的合法区间，而 `validate_intent` 只钳制上界和跨度、不纠正历史区间，
+    查询于是落在没有数据的时段上，表现为「查不到」而不是报错。
+    """
+
     return (
         CROSS_BUSINESS_GUIDANCE
         + GENERATED_METRIC_GUIDANCE
+        + OUTPUT_CONTRACT
         + (
+            f"今天的业务日期是 {today.isoformat()}（{BUSINESS_TIMEZONE_LABEL}）。"
+            "所有相对时间表述都以此为基准换算，date_range 不得晚于今天。\n"
             f"业务域：{category}\n业务知识：{knowledge_text}\n商家问题：{question}\n"
-            f"输出完整 QueryIntent JSON；metric={sorted(METRIC_WHITELIST)}；"
-            f"dimensions={sorted(DIMENSION_WHITELIST)}；filters={sorted(FILTER_WHITELIST)}；"
-            "必须输出 analysis_requested 布尔值：仅当用户明确要求分析、解读、原因或建议时为 true，"
+            f"metric 取值白名单={sorted(METRIC_WHITELIST)}；"
+            f"dimensions 取值白名单={sorted(DIMENSION_WHITELIST)}；"
+            f"filters 的键白名单={sorted(FILTER_WHITELIST)}；"
+            "analysis_requested：仅当用户明确要求分析、解读、原因或建议时为 true，"
             "只要求查看明细时为 false。不得输出 SQL、表名或自由查询文本。"
         )
     )
