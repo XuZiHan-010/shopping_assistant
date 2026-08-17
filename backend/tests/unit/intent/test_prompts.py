@@ -13,13 +13,37 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date
 
 from app.intent.models import QueryIntent
-from app.intent.prompts import understand_user_prompt
+from app.intent.prompts import (
+    CLASSIFY_SYSTEM,
+    UNDERSTAND_SYSTEM,
+    classify_user_prompt,
+    understand_user_prompt,
+)
 from app.schemas.chat import AnswerMode, QuestionCategory
 
 _TODAY = date(2026, 8, 17)
+
+
+EXAMPLE_MARKER = "输出示例："
+
+
+def _sole_json_object(prompt: str) -> dict[str, object]:
+    """取出提示词里 `输出示例：` 之后那段 JSON。
+
+    参考项目 `LlmIntentAnalysisService.buildPrompt` 用「完整 JSON 示例」而不是字段表
+    来传达契约（R9）。示例一旦和真实 schema 脱节就是在教模型输出错的东西，所以这里
+    把它抠出来交给下面的用例真正校验，而不是只断言「提示词里有个大括号」。
+    """
+
+    assert EXAMPLE_MARKER in prompt, f"提示词缺少「{EXAMPLE_MARKER}」段"
+    tail = prompt.split(EXAMPLE_MARKER, 1)[1].lstrip()
+    value, _ = json.JSONDecoder().raw_decode(tail)
+    assert isinstance(value, dict)
+    return value
 
 
 def _prompt() -> str:
@@ -66,6 +90,52 @@ def test_understand_prompt_lists_allowed_values_for_required_enums() -> None:
         if value not in prompt
     ]
     assert missing == [], f"提示词未列出这些必填枚举取值：{missing}"
+
+
+def test_understand_prompt_carries_a_json_example_that_matches_the_schema() -> None:
+    """示例必须真的能过 `QueryIntent` 校验，否则就是在教模型输出错的形状。"""
+
+    QueryIntent.model_validate(_sole_json_object(_prompt()))
+
+
+def test_classify_prompt_lists_allowed_values_for_both_enums() -> None:
+    """分类阶段是整条链路的闸门：它一失败，`understand` 根本不会执行。
+
+    2026-08-17 线上实测：提示词只说「输出 answer_mode、category、intent_keywords
+    JSON」，真实模型返回 answer_mode="trend_query"、category="退款退货域"。
+    `_answer_mode` / `_category` 遇到非法值静默回落成 CHAT / UNKNOWN，不报错，
+    于是整轮问答退化成兜底文案却没有任何异常信号。
+
+    参考项目 `LlmIntentAnalysisService.buildPrompt` 逐个列出了 category 与
+    answerMode 的可选值（R9），移植时丢了这一段。
+    """
+
+    prompt = classify_user_prompt("最近7天的退货量趋势", "（业务索引）")
+    missing = [
+        value
+        for enum in (AnswerMode, QuestionCategory)
+        for value in (member.value for member in enum)
+        if value not in prompt
+    ]
+    assert missing == [], f"分类提示词未列出这些枚举取值：{missing}"
+
+
+def test_classify_prompt_example_uses_only_legal_enum_values() -> None:
+    example = _sole_json_object(classify_user_prompt("最近7天的退货量趋势", "（业务索引）"))
+    assert set(example) == {"answer_mode", "category", "intent_keywords"}
+    AnswerMode(example["answer_mode"])
+    QuestionCategory(example["category"])
+    assert isinstance(example["intent_keywords"], list)
+
+
+def test_both_system_prompts_forbid_markdown_fences() -> None:
+    """参考项目的系统提示词写明「必须只输出 JSON 对象，不要输出 Markdown」。
+
+    裸 `json.loads` 遇到 ```json 围栏直接失败，而失败表现是静默降级。
+    """
+
+    for name, system in (("classify", CLASSIFY_SYSTEM), ("understand", UNDERSTAND_SYSTEM)):
+        assert "Markdown" in system or "markdown" in system, f"{name} 系统提示词未禁止 Markdown"
 
 
 def test_understand_prompt_states_today_so_relative_dates_resolve() -> None:

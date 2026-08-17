@@ -1,5 +1,16 @@
+"""两阶段意图识别的提示词。
+
+契约的表达形式照搬参考项目 `LlmIntentAnalysisService`（R9）：**枚举取值表 + 完整
+JSON 示例 + 编号约束**，系统提示词里显式禁止 Markdown。移植成两个独立提示词时这
+一整套都丢了，2026-08-17 首次真实模型调用一次暴露两处后果——见各常量上方注释。
+
+字段名沿用我方 `QueryIntent` 的 snake_case，不跟参考项目的 Java camelCase：那是内部
+LLM 契约，`docs/backend-development-plan.md` §8 管的是对外 API 契约，两者互不影响。
+"""
+
 from __future__ import annotations
 
+import json
 from datetime import date
 
 from app.intent.whitelist import DIMENSION_WHITELIST, FILTER_WHITELIST, METRIC_WHITELIST
@@ -9,9 +20,21 @@ from app.schemas.chat import AnswerMode, QuestionCategory
 # 把这件事告诉模型，不重新读配置——提示词模块不该依赖运行期配置。
 BUSINESS_TIMEZONE_LABEL = "Asia/Shanghai"
 
+# 测试按这个标记抠出示例并真正校验它，避免示例悄悄和 schema 脱节。
+EXAMPLE_MARKER = "输出示例："
+
+# 参考项目系统提示词的原话是「必须只输出 JSON 对象，不要输出 Markdown」。少了这句，
+# 模型很容易回 ```json 围栏，而 `IntentService._object` 是裸 json.loads，遇到围栏
+# 直接返回 None——表现为静默降级，不是报错。
+_NO_MARKDOWN = "必须只输出单个 JSON 对象，不要输出 Markdown 代码围栏或任何解释文字。"
+
 
 def _values(enum: type[AnswerMode] | type[QuestionCategory]) -> str:
     return "|".join(member.value for member in enum)
+
+
+def _example(payload: dict[str, object]) -> str:
+    return f"{EXAMPLE_MARKER}\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n"
 
 
 # `QueryIntent` 是 extra="forbid"：少一个必填字段或多一个自造字段都会整条拒绝。
@@ -36,18 +59,52 @@ OUTPUT_CONTRACT = (
     "  needs_attachment      可选  布尔\n"
     "  cross_business_plan   可选  见上方跨业务说明\n"
     "  generated_metric_plan 可选  见上方生成指标说明\n"
-    "不得输出 intent、business_domain、metrics 等上表之外的字段，"
-    "也不得输出 JSON 以外的解释文字或 markdown 代码围栏。\n"
+    "不得输出 intent、business_domain、metrics 等上表之外的字段。\n"
+) + _example(
+    {
+        "answer_mode": "METRIC",
+        "category": "REFUND",
+        "analysis_requested": True,
+        "metric": "return_count",
+        "dimensions": ["date"],
+        "date_range": {"start": "2026-08-11", "end": "2026-08-17"},
+    }
 )
 
-CLASSIFY_SYSTEM = "你是 Borough 商家 AI 助手的意图分类器。只输出 JSON。"
-UNDERSTAND_SYSTEM = "你是 Borough 商家 AI 助手的结构化理解器。只输出 JSON，禁止 SQL。"
+CLASSIFY_SYSTEM = f"你是 Borough 商家 AI 助手的意图分类器。{_NO_MARKDOWN}"
+UNDERSTAND_SYSTEM = (
+    f"你是 Borough 商家 AI 助手的结构化理解器。{_NO_MARKDOWN}禁止输出 SQL、表名或列名。"
+)
 
 
 def classify_user_prompt(question: str, index_text: str) -> str:
+    """第一阶段：判断业务域与回答模式，供第二阶段和知识正文检索使用。
+
+    这一步是整条链路的闸门——它一失败，`IntentService.understand` 会因
+    `llm_analyzed=False` 直接短路成 CHAT，第二阶段根本不执行。
+
+    2026-08-17 线上实测：旧提示词只写「输出 answer_mode、category、intent_keywords
+    JSON」，真实模型返回 answer_mode="trend_query"、category="退款退货域"。
+    `_answer_mode` / `_category` 遇到非法值静默回落成 CHAT / UNKNOWN，不抛异常，
+    于是整轮问答退化成兜底文案却没有任何异常信号。参考项目
+    `LlmIntentAnalysisService.buildPrompt` 本来就逐个列出了可选值，移植时丢了。
+    """
+
     return (
-        f"业务索引：\n{index_text}\n商家问题：{question}\n"
-        "输出 answer_mode、category、intent_keywords JSON。"
+        f"业务索引：\n{index_text}\n商家问题：{question}\n\n"
+        f"可选 answer_mode：{_values(AnswerMode)}\n"
+        f"可选 category：{_values(QuestionCategory)}\n\n"
+        "输出 JSON 字段：\n"
+        "  answer_mode      必填  上面 answer_mode 可选值之一，原样照抄，不得自造\n"
+        "  category         必填  上面 category 可选值之一，原样照抄，不得自造\n"
+        "  intent_keywords  必填  字符串数组，问题里的业务关键词\n"
+        "判断不了业务域时 category 填 UNKNOWN；不得译成中文，也不得另造名称。\n"
+    ) + _example(
+        {
+            "answer_mode": "METRIC",
+            "category": "REFUND",
+            "intent_keywords": ["退货量", "趋势"],
+        }
     )
 
 
