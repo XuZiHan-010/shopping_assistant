@@ -190,3 +190,95 @@ async def test_compose_rejects_a_draft_with_a_number_missing_from_query_result()
 
     assert result.degraded is True
     assert "12.00" in result.draft.answer
+
+
+def _trend_facts():
+    """按日期维度返回多行的趋势事实包，复刻 2026-08-17 线上那一轮。"""
+
+    from app.services.answer_service import AnswerFacts
+
+    return AnswerFacts(
+        question="最近7天的退货量趋势怎么样",
+        metric=MetricPayload(
+            metric_code="return_count",
+            display_name="退货量",
+            unit="件",
+            definition="统计周期内发起退货的商品件数。",
+            source="Borough 指标目录",
+            owner="经营分析组",
+            status="ACTIVE",
+            generated=False,
+            notice=None,
+        ),
+        query_result=QueryResult(
+            columns=(
+                ResultColumn("date", "日期", "DIMENSION"),
+                ResultColumn("return_count", "退货量", "METRIC"),
+            ),
+            rows=[
+                {"date": "2026-08-11", "return_count": 3},
+                {"date": "2026-08-17", "return_count": 15},
+            ],
+            total_rows=2,
+            truncated=False,
+            source_tables=("returns",),
+            plan_steps=("按日期汇总退货量",),
+            export_spec=None,
+            notes=(),
+            non_additive=False,
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_compose_accepts_dates_written_in_chinese_form() -> None:
+    """事实包用 ISO 日期，但中文回答里模型自然会写「8月11日」。
+
+    2026-08-17 线上实测：一份完全基于事实的草稿因此被判成幻觉——`_validate` 只剥
+    ISO 日期，剩下的 8/11/17 被当作「查询结果外的数字」，整轮回答降级成兜底摘要。
+    日期成分是维度值，不是要与聚合结果逐项比对的业务数字，写成哪种格式都一样。
+    """
+
+    from app.services.answer_service import AnswerService
+
+    draft = """{
+      "answer": "8月11日退货量为 3 件，8月17日升至 15 件。",
+      "recommendations": [
+        {"title": "核查退货激增", "evidence": "8月17日退货量为 15 件。",
+         "action": "调取当天退货明细。"},
+        {"title": "持续观察", "evidence": "8月11日退货量为 3 件。",
+         "action": "每日跟踪退货量。"}
+      ]
+    }"""
+
+    result = await AnswerService().compose(
+        _trend_facts(),
+        FakeLlmClient(responses=[draft]),
+        LlmBudget(max_calls=4, max_tokens=1_000),
+    )
+
+    assert result.degraded is False, "基于事实的中文日期草稿不应被判成幻觉"
+    assert "8月11日" in result.draft.answer
+
+
+@pytest.mark.asyncio
+async def test_compose_still_rejects_business_numbers_outside_the_facts() -> None:
+    """放行日期成分不能顺带放行编造的业务数字——这道守卫的本职必须保留。"""
+
+    from app.services.answer_service import AnswerService
+
+    draft = """{
+      "answer": "8月11日退货量为 3 件，退款金额达到 98765 元。",
+      "recommendations": [
+        {"title": "核查退货", "evidence": "8月11日退货量为 3 件。", "action": "调取明细。"},
+        {"title": "持续观察", "evidence": "8月17日退货量为 15 件。", "action": "每日跟踪。"}
+      ]
+    }"""
+
+    result = await AnswerService().compose(
+        _trend_facts(),
+        FakeLlmClient(responses=[draft]),
+        LlmBudget(max_calls=4, max_tokens=1_000),
+    )
+
+    assert result.degraded is True, "编造的 98765 必须仍被拦下"

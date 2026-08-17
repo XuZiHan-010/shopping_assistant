@@ -22,6 +22,17 @@ from app.services.safe_query import QueryResult
 
 _NUMBER = re.compile(r"(?<![\d.])\d+(?:\.\d+)?(?![\d.])")
 _ISO_DATE = re.compile(r"\b\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:[+-]\d{2}:?\d{2}|Z)?)?\b")
+# 事实包里的日期是 ISO，但中文回答里模型自然会写成「8月11日」「2026年8月17日」，
+# 甚至「8月14日至16日」这种只剩「16日」的续写。这些都是维度值，不是要与聚合结果
+# 逐项比对的业务数字——不剥掉的话，一份完全基于事实的草稿会因为 8/11/16/17 被判成
+# 幻觉（2026-08-17 线上实测）。分支按从长到短排列，正则取首个匹配。
+_CN_DATE = re.compile(
+    r"\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*[日号]"
+    r"|\d{4}\s*年\s*\d{1,2}\s*月"
+    r"|\d{1,2}\s*月\s*\d{1,2}\s*[日号]"
+    r"|\d{1,2}\s*月"
+    r"|\d{1,2}\s*[日号]"
+)
 _UUID = re.compile(
     r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
 )
@@ -127,8 +138,8 @@ class AnswerService:
         ):
             raise ValueError("非加和指标不能被回答草稿合计或汇总")
         # 日期是维度值，不是要与聚合结果逐项比对的业务数字；否则 2026-08-05
-        # 会被拆成三个数字并把一份完全基于事实的草稿误判为幻觉。
-        text = _ISO_DATE.sub("", raw_text)
+        # 会被拆成三个数字并把一份完全基于事实的草稿误判为幻觉。中文写法同理。
+        text = _CN_DATE.sub("", _ISO_DATE.sub("", raw_text))
         unexpected = {number for number in _NUMBER.findall(text) if number not in allowed_numbers}
         if unexpected:
             raise ValueError("回答含有查询结果外的数字")
