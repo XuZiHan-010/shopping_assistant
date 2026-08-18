@@ -313,3 +313,47 @@ async def test_compose_accepts_the_time_window_restated_from_the_question() -> N
 
     assert result.degraded is False, "复述问题里的时间窗口不应被判成幻觉"
     assert "最近7天" in result.draft.answer
+
+
+@pytest.mark.asyncio
+async def test_compose_accepts_dates_written_with_slashes() -> None:
+    """模型也会把日期写成「8/12」「8/14-8/16」。
+
+    2026-08-18 线上实测：4 次采样有 2 次因此降级，越界数字全是斜杠日期的成分。
+    枚举格式是打地鼠，但数据里不存在的空档日期（8/14-8/16）只能靠剥格式覆盖。
+    """
+
+    from app.services.answer_service import AnswerService
+
+    draft = """{
+      "answer": "8/11、8/17 分别为 3 件和 15 件，期间 8/14-8/16 无记录。",
+      "recommendations": [
+        {"title": "核查激增", "evidence": "8/17 退货量为 15 件。",
+         "action": "调取当天明细。"},
+        {"title": "补齐监测", "evidence": "8/14-8/16 无退货记录。",
+         "action": "确认拉取范围。"}
+      ]
+    }"""
+
+    result = await AnswerService().compose(
+        _trend_facts(),
+        FakeLlmClient(responses=[draft]),
+        LlmBudget(max_calls=4, max_tokens=1_000),
+    )
+
+    assert result.degraded is False, "斜杠日期不应被判成幻觉"
+
+
+def test_allowed_numbers_includes_date_parts_from_the_facts() -> None:
+    """治本：事实包里日期值的成分本身就是可引用的数字。
+
+    只要日期在数据里，模型写成 8月11日 / 8/11 / 08-11 / 十一日 都不该被拦——
+    与其枚举模型可能用的每种格式，不如承认这些成分是合法可引用的。
+    """
+
+    from app.services.answer_service import _allowed_numbers
+
+    allowed = _allowed_numbers(_trend_facts().query_result)
+
+    for part in ("2026", "8", "11", "17"):
+        assert part in allowed, f"日期成分 {part} 应当可被引用"

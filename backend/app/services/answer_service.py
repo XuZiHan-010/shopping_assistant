@@ -41,6 +41,9 @@ _CN_DATE = re.compile(
 # 该指标的数值也会被一并剥掉，守卫对它失效。当前 9 个指标的单位是元/件/单/个，
 # 不在此列；将来引入以天/小时为单位的指标时，这里要改成按 metric.unit 排除。
 _DURATION = re.compile(r"\d+(?:\.\d+)?\s*(?:天|周|个月|个季度|季度|小时|分钟|年)")
+# 模型也会把日期写成「8/12」「8/14-8/16」。刻意只认斜杠、不认连字符和点：
+# `15-20` 是取值区间、`15.5` 是小数，剥掉它们会让编造的数字蒙混过关。
+_SLASH_DATE = re.compile(r"\d{4}\s*/\s*\d{1,2}\s*/\s*\d{1,2}|\d{1,2}\s*/\s*\d{1,2}")
 _UUID = re.compile(
     r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
 )
@@ -147,7 +150,7 @@ class AnswerService:
             raise ValueError("非加和指标不能被回答草稿合计或汇总")
         # 日期是维度值，不是要与聚合结果逐项比对的业务数字；否则 2026-08-05
         # 会被拆成三个数字并把一份完全基于事实的草稿误判为幻觉。中文写法同理。
-        text = _DURATION.sub("", _CN_DATE.sub("", _ISO_DATE.sub("", raw_text)))
+        text = _DURATION.sub("", _SLASH_DATE.sub("", _CN_DATE.sub("", _ISO_DATE.sub("", raw_text))))
         unexpected = {number for number in _NUMBER.findall(text) if number not in allowed_numbers}
         if unexpected:
             raise ValueError("回答含有查询结果外的数字")
@@ -216,7 +219,33 @@ def _allowed_numbers(result: QueryResult) -> set[str]:
         for value in row.values():
             if isinstance(value, Decimal | int | float):
                 values.add(_display_value(value))
+            else:
+                values |= _date_parts(value)
     return values
+
+
+def _date_parts(value: object) -> set[str]:
+    """日期值的成分本身就是可引用的数字。
+
+    治本项：与其枚举模型可能采用的每种日期写法再逐一剥除（已经补过中文、斜杠两轮），
+    不如承认「事实包里出现过的日期的年/月/日」本来就允许被引用——这样无论模型写成
+    8月11日、8/11 还是 08-11，都不会被误判。数据里不存在的空档日期仍只能靠剥格式覆盖。
+    """
+
+    if isinstance(value, date | datetime):
+        text = value.isoformat()
+    elif isinstance(value, str):
+        text = value.strip()
+    else:
+        return set()
+    if not _ISO_DATE.match(text):
+        return set()
+    parts: set[str] = set()
+    for chunk in _NUMBER.findall(text):
+        parts.add(chunk)
+        # 模型写「8月」而不是「08月」，两种形态都要放行。
+        parts.add(chunk.lstrip("0") or "0")
+    return parts
 
 
 def _display_value(value: object) -> str:
