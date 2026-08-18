@@ -282,3 +282,34 @@ async def test_compose_still_rejects_business_numbers_outside_the_facts() -> Non
     )
 
     assert result.degraded is True, "编造的 98765 必须仍被拦下"
+
+
+@pytest.mark.asyncio
+async def test_compose_accepts_the_time_window_restated_from_the_question() -> None:
+    """模型复述用户问的时间窗口（「最近 7 天」）不是幻觉。
+
+    2026-08-17 线上实测：日期写法修好后仍然降级，唯一越界数字是 7——来自
+    「最近7天有记录的退货量中……」和「无法覆盖完整7天趋势」。时长表述与日期同类，
+    都是时间成分，不是要与聚合结果逐项比对的业务数字。
+    """
+
+    from app.services.answer_service import AnswerService
+
+    draft = """{
+      "answer": "最近7天有记录的退货量中，8月11日为 3 件，8月17日达到 15 件。",
+      "recommendations": [
+        {"title": "核查退货激增", "evidence": "8月17日退货量为 15 件。",
+         "action": "调取当天退货明细。"},
+        {"title": "补齐监测", "evidence": "当前数据无法覆盖完整7天趋势。",
+         "action": "确认拉取范围是否遗漏。"}
+      ]
+    }"""
+
+    result = await AnswerService().compose(
+        _trend_facts(),
+        FakeLlmClient(responses=[draft]),
+        LlmBudget(max_calls=4, max_tokens=1_000),
+    )
+
+    assert result.degraded is False, "复述问题里的时间窗口不应被判成幻觉"
+    assert "最近7天" in result.draft.answer

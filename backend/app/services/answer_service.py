@@ -33,6 +33,14 @@ _CN_DATE = re.compile(
     r"|\d{1,2}\s*月"
     r"|\d{1,2}\s*[日号]"
 )
+# 时长表述与日期同类：模型复述用户问的时间窗口（「最近 7 天」「完整 7 天趋势」）时，
+# 7 并不是一个来自查询结果的业务数字。2026-08-17 线上实测：中文日期修好后，唯一
+# 剩下的越界数字就是它。
+#
+# 代价是——若某个指标的单位恰好是这里的时间单位（如「平均配送时长 3 天」），
+# 该指标的数值也会被一并剥掉，守卫对它失效。当前 9 个指标的单位是元/件/单/个，
+# 不在此列；将来引入以天/小时为单位的指标时，这里要改成按 metric.unit 排除。
+_DURATION = re.compile(r"\d+(?:\.\d+)?\s*(?:天|周|个月|个季度|季度|小时|分钟|年)")
 _UUID = re.compile(
     r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
 )
@@ -139,7 +147,7 @@ class AnswerService:
             raise ValueError("非加和指标不能被回答草稿合计或汇总")
         # 日期是维度值，不是要与聚合结果逐项比对的业务数字；否则 2026-08-05
         # 会被拆成三个数字并把一份完全基于事实的草稿误判为幻觉。中文写法同理。
-        text = _CN_DATE.sub("", _ISO_DATE.sub("", raw_text))
+        text = _DURATION.sub("", _CN_DATE.sub("", _ISO_DATE.sub("", raw_text)))
         unexpected = {number for number in _NUMBER.findall(text) if number not in allowed_numbers}
         if unexpected:
             raise ValueError("回答含有查询结果外的数字")
