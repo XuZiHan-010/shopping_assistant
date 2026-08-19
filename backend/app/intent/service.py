@@ -16,6 +16,7 @@ from app.intent.prompts import (
 )
 from app.intent.whitelist import IntentValidation, validate_intent
 from app.llm.client import (
+    STRUCTURED_CALL_OPTIONS,
     LlmBudget,
     LlmBudgetError,
     LlmClient,
@@ -56,6 +57,7 @@ class IntentService:
                 user=classify_user_prompt(question, index_text),
                 fallback="",
                 budget=budget,
+                options=STRUCTURED_CALL_OPTIONS,
             )
             value = _object(result.text)
             if value is not None:
@@ -105,6 +107,7 @@ class IntentService:
                     ),
                     fallback="",
                     budget=budget,
+                    options=STRUCTURED_CALL_OPTIONS,
                 )
                 value = _object(result.text)
                 if value is not None:

@@ -120,6 +120,16 @@ def test_classify_prompt_lists_allowed_values_for_both_enums() -> None:
     assert missing == [], f"分类提示词未列出这些枚举取值：{missing}"
 
 
+def test_classify_prompt_can_route_core_business_questions_without_knowledge_index() -> None:
+    """知识库为空时，分类器仍必须知道核心业务域，不能把所有问题判成 UNKNOWN。"""
+
+    prompt = classify_user_prompt("最近七天成交额趋势如何？", "")
+
+    assert "成交额、GMV、订单、交易" in prompt
+    assert "退款、退货" in prompt
+    assert "规则、平台规则" in prompt
+
+
 def test_classify_prompt_example_uses_only_legal_enum_values() -> None:
     example = _sole_json_object(classify_user_prompt("最近7天的退货量趋势", "（业务索引）"))
     assert set(example) == {"answer_mode", "category", "intent_keywords"}

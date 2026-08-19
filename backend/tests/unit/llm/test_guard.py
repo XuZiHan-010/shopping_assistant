@@ -10,9 +10,12 @@ import pytest
 
 from app.core.config import AppEnvironment, Settings
 from app.llm.client import (
+    DEFAULT_LLM_CALL_OPTIONS,
     LlmBudget,
+    LlmCallOptions,
     LlmClient,
     LlmDailyBudgetExceededError,
+    LlmFailureKind,
     LlmResult,
     LlmUnavailableError,
 )
@@ -54,7 +57,12 @@ class _RecordUsageCall:
     usage_date: date
     request_id: str
     model: str
-    tokens: int
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    reserved_tokens: int
+    usage_known: bool
+    failure_kind: str | None
     status: str
     merchant_id: UUID | None
 
@@ -84,12 +92,29 @@ class FakeLlmBudgetRepository:
         usage_date: date,
         request_id: str,
         model: str,
-        tokens: int,
+        input_tokens: int,
+        output_tokens: int,
+        total_tokens: int,
+        reserved_tokens: int,
+        usage_known: bool,
+        failure_kind: str | None,
         status: str,
         merchant_id: UUID | None,
     ) -> None:
         self.record_usage_calls.append(
-            _RecordUsageCall(usage_date, request_id, model, tokens, status, merchant_id)
+            _RecordUsageCall(
+                usage_date,
+                request_id,
+                model,
+                input_tokens,
+                output_tokens,
+                total_tokens,
+                reserved_tokens,
+                usage_known,
+                failure_kind,
+                status,
+                merchant_id,
+            )
         )
 
 
@@ -102,14 +127,22 @@ class StubInnerClient:
         self._result = result
         self._error = error
         self.calls = 0
+        self.call_options: list[LlmCallOptions] = []
 
     def is_configured(self) -> bool:
         return True
 
     async def complete(
-        self, *, system: str, user: str, fallback: str, budget: LlmBudget
+        self,
+        *,
+        system: str,
+        user: str,
+        fallback: str,
+        budget: LlmBudget,
+        options: LlmCallOptions = DEFAULT_LLM_CALL_OPTIONS,
     ) -> LlmResult:
         self.calls += 1
+        self.call_options.append(options)
         if self._error is not None:
             raise self._error
         assert self._result is not None
@@ -150,7 +183,9 @@ async def test_complete_does_not_reserve_budget_when_inner_client_unconfigured()
 @pytest.mark.asyncio
 async def test_complete_reconciles_estimate_to_actual_tokens_and_records_success() -> None:
     repository = FakeLlmBudgetRepository(reserve_returns=[50])
-    inner = StubInnerClient(result=LlmResult(text="ok", tokens=30, degraded=False))
+    inner = StubInnerClient(
+        result=LlmResult(text="ok", tokens=30, degraded=False, usage_known=True)
+    )
     guard = _guard(repository, inner)
 
     result = await guard.complete(
@@ -165,13 +200,15 @@ async def test_complete_reconciles_estimate_to_actual_tokens_and_records_success
         )
     ]
     assert repository.record_usage_calls[-1].status == "SUCCEEDED"
-    assert repository.record_usage_calls[-1].tokens == 30
+    assert repository.record_usage_calls[-1].total_tokens == 30
 
 
 @pytest.mark.asyncio
 async def test_complete_raises_and_sets_cap_hit_when_reserve_rejected() -> None:
     repository = FakeLlmBudgetRepository(reserve_returns=[None])
-    inner = StubInnerClient(result=LlmResult(text="unused", tokens=0, degraded=False))
+    inner = StubInnerClient(
+        result=LlmResult(text="unused", tokens=0, degraded=False, usage_known=True)
+    )
     guard = _guard(repository, inner)
 
     with pytest.raises(LlmDailyBudgetExceededError):
@@ -190,6 +227,11 @@ async def test_complete_raises_and_sets_cap_hit_when_reserve_rejected() -> None:
             "req-1",
             "deepseek-v4-flash",
             0,
+            0,
+            0,
+            0,
+            True,
+            None,
             "BUDGET_REJECTED",
             MERCHANT_ID,
         )
@@ -212,7 +254,8 @@ async def test_complete_still_bills_estimate_when_inner_call_fails() -> None:
 
     assert repository.reconcile_calls == []
     assert repository.record_usage_calls[-1].status == "FAILED"
-    assert repository.record_usage_calls[-1].tokens == repository.reserve_calls[0].tokens
+    assert repository.record_usage_calls[-1].total_tokens == 0
+    assert repository.record_usage_calls[-1].reserved_tokens == repository.reserve_calls[0].tokens
 
 
 @pytest.mark.asyncio
@@ -228,6 +271,97 @@ async def test_complete_records_failed_without_reconcile_when_degraded_zero_toke
     assert result.degraded is True
     assert repository.reconcile_calls == []
     assert repository.record_usage_calls[-1].status == "FAILED"
+
+
+@pytest.mark.asyncio
+async def test_usage_row_records_real_prompt_and_completion_tokens() -> None:
+    repository = FakeLlmBudgetRepository(reserve_returns=[3_000])
+    inner = StubInnerClient(
+        result=LlmResult(
+            text="ok",
+            tokens=2_778,
+            degraded=False,
+            input_tokens=508,
+            output_tokens=2_270,
+            usage_known=True,
+        )
+    )
+
+    await _guard(repository, inner).complete(
+        system="s", user="u", fallback="fallback", budget=LlmBudget(max_calls=4, max_tokens=8_000)
+    )
+    row = repository.record_usage_calls[-1]
+
+    assert row.input_tokens == 508
+    assert row.output_tokens == 2_270
+    assert row.total_tokens == 2_778
+
+
+@pytest.mark.asyncio
+async def test_http_401_records_known_zero_tokens_and_releases_reservation() -> None:
+    repository = FakeLlmBudgetRepository(reserve_returns=[500])
+    inner = StubInnerClient(
+        result=LlmResult(
+            text="fallback",
+            tokens=0,
+            degraded=True,
+            failure_kind=LlmFailureKind.HTTP_401,
+            usage_known=True,
+        )
+    )
+
+    await _guard(repository, inner).complete(
+        system="s", user="u", fallback="fallback", budget=LlmBudget(max_calls=4, max_tokens=8_000)
+    )
+    row = repository.record_usage_calls[-1]
+
+    assert row.total_tokens == 0
+    assert row.status == "FAILED"
+    assert row.failure_kind == "HTTP_401"
+    assert row.usage_known is True
+    assert row.reserved_tokens == repository.reserve_calls[0].tokens
+    assert repository.reconcile_calls[-1].delta == -repository.reserve_calls[0].tokens
+
+
+@pytest.mark.asyncio
+async def test_timeout_keeps_conservative_reservation_and_marks_usage_unknown() -> None:
+    repository = FakeLlmBudgetRepository(reserve_returns=[500])
+    inner = StubInnerClient(
+        result=LlmResult(
+            text="fallback",
+            tokens=0,
+            degraded=True,
+            failure_kind=LlmFailureKind.TIMEOUT,
+            usage_known=False,
+        )
+    )
+
+    await _guard(repository, inner).complete(
+        system="s", user="u", fallback="fallback", budget=LlmBudget(max_calls=4, max_tokens=8_000)
+    )
+    row = repository.record_usage_calls[-1]
+
+    assert row.total_tokens == 0
+    assert row.failure_kind == "TIMEOUT"
+    assert row.usage_known is False
+    assert row.reserved_tokens == repository.reserve_calls[0].tokens
+    assert repository.reconcile_calls == []
+
+
+@pytest.mark.asyncio
+async def test_success_payload_without_usage_never_releases_reservation() -> None:
+    repository = FakeLlmBudgetRepository(reserve_returns=[500])
+    inner = StubInnerClient(
+        result=LlmResult(text='{"answer":"ok"}', tokens=0, degraded=False, usage_known=False)
+    )
+
+    await _guard(repository, inner).complete(
+        system="s", user="u", fallback="fallback", budget=LlmBudget(max_calls=4, max_tokens=8_000)
+    )
+
+    assert repository.reconcile_calls == []
+    assert repository.record_usage_calls[-1].reserved_tokens == repository.reserve_calls[0].tokens
+    assert repository.record_usage_calls[-1].usage_known is False
 
 
 @pytest.mark.asyncio

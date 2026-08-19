@@ -8,6 +8,8 @@ from uuid import UUID
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     ForeignKey,
@@ -48,7 +50,10 @@ class AuditLog(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
 
 class LlmUsage(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
     __tablename__ = "llm_usage"
-    __table_args__ = (Index("ix_llm_usage_usage_date", "usage_date"),)
+    __table_args__ = (
+        Index("ix_llm_usage_usage_date", "usage_date"),
+        CheckConstraint("reserved_tokens >= 0", name="ck_llm_usage_reserved_tokens_nonnegative"),
+    )
 
     merchant_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
@@ -78,6 +83,17 @@ class LlmUsage(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
         nullable=False,
         server_default=text("0"),
     )
+    reserved_tokens: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("0"),
+    )
+    usage_known: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=text("false"),
+    )
+    failure_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
 
 

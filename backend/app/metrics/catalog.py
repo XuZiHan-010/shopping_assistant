@@ -8,7 +8,13 @@ from typing import Final, Protocol
 
 from app.analytics.contract import metric_spec
 from app.intent.models import QueryIntent
-from app.llm.client import LlmBudget, LlmBudgetError, LlmClient, LlmUnavailableError
+from app.llm.client import (
+    STRUCTURED_CALL_OPTIONS,
+    LlmBudget,
+    LlmBudgetError,
+    LlmClient,
+    LlmUnavailableError,
+)
 from app.metrics.field_comments import find_field_comment
 from app.schemas.chat import AnswerMode, MetricDefinitionSource
 
@@ -17,6 +23,12 @@ GENERATED_NOTICE: Final[str] = (
     "以下内容由大模型根据当前问题生成，仅供参考，请以正式指标口径为准。"
 )
 _SYSTEM_PROMPT = "你是 Borough 商家 AI 助手的指标口径助理，只输出 JSON。"
+#: 只报字段名不给形状，模型就会自造嵌套结构——2026-08-17 的 understand 事故正是如此。
+#: 示例与下游真正读取的字段由 `tests/unit/prompts/test_structured_prompts.py` 钉在一起。
+METRIC_CATALOG_EXAMPLE = (
+    '{"display_name":"退货量","unit":"件","definition":"统计周期内发起退货的商品件数。"}'
+)
+METRIC_CATALOG_FIELDS = ("display_name", "unit", "definition")
 
 
 @dataclass(frozen=True)
@@ -100,10 +112,12 @@ class MetricCatalog:
                 system=_SYSTEM_PROMPT,
                 user=(
                     f"指标标识：{intent.metric}\n可用知识：\n{knowledge_text}\n"
-                    "只输出 JSON，字段为 display_name、unit、definition。"
+                    "只输出 JSON 对象，不要围栏和解释文字。输出示例："
+                    f"{METRIC_CATALOG_EXAMPLE}"
                 ),
                 fallback="",
                 budget=budget,
+                options=STRUCTURED_CALL_OPTIONS,
             )
             data = json.loads(result.text)
         except (json.JSONDecodeError, LlmBudgetError, LlmUnavailableError):

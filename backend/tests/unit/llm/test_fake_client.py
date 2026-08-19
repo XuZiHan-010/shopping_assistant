@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from app.llm.client import LlmBudget, LlmBudgetExceededError, LlmUnavailableError
+from app.llm.client import (
+    STRUCTURED_CALL_OPTIONS,
+    LlmBudget,
+    LlmBudgetExceededError,
+    LlmUnavailableError,
+)
 from app.llm.fake import FakeLlmClient
 
 
@@ -22,6 +27,21 @@ async def test_normal_fake_client_returns_the_configured_response() -> None:
 
     assert result.text == '{"answer_mode": "METRIC"}'
     assert result.degraded is False
+
+
+@pytest.mark.asyncio
+async def test_fake_client_records_call_options() -> None:
+    client = FakeLlmClient(responses=["ok"])
+
+    await client.complete(
+        system="s",
+        user="u",
+        fallback="fb",
+        budget=_budget(),
+        options=STRUCTURED_CALL_OPTIONS,
+    )
+
+    assert client.call_options == [STRUCTURED_CALL_OPTIONS]
 
 
 @pytest.mark.asyncio
