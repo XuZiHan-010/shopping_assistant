@@ -2,7 +2,7 @@
 
 > 本文件只保留当前可继续开发的事实快照，不追加每日流水账。每次完成一段可验证工作后，更新日期、状态、验证结果、下一步和风险。
 
-**最后更新：2026-08-18**
+**最后更新：2026-08-19**
 
 ## 当前快照
 
@@ -16,9 +16,15 @@ R9 阶段 B（四个能力切片：指标口径、纯明细、跨业务查询、
 
 **分支状态**：主目录签出 `main`，HEAD 为 `b455dfc`；`main` 与 `origin/main` 一致。`feature/integrate-b7-f4` 及两个历史 worktree 只作对照，不再是主线。`plans/2026-08-12-post-f6-execution-roadmap.md` 的阶段 0/1 状态和多处检查框仍停留在执行前，与 Git 事实脱节；读取路线图时应把阶段 0、1、2、2.5 视为已经由当前 `main` 的代码与提交完成，尚未完成的是阶段 3 之后的 Railway/真实模型/P1 工作。Task 2.4（清理 `tests/`/`scripts/` 既有 mypy 债务）仍未开始。
 
+**回答闭环整改（2026-08-19，工作副本 `feature/answer-loop-demo-refresh`）**：计划 A1–A3、B1–B3、B5–B6，以及 C1–C2 的本地代码均已实现：DeepSeek 失败类型安全记录、已知/未知用量分别结算、结构化调用关闭 thinking 并请求 JSON、回答/Reviewer 宽松 JSON 提取、后端派生事实摘要和全字段数字守卫、最多三轮的统一质量循环、受控降级、演示数据窗口一致性与受显式环境开关保护的滚动 Seed Job。未调用真实模型。随后经一轮对照计划的复核，又补掉六处问题：节点合并后遗留的死代码（`_review_degraded` 还引用着已删除的 `review_answer` 节点名）、只剩测试在调的旧 `AnswerService.compose()` 与 `ReviewService.review()`（10 条用例在给已下线的路径背书）、`roll_forward` 在调用方已开事务时必然抛 `InvalidRequestError`（该用例无 PostgreSQL 时被跳过，缺陷一直不可见）、日预算被当成单请求预算对用户播报、演示随机基线在两个写入口各写一份 20260804、指标口径与 Reviewer 提示词缺 JSON 示例与契约测试。当前本地后端回归为 **725 passed / 133 skipped**；跳过项均依赖未启动的 `127.0.0.1:55432` PostgreSQL，**迁移 `20260818_0011` 与滚动 Seed 的集成用例因此仍未真正跑过一次**。前端生成类型、fixture、ESLint、TypeScript 门禁均通过；Vitest 全量 254 条中 `src/router/index.spec.ts` 的「两条路由都能渲染」在满负载下偶发 5 秒超时（单独重跑 5 passed），属既有 flake，不是本轮改动引入。真实模型验收（A4、B4、B7）和 Railway Cron（C3）仍须分别得到用户的明确授权。
+
 **Railway 已部署（2026-08-17）**：前后端与 Neon PostgreSQL 均已上线，演示数据已灌入，`/api/health`、`/api/ready`、`/api/demo/merchants`、CORS 正反例、`/api/admin/ops/status` 均实测通过。首次真实 `deepseek-v4-flash` 调用暴露两个从未被测试覆盖的缺陷，已用 TDD 修复（见「已完成 · 首次真实模型验收」）。
 
 **自动化测试仍全部使用 Fake/确定性 LLM；真实 DeepSeek 调用只发生在 2026-08-17～18 的人工排查与验收中，后端记账约 3.5 万 token，另有本地排查脚本约 2 万 token。**
+
+**真实 PostgreSQL 验收（2026-08-19）**：已启动本机 Compose 的 `borough_test`，以 `REQUIRE_INTEGRATION_DB=1 uv run pytest -q` 运行全量回归，结果为 **858 passed / 0 skipped / 0 failed**（76.40 秒）。滚动 Seed 的 4 条集成用例和迁移 `20260818_0011` 均已实际执行；期间发现测试指纹对 UUID 使用 PostgreSQL 不支持的 `min/max` 聚合，已改为转换为文本后聚合并重跑全量通过。
+
+**A4 真实模型定向验收（2026-08-19）**：经用户授权，以 `deepseek-v4-flash` 对 classify、understand、指标口径与 Reviewer 各直接调用一次；每次上限 5,000 token，总上限 20,000。classify 为 298 token / 1.94 秒，understand 为 865 token / 1.05 秒，均成功返回合法 JSON；指标口径生成成功且字段完整，但现有组件未向验收调用方暴露该次 LLM usage，按未知用量记录；Reviewer 0.90 秒返回合法 `passed=false` verdict（未被误报为上游降级）。未输出密钥或完整提示词。
 
 ## 产品裁决：参考项目是需求基准（2026-08-09）
 
@@ -43,7 +49,7 @@ R9 阶段 B（四个能力切片：指标口径、纯明细、跨业务查询、
 
 - B0–B3：FastAPI 工程、演示商家身份与商家隔离、PostgreSQL/Alembic、会话和回答持久化、Chat JSON/SSE 双路径、幂等、跨商家审计和服务端推荐问题；指标/维度/筛选白名单、知识检索、Fake/DeepSeek LLM Client、两阶段结构化意图和 LangGraph 问答图均已落地。
 - B4：六张经营数据表与迁移、180 天可重复 Seed、指标/维度/筛选 SQL 契约、业务时区日期解析、受控聚合与五类明细查询、Safe Query Service（白名单路由 + 商家范围强制 + 绑定筛选值）、`GET /api/metrics/{code}` 指标口径接口、`MerchantQaGraph` 接入真实查询、REFUND 明细路由三级信号分流修复、终审修复轮（自洽性不变量、异常边界、日期筛选校验、`limit` 下界）。
-- B5：`VisualizationService`（只用已登记维度/指标列）、`AnswerService`（结构化回答草稿 + 本地确定性校验）、`ReviewService`（独立 Reviewer，最多两轮）均已接入问答图；`quality_status`/`quality_attempts`/`quality_notes` 如实记录。
+- B5：`VisualizationService`（只用已登记维度/指标列）、`AnswerService`（结构化回答草稿 + 本地确定性校验）、`ReviewService` 与可配置（最多 3 轮）的统一质量循环均已接入问答图；`quality_status`/`quality_attempts`/`quality_notes` 如实记录。受控降级只汇总来自当前查询的事实，截断明细不提供不完整总计。
 - B6：`POST /api/answers/{id}/feedback`（幂等采纳/点赞点踩，跨商家 403 + 审计）、`GET /api/exports/{id}`（HMAC 签名、15 分钟过期、UTF-8 BOM、公式注入防护）均已实现。
 - B7：`LlmCostGuard`/`SlidingWindowRateLimiter`/`resolve_client_ip` 补齐必测；`OperationalMetrics` 可观测性；`GET /api/admin/ops/status` 运维端点（只认 `X-Admin-Token`，未配置时整体不挂载路由）；`railway.json`、`docs/deployment.md`。实际 Railway 部署未执行。
 
@@ -152,7 +158,7 @@ R9 阶段 B（四个能力切片：指标口径、纯明细、跨业务查询、
 2. **补 F1 人工视觉证据**：按 1440×1000 对照 Prototype，记录布局、间距、字体、颜色和主要交互差异；自动化响应式测试不能替代这一项。
 3. **同步剩余进度文档**：更新 `docs/specs/2026-08-11-mvp-exit-evidence-matrix.md` 的 R9、Vitest、Playwright 与当前未验证项；校正 `docs/yshopping-parity-audit.md` 的旧分支基线；回填 `plans/2026-08-12-post-f6-execution-roadmap.md` 阶段 0–2.5 的实际状态。
 4. **补完阶段 3 的剩余线上验收项**：Railway 部署本身已完成（见「已完成 · 首次真实模型验收与 Railway 上线」），仍未做的是**转发头伪造验收**（同一演示 Token 连续更换 `X-Real-IP`/`X-Forwarded-For`，超限仍须返回 429；零费用）、SIGTERM 收尾验收、日志脱敏抽查。
-5. **修 `DeepSeekLlmClient` 的静默降级**（建议优先）：`except (httpx.HTTPError, ValueError): return LlmResult(fallback, 0, True)` 把 401、超时、限流、网络不通压成同一个无声结果，一行日志都没有。2026-08-18 的 `LLM_API_KEY` 误填事故因此难查近一小时。至少把状态码与异常类型写进结构化日志，并让 `record_usage` 区分「上游拒绝」与「模型输出不合格」；顺带修 `llm_usage.input_tokens`/`output_tokens` 恒为 0、`FAILED` 行记估算值而非真实用量的问题。
+5. **回答闭环整改**：已完成 A1–A3、B1–B3、B5–B6 的本地实现；真实模型验收（A4、B4、B7）和 Railway Cron（C3）仍须分别获得用户许可。滚动 Seed 的真实 PostgreSQL 验收待测试库可用后执行。
 6. **导入知识库**：`knowledge_documents` 仍是 0 行，每轮回答都带「未命中与当前问题相关的知识资料」，RULE 类问题无依据可答。`backend/scripts/import_wiki.py` 已存在，参考项目 `runtime/llm-wiki/` 有 43 份文档可导。零 LLM 费用。
 7. **扩大真实模型验收面**（阶段 4）：目前只验通了 METRIC 一条路径。指标口径 catalog 提示词只点了三个字段名、未给枚举取值，未证实但可疑；DETAIL / RULE / IDENTITY / 生成指标 / 跨业务查询均未验。之后再按完整问题集评估意图准确率是否 ≥90% 并裁定 MVP；执行前必须按 R3 说明调用次数与预计费用。
 8. **MVP 完成后进入 P1**：按 B8 → F7、B9 → F8、F9 推进附件与日报、商家记忆、对象存储/Worker、知识库后台和内部可用版收口；P2 的真实 SSO/登录页仍不提前实施。
@@ -162,6 +168,7 @@ R9 阶段 B（四个能力切片：指标口径、纯明细、跨业务查询、
 - **（倾向于已解决，未完全确认，2026-08-13）真实数据库全量 pytest 此前不是可复现绿灯**：`TRUNCATE_ALL_TABLES` 与其他测试连接之间曾出现死锁/超时竞争，三次运行报错的具体用例都不同，但那三次都发生在有另一 Agent 并发访问同一测试容器期间。本轮在确认无并发访问后连续两次干净通过（781 passed / 0 failed，见「最近验证」）。**结论：单 Agent 独占运行时可信任结果；多 Agent 并发跑同一容器时不要信任「XXX passed / 0 failed」为稳定基线**，未来若在并发场景下再次复现死锁，应视为该假设被推翻，需要专项排查而非归因于环境噪音。
 - **治理：本项目已出现 4 次同类「绕过用户审阅门」问题**（详见「已完成」的治理记录条目），其中第 4 次是编造用户决策原文并写入部署文档。核对任何标注「用户已裁定」「用户已确认」的条目时，应能在对话记录或本文件中找到对应的真实用户发言，找不到则视为未裁定。
 - **`FakeLlmClient` 会掩盖整类缺陷**：它返回预写好的合法 JSON，因此「提示词有没有告诉模型该输出什么」这件事在自动化测试里完全不可见。2026-08-17 首次真实模型调用一次暴露两个此类缺陷（见「已完成」）。新增或修改任何 LLM 提示词时，**必须同时加一条从 Pydantic 模型推导期望值的提示词契约测试**（范式见 `backend/tests/unit/intent/test_prompts.py`），否则 Fake 全绿而线上必挂。`classify`、指标口径、回答、Reviewer 四处目前都还没有这类测试。
+- **两套重试是乘加关系，调参时必须一起看**：`app/intent/service.py` 的 `MAX_INTENT_RETRIES=2`（understand 最坏跑 3 次）与 `QUALITY_MAX_ATTEMPTS`（每轮最多 2 次模型请求）互相独立，但四个调用点共用同一个 `LlmBudget`。当前最坏路径 9 次，`MAX_LLM_CALLS_PER_REQUEST` 定 10。任何一边加码都要重算这条路径，否则会以「预算耗尽」的面目暴露成意图识别问题。
 - 未获用户明确同意，不得调用真实 DeepSeek API、收费 OCR 或日报生成；单元测试必须 mock LLM。真实模型调用前须先说明模型、调用次数和预期费用。
 - 商家身份只可由 Bearer Token 解析；后端所有经营查询必须强制注入 `merchant_id`，不得信任前端传入的商家编号。
 - `backend/tests/unit/agent/test_stage_reference_hygiene.py` 的 `CURRENT_STAGE` 常量停在 `"B7"`（随 B5/B6/B7 收口时的值）。该常量只扫 `app/agent/**` 的字符串字面量；若后续引入新的后端 stage 标记，记得同步推进，否则该防线会继续只挡旧阶段字样。
@@ -186,6 +193,9 @@ R9 阶段 B（四个能力切片：指标口径、纯明细、跨业务查询、
 - `backend/app/intent/models.py`、`whitelist.py`：`GeneratedMetricPlan`/`CrossBusinessPlan` 的结构校验与降级语义；`whitelist.py` 本轮修过「被拒绝计划未清空」的缺陷。
 - `backend/app/services/answer_service.py`、`review_service.py`、`visualization_service.py`：B5 回答草稿、独立 Reviewer 与安全图表；`visualization_service.py` 本轮修过生成指标选列缺陷。
 - `backend/app/services/export_service.py`、`feedback_service.py`：B6 签名 CSV 导出与商家反馈。
+- `backend/app/services/quality_loop.py`、`quality_types.py`：生成 → 本地校验 → 独立复核 → 回喂重试 → 确定性兜底的统一质量循环；轮次由 `QUALITY_MAX_ATTEMPTS` 注入，降级原因分 `UPSTREAM`/`VALIDATION`/`BUDGET` 三类。
+- `backend/app/jobs/seed_demo_rolling.py`、`app/core/seed_config.py`：演示数据的每日增量滚动入口与其最小配置；写入需 `ALLOW_DEMO_DATA_REFRESH=true` 且数据库商家集合与三个演示商家精确相等。
+- `backend/app/analytics/demo_data.py` 的 `DEMO_ANALYTICS_SEED_BASE = 20260804`：演示经营数据随机基线的**唯一来源**，第 i 个商家用 `BASE + i`，滚动 Job 与 `backend/scripts/seed_demo_analytics.py` 共用。`scripts/seed_demo_data.py` 的 `--random-seed 20260730` 只作用于商家表，与经营数据无关，别拿错常量。
 - `backend/app/api/routes/exports.py`、`feedback.py`：B6 对外端点。
 - `backend/app/llm/guard.py`、`app/core/rate_limit.py`、`app/core/client_ip.py`、`app/repositories/llm_budget.py`：B7 费用防护/限流/可信代理 IP 基础设施；`client_ip.py` 本轮修过头优先级缺陷，必测见 `tests/unit/core/test_client_ip.py`、`tests/api/test_rate_limit_trust_boundary.py`。
 - `backend/app/core/metrics.py`、`app/api/routes/admin.py`：B7 运维可观测性与 `GET /api/admin/ops/status` 运维端点。

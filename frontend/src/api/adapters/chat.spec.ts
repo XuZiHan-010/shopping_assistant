@@ -97,10 +97,9 @@ describe('toChatAnswer · 真实载荷', () => {
     expect(quality.degraded).toBe(false)
     expect(quality.degradedReason).toBeUndefined()
     expect(quality.sources).toEqual(['DATABASE'])
-    expect(quality.status).toBe('NOT_RUN')
-    expect(quality.attempts).toBe(0)
+    expect(quality.status).toBe('PASSED')
+    expect(quality.attempts).toBe(1)
     expect(quality.notes).toEqual(gmv.quality_notes ?? [])
-    expect(quality.notes).toEqual([])
   })
 
   it('猜你想问带当前组与备选组', () => {
@@ -261,8 +260,9 @@ describe('toChatAnswer · 语义守卫', () => {
     expect(() => toChatAnswer(raw)).toThrow(expect.objectContaining({ code: 'CONTRACT' }))
   })
 
-  it('quality_attempts 超出 0–2 时报错', () => {
-    expect(() => toChatAnswer(clone({ quality_attempts: 3 }))).toThrow(ChatContractError)
+  it('quality_attempts 超出 0–3 时报错', () => {
+    expect(toChatAnswer(clone({ quality_attempts: 3 })).quality.attempts).toBe(3)
+    expect(() => toChatAnswer(clone({ quality_attempts: 4 }))).toThrow(ChatContractError)
     expect(() => toChatAnswer(clone({ quality_attempts: -1 }))).toThrow(ChatContractError)
   })
 

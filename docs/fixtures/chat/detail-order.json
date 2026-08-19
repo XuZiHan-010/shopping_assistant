@@ -44,9 +44,11 @@
   "metric_sql_definition": null,
   "metric_status": null,
   "metric_unit": null,
-  "quality_attempts": 0,
-  "quality_notes": [],
-  "quality_status": "NOT_RUN",
+  "quality_attempts": 1,
+  "quality_notes": [
+    "第 1 轮通过本地校验和独立复核前后比对"
+  ],
+  "quality_status": "PASSED",
   "query_plan": {
     "summary": "按商家范围检索订单明细；时间范围 2026-07-29 至 2026-08-04；数据来源：订单"
   },
@@ -109,16 +111,8 @@
       "node": "compose_answer"
     },
     {
-      "label": "本地校验回答",
-      "node": "local_validate"
-    },
-    {
-      "label": "复核回答质量",
-      "node": "review_answer"
-    },
-    {
-      "label": "判断是否需要重试",
-      "node": "decide_retry"
+      "label": "校验并复核回答质量",
+      "node": "quality_loop"
     },
     {
       "label": "生成推荐问题",

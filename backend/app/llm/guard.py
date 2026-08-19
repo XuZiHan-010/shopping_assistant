@@ -9,7 +9,9 @@ from uuid import UUID
 from app.analytics.dates import business_today
 from app.core.config import Settings
 from app.llm.client import (
+    DEFAULT_LLM_CALL_OPTIONS,
     LlmBudget,
+    LlmCallOptions,
     LlmClient,
     LlmDailyBudgetExceededError,
     LlmResult,
@@ -55,7 +57,13 @@ class LlmCostGuard:
         return max(self._settings.llm_daily_budget_tokens - snapshot.consumed_tokens, 0)
 
     async def complete(
-        self, *, system: str, user: str, fallback: str, budget: LlmBudget
+        self,
+        *,
+        system: str,
+        user: str,
+        fallback: str,
+        budget: LlmBudget,
+        options: LlmCallOptions = DEFAULT_LLM_CALL_OPTIONS,
     ) -> LlmResult:
         if not self._inner.is_configured():
             raise LlmUnavailableError("LLM 客户端未配置")
@@ -75,42 +83,48 @@ class LlmCostGuard:
                 usage_date=usage_date,
                 request_id=self._request_id,
                 model=self._settings.llm_model,
-                tokens=0,
+                input_tokens=0,
+                output_tokens=0,
+                total_tokens=0,
+                reserved_tokens=0,
+                usage_known=True,
+                failure_kind=None,
                 status="BUDGET_REJECTED",
                 merchant_id=self._merchant_id,
             )
             raise LlmDailyBudgetExceededError
         try:
             result = await self._inner.complete(
-                system=system, user=user, fallback=fallback, budget=budget
+                system=system, user=user, fallback=fallback, budget=budget, options=options
             )
         except BaseException:
             await self._repository.record_usage(
                 usage_date=usage_date,
                 request_id=self._request_id,
                 model=self._settings.llm_model,
-                tokens=estimated,
+                input_tokens=0,
+                output_tokens=0,
+                total_tokens=0,
+                reserved_tokens=estimated,
+                usage_known=False,
+                failure_kind=None,
                 status="FAILED",
                 merchant_id=self._merchant_id,
             )
             raise
-        if result.degraded and result.tokens == 0:
-            await self._repository.record_usage(
-                usage_date=usage_date,
-                request_id=self._request_id,
-                model=self._settings.llm_model,
-                tokens=estimated,
-                status="FAILED",
-                merchant_id=self._merchant_id,
-            )
-            return result
-        await self._repository.reconcile(usage_date=usage_date, delta=result.tokens - estimated)
+        if result.usage_known:
+            await self._repository.reconcile(usage_date=usage_date, delta=result.tokens - estimated)
         await self._repository.record_usage(
             usage_date=usage_date,
             request_id=self._request_id,
             model=self._settings.llm_model,
-            tokens=result.tokens,
-            status="SUCCEEDED",
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+            total_tokens=result.tokens,
+            reserved_tokens=estimated,
+            usage_known=result.usage_known,
+            failure_kind=result.failure_kind.value if result.failure_kind is not None else None,
+            status="FAILED" if result.degraded else "SUCCEEDED",
             merchant_id=self._merchant_id,
         )
         return result

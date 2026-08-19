@@ -7,7 +7,7 @@ import json
 import pytest
 
 from app.intent.models import QueryIntent
-from app.llm.client import LlmBudget
+from app.llm.client import STRUCTURED_CALL_OPTIONS, LlmBudget
 from app.llm.fake import FakeLlmClient
 from app.metrics.catalog import GENERATED_NOTICE, MetricCatalog
 from app.metrics.field_comments import FIELD_COMMENT_DEFINITIONS
@@ -66,7 +66,8 @@ async def test_generated_metric_is_explicitly_unverified() -> None:
     generated = json.dumps(
         {"display_name": "临时口径", "unit": "单", "definition": "由模型生成"}, ensure_ascii=False
     )
-    catalog = MetricCatalog(_FakeMetricRepository({}), FakeLlmClient(responses=[generated]))
+    llm = FakeLlmClient(responses=[generated])
+    catalog = MetricCatalog(_FakeMetricRepository({}), llm)
 
     payload = await catalog.resolve(_intent("unknown_metric_1d"), "知识正文", _budget())
 
@@ -76,6 +77,7 @@ async def test_generated_metric_is_explicitly_unverified() -> None:
     assert payload.source == "AI_GENERATED"
     assert payload.notice == GENERATED_NOTICE
     assert "yshopping" not in payload.notice.lower()
+    assert llm.call_options == [STRUCTURED_CALL_OPTIONS]
 
 
 @pytest.mark.asyncio
@@ -117,3 +119,28 @@ async def test_invalid_llm_json_does_not_emit_a_metric_payload() -> None:
     catalog = MetricCatalog(_FakeMetricRepository({}), FakeLlmClient(behaviour="invalid_json"))
 
     assert await catalog.resolve(_intent("unknown_metric_1d"), "", _budget()) is None
+
+
+@pytest.mark.asyncio
+async def test_empty_llm_content_does_not_emit_a_metric_payload() -> None:
+    """空正文与非法 JSON 一样不能成为临时指标口径。"""
+
+    catalog = MetricCatalog(_FakeMetricRepository({}), FakeLlmClient(responses=[""]))
+
+    assert await catalog.resolve(_intent("unknown_metric_1d"), "", _budget()) is None
+
+
+@pytest.mark.asyncio
+async def test_generated_metric_prompt_carries_a_full_json_example() -> None:
+    """只报字段名不给形状，模型就会自造嵌套结构（2026-08-17 的 understand 事故同因）。"""
+
+    from app.metrics.catalog import METRIC_CATALOG_EXAMPLE
+
+    llm = FakeLlmClient(responses=[METRIC_CATALOG_EXAMPLE])
+    catalog = MetricCatalog(_FakeMetricRepository({}), llm)
+
+    payload = await catalog.resolve(_intent("unknown_metric_1d"), "知识正文", _budget())
+
+    assert METRIC_CATALOG_EXAMPLE in llm.calls[0][1]
+    assert payload is not None
+    assert payload.display_name == "退货量"

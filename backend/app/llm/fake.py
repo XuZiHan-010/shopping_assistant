@@ -5,7 +5,13 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Literal
 
-from app.llm.client import LlmBudget, LlmResult, LlmUnavailableError
+from app.llm.client import (
+    DEFAULT_LLM_CALL_OPTIONS,
+    LlmBudget,
+    LlmCallOptions,
+    LlmResult,
+    LlmUnavailableError,
+)
 
 Behaviour = Literal["normal", "invalid_json", "timeout", "empty"]
 
@@ -26,6 +32,7 @@ class FakeLlmClient:
         self._configured = configured
         self._tokens_per_call = tokens_per_call
         self.calls: list[tuple[str, str]] = []
+        self.call_options: list[LlmCallOptions] = []
 
     def is_configured(self) -> bool:
         return self._configured
@@ -37,6 +44,7 @@ class FakeLlmClient:
         user: str,
         fallback: str,
         budget: LlmBudget,
+        options: LlmCallOptions = DEFAULT_LLM_CALL_OPTIONS,
     ) -> LlmResult:
         if not self._configured:
             raise LlmUnavailableError("FakeLlmClient 被构造为未配置")
@@ -44,11 +52,27 @@ class FakeLlmClient:
         budget.charge_call()
         budget.charge(self._tokens_per_call)
         self.calls.append((system, user))
+        self.call_options.append(options)
 
         if self._behaviour == "invalid_json":
-            return LlmResult(text="这不是 JSON", tokens=self._tokens_per_call, degraded=False)
+            return LlmResult(
+                text="这不是 JSON",
+                tokens=self._tokens_per_call,
+                degraded=False,
+                usage_known=True,
+            )
         if self._behaviour in {"timeout", "empty"}:
-            return LlmResult(text=fallback, tokens=self._tokens_per_call, degraded=True)
+            return LlmResult(
+                text=fallback,
+                tokens=self._tokens_per_call,
+                degraded=True,
+                usage_known=True,
+            )
 
         text = self._responses.pop(0) if self._responses else fallback
-        return LlmResult(text=text, tokens=self._tokens_per_call, degraded=False)
+        return LlmResult(
+            text=text,
+            tokens=self._tokens_per_call,
+            degraded=False,
+            usage_known=True,
+        )

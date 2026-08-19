@@ -54,21 +54,26 @@ class Settings(BaseSettings):
     # 偏紧；超时在 DeepSeekLlmClient 里被吞成 fallback + degraded，表现为「模型没理解」
     # 而不是「超时了」，很难查。
     llm_timeout_seconds: float = Field(default=90.0, gt=0, le=120)
+    llm_disable_thinking_for_structured: bool = True
+    quality_max_attempts: int = Field(default=3, ge=1, le=3)
+    # 最坏调用路径是 classify 1 + understand 3（`intent/service.py` 自带 2 次重试）
+    # + 指标口径 1 + （生成 + 复核）× 2 = 9 次，四个调用点共用同一个 LlmBudget。
+    # 定 6 会让 understand 一重试就把质量循环挤成「预算耗尽」降级，把排查方向带偏。
     llm_max_calls_per_request: int = Field(
-        default=6,
+        default=10,
         ge=1,
         le=20,
         validation_alias=AliasChoices("MAX_LLM_CALLS_PER_REQUEST", "llm_max_calls_per_request"),
     )
     llm_max_tokens_per_request: int = Field(
-        default=20_000,
+        default=25_000,
         ge=100,
         le=200_000,
         validation_alias=AliasChoices("MAX_LLM_TOKENS_PER_REQUEST", "llm_max_tokens_per_request"),
     )
     # 全局每日预算（`llm_daily_budget` 只按 usage_date 聚合，不分商家、不分访客，
-    # 公开演示时所有人共用同一个池子）。500_000 = 单请求上限 20_000 × 25 个问题，
-    # 即最坏情况也保证 25 个完整问题。2026-08-17 真实 `deepseek-v4-flash` 实测每个
+    # 公开演示时所有人共用同一个池子）。500_000 = 单请求上限 25_000 × 20 个问题，
+    # 即最坏情况也保证 20 个完整问题。2026-08-17 真实 `deepseek-v4-flash` 实测每个
     # 完整问题约 6_000 token，因此实际可支撑约 80 个。
     llm_daily_budget_tokens: int = Field(default=500_000, ge=1_000, le=100_000_000)
     # 1024 对推理模型是错的：2026-08-17 实测单次结构化意图光 reasoning_tokens 就要

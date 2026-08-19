@@ -277,6 +277,11 @@ async def build_fixture(case: FixtureCase) -> ChatResponse:
             if case.name in {"metric-refund", "metric-gmv", "detail-order"}
             else None
         ),
+        reviewer_llm=(
+            FakeLlmClient(responses=['{"passed":true,"issues":[]}'])
+            if case.name in {"metric-refund", "metric-gmv", "detail-order"}
+            else None
+        ),
     )
     response = (await graph.run(case.message, session_id)).response
     response = response.model_copy(update={"id": uuid5(_FIXTURE_NAMESPACE, f"{case.name}/answer")})

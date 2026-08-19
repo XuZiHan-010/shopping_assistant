@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from typing import Protocol
 
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -15,16 +16,22 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from app.core.config import Settings
 from app.core.errors import DatabaseUnavailableError
 
 Sleep = Callable[[float], Awaitable[None]]
 
 
+class DatabaseSettings(Protocol):
+    database_url: str
+    db_connect_max_attempts: int
+    db_connect_retry_seconds: float
+    db_statement_timeout_ms: int
+
+
 class Database:
     """集中管理数据库连接池和 Session 生命周期。"""
 
-    def __init__(self, settings: Settings, *, sleep: Sleep = asyncio.sleep) -> None:
+    def __init__(self, settings: DatabaseSettings, *, sleep: Sleep = asyncio.sleep) -> None:
         self._settings = settings
         self._sleep = sleep
         self.engine: AsyncEngine = create_async_engine(
