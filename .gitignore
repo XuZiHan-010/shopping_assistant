@@ -53,3 +53,7 @@ Thumbs.db
 # 也不被构建消费，占仓库一半体积。保留在本地即可。
 yshopping-merchant-ai 4/
 yshopping-prototype/
+
+# 实施计划与整改计划只保留在本地，不进远端仓库（2026-08-19 用户裁定）。
+# 规则仍按 R10：技能产出的计划写进 plans/，不建 superpowers/ 目录。
+plans/
