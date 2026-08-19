@@ -2,11 +2,11 @@
 
 > 本文件只保留当前可继续开发的事实快照，不追加每日流水账。每次完成一段可验证工作后，更新日期、状态、验证结果、下一步和风险。
 
-**最后更新：2026-08-17**
+**最后更新：2026-08-18**
 
 ## 当前快照
 
-R9 阶段 B（四个能力切片：指标口径、纯明细、跨业务查询、受控临时分组指标）与阶段 2.5（可信客户端 IP 契约、`TRUSTED_PROXY_IPS` 策略裁定）的代码均已完成；前端 F0–F6 代码与文档已完成、Railway 部署配置就绪。当前 `main` 已包含全部成果，并与本地远端跟踪引用 `origin/main` 一致（ahead 0 / behind 0）。Railway 本身仍未部署，MVP 尚未宣告完成。
+R9 阶段 B（四个能力切片：指标口径、纯明细、跨业务查询、受控临时分组指标）与阶段 2.5（可信客户端 IP 契约、`TRUSTED_PROXY_IPS` 策略裁定）的代码均已完成；前端 F0–F6 代码与文档已完成、Railway 部署配置就绪。当前 `main` 已包含全部成果并已推送 `origin/main`。**Railway 前后端与 Neon PostgreSQL 已上线，2026-08-18 首次拿到零降级的真实模型端到端回答**（见「已完成 · 线上真实模型端到端跑通」）；但 MVP 仍未宣告完成——转发头伪造验收、知识库导入、除 METRIC 外的其余回答模式真实验收均未做。
 
 **代码质量**：本轮 code review 在生成指标功能（R9 Task 12）里发现并已用 TDD 修复 3 个正确性缺陷；此前一轮 review 已修复 2 个（`X-Real-IP` 头优先级、生成指标图表选列）。详见「已完成」。
 
@@ -14,11 +14,11 @@ R9 阶段 B（四个能力切片：指标口径、纯明细、跨业务查询、
 
 **真实数据库全量测试可复现性**：最近一次完整真实 PostgreSQL 证据仍是 2026-08-13 的连续三次独立通过（**781 passed / 0 failed**，66.95s、74.64s、211.70s），均在单 Agent 独占访问测试容器期间执行；此前三次死锁/超时报错都发生在另一 Agent 并发访问同一容器期间。2026-08-17 复核时本机 `127.0.0.1:55432` 测试库未运行，因此默认 pytest 结果为 **653 passed / 128 skipped**，不能当作新的全量真实库绿灯。部署前仍需在无并发写入的独立测试库上重跑 `REQUIRE_INTEGRATION_DB=1 pytest`。详见「风险与约束」。
 
-**分支状态**：主目录签出 `main`，HEAD 为 `407dfa2`；除本次 `docs/project-progress.md` 快照更新外无其他未提交改动，`main` 与本地 `origin/main` ahead 0 / behind 0。`feature/integrate-b7-f4` 及两个历史 worktree 只作对照，不再是主线。`plans/2026-08-12-post-f6-execution-roadmap.md` 的阶段 0/1 状态和多处检查框仍停留在执行前，与 Git 事实脱节；读取路线图时应把阶段 0、1、2、2.5 视为已经由当前 `main` 的代码与提交完成，尚未完成的是阶段 3 之后的 Railway/真实模型/P1 工作。Task 2.4（清理 `tests/`/`scripts/` 既有 mypy 债务）仍未开始。
+**分支状态**：主目录签出 `main`，HEAD 为 `b455dfc`；`main` 与 `origin/main` 一致。`feature/integrate-b7-f4` 及两个历史 worktree 只作对照，不再是主线。`plans/2026-08-12-post-f6-execution-roadmap.md` 的阶段 0/1 状态和多处检查框仍停留在执行前，与 Git 事实脱节；读取路线图时应把阶段 0、1、2、2.5 视为已经由当前 `main` 的代码与提交完成，尚未完成的是阶段 3 之后的 Railway/真实模型/P1 工作。Task 2.4（清理 `tests/`/`scripts/` 既有 mypy 债务）仍未开始。
 
-**Railway 已部署并完成首次真实模型验收（2026-08-17）**：前后端与 Neon PostgreSQL 均已上线，演示数据已灌入，`/api/health`、`/api/ready`、`/api/demo/merchants`、CORS 正反例、`/api/admin/ops/status` 均实测通过。首次真实 `deepseek-v4-flash` 调用暴露两个从未被测试覆盖的缺陷，已用 TDD 修复（见「已完成 · 首次真实模型验收」）。
+**Railway 已部署（2026-08-17）**：前后端与 Neon PostgreSQL 均已上线，演示数据已灌入，`/api/health`、`/api/ready`、`/api/demo/merchants`、CORS 正反例、`/api/admin/ops/status` 均实测通过。首次真实 `deepseek-v4-flash` 调用暴露两个从未被测试覆盖的缺陷，已用 TDD 修复（见「已完成 · 首次真实模型验收」）。
 
-**自动化测试仍全部使用 Fake/确定性 LLM；真实 DeepSeek 调用只发生在 2026-08-17 的人工排查与验收中，累计约 3 万 token。**
+**自动化测试仍全部使用 Fake/确定性 LLM；真实 DeepSeek 调用只发生在 2026-08-17～18 的人工排查与验收中，后端记账约 3.5 万 token，另有本地排查脚本约 2 万 token。**
 
 ## 产品裁决：参考项目是需求基准（2026-08-09）
 
@@ -32,7 +32,7 @@ R9 阶段 B（四个能力切片：指标口径、纯明细、跨业务查询、
 
 - 后端：**B4–B7 代码均已收口并完成终审修复轮**；`REQUIRE_INTEGRATION_DB=1 pytest` 历次在真实 PostgreSQL 上跑通（数字随后续切片增长，见「最近验证」）；`ruff`/`ruff format`/`mypy app` 全绿。**未完成的只剩需要人工在 Railway 控制台操作的部分**。
 - 后端：**R9 阶段 B（Task 9–15，四个能力切片）与阶段 2.5（可信 IP 契约）代码均已完成**，`TRUSTED_PROXY_IPS` 策略已由用户裁定（采用留空方案，依赖 Railway 单跳代理边界）。
-- 前端：**F0–F6 代码与文档已完成，Railway 部署就绪；Railway 尚未部署，MVP 尚未宣告完成。** `docs/specs/2026-08-11-mvp-exit-evidence-matrix.md` 仍停在 2026-08-12：其中 R9 未完成、Playwright `exit 124` 和 Vitest 245 条等记录均已过期，不能直接作为当前完成度结论；Railway 未验证项仍然有效。
+- 前端：**F0–F6 代码与文档已完成，Railway 已部署上线；MVP 尚未宣告完成。** `docs/specs/2026-08-11-mvp-exit-evidence-matrix.md` 仍停在 2026-08-12：其中 R9 未完成、Playwright `exit 124` 和 Vitest 245 条等记录均已过期，不能直接作为当前完成度结论；Railway 未验证项仍然有效。
 - F1 遗留：1440×1000 人工视觉比对待本地 Windows Computer Use helper 可用后补做；不影响已通过的结构、几何和无障碍自动化验收。
 - **P1 状态**：B8–B9、F7–F9 基本未开工。`ATTACHMENT`/`MEMORY` 目前只有枚举或契约占位，附件、日报、商家记忆闭环、对象存储、异步 Worker、知识库 CRUD 均无正式实现；`KnowledgeBaseView.vue` 仍是占位页，`worker/` 尚未创建。
 - **仓库结构（2026-08-17 确认）**：主目录当前签出分支为 `main`，已包含 `feature/integrate-b7-f4` 全部内容，并与本地 `origin/main` 一致。历史 worktree `.worktrees/feature-b5-b6-answer-feedback-export/`、`.worktrees/feature-f3-real-api-integration/` 内容均已并入主线，留作对照，不再是主线。
@@ -107,6 +107,25 @@ R9 阶段 B（四个能力切片：指标口径、纯明细、跨业务查询、
 
 **验收结果**：METRIC / METRIC / DETAIL / CHAT 四类问题全部 `finish_reason=stop`、`QueryIntent` 校验通过、日期区间正确。契约写清后单次调用从 2265–2778 token 降到 971–1191。**注意：仅覆盖 `understand` 这一步，`classify`/指标口径/回答/Reviewer 四个 LLM 环节尚未做真实模型验收。**
 
+### 线上真实模型端到端跑通（2026-08-18）
+
+**结论：Railway 线上首次拿到零降级的完整回答。** `degraded=false`、`quality_status=PASSED`（Reviewer 实际执行并通过）、`analysis_sources=["DATABASE"]`、3 行真实数据、LINE 图表、2 条带事实依据的建议，正文是真实趋势解读而非兜底摘要。这是 MVP 阶段 4「真实模型验收」第一次真正达成的单点证据。
+
+达成前又排掉三个问题，均为 2026-08-17～18 实测发现：
+
+1. **`classify` 提示词同样缺输出契约**（提交 `bfaf32b`）。`understand` 修好后失败点前移到第一阶段：模型返回 `answer_mode="trend_query"`、`category="退款退货域"` 这类非法枚举值，`_answer_mode`/`_category` **静默回落**成 `CHAT`/`UNKNOWN`，不报错所以长期不可见。按 R9 核对参考项目 `LlmIntentAnalysisService.buildPrompt`，发现**它本来就有完整契约**（枚举取值表 + 20 字段 JSON 示例 + 6 条编号约束），是我方移植时把一个提示词拆成两个、契约没跟过来。已按参考项目形式补齐。
+2. **Railway 的 `LLM_API_KEY` 被填成了占位符字符串**。这是 agent 给出「整块替换」的变量清单时把 `LLM_API_KEY="你的DeepSeekKey"` 留在里面导致的。后果：DeepSeek 一律 401，而 `DeepSeekLlmClient` 把 `httpx.HTTPError` 静默换成 fallback，表面现象与「模型没理解问题」完全一致，误导排查方向近一小时。
+3. **数字守卫把时间表述判成幻觉**（提交 `24051ba`、`b455dfc`）。`AnswerService._validate` 拒绝「查询结果外的数字」，比对前只剥 ISO 日期；而中文回答里模型自然写「8月12日」「最近7天」，于是 8/12/17/7 全被判为编造，一份完全基于事实的草稿降级成兜底摘要，且 `degraded_reason` 报成「回答生成服务暂不可用」——把本地校验的误判说成服务故障。已新增 `_CN_DATE`（中文日期）与 `_DURATION`（时长表述）一并剥除；守卫本职由新增用例保证（事实包外的 98765 仍被拦下）。参考项目没有这道机械校验，属我方自加防线的缺陷。
+
+**仍然打开的问题**：
+
+- 🔴 **`DeepSeekLlmClient` 吞掉全部上游错误**（[`app/llm/deepseek.py`](../backend/app/llm/deepseek.py) 的 `except (httpx.HTTPError, ValueError): return LlmResult(fallback, 0, True)`）。401、超时、限流、网络不通被压成同一个无声降级，一行日志都没有；`llm_usage` 只记 `FAILED` 不记原因。上面第 2 条之所以难查，根源就在这里。**建议下一步优先修**：至少把状态码与异常类型写进结构化日志，并让 `record_usage` 区分「上游拒绝」与「模型输出不合格」。
+- 🟡 `knowledge_documents` **仍是 0 行**，`quality_notes` 每轮都带「未命中与当前问题相关的知识资料」。规则类（RULE）问题无依据可答，指标口径三级检索的第三级也无料。`backend/scripts/import_wiki.py` 存在，参考项目 `runtime/llm-wiki/` 有 43 份文档可导，尚未执行。
+- 🟡 **只验了 METRIC 一条路径**。指标口径 catalog 提示词只点了三个字段名、未给枚举，未证实但可疑；DETAIL / RULE / IDENTITY / 生成指标 / 跨业务查询均未做真实模型验收。
+- 🟡 `llm_usage` 的 `input_tokens` / `output_tokens` 恒为 0，只有 `total_tokens` 有值；且 `FAILED` 行记的是 `LlmCostGuard` 的**悲观估算值**而非真实用量，直接拿它统计费用会高估。
+
+**今日真实 DeepSeek 用量**：后端记账约 3.5 万 token（2026-08-17），另有本地排查脚本约 2 万 token。
+
 ## 最近验证
 
 - **当前工作树复核（2026-08-17）**：复核开始时 Git 工作区干净；完成复核后仅 `docs/project-progress.md` 因本次快照同步产生未提交改动。`main` 与本地 `origin/main` ahead 0 / behind 0。后端默认 pytest **653 passed / 128 skipped**，128 条均因 `127.0.0.1:55432` 真实 PostgreSQL 测试库未运行而跳过；`ruff check`、`ruff format --check`、`mypy app`（90 个源文件）全绿。前端 Vitest **26 文件 / 254 passed**，ESLint、Prettier、TypeScript、OpenAPI 生成类型漂移、fixture 漂移、生产构建、生产 Mock 载荷、构建产物密钥与首屏静态依赖门禁均通过；Mock Playwright **25 passed**，生产首屏 Playwright **1 passed**，两条命令均以退出码 0 正常结束。生产构建仍有 ECharts chunk 超过 500 kB 的 Vite 警告，但首屏测试确认入口不会请求该 chunk。全程使用 Fake/确定性 LLM，DeepSeek 调用 0、费用 0。
@@ -133,9 +152,10 @@ R9 阶段 B（四个能力切片：指标口径、纯明细、跨业务查询、
 2. **补 F1 人工视觉证据**：按 1440×1000 对照 Prototype，记录布局、间距、字体、颜色和主要交互差异；自动化响应式测试不能替代这一项。
 3. **同步剩余进度文档**：更新 `docs/specs/2026-08-11-mvp-exit-evidence-matrix.md` 的 R9、Vitest、Playwright 与当前未验证项；校正 `docs/yshopping-parity-audit.md` 的旧分支基线；回填 `plans/2026-08-12-post-f6-execution-roadmap.md` 阶段 0–2.5 的实际状态。
 4. **补完阶段 3 的剩余线上验收项**：Railway 部署本身已完成（见「已完成 · 首次真实模型验收与 Railway 上线」），仍未做的是**转发头伪造验收**（同一演示 Token 连续更换 `X-Real-IP`/`X-Forwarded-For`，超限仍须返回 429；零费用）、SIGTERM 收尾验收、日志脱敏抽查。
-5. **把 `0bb53a0` / `45b9a4c` 部署上线并复验**：这两个修复推送后 Railway 需重新部署，且必须同步把 `LLM_MAX_OUTPUT_TOKENS_PER_CALL` 调到 `4096`（旧值 1024 会让修复完全不生效）。部署后重跑一次 METRIC 问题，确认返回真实数据行与图表而非兜底文案。
-6. **完成剩余四个 LLM 环节的真实模型验收**（阶段 4）：目前只验了 `understand`。`classify`、指标口径、回答生成、Reviewer 四处仍只有 Fake 覆盖，很可能存在同类的「提示词未声明输出契约」缺陷。之后再按完整问题集评估意图准确率是否 ≥90% 并裁定 MVP；执行前必须按 R3 说明调用次数与预计费用。
-7. **MVP 完成后进入 P1**：按 B8 → F7、B9 → F8、F9 推进附件与日报、商家记忆、对象存储/Worker、知识库后台和内部可用版收口；P2 的真实 SSO/登录页仍不提前实施。
+5. **修 `DeepSeekLlmClient` 的静默降级**（建议优先）：`except (httpx.HTTPError, ValueError): return LlmResult(fallback, 0, True)` 把 401、超时、限流、网络不通压成同一个无声结果，一行日志都没有。2026-08-18 的 `LLM_API_KEY` 误填事故因此难查近一小时。至少把状态码与异常类型写进结构化日志，并让 `record_usage` 区分「上游拒绝」与「模型输出不合格」；顺带修 `llm_usage.input_tokens`/`output_tokens` 恒为 0、`FAILED` 行记估算值而非真实用量的问题。
+6. **导入知识库**：`knowledge_documents` 仍是 0 行，每轮回答都带「未命中与当前问题相关的知识资料」，RULE 类问题无依据可答。`backend/scripts/import_wiki.py` 已存在，参考项目 `runtime/llm-wiki/` 有 43 份文档可导。零 LLM 费用。
+7. **扩大真实模型验收面**（阶段 4）：目前只验通了 METRIC 一条路径。指标口径 catalog 提示词只点了三个字段名、未给枚举取值，未证实但可疑；DETAIL / RULE / IDENTITY / 生成指标 / 跨业务查询均未验。之后再按完整问题集评估意图准确率是否 ≥90% 并裁定 MVP；执行前必须按 R3 说明调用次数与预计费用。
+8. **MVP 完成后进入 P1**：按 B8 → F7、B9 → F8、F9 推进附件与日报、商家记忆、对象存储/Worker、知识库后台和内部可用版收口；P2 的真实 SSO/登录页仍不提前实施。
 
 ## 风险与约束
 
