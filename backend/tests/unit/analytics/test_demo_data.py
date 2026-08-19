@@ -10,14 +10,20 @@ from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
-from app.analytics.demo_data import build_demo_dataset
+from app.analytics.demo_data import (
+    DEMO_ANALYTICS_SEED_BASE,
+    DemoDataset,
+    build_demo_dataset,
+)
 
 MERCHANT = UUID("00000000-0000-0000-0000-000000000001")
 END = date(2026, 8, 4)
 
 
 def _dataset():
-    return build_demo_dataset(merchant_id=MERCHANT, end_date=END, days=180, seed=20260804)
+    return build_demo_dataset(
+        merchant_id=MERCHANT, end_date=END, days=180, seed=DEMO_ANALYTICS_SEED_BASE
+    )
 
 
 def test_orders_cover_exactly_the_requested_window() -> None:
@@ -38,6 +44,56 @@ def test_generation_is_deterministic_for_the_same_seed() -> None:
 
     assert first.orders == second.orders
     assert first.returns == second.returns
+
+
+def test_a_business_day_is_identical_regardless_of_generation_window() -> None:
+    """演示数据每天滚动，但历史必须钉死。
+
+    否则今天回答里的「8月17日退货 15 件」明天会变成别的数字，已落库的 answers
+    与会话历史全部对不上——这正是「每日全量重建」方案的致命缺陷。
+    """
+
+    target = date(2026, 8, 3)
+    wide = build_demo_dataset(merchant_id=MERCHANT, end_date=END, days=180, seed=1)
+    narrow = build_demo_dataset(merchant_id=MERCHANT, end_date=target, days=7, seed=1)
+
+    def facts_on(dataset: DemoDataset) -> tuple[object, ...]:
+        return tuple(
+            tuple(row for row in rows if row["business_date"] == target)
+            for rows in (
+                dataset.orders,
+                dataset.order_items,
+                dataset.refunds,
+                dataset.returns,
+                dataset.tickets,
+            )
+        )
+
+    assert facts_on(wide) == facts_on(narrow)
+    assert wide.products == narrow.products
+    codes = {(row["merchant_id"], row["product_code"]) for row in wide.products}
+    assert len(codes) == len(wide.products), "商品目录受 UNIQUE(merchant_id, product_code) 约束"
+
+
+def test_the_rolling_job_and_the_full_rebuild_script_share_one_random_baseline() -> None:
+    """两个写入口用不同 seed，会让新旧两段历史落在两条随机序列上，交界处出现断层。"""
+
+    import importlib.util
+    from pathlib import Path
+
+    from app.jobs.seed_demo_rolling import DEMO_ANALYTICS_SEED_BASE as rolling_base
+
+    # 按文件路径加载：仓库根与 backend/ 下各有一个顶层 `scripts` 包，
+    # 全量跑测试时 `import scripts.seed_demo_analytics` 会解析到另一个包。
+    path = Path(__file__).resolve().parents[3] / "scripts" / "seed_demo_analytics.py"
+    spec = importlib.util.spec_from_file_location("seed_demo_analytics_for_test", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert rolling_base == DEMO_ANALYTICS_SEED_BASE
+    assert module.DEMO_ANALYTICS_SEED_BASE == DEMO_ANALYTICS_SEED_BASE
+    assert DEMO_ANALYTICS_SEED_BASE == 20260804
 
 
 def test_every_row_carries_the_requested_merchant() -> None:

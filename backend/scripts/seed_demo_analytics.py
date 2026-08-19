@@ -13,7 +13,7 @@ from datetime import UTC, date, datetime
 from sqlalchemy import delete
 
 from app.analytics.dates import business_today
-from app.analytics.demo_data import build_demo_dataset
+from app.analytics.demo_data import DEMO_ANALYTICS_SEED_BASE, build_demo_dataset
 from app.core.config import AppEnvironment, Settings, get_settings
 from app.core.runtime import configure_event_loop_policy
 from app.db.session import Database
@@ -58,7 +58,7 @@ async def _seed(days: int, end_date: date) -> int:
                 merchant_id=merchant.id,
                 end_date=end_date,
                 days=days,
-                seed=20260804 + index,
+                seed=DEMO_ANALYTICS_SEED_BASE + index,
             )
             for model, rows in (
                 (Product, dataset.products),
@@ -81,7 +81,10 @@ def _dry_run(days: int, end_date: date) -> None:
     total = 0
     for index, merchant in enumerate(default_merchants()):
         dataset = build_demo_dataset(
-            merchant_id=merchant.id, end_date=end_date, days=days, seed=20260804 + index
+            merchant_id=merchant.id,
+            end_date=end_date,
+            days=days,
+            seed=DEMO_ANALYTICS_SEED_BASE + index,
         )
         rows = sum(
             len(part)
@@ -109,6 +112,11 @@ def main() -> None:
         help="最新一天的业务日；默认取业务时区的今天",
     )
     parser.add_argument("--dry-run", action="store_true", help="只展示计划，不写数据库")
+    parser.add_argument(
+        "--force-full-rebuild",
+        action="store_true",
+        help="明确确认删除全部演示经营历史后重建",
+    )
     args = parser.parse_args()
     end_date = args.end_date or default_end_date(
         datetime.now(UTC), timezone=get_settings().business_timezone
@@ -116,6 +124,11 @@ def main() -> None:
     if args.dry_run:
         _dry_run(args.days, end_date)
         return
+    if not args.force_full_rebuild:
+        parser.error(
+            "演示数据现在由 app.jobs.seed_demo_rolling 每日滚动维护；"
+            "全量重灌会抹掉历史，需显式传入 --force-full-rebuild"
+        )
     # Windows 的默认事件循环跑不了 psycopg 异步模式，见 app.core.runtime 的说明。
     configure_event_loop_policy()
     total = asyncio.run(_seed(args.days, end_date))

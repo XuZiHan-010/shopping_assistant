@@ -68,3 +68,11 @@ def test_end_date_follows_the_business_timezone_not_the_host_date() -> None:
 
     assert default_end_date(now, timezone="Asia/Shanghai") == date(2026, 8, 5)
     assert default_end_date(now, timezone="Asia/Shanghai") != now.date()
+
+
+def test_full_rebuild_requires_explicit_force_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(_seed_module, "get_settings", lambda: _settings(AppEnvironment.DEVELOPMENT))
+    monkeypatch.setattr("sys.argv", ["seed_demo_analytics.py"])
+
+    with pytest.raises(SystemExit):
+        _seed_module.main()
