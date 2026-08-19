@@ -162,6 +162,7 @@ def get_chat_service(
         merchant_id=context.merchant_id,
         answer_llm=llm,
         reviewer_llm=llm,
+        quality_max_attempts=settings.quality_max_attempts,
         node_timer=request.app.state.metrics,
     )
     return ChatService(

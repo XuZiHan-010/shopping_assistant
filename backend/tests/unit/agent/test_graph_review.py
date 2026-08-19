@@ -114,7 +114,7 @@ async def test_graph_retries_once_then_returns_passed_with_two_attempts() -> Non
 
 
 @pytest.mark.asyncio
-async def test_graph_returns_failed_after_two_reviewer_rejections() -> None:
+async def test_graph_degrades_to_facts_after_two_reviewer_rejections() -> None:
     intent_llm = FakeLlmClient(responses=_intent_responses())
     graph = MerchantQaGraph(
         retrieval=KnowledgeRetrieval(_Documents()),
@@ -134,6 +134,7 @@ async def test_graph_returns_failed_after_two_reviewer_rejections() -> None:
 
     response = (await graph.run("最近一天 GMV", uuid4())).response
 
-    assert response.quality_status is QualityStatus.FAILED
+    assert response.quality_status is QualityStatus.DEGRADED
     assert response.quality_attempts == 2
-    assert response.degraded is False
+    assert response.degraded is True
+    assert "12.00" in response.answer

@@ -798,7 +798,7 @@
           },
           "quality_attempts": {
             "type": "integer",
-            "maximum": 2.0,
+            "maximum": 3.0,
             "minimum": 0.0,
             "title": "Quality Attempts"
           },
@@ -1130,7 +1130,7 @@
           },
           "quality_attempts": {
             "type": "integer",
-            "maximum": 2.0,
+            "maximum": 3.0,
             "minimum": 0.0,
             "title": "Quality Attempts"
           },

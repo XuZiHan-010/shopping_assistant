@@ -208,11 +208,19 @@ class _RecordingLlm:
     def is_configured(self) -> bool:
         return True
 
-    async def complete(self, *, system: str, user: str, fallback: str, budget: object) -> object:
+    async def complete(
+        self, *, system: str, user: str, fallback: str, budget: object, options: object = None
+    ) -> object:
         from app.llm.client import LlmResult
 
+        del options
         self.prompts.append(user)
-        return LlmResult(self._responses.pop(0) if self._responses else fallback, 10, False)
+        return LlmResult(
+            self._responses.pop(0) if self._responses else fallback,
+            10,
+            False,
+            usage_known=True,
+        )
 
 
 @pytest.mark.asyncio

@@ -194,8 +194,12 @@ def test_non_degraded_answer_must_not_carry_a_reason() -> None:
 # --- 质量状态 -----------------------------------------------------------
 
 
-@pytest.mark.parametrize("attempts", [-1, 3])
-def test_quality_attempts_outside_zero_to_two_is_rejected(attempts: int) -> None:
+def test_quality_attempts_supports_up_to_three_attempts() -> None:
+    assert ChatResponse.model_validate(_base_response(quality_attempts=3)).quality_attempts == 3
+
+
+@pytest.mark.parametrize("attempts", [-1, 4])
+def test_quality_attempts_outside_zero_to_three_is_rejected(attempts: int) -> None:
     with pytest.raises(ValidationError):
         ChatResponse.model_validate(_base_response(quality_attempts=attempts))
 

@@ -82,16 +82,8 @@
       "node": "compose_answer"
     },
     {
-      "label": "本地校验回答",
-      "node": "local_validate"
-    },
-    {
-      "label": "复核回答质量",
-      "node": "review_answer"
-    },
-    {
-      "label": "判断是否需要重试",
-      "node": "decide_retry"
+      "label": "校验并复核回答质量",
+      "node": "quality_loop"
     },
     {
       "label": "生成推荐问题",
