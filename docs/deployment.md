@@ -67,9 +67,9 @@ Railway 的 Config File Path 不跟随 Root Directory。即使 Service Root 已�
 | `RATE_LIMIT_PER_MINUTE` | 单 Token 与可信 IP 的每分钟上限。 |
 | `LLM_DAILY_BUDGET_TOKENS` | **全局**每日模型 token 预算——`llm_daily_budget` 表只按 `usage_date` 聚合，不分商家、不分访客，公开演示时所有人共用这一个池子，它是唯一的总量闸门。默认 `500000` = 单请求上限 `25000` × 20，最坏情况也保证 20 个完整问题；按真实模型实测（每问约 6000 token）实际约 80 个。耗尽后所有人收到 `LLM_BUDGET_EXCEEDED` 的可见降级，不会静默继续扣费。 |
 | `LLM_MAX_OUTPUT_TOKENS_PER_CALL` | 默认 `4096`。**推理模型不得低于此值**：`deepseek-v4-flash` 单次结构化意图的 `reasoning_tokens` 就要 1400–2200，设为 1024 时正文返回空串，三次重试全废、回落 CHAT 模式——每次提问真实扣费却只得到兜底文案。这是上限不是花费。 |
-| `MAX_LLM_TOKENS_PER_REQUEST` | 默认 `25000`，覆盖一轮问答最坏 9 次模型请求。 |
-| `MAX_LLM_CALLS_PER_REQUEST` | 默认 `10`。最坏调用路径为 classify 1 + understand 3（意图服务自带 2 次重试）+ 指标口径 1 + （回答生成 + 独立复核）× 2 = 9 次，四个调用点共用同一个单请求预算。设低于 9 会让 understand 的重试把质量循环挤成「预算耗尽」降级，把排查方向带偏。 |
-| `QUALITY_MAX_ATTEMPTS` | 回答质量循环的最大轮次，代码支持 1–3。Railway 初期设 `2`，观察真实用量与延迟后再放开到 3。与 `MAX_LLM_CALLS_PER_REQUEST` 联动：每加一轮最多多 2 次模型请求。 |
+| `MAX_LLM_TOKENS_PER_REQUEST` | 默认 `25000`，覆盖一轮问答最坏 10 次模型请求。 |
+| `MAX_LLM_CALLS_PER_REQUEST` | 默认 `10`。最坏调用路径为 classify 2（业务关键词收到 `INVALID/UNKNOWN` 时重试 1 次）+ understand 3（意图服务自带 2 次重试）+ 指标口径 1 + （回答生成 + 独立复核）× 2 = 10 次，四个调用点共用同一个单请求预算。设低于 10 会让意图重试把质量循环挤成「预算耗尽」降级，把排查方向带偏。 |
+| `QUALITY_MAX_ATTEMPTS` | 回答质量循环的最大轮次，代码支持 1–3，默认 `2`。与 `MAX_LLM_CALLS_PER_REQUEST` 联动：每加一轮最多多 2 次模型请求；若设为 `3`，完整最坏路径为 12 次，必须同步提高调用上限。 |
 | `LLM_TIMEOUT_SECONDS` | 默认 `90`。推理模型出一次意图耗时明显；超时会被 `DeepSeekLlmClient` 吞成 fallback + degraded，表现为「模型没理解」而不是「超时」，很难查。 |
 
 现有代码已强制精确 CORS、生产 JSON 日志、`create_app()` 不启用 Debug，以及数据库连接重试。B8 附件功能尚未实现，不得把正式附件写入容器临时磁盘。
