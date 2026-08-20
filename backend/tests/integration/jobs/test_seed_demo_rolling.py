@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from datetime import date
-from uuid import UUID
+from datetime import UTC, date, datetime
+from decimal import Decimal
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import String, cast, func, select
@@ -9,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.seed_config import SeedSettings
 from app.jobs.seed_demo_rolling import roll_forward
-from app.models.analytics import Order, OrderItem, Refund, ReturnRecord
+from app.models.analytics import Order, OrderItem, Product, Refund, ReturnRecord
 from app.models.merchant import Merchant
 from app.services.seed_service import default_merchants, seed_demo_merchants
 
@@ -102,6 +103,95 @@ async def test_rolling_seed_never_rewrites_history_and_prunes_the_window(
         assert before[day] == after[day], f"{day} 的历史数据被改写了"
     assert date(2026, 8, 19) in after
     assert date(2026, 8, 12) not in after, "滑出 5 天窗口的分区应被清理"
+    assert await _dangling_foreign_keys(db_session) == 0
+
+
+@pytest.mark.asyncio
+async def test_rolling_seed_keeps_a_refund_still_in_window_even_if_its_order_left_it(
+    db_session: AsyncSession,
+) -> None:
+    """旧脚本曾让退款日期比订单晚最多 5 天。订单本身可能已经滑出窗口，但那笔
+    退款的业务日期还在窗口内——它不该被「删订单」的级联外键顺手带走。"""
+
+    await seed_demo_merchants(db_session, default_merchants())
+    merchant = default_merchants()[0]
+
+    # 这几张表之间只有裸 `ForeignKey`，没有声明 ORM `relationship()`，flush 时
+    # SQLAlchemy 不会按外键拓扑排序插入顺序；逐条 flush 以显式保证父行先落库。
+    product_id = uuid4()
+    db_session.add(
+        Product(
+            id=product_id,
+            merchant_id=merchant.id,
+            business_date=date(2026, 8, 10),
+            product_code="legacy-lag-sku",
+            title="历史滞后退款商品",
+            category="其他",
+            price=Decimal("100.00"),
+            status="ONLINE",
+            listed_at=datetime(2026, 8, 10, tzinfo=UTC),
+        )
+    )
+    await db_session.flush()
+
+    order_id = uuid4()
+    db_session.add(
+        Order(
+            id=order_id,
+            merchant_id=merchant.id,
+            business_date=date(2026, 8, 10),  # 早于下方 cutoff（8/15），本该被清理
+            order_no="legacy-lag-order",
+            buyer_key="legacy-buyer",
+            address_city_name=None,
+            order_status="COMPLETED",
+            total_amount=Decimal("100.00"),
+            paid_amount=Decimal("100.00"),
+            placed_at=datetime(2026, 8, 10, tzinfo=UTC),
+            paid_at=datetime(2026, 8, 10, tzinfo=UTC),
+        )
+    )
+    await db_session.flush()
+
+    order_item_id = uuid4()
+    db_session.add(
+        OrderItem(
+            id=order_item_id,
+            merchant_id=merchant.id,
+            business_date=date(2026, 8, 10),
+            order_id=order_id,
+            product_id=product_id,
+            quantity=1,
+            item_amount=Decimal("100.00"),
+        )
+    )
+    await db_session.flush()
+
+    refund_id = uuid4()
+    db_session.add(
+        Refund(
+            id=refund_id,
+            merchant_id=merchant.id,
+            business_date=date(2026, 8, 16),  # 晚于订单 6 天，仍在下方窗口内
+            order_item_id=order_item_id,
+            refund_amount=Decimal("100.00"),
+            refund_reason="旧脚本跨天滞后场景",
+            refund_status="REFUNDED",
+            refunded_at=datetime(2026, 8, 16, tzinfo=UTC),
+        )
+    )
+    await db_session.flush()
+
+    # business_day=2026-08-19、window_days=5 → cutoff=2026-08-15：
+    # 订单/订单项的 8/10 在窗口外，退款的 8/16 仍在窗口内。
+    await roll_forward(
+        db_session, settings=_settings(), business_day=date(2026, 8, 19), window_days=5
+    )
+
+    assert await db_session.get(Refund, refund_id) is not None, "仍在窗口内的退款不该被级联删除"
+    kept_item = await db_session.get(OrderItem, order_item_id)
+    assert kept_item is not None, "被在窗口内退款引用的订单项不该被删除"
+    kept_order = await db_session.get(Order, order_id)
+    assert kept_order is not None, "被在窗口内订单项引用的订单不该被删除"
     assert await _dangling_foreign_keys(db_session) == 0
 
 

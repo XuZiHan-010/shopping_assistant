@@ -9,15 +9,16 @@ from app.llm.client import (
     DEFAULT_LLM_CALL_OPTIONS,
     LlmBudget,
     LlmCallOptions,
+    LlmFailureKind,
     LlmResult,
     LlmUnavailableError,
 )
 
-Behaviour = Literal["normal", "invalid_json", "timeout", "empty"]
+Behaviour = Literal["normal", "invalid_json", "timeout", "empty", "bad_payload"]
 
 
 class FakeLlmClient:
-    """覆盖正常、非法 JSON、超时和空响应四类 B3 验收场景。"""
+    """覆盖正常、非法 JSON、超时、空响应和损坏 payload 五类验收场景。"""
 
     def __init__(
         self,
@@ -67,6 +68,16 @@ class FakeLlmClient:
                 tokens=self._tokens_per_call,
                 degraded=True,
                 usage_known=True,
+            )
+        if self._behaviour == "bad_payload":
+            # 复刻 DeepSeekLlmClient 对损坏响应体的行为：HTTP 200 但解析失败，
+            # 返回的 text 是调用方传入的确定性兜底 JSON，同样合法可解析。
+            return LlmResult(
+                text=fallback,
+                tokens=0,
+                degraded=True,
+                failure_kind=LlmFailureKind.BAD_PAYLOAD,
+                usage_known=False,
             )
 
         text = self._responses.pop(0) if self._responses else fallback

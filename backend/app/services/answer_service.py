@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
-from app.llm.client import LlmBudget, LlmClient, LlmFailureKind
+from app.llm.client import STRUCTURED_CALL_OPTIONS, LlmBudget, LlmClient
 from app.metrics.catalog import MetricPayload
 from app.prompts.answer import ANSWER_SYSTEM_PROMPT
 from app.schemas.answer import AnswerDraft
@@ -90,8 +90,9 @@ class AnswerService:
             user=user,
             fallback=self._fallback(facts).model_dump_json(),
             budget=budget,
+            options=STRUCTURED_CALL_OPTIONS,
         )
-        if result.degraded and result.failure_kind is not LlmFailureKind.BAD_PAYLOAD:
+        if result.degraded:
             return DraftAttempt(None, result.text, AttemptFailureKind.UPSTREAM)
         if not result.text:
             return DraftAttempt(None, "", None)
