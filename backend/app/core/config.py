@@ -55,7 +55,9 @@ class Settings(BaseSettings):
     # 而不是「超时了」，很难查。
     llm_timeout_seconds: float = Field(default=90.0, gt=0, le=120)
     llm_disable_thinking_for_structured: bool = True
-    quality_max_attempts: int = Field(default=3, ge=1, le=3)
+    # 默认两轮生成/复核：在保留一次纠错机会的同时，保证下方 10 次请求上限覆盖完整路径。
+    # 如需三轮，部署时须连同 MAX_LLM_CALLS_PER_REQUEST 一起显式提高。
+    quality_max_attempts: int = Field(default=2, ge=1, le=3)
     # 最坏调用路径是 classify 1 + understand 3（`intent/service.py` 自带 2 次重试）
     # + 指标口径 1 + （生成 + 复核）× 2 = 9 次，四个调用点共用同一个 LlmBudget。
     # 定 6 会让 understand 一重试就把质量循环挤成「预算耗尽」降级，把排查方向带偏。

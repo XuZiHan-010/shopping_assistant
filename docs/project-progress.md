@@ -2,7 +2,9 @@
 
 > 本文件只保留当前可继续开发的事实快照，不追加每日流水账。每次完成一段可验证工作后，更新日期、状态、验证结果、下一步和风险。
 
-**最后更新：2026-08-19**
+**最后更新：2026-08-20**
+
+> **本轮校正**：知识库已重新导入，当前本机库为 **23 篇**（十个业务分类各 2 篇、`UNKNOWN` 3 篇；此前“43 份”是过期估计）；T3 已证明指标口径三级兜底经统一 `LlmCostGuard` 记录真实用量，无需增加重复记账。T4 将默认 `QUALITY_MAX_ATTEMPTS` 定为 2，并为业务关键词收到 `INVALID/UNKNOWN` 的 classify 增加一次受预算约束的重试；最坏调用路径为 classify 2 + understand 3 + catalog 1 +（生成 + 复核）×2 = **10 次**，与 `MAX_LLM_CALLS_PER_REQUEST=10` 对齐。2026-08-20 实测：真实 PostgreSQL 回归 **864 passed / 0 failed / 0 skipped**；后端 Ruff/mypy 与前端 26 文件 / 254 项 Vitest 及全部静态门禁均通过。B7 首轮九题真实调用（30 次、17,397 token、无上游失败）发生在经营表为空时，不能作为有数据验收通过。Docker 恢复后，二轮九题实际使用 `deepseek-v4-flash` **18 次调用、25,060 token**，均返回 HTTP 200 且上游成功，但全部被模型输出的 `CHAT/UNKNOWN` 或 `INVALID` 分类短路，未进入预期的数据/知识路径，**B7 仍不通过**。已用 TDD 修复业务关键词在 `CHAT/UNKNOWN` 时漏掉第二次 classify 重试，以及规则提示词错误使用 `PLATFORM` 而非 `PLATFORM_RULE`；修复后的真实 PostgreSQL 回归为 864 项全绿。不得自动重跑；需新的 R3 计费授权后才可在有数据环境复验。当前本地库已恢复为 5,670 笔订单（2026-02-22 至 2026-08-20）与 23 篇知识文档。Railway Cron 的控制台创建、变量配置和手工触发亦未完成：Railway CLI 未安装，Windows 控制台自动化运行时不可用，须由有控制台权限的用户完成。
 
 ## 当前快照
 
@@ -126,7 +128,7 @@ R9 阶段 B（四个能力切片：指标口径、纯明细、跨业务查询、
 **仍然打开的问题**：
 
 - 🔴 **`DeepSeekLlmClient` 吞掉全部上游错误**（[`app/llm/deepseek.py`](../backend/app/llm/deepseek.py) 的 `except (httpx.HTTPError, ValueError): return LlmResult(fallback, 0, True)`）。401、超时、限流、网络不通被压成同一个无声降级，一行日志都没有；`llm_usage` 只记 `FAILED` 不记原因。上面第 2 条之所以难查，根源就在这里。**建议下一步优先修**：至少把状态码与异常类型写进结构化日志，并让 `record_usage` 区分「上游拒绝」与「模型输出不合格」。
-- 🟡 `knowledge_documents` **仍是 0 行**，`quality_notes` 每轮都带「未命中与当前问题相关的知识资料」。规则类（RULE）问题无依据可答，指标口径三级检索的第三级也无料。`backend/scripts/import_wiki.py` 存在，参考项目 `runtime/llm-wiki/` 有 43 份文档可导，尚未执行。
+- 🟡 当前本机 `knowledge_documents` 已有 **23 行**，由 `backend/scripts/import_wiki.py` 从参考项目只读 Wiki 导入；首轮 B7 在导入前执行，RULE 题仍显示未命中知识，需在重新授权的有数据验收中复核。真实 PostgreSQL 全量测试会清空此测试库，之后必须再次导入，不能把一次导入当作永久状态。
 - 🟡 **只验了 METRIC 一条路径**。指标口径 catalog 提示词只点了三个字段名、未给枚举，未证实但可疑；DETAIL / RULE / IDENTITY / 生成指标 / 跨业务查询均未做真实模型验收。
 - 🟡 `llm_usage` 的 `input_tokens` / `output_tokens` 恒为 0，只有 `total_tokens` 有值；且 `FAILED` 行记的是 `LlmCostGuard` 的**悲观估算值**而非真实用量，直接拿它统计费用会高估。
 
@@ -159,7 +161,7 @@ R9 阶段 B（四个能力切片：指标口径、纯明细、跨业务查询、
 3. **同步剩余进度文档**：更新 `docs/specs/2026-08-11-mvp-exit-evidence-matrix.md` 的 R9、Vitest、Playwright 与当前未验证项；校正 `docs/yshopping-parity-audit.md` 的旧分支基线；回填 `plans/2026-08-12-post-f6-execution-roadmap.md` 阶段 0–2.5 的实际状态。
 4. **补完阶段 3 的剩余线上验收项**：Railway 部署本身已完成（见「已完成 · 首次真实模型验收与 Railway 上线」），仍未做的是**转发头伪造验收**（同一演示 Token 连续更换 `X-Real-IP`/`X-Forwarded-For`，超限仍须返回 429；零费用）、SIGTERM 收尾验收、日志脱敏抽查。
 5. **回答闭环整改**：已完成 A1–A3、B1–B3、B5–B6 的本地实现；真实模型验收（A4、B4、B7）和 Railway Cron（C3）仍须分别获得用户许可。滚动 Seed 的真实 PostgreSQL 验收待测试库可用后执行。
-6. **导入知识库**：`knowledge_documents` 仍是 0 行，每轮回答都带「未命中与当前问题相关的知识资料」，RULE 类问题无依据可答。`backend/scripts/import_wiki.py` 已存在，参考项目 `runtime/llm-wiki/` 有 43 份文档可导。零 LLM 费用。
+6. **保持知识库可用**：当前本机已导入 23 篇 Wiki 文档；每次在该库运行会清空表的真实 PostgreSQL 全量测试后，均须重跑 `backend/scripts/import_wiki.py --root <legacy-llm-wiki>`，再进行 RULE 或指标口径的真实验收。零 LLM 费用。
 7. **扩大真实模型验收面**（阶段 4）：目前只验通了 METRIC 一条路径。指标口径 catalog 提示词只点了三个字段名、未给枚举取值，未证实但可疑；DETAIL / RULE / IDENTITY / 生成指标 / 跨业务查询均未验。之后再按完整问题集评估意图准确率是否 ≥90% 并裁定 MVP；执行前必须按 R3 说明调用次数与预计费用。
 8. **MVP 完成后进入 P1**：按 B8 → F7、B9 → F8、F9 推进附件与日报、商家记忆、对象存储/Worker、知识库后台和内部可用版收口；P2 的真实 SSO/登录页仍不提前实施。
 

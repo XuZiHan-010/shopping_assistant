@@ -5,7 +5,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.llm.client import LlmBudget
+from app.llm.client import STRUCTURED_CALL_OPTIONS, LlmBudget
 from app.llm.fake import FakeLlmClient
 from app.metrics.catalog import MetricPayload
 from app.repositories.analytics import ResultColumn
@@ -139,6 +139,44 @@ async def test_compose_once_returns_a_parsed_draft_for_a_valid_response() -> Non
     assert attempt.draft.answer == "最近一天成交 GMV 为 12.00 元。"
     assert len(attempt.draft.recommendations) == 2
     assert await _issues(_model_draft(), _facts()) == []
+
+
+@pytest.mark.asyncio
+async def test_compose_once_requests_structured_json_output_with_thinking_disabled() -> None:
+    """草稿生成是四处结构化 JSON 调用之外遗漏的第五处：这里曾经用默认选项，
+    推理模式不关，也不强制 json_object，容易被隐藏的 reasoning token 挤爆
+    max_tokens 而截断或返回空 content。"""
+
+    llm = FakeLlmClient(responses=[_model_draft()])
+    await _attempt_with(llm, _facts())
+
+    assert llm.call_options == [STRUCTURED_CALL_OPTIONS]
+
+
+@pytest.mark.asyncio
+async def test_a_corrupted_upstream_payload_is_reported_as_upstream_not_a_passed_draft() -> None:
+    """DeepSeek 返回损坏 payload 时，`LlmResult.text` 是调用方传入的确定性兜底
+    JSON——语法合法但不是模型的真实输出。曾经的实现把 BAD_PAYLOAD 排除在「当
+    失败处理」之外，于是这段兜底 JSON 被当成真实草稿走完质量循环，最终对用户
+    显示 quality_status=PASSED，完全看不出模型输出其实已被丢弃（违反 R7）。"""
+
+    from app.services.answer_service import AnswerService
+    from app.services.quality_types import AttemptFailureKind
+
+    attempt = await AnswerService().compose_once(
+        _facts(),
+        FakeLlmClient(behaviour="bad_payload"),
+        LlmBudget(max_calls=4, max_tokens=1_000),
+    )
+
+    assert attempt.draft is None
+    assert attempt.failure_kind is AttemptFailureKind.UPSTREAM
+
+
+async def _attempt_with(llm: FakeLlmClient, facts):
+    from app.services.answer_service import AnswerService
+
+    return await AnswerService().compose_once(facts, llm, LlmBudget(max_calls=4, max_tokens=1_000))
 
 
 @pytest.mark.asyncio

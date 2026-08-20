@@ -4,7 +4,7 @@
 在自动化测试里完全不可见——2026-08-17 的 understand 与 classify 两次线上事故都是
 这么漏出去的。这里把提示词里的 JSON 示例抠出来真正校验，而不是断言某段措辞。
 
-另一条同样重要：这四处都以 `STRUCTURED_CALL_OPTIONS` 请求 `json_object`，而
+另一条同样重要：这五处都以 `STRUCTURED_CALL_OPTIONS` 请求 `json_object`，而
 DeepSeek 要求消息里出现 "JSON" 字样，否则整条调用直接被上游拒绝。
 """
 
@@ -17,6 +17,7 @@ import pytest
 
 from app.intent.prompts import CLASSIFY_SYSTEM, UNDERSTAND_SYSTEM
 from app.metrics.catalog import METRIC_CATALOG_EXAMPLE, METRIC_CATALOG_FIELDS
+from app.prompts.answer import ANSWER_SYSTEM_PROMPT
 from app.prompts.reviewer import REVIEWER_SYSTEM_PROMPT
 from app.schemas.answer import ReviewVerdict
 
@@ -25,7 +26,7 @@ _JSON_OBJECT = re.compile(r"\{[^{}]*\}")
 
 @pytest.mark.parametrize(
     "prompt",
-    [CLASSIFY_SYSTEM, UNDERSTAND_SYSTEM, REVIEWER_SYSTEM_PROMPT],
+    [CLASSIFY_SYSTEM, UNDERSTAND_SYSTEM, ANSWER_SYSTEM_PROMPT, REVIEWER_SYSTEM_PROMPT],
 )
 def test_structured_prompts_mention_json_as_json_output_requires(prompt: str) -> None:
     assert "JSON" in prompt.upper()

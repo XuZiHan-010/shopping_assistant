@@ -8,7 +8,7 @@ from contextlib import nullcontext
 from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, exists, func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -106,12 +106,33 @@ async def roll_forward(
                         await session.execute(insert(model).values(rows))
                         written += len(rows)
             cutoff = business_day - timedelta(days=window_days - 1)
-            for model in (SupportTicket, ReturnRecord, Refund, OrderItem, Order):
+            for model in (SupportTicket, ReturnRecord, Refund):
                 await session.execute(
                     delete(model).where(
                         model.merchant_id == merchant.id, model.business_date < cutoff
                     )
                 )
+            # OrderItem/Order 不能只按自己的 business_date 删：外键是 ON DELETE
+            # CASCADE，若历史数据里退款/退货日期晚于订单（旧脚本曾生成这种跨天
+            # 滞后），上面按各自日期的删除会正确保留仍在窗口内的子行，但接下来
+            # 删父行会把它级联带走，且不会报错。只有在没有子行仍引用某个父行时
+            # 才删它，让「谁的业务日期过期」和「谁仍被窗口内的行引用」两个条件
+            # 同时成立才真正删除。
+            await session.execute(
+                delete(OrderItem).where(
+                    OrderItem.merchant_id == merchant.id,
+                    OrderItem.business_date < cutoff,
+                    ~exists().where(Refund.order_item_id == OrderItem.id),
+                    ~exists().where(ReturnRecord.order_item_id == OrderItem.id),
+                )
+            )
+            await session.execute(
+                delete(Order).where(
+                    Order.merchant_id == merchant.id,
+                    Order.business_date < cutoff,
+                    ~exists().where(OrderItem.order_id == Order.id),
+                )
+            )
     return written
 
 

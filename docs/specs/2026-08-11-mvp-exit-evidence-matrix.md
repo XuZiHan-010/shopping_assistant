@@ -1,6 +1,8 @@
 # MVP 出口证据矩阵
 
-**状态：** 2026-08-12；供用户决定是否宣告 MVP 完成。
+**状态：** 2026-08-20；供用户决定是否宣告 MVP 完成。
+
+> **当前证据校正（2026-08-20）**：本地真实 PostgreSQL 全量回归已重跑并通过 **862 passed / 0 failed / 0 skipped**；后端 `ruff check`、`ruff format --check`、`mypy app` 全绿。前端 `typecheck`、`lint`、`format:check`、`codegen:check`、`fixtures:check` 全绿，Vitest 为 **26 文件 / 254 passed**。因此下表中以“Docker 不可用”“28 passed / 1 skipped”“245 passed”或“当前未重跑”为理由的旧记录均已过期；其余 Railway、B7 真实模型九题、线上 E2E 和人工视觉验收仍未完成，不能据此宣告 MVP 完成。
 
 ## 判定口径
 
