@@ -71,6 +71,22 @@ describe('AppError.fromErrorResponse', () => {
     expect(error.code).toBe('AUTH_REQUIRED')
     expect(error.shouldReport).toBe(false)
   })
+
+  it('知识库路径错误保留业务错误码，供中文文案展示', () => {
+    const error = AppError.fromErrorResponse(
+      {
+        code: 'WIKI_READ_ONLY',
+        message: '记忆目录只读',
+        request_id: 'r-4',
+        details: [],
+        retryable: false,
+      },
+      403,
+    )
+
+    expect(error.code).toBe('WIKI_READ_ONLY')
+    expect(error.shouldReport).toBe(false)
+  })
 })
 
 describe('AppError.fromNetwork', () => {

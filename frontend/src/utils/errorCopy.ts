@@ -106,6 +106,84 @@ const COPY: Record<AppErrorCode, ErrorCopy> = {
     surface: 'message',
     action: 'retry',
   },
+  INVALID_WIKI_PATH: {
+    title: '知识库路径不合法',
+    detail: '请检查目录和文件名后重试。',
+    surface: 'message',
+    action: 'none',
+  },
+  WIKI_READ_ONLY: {
+    title: '该知识库内容只读',
+    detail: '商家记忆由系统自动沉淀，不能在后台直接修改。',
+    surface: 'message',
+    action: 'none',
+  },
+  INVALID_FILE_TYPE: {
+    title: '仅支持 Markdown 文档',
+    detail: '请使用 .md 后缀的知识库文档。',
+    surface: 'message',
+    action: 'none',
+  },
+  INVALID_WIKI_PARENT: {
+    title: '目标目录不存在',
+    detail: '请先创建对应业务域，再添加文档。',
+    surface: 'message',
+    action: 'none',
+  },
+  WIKI_NODE_EXISTS: {
+    title: '同名文档已存在',
+    detail: '请更换文档名称后重试。',
+    surface: 'message',
+    action: 'none',
+  },
+  WIKI_NODE_NOT_FOUND: {
+    title: '未找到知识库文档',
+    detail: '该文档可能已被删除或路径有误。',
+    surface: 'message',
+    action: 'none',
+  },
+  WIKI_DIRECTORY_NOT_EMPTY: {
+    title: '业务域仍包含文档',
+    detail: '请确认后使用递归删除。',
+    surface: 'message',
+    action: 'none',
+  },
+  WIKI_VERSION_REQUIRED: {
+    title: '缺少文档版本',
+    detail: '请重新加载文档后再保存。',
+    surface: 'message',
+    action: 'none',
+  },
+  WIKI_VERSION_CONFLICT: {
+    title: '文档已被其他维护者修改',
+    detail: '请重新加载最新内容，并保留你当前的修改后再处理。',
+    surface: 'message',
+    action: 'none',
+  },
+  WIKI_DOCUMENT_TOO_LARGE: {
+    title: '文档内容过大',
+    detail: '请缩短内容后再保存。',
+    surface: 'message',
+    action: 'none',
+  },
+  INVALID_WIKI_ENCODING: {
+    title: '文档编码不支持',
+    detail: '请使用 UTF-8 编码的文本。',
+    surface: 'message',
+    action: 'none',
+  },
+  INVALID_WIKI_CONTENT: {
+    title: '文档内容不合法',
+    detail: '请移除不支持的控制字符后重试。',
+    surface: 'message',
+    action: 'none',
+  },
+  WIKI_IO_ERROR: {
+    title: '知识库暂时无法写入',
+    detail: '请稍后重试；如果持续出现，请联系支持。',
+    surface: 'message',
+    action: 'retry',
+  },
 
   // —— 前端本地错误码（5 项） ——
   CONFIG: {

@@ -180,12 +180,16 @@ def test_chat_response_declares_every_always_present_field(app: FastAPI) -> None
     }
 
 
-def test_future_stage_routes_are_not_exposed_yet(app: FastAPI) -> None:
+def test_openapi_exposes_admin_knowledge_routes_but_not_unimplemented_merchant_routes(
+    app: FastAPI,
+) -> None:
     paths = set(app.openapi()["paths"])
 
     assert not {path for path in paths if path.startswith("/api/attachments")}
     assert not {path for path in paths if path.startswith("/api/memories")}
-    assert not {path for path in paths if path.startswith("/api/admin")}
+    assert "/api/admin/knowledge/tree" in paths
+    assert "/api/admin/knowledge/documents/{document_path}" in paths
+    assert "/api/admin/knowledge/business-domains" in paths
 
 
 def test_b6_feedback_and_export_routes_are_exposed(app: FastAPI) -> None:

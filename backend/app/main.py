@@ -11,8 +11,7 @@ from uuid import uuid4
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.router import api_router
-from app.api.routes.admin import router as admin_router
+from app.api.router import admin_routers, api_router
 from app.core.config import Settings, get_settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging
@@ -115,5 +114,6 @@ def create_app(
     register_exception_handlers(app, logger)
     app.include_router(api_router, prefix="/api")
     if resolved_settings.admin_token:
-        app.include_router(admin_router, prefix="/api")
+        for admin_router in admin_routers:
+            app.include_router(admin_router, prefix="/api")
     return app

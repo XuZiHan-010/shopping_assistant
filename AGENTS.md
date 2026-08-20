@@ -526,7 +526,7 @@ merchant_assistant/
 | --- | --- | --- |
 | `frontend/src/views/AssistantView.vue` | P0 | 商家助手三栏主页面 |
 | `frontend/src/components/layout/MerchantSwitcher.vue` | P0 | 演示商家切换器，MVP 的唯一身份入口 |
-| `frontend/src/views/KnowledgeBaseView.vue` | P1 | 知识库维护后台，用 `ADMIN_TOKEN` 进入 |
+| `frontend/src/views/KnowledgeBaseView.vue` | P1 已实现 | 知识库维护后台；令牌仅内存持有，通过 `X-Admin-Token` 进入 |
 | `frontend/src/views/LoginView.vue` | **P2** | 真实用户体系上线后才创建。**MVP 和 P1 都不做登录页**，不要提前建这个文件 |
 
 ### 7.3 聊天组件
@@ -600,7 +600,7 @@ OpenAPI → api/generated.ts → api/adapters/*.ts → types/*.ts → Store → 
 | `backend/app/api/routes/attachments.py` | 附件上传、状态和删除 |
 | `backend/app/api/routes/reports.py` | 每日经营报告 |
 | `backend/app/api/routes/exports.py` | CSV 导出 |
-| `backend/app/api/routes/knowledge.py` | 知识库目录和文档 CRUD |
+| `backend/app/api/routes/knowledge.py` | P1 已实现：管理员知识库目录树、文档 CRUD、业务域维护；独立 `X-Admin-Token` 鉴权 |
 | `backend/app/api/routes/metrics.py` | 指标检索和口径查询 |
 | `backend/app/api/routes/health.py` | Railway 健康检查 |
 
@@ -795,9 +795,13 @@ GET    /api/admin/knowledge/documents/{id}
 POST   /api/admin/knowledge/documents
 PUT    /api/admin/knowledge/documents/{id}
 DELETE /api/admin/knowledge/documents/{id}
+POST   /api/admin/knowledge/business-domains
+PUT    /api/admin/knowledge/business-domains
+DELETE /api/admin/knowledge/business-domains
 ```
 
 - 知识目录由 `GET /api/admin/knowledge/tree` 提供，**没有** `GET /api/admin/knowledge/documents` 列表接口，文档按 `{id}` 单独读取；
+- 业务域三端点由参考项目既有实现反查补入：创建时建立固定四板块、改名需 `If-Match`、删除需 `If-Match` 且以 `recursive` 显式确认非空删除（R9）。
 - `/api/memories` 三条让商家查询、纠错和删除自己的记忆，用**商家 Token**——记忆归商家所有，管理员不替商家改记忆。
 
 ### 10.2.1 两套凭证

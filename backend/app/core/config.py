@@ -79,6 +79,7 @@ class Settings(BaseSettings):
     trusted_proxy_hops: int = Field(default=0, ge=0, le=4)
     trusted_proxy_ips: str = ""
     admin_token: str | None = None
+    knowledge_max_document_bytes: int = Field(default=262_144, ge=1, le=2_097_152)
     export_signing_secret: str | None = None
     export_url_ttl_minutes: int = Field(default=15, ge=1, le=60)
 

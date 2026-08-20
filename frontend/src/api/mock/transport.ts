@@ -148,6 +148,7 @@ function historyAnswerPayload(
  * 「没带身份」的请求彼此还能看到同一张表，不破坏历史上不关心鉴权的用例。
  */
 const ANONYMOUS_TENANT_KEY = '(no-authorization-header)'
+const MOCK_ADMIN_TOKEN = 'mock-admin-token'
 
 /**
  * 按「这次请求会带哪个 Authorization 头」分桶，而不是直接读 `request.auth`
@@ -177,6 +178,13 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
   // 的会话表——真实后端按 Token 过滤，Mock 至少要在传输实例这一级做到同样
   // 的隔离，Playwright 的隔离 e2e 才不会在假绿的 Mock 上通过。
   const conversationsByTenant = new Map<string, Map<string, ConversationRecord>>()
+  const knowledgeDocuments = new Map([
+    ['index/运营手册.md', { content: '# 运营手册\n\n初始内容', read_only: false, version: '1' }],
+    [
+      'memory/merchants/demo/TRADE.md',
+      { content: '本轮自动沉淀：关注退款率。', read_only: true, version: '1' },
+    ],
+  ])
 
   function conversationsFor(request: TransportRequest): Map<string, ConversationRecord> {
     const key = tenantKeyFor(request)
@@ -207,6 +215,94 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
       return jsonResponse({
         merchants: [...MOCK_MERCHANTS],
       } satisfies components['schemas']['DemoMerchantListResponse'])
+    }
+
+    if (request.path === '/api/admin/knowledge/tree' && request.method === 'GET') {
+      if (tenantKeyFor(request) !== MOCK_ADMIN_TOKEN) {
+        return errorResponse('AUTH_REQUIRED', '管理员令牌无效', 401)
+      }
+      return jsonResponse({
+        roots: [
+          {
+            name: 'index',
+            path: 'index',
+            node_type: 'directory',
+            read_only: false,
+            size: 1,
+            version: 'index-v1',
+            children: [
+              {
+                name: '运营手册.md',
+                path: 'index/运营手册.md',
+                node_type: 'document',
+                read_only: false,
+                size: 10,
+                version: '1',
+                children: [],
+              },
+            ],
+          },
+          {
+            name: '业务',
+            path: '业务',
+            node_type: 'directory',
+            read_only: false,
+            size: 0,
+            version: 'business-v1',
+            children: [],
+          },
+          {
+            name: 'memory',
+            path: 'memory',
+            node_type: 'directory',
+            read_only: true,
+            size: 1,
+            version: 'memory-v1',
+            children: [
+              {
+                name: 'TRADE.md',
+                path: 'memory/merchants/demo/TRADE.md',
+                node_type: 'document',
+                read_only: true,
+                size: 12,
+                version: '1',
+                children: [],
+              },
+            ],
+          },
+        ],
+      } satisfies components['schemas']['KnowledgeTreeResponse'])
+    }
+
+    const knowledgePathMatch = /^\/api\/admin\/knowledge\/documents\/(.+)$/.exec(request.path)
+    if (knowledgePathMatch) {
+      if (tenantKeyFor(request) !== MOCK_ADMIN_TOKEN) {
+        return errorResponse('AUTH_REQUIRED', '管理员令牌无效', 401)
+      }
+      const path = decodeURIComponent(knowledgePathMatch[1])
+      const document = knowledgeDocuments.get(path)
+      if (!document) return errorResponse('WIKI_NODE_NOT_FOUND', '文档不存在', 404)
+
+      if (request.method === 'GET') {
+        return jsonResponse({
+          path,
+          ...document,
+        } satisfies components['schemas']['KnowledgeDocumentResponse'])
+      }
+
+      if (request.method === 'PUT') {
+        if (request.headers?.['If-Match'] !== `"${document.version}"`) {
+          return errorResponse('WIKI_VERSION_CONFLICT', '文档已被其他维护者更新', 412)
+        }
+        const content = (request.body as components['schemas']['KnowledgeDocumentUpdateRequest'])
+          .content
+        const updated = { ...document, content, version: String(Number(document.version) + 1) }
+        knowledgeDocuments.set(path, updated)
+        return jsonResponse({
+          path,
+          ...updated,
+        } satisfies components['schemas']['KnowledgeDocumentResponse'])
+      }
     }
 
     if (request.path === '/api/chat' && request.method === 'POST') {

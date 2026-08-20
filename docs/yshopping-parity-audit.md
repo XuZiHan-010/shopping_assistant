@@ -165,7 +165,6 @@ Railway 控制台部署与线上验收、B8/B9、F7–F9 尚未完成。R9 阶�
 | `AttachmentService` / `AttachmentStore` / `ChatMessage.vue` 附件区块 | B8 / F7 |
 | `DailyReportService` / `DailyReportCard.vue` | B8 / F7 |
 | `MemoryConsolidationService`（商家记忆固化） | B8 |
-| `WikiAdminService` / `WikiAdminController` / `KnowledgeBaseApp.vue` | B9 / F8（我方已有 `KnowledgeBaseView.vue` 骨架，完成度见 ❓5.5） |
 
 `ChatMessage.vue` 的 `quality-audit` 质检块与 `message-actions` 反馈操作已在 F5 实现：四种质量状态、校验次数、备注和全部来源均如实展示；采纳、点赞、点踩已接入 B6 反馈端点，并覆盖失败保留、同值重试与并发中止。R9 Task 8 已将质量状态、备注、`answer_id` 和已有反馈状态随脱敏历史载荷返回，因此历史消息同样展示可信质量轨迹和反馈状态；由于详情契约不保存 `analysis_sources`，历史消息不会编造来源标签。
 
@@ -197,6 +196,15 @@ PRD §10 Metric Catalog 与 §6.2。
 
 数据库没有路径穿越语义，以唯一约束表达同一商家同一分类的全量覆盖；商家范围由查询条件和外键共同约束。
 
+### 5.6 建业务域写占位文档而非空目录
+
+数据库中不存在空目录。创建业务域时，四个固定板块各写一篇 `is_complete=False` 的占位说明，
+使目录树可显示且检索层能如实提示资料未完整；这与参考文件系统中的空目录表现等价。
+
+### 5.7 不实现 `SYMLINK_NOT_ALLOWED`
+
+数据库中不存在符号链接，因此无对应攻击面；其余 13 个知识库路径/写入错误码均已实现并有测试。
+
 ---
 
 ## 6. ❓ 待核实（需单独一轮逐行对照）
@@ -206,7 +214,6 @@ PRD §10 Metric Catalog 与 §6.2。
 | `DorisQueryService` | 1050 | `repositories/analytics.py` + `services/safe_query.py` | 数据源不同（Doris vs PostgreSQL），需按「查询能力」而非按代码逐条比 |
 | ~~`LlmIntentAnalysisService`~~ | 603 | `app/intent/` | **提示词部分已于 2026-08-17 完成对照，结论见 §3.7（真实缺口，已修复）。** 重试策略仍未逐条比对 |
 | `PromptLoopAnalysisService` | 354 | `services/answer_service.py` + `services/review_service.py` | 已确认 `loopStatus`/`loopAttempts`/`loopNotes` 三元组在我方有对应（`quality_status`/`quality_attempts`/`quality_notes`），但校验规则清单未逐条比 |
-| `WikiAdminService` | 498 | F8/B9 未开工 | 阶段未到，但需在开工前先做一次逐条对照 |
 
 `AnswerComposeService`(323) / `VisualizationService`(103) / `CsvExportService`(91) /
 `FeedbackService`(66) 已确认存在对应实现，字段级差异未逐条比对。
@@ -248,6 +255,7 @@ PRD §10 Metric Catalog 与 §6.2。
 | Reviewer 循环 | `PromptLoopAnalysisService`、`PromptLoopAnalysisServiceTest`、`MerchantQaLangGraph` | 本地校验与独立 reviewer 均通过才 PASS；最多 3 次总尝试后确定性 FALLBACK；loop notes 记录每轮退回原因；纯明细不允许被 loop 生成正文。 | ✅ 我方已有质量状态/次数/备注，R9 Task 8 已随脱敏历史助手载荷回放。 |
 | CSV 导出 | `QueryBundle`、`CsvExportService`、`DorisQueryService` | 截断时保存文件名、URL、notice；文件名净化、UTF-8 BOM、列顺序稳定；参考实现未实现公式注入和签名过期。 | ✅ 我方签名、过期、公式防护更强；生成指标下载会重放已签名的受控计划，拒绝被篡改的计划、类别或列集合。 |
 | 图表 | `VisualizationService`、`VisualizationServiceTest` | 仅 METRIC 且有行时启用；趋势用 `pt/value`，分组用白名单维度；金额优先金额列，单一筛选值禁用饼图。 | ✅ 安全图表原则一致；生成指标仅从固定结果列选择金额字段，字段映射已有测试。 |
+| 知识库维护后台 | `WikiAdminService`、`WikiAdminController`、`KnowledgeBaseApp.vue` | 三根目录、业务域固定四板块、路径校验、ETag 乐观锁、管理员令牌独立于商家 Token，记忆仅可读。 | ✅ B9/F8 已实现；数据库路径策略保留参考的 13 个可适用错误码，业务域用不完整占位文档表达空目录。 |
 
 `SemanticLayerService`、`CsvExportService`、`QueryBundle` 与 `MerchantQaLangGraph` 在参考测试目录没有同名单测；
 已如实记录为“源代码行为已核对”，未把不存在的测试虚构为证据。其余表列测试只证明已覆盖的样例，
