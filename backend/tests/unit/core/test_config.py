@@ -105,6 +105,17 @@ def test_max_llm_env_keys_from_the_plan_actually_bind() -> None:
     assert settings.llm_max_tokens_per_request == 1234
 
 
+def test_default_llm_call_cap_covers_the_documented_worst_case() -> None:
+    """默认质量循环不能让 10 次请求上限在正常最坏路径上自相矛盾。"""
+
+    settings = make_settings()
+    worst_case_calls = 2 + 3 + 1 + (2 * settings.quality_max_attempts)
+
+    assert settings.quality_max_attempts == 2
+    assert worst_case_calls == 10
+    assert worst_case_calls <= settings.llm_max_calls_per_request
+
+
 def test_settings_can_still_be_built_by_field_name() -> None:
     settings = make_settings(llm_max_tokens_per_request=1234)
 

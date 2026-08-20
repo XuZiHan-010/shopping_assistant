@@ -26,6 +26,18 @@ from app.llm.client import (
 from app.schemas.chat import AnswerMode, QuestionCategory
 
 MAX_INTENT_RETRIES: Final[int] = 2
+_BUSINESS_MARKERS: Final[tuple[str, ...]] = (
+    "成交额",
+    "gmv",
+    "订单",
+    "交易",
+    "退款",
+    "退货",
+    "工单",
+    "咨询",
+    "规则",
+    "平台规则",
+)
 
 
 @dataclass(frozen=True)
@@ -52,23 +64,33 @@ class IntentService:
 
     async def recognize(self, question: str, index_text: str, budget: LlmBudget) -> InitialIntent:
         try:
-            result = await self._llm.complete(
-                system=CLASSIFY_SYSTEM,
-                user=classify_user_prompt(question, index_text),
-                fallback="",
-                budget=budget,
-                options=STRUCTURED_CALL_OPTIONS,
-            )
-            value = _object(result.text)
-            if value is not None:
+            prompt = classify_user_prompt(question, index_text)
+            for attempt in range(2):
+                result = await self._llm.complete(
+                    system=CLASSIFY_SYSTEM,
+                    user=prompt,
+                    fallback="",
+                    budget=budget,
+                    options=STRUCTURED_CALL_OPTIONS,
+                )
+                value = _object(result.text)
+                if value is None:
+                    break
                 raw_keywords = value.get("intent_keywords", [])
                 keywords = raw_keywords if isinstance(raw_keywords, list) else []
-                return InitialIntent(
+                initial = InitialIntent(
                     _answer_mode(value.get("answer_mode")),
                     _category(value.get("category")),
                     tuple(str(x) for x in keywords if str(x).strip()),
                     True,
                 )
+                if attempt == 0 and _needs_business_classification_retry(question, initial):
+                    prompt += (
+                        "\n该问题包含明确业务关键词，不得返回 INVALID/UNKNOWN；"
+                        "请按既定枚举重新分类。\n"
+                    )
+                    continue
+                return initial
         except LlmDailyBudgetExceededError:
             return _unavailable_initial("今日模型用量已达上限，本次只提供受控数据摘要")
         except LlmBudgetError:
@@ -144,6 +166,12 @@ class IntentService:
 
 def _unavailable_initial(reason: str) -> InitialIntent:
     return InitialIntent(AnswerMode.CHAT, QuestionCategory.UNKNOWN, (), False, reason)
+
+
+def _needs_business_classification_retry(question: str, initial: InitialIntent) -> bool:
+    return initial.category is QuestionCategory.UNKNOWN and any(
+        marker in question.casefold() for marker in _BUSINESS_MARKERS
+    )
 
 
 def _object(text: str) -> dict[str, object] | None:

@@ -130,6 +130,12 @@ def test_classify_prompt_can_route_core_business_questions_without_knowledge_ind
     assert "规则、平台规则" in prompt
 
 
+def test_classify_prompt_routes_rules_to_the_legal_platform_rule_category() -> None:
+    prompt = classify_user_prompt("商品上架有哪些规则？", "")
+
+    assert "规则、平台规则 → RULE，类别 PLATFORM_RULE" in prompt
+
+
 def test_classify_prompt_example_uses_only_legal_enum_values() -> None:
     example = _sole_json_object(classify_user_prompt("最近7天的退货量趋势", "（业务索引）"))
     assert set(example) == {"answer_mode", "category", "intent_keywords"}

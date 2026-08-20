@@ -62,6 +62,32 @@ async def test_recognize_uses_index_and_returns_initial_intent() -> None:
 
 
 @pytest.mark.asyncio
+async def test_recognize_retries_legal_but_useless_unknown_for_business_question() -> None:
+    """业务问题不应因模型给出合法的 INVALID/UNKNOWN 而直接短路。"""
+
+    llm = FakeLlmClient(responses=[_classify("INVALID", "UNKNOWN"), _classify()])
+
+    initial = await IntentService(llm).recognize("最近七天成交额趋势如何？", "业务索引", _budget())
+
+    assert initial.answer_mode is AnswerMode.METRIC
+    assert initial.category is QuestionCategory.TRADE
+    assert len(llm.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_recognize_retries_chat_unknown_for_business_question() -> None:
+    """业务问题被误判为 CHAT/UNKNOWN 时也不能跳过第二次分类。"""
+
+    llm = FakeLlmClient(responses=[_classify("CHAT", "UNKNOWN"), _classify()])
+
+    initial = await IntentService(llm).recognize("最近七天成交额趋势如何？", "业务索引", _budget())
+
+    assert initial.answer_mode is AnswerMode.METRIC
+    assert initial.category is QuestionCategory.TRADE
+    assert len(llm.calls) == 2
+
+
+@pytest.mark.asyncio
 async def test_understand_validates_structured_intent() -> None:
     llm = FakeLlmClient(responses=[_classify(), _understand()])
     service = IntentService(llm)
