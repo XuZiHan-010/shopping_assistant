@@ -22,7 +22,7 @@ from app.agent.state import AgentState
 from app.core.security import MerchantContext
 from app.intent.models import QueryIntent
 from app.intent.service import IntentService
-from app.knowledge.retrieval import KnowledgeResult, KnowledgeRetrieval
+from app.knowledge.retrieval import KnowledgeResult, KnowledgeRetrieval, KnowledgeSource
 from app.llm.client import LlmBudget, LlmClient
 from app.metrics.catalog import MetricCatalog, MetricPayload
 from app.schemas.answer import AnswerDraft
@@ -271,6 +271,8 @@ class MerchantQaGraph:
             notes.append("命中的知识资料尚未完整，回答仅基于现有内容")
         if not detail.matched:
             notes.append("未命中与当前问题相关的知识资料")
+        elif detail.source is KnowledgeSource.MEMORY_FALLBACK:
+            notes.append("团队知识库未命中，本次依据该商家的历史记忆作答")
         # 口径检索放在正文层之后：三级检索的第三级要靠知识正文生成候选口径，
         # 而索引层只有目录词汇。节点顺序由计划 §10 固定，正文层在此才可用。
         metric: MetricPayload | None = None
@@ -590,7 +592,11 @@ class MerchantQaGraph:
             )
         knowledge_detail = state["knowledge_detail"]
         sources = (
-            [AnalysisSource.KNOWLEDGE]
+            [
+                AnalysisSource.MEMORY
+                if knowledge_detail.source is KnowledgeSource.MEMORY_FALLBACK
+                else AnalysisSource.KNOWLEDGE
+            ]
             if mode is AnswerMode.RULE and knowledge_detail is not None and knowledge_detail.matched
             else [AnalysisSource.FALLBACK]
             if state["degraded"]

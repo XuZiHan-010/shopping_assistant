@@ -188,6 +188,15 @@ PRD §10 Metric Catalog 与 §6.2。
 参考项目有独立的 `SuggestionList.vue`（34 行）。我们把「猜你想问」与经营建议合并在
 `components/insights/RecommendationPanel.vue` 内。视觉分区一致，组件边界不同。判定为等价替代。
 
+### 5.4 记忆存储介质：文件系统 → PostgreSQL
+
+依据 `AGENTS.md` §8.7，商家记忆存入 `merchant_memories`，不依赖 Railway 临时文件系统。
+参考实现的 `ensureNoSymbolicLinks` 没有数据库等价物，故不实现；其余知识路径校验保留给知识库维护后台。
+
+### 5.5 记忆文件名 `isolatedPathSegment()` → `(merchant_id, category)` 唯一约束
+
+数据库没有路径穿越语义，以唯一约束表达同一商家同一分类的全量覆盖；商家范围由查询条件和外键共同约束。
+
 ---
 
 ## 6. ❓ 待核实（需单独一轮逐行对照）
@@ -196,7 +205,6 @@ PRD §10 Metric Catalog 与 §6.2。
 | --- | --- | --- | --- |
 | `DorisQueryService` | 1050 | `repositories/analytics.py` + `services/safe_query.py` | 数据源不同（Doris vs PostgreSQL），需按「查询能力」而非按代码逐条比 |
 | ~~`LlmIntentAnalysisService`~~ | 603 | `app/intent/` | **提示词部分已于 2026-08-17 完成对照，结论见 §3.7（真实缺口，已修复）。** 重试策略仍未逐条比对 |
-| `WikiMemoryService` | 441 | `app/knowledge/` | 知识检索分层与记忆写入策略未比对 |
 | `PromptLoopAnalysisService` | 354 | `services/answer_service.py` + `services/review_service.py` | 已确认 `loopStatus`/`loopAttempts`/`loopNotes` 三元组在我方有对应（`quality_status`/`quality_attempts`/`quality_notes`），但校验规则清单未逐条比 |
 | `WikiAdminService` | 498 | F8/B9 未开工 | 阶段未到，但需在开工前先做一次逐条对照 |
 
@@ -232,6 +240,7 @@ PRD §10 Metric Catalog 与 §6.2。
 
 | 能力 | 参考证据（均已只读核对） | 输入、校验、输出与失败语义 | 我方状态 |
 | --- | --- | --- | --- |
+| 双知识库与记忆沉淀 | `WikiMemoryService`、`MemoryConsolidationService`、`MerchantQaLangGraph` | 人工库命中即返回且记忆不参与；未命中才取该商家记忆；记忆强制带 `本轮自动沉淀` 标记；沉淀异步且失败只记日志 | ✅ 已实现，来源经 `analysis_sources` 的 `MEMORY` 对用户可见 |
 | 纯明细 | `QuestionIntent`、`LlmIntentAnalysisService`、`SemanticLayerService`、`MerchantQaLangGraph` | 模型仅声明是否要求分析；`DETAIL` 且未要求分析时设 table-only；`repairAnswer()` 清空正文，`outputMatchesIntent()` 强制正文为空。 | ✅ `analysis_requested` 内部字段 + 响应空正文不变量、表格/导出保留、历史 Answer payload 可重放均已实现；空正文助手消息不会渲染为空白卡片。 |
 | 跨业务计划 | `QuestionIntent`、`SemanticLayerService`、`DorisQueryService` | 仅 `ORDER_TO_REFUND`、`ORDER_TO_GOODS`、`ORDER_REFUND_GOODS`；以商家范围和子订单号串行查订单、退款、商品；计划参数非法时移除该计划并记录说明，基础意图继续执行。 | ✅ 已实现受控计划、固定 ORM 路由、商家范围解析、可见降级说明与 CSV 重放；不存在与跨商家订单统一回退，避免存在性探测。 |
 | 临时分组指标 | `QuestionIntent`、`LlmIntentAnalysisService`、`SemanticLayerService`、`DorisQueryService`、`MetricDefinitionService`、`VisualizationService`，以及 `DorisQueryServiceTest`、`LlmIntentAnalysisServiceTest`、`MetricDefinitionServiceTest`、`VisualizationServiceTest` | 白名单仅 `spu_id`、`address_city_name`；按交易/退款类别选择固定聚合；城市筛选可替代分组；金额由分转元；非法维度整体 `INVALID`；截断时生成 CSV 与提示；图表只取查询结果已有字段。 | ✅ 已实现受控计划、类别驱动固定 SQLAlchemy 模板、精确截断、签名 CSV 重放与安全图表字段映射；2026-08-13 已由真实 PostgreSQL 浏览器场景验证截断下载、图表和待核验提示；不接受自由公式、自由列名或 `measure` 枚举。 |

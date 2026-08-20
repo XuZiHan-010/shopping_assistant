@@ -638,7 +638,7 @@ OpenAPI → api/generated.ts → api/adapters/*.ts → types/*.ts → Store → 
 | `backend/app/services/attachment_service.py` | 图片、PDF、Excel、CSV 解析 |
 | `backend/app/services/export_service.py` | P0 动态生成受权限保护的 CSV（不引入 S3 SDK）；P1 再增加对象存储和签名对象 URL |
 | `backend/app/services/report_service.py` | 每日经营报告 |
-| `backend/app/services/memory_service.py` | 商家记忆提取、压缩和召回 |
+| `backend/app/services/memory_service.py` | 商家记忆提取、压缩和召回（已实现） |
 
 ### 8.5 数据库和 Repository
 
@@ -717,7 +717,7 @@ ORM 模型与 API Schema 分开，禁止直接把 ORM 对象作为外部接口�
 [P0] metric_definitions # 含 metric_code 与 display_name
 [P0] knowledge_documents
 [P0] orders / order_items / refunds / products / support_tickets
-[P1] merchant_memories
+[P1，已落地] merchant_memories
 [P1] attachments
 [P2] users              # 真实用户体系上线时才创建
 ```

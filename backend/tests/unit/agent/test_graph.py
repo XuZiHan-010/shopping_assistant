@@ -31,9 +31,29 @@ class K:
         return self._documents
 
 
+class EmptyK:
+    async def list_active(self) -> list[D]:
+        return []
+
+
 class M:
     async def get_by_code(self, metric_code: str) -> None:
         return None
+
+
+class Memory:
+    def __init__(self, category: str, content: str) -> None:
+        self.category = category
+        self.content = content
+
+
+class MemoryRepo:
+    def __init__(self, memories: list[Memory]) -> None:
+        self._memories = memories
+
+    async def list_for_merchant(self, merchant_id, category: str) -> list[Memory]:
+        del merchant_id
+        return [memory for memory in self._memories if memory.category == category]
 
 
 def response(mode: str, metric: str | None) -> str:
@@ -111,6 +131,36 @@ async def test_graph_rule_answer_uses_knowledge_content_and_source() -> None:
     assert "商品上架前必须完成资质审核" in result.response.answer
     assert "rules/listing.md" in result.response.answer
     assert result.response.analysis_sources == [AnalysisSource.KNOWLEDGE]
+
+
+@pytest.mark.asyncio
+async def test_graph_rule_answer_surfaces_memory_not_team_knowledge() -> None:
+    llm = FakeLlmClient(
+        responses=[
+            json.dumps(
+                {
+                    "answer_mode": "RULE",
+                    "category": "PLATFORM_RULE",
+                    "intent_keywords": ["上架"],
+                }
+            ),
+            rule_response(),
+        ]
+    )
+    graph = MerchantQaGraph(
+        retrieval=KnowledgeRetrieval(
+            EmptyK(),
+            memories=MemoryRepo([Memory("PLATFORM_RULE", "历史规则记忆")]),
+            merchant_id=uuid4(),
+        ),
+        intent_service_llm=llm,
+        catalog=MetricCatalog(M(), llm),
+    )
+
+    result = await graph.run("商品上架有什么规则", uuid4())
+
+    assert result.response.analysis_sources == [AnalysisSource.MEMORY]
+    assert any("历史记忆" in note for note in result.response.quality_notes)
 
 
 @pytest.mark.asyncio

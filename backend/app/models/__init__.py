@@ -10,7 +10,7 @@ from app.models.analytics import (
 )
 from app.models.answer import Answer, Feedback
 from app.models.conversation import Conversation, Message
-from app.models.knowledge import KnowledgeDocument, MetricDefinition
+from app.models.knowledge import KnowledgeDocument, MerchantMemory, MetricDefinition
 from app.models.merchant import Merchant
 from app.models.operations import AuditLog, ExportFile, LlmDailyBudget, LlmUsage
 
@@ -24,6 +24,7 @@ __all__ = [
     "LlmDailyBudget",
     "LlmUsage",
     "Merchant",
+    "MerchantMemory",
     "Message",
     "MetricDefinition",
     "Order",

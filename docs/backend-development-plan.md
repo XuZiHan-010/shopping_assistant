@@ -1630,14 +1630,20 @@ B3 建立的是六种 `AnswerMode`，本阶段扩展为七种。仅在 ChatRespo
 
 ### 商家记忆闭环
 
-当前只有 `merchant_memories` 表和"检索时可读取"，不足以实现。P1 需要完整链路：
+**已完成（2026-08-20）**：`merchant_memories` 已由独立迁移创建；成功回答持久化后通过
+`BackgroundTasks` 异步提交 `MemoryAgent`，使用独立数据库 Session 与单次 LLM 预算完成按
+`(merchant_id, category)` 覆盖式压缩。团队知识优先，未命中才按已验证的 `merchant_id` 读取记忆，
+命中记忆时 `analysis_sources` 返回 `MEMORY`；每日预算耗尽、数据库或模型异常只记录日志，绝不影响主回答。
+本轮没有调用真实模型，记忆压缩的真实模型验收仍须按 R3 单独申报。
+
+仍未实现的 P1 后续能力如下：
 
 | 环节 | 要求 |
 | --- | --- |
-| Memory Extraction | 从**已成功回答的会话**中提取，不从原始用户输入直接提取；有独立 Prompt 和 Pydantic Schema |
+| Memory Extraction | ✅ 从**已成功回答的会话**中提取，不从原始用户输入直接提取；有独立 Prompt；真实模型验收待 R3 单独申报 |
 | Memory Validation | 提取结果必须通过结构校验和白名单检查；**不得把未审核的模型输出升级为团队知识** |
-| Memory Persistence | 写入时机为一轮问答成功落库之后的异步任务；带幂等键，重试不产生重复记忆 |
-| Memory Retrieval | 检索优先级：团队知识 > 商家记忆；命中记忆时 `analysis_sources` 含 `MEMORY` |
+| Memory Persistence | ✅ 写入时机为一轮问答成功落库之后的异步任务；以 `(merchant_id, category)` 唯一约束保证覆盖写入 |
+| Memory Retrieval | ✅ 检索优先级：团队知识 > 商家记忆；命中记忆时 `analysis_sources` 含 `MEMORY` |
 | Memory Deletion | 见下方 API；**删除会话时同时删除由该会话产生的记忆** |
 
 记忆必须对商家可见可控，否则它就是个不可审查的黑盒。三条正式接口（已进 §8.0 路由表，用商家 Token）：
@@ -2008,6 +2014,19 @@ REQUEST_IN_PROGRESS
 EXPORT_LINK_EXPIRED
 HTTP_ERROR
 INTERNAL_ERROR
+INVALID_WIKI_PATH
+WIKI_READ_ONLY
+INVALID_FILE_TYPE
+INVALID_WIKI_PARENT
+WIKI_NODE_EXISTS
+WIKI_NODE_NOT_FOUND
+WIKI_DIRECTORY_NOT_EMPTY
+WIKI_VERSION_REQUIRED
+WIKI_VERSION_CONFLICT
+WIKI_DOCUMENT_TOO_LARGE
+INVALID_WIKI_ENCODING
+INVALID_WIKI_CONTENT
+WIKI_IO_ERROR
 ```
 
 **本表是后端错误码的唯一登记处。** 代码侧的唯一出处是 `app.core.errors.ErrorCode` 枚举，两者由

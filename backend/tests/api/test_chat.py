@@ -463,6 +463,20 @@ async def test_end_to_end_sse_matches_the_json_payload(
     assert events[-1][1] == replay.json()
 
 
+async def test_sse_path_completes_while_memory_task_runs_in_background(
+    postgres_client: AsyncClient,
+) -> None:
+    """后台记忆沉淀不得阻塞 SSE 的 done 事件。"""
+
+    stream = await postgres_client.post(
+        "/api/chat",
+        headers=MERCHANT_ONE_AUTH,
+        json={"message": "最近7天退货量趋势", "client_request_id": "e2e-memory-background"},
+    )
+
+    assert [name for name, _ in parse_sse(stream.text)][-1] == "done"
+
+
 async def test_end_to_end_stream_stays_readable_as_an_async_byte_stream(
     postgres_client: AsyncClient,
 ) -> None:

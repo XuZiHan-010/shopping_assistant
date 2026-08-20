@@ -6,7 +6,7 @@ import hmac
 from collections.abc import AsyncIterator
 from typing import Annotated, cast
 
-from fastapi import Depends, Request
+from fastapi import BackgroundTasks, Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,10 +34,12 @@ from app.repositories.conversation import ConversationRepository
 from app.repositories.export import ExportRepository
 from app.repositories.knowledge import KnowledgeRepository
 from app.repositories.llm_budget import LlmBudgetRepository
+from app.repositories.memory import MerchantMemoryRepository
 from app.repositories.merchant import MerchantRepository
 from app.repositories.metric import MetricRepository
 from app.services.chat_service import ChatService
 from app.services.export_service import ExportService
+from app.services.memory_agent import MemoryAgent
 from app.services.merchant_scope import MerchantScopeService
 from app.services.safe_query import SafeQueryService
 
@@ -124,12 +126,13 @@ def require_admin_token(
         raise AdminForbiddenError
 
 
-def get_chat_service(
+async def get_chat_service(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_db_session)],
     database: Annotated[Database, Depends(get_database)],
     settings: Annotated[Settings, Depends(get_app_settings)],
     context: Annotated[MerchantContext, Depends(get_merchant_context)],
+    background: BackgroundTasks,
 ) -> ChatService:
     """构造请求级 ChatService；B3 起由 MerchantQaGraph 处理问题。
 
@@ -150,8 +153,14 @@ def get_chat_service(
     )
     llm: LlmClient = guard
     conversations = ConversationRepository(session)
+    merchant_summaries = await MerchantRepository(session).list_demo_by_ids([context.merchant_id])
+    merchant_display = merchant_summaries[0].display_name if merchant_summaries else "商家"
     graph = MerchantQaGraph(
-        retrieval=KnowledgeRetrieval(KnowledgeRepository(session)),
+        retrieval=KnowledgeRetrieval(
+            KnowledgeRepository(session),
+            memories=MerchantMemoryRepository(session),
+            merchant_id=context.merchant_id,
+        ),
         intent_service_llm=llm,
         catalog=MetricCatalog(MetricRepository(session), llm),
         max_llm_calls=settings.llm_max_calls_per_request,
@@ -173,6 +182,14 @@ def get_chat_service(
         guard,
         guard,
         metrics=request.app.state.metrics,
+        memory_agent=MemoryAgent(
+            background=background,
+            database=database,
+            settings=settings,
+            merchant_id=context.merchant_id,
+            merchant_display=merchant_display,
+            request_id=str(request.state.request_id),
+        ),
     )
 
 

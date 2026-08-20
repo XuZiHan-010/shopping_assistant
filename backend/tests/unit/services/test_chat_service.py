@@ -233,6 +233,16 @@ class _ExportService:
         return ExportInfo(id=uuid4(), url="/api/exports/generated", expires_at=datetime(2026, 8, 2))
 
 
+class _RecordingMemoryAgent:
+    def __init__(self, repository: FakeConversationRepository) -> None:
+        self._repository = repository
+        self.calls: list[dict[str, object]] = []
+
+    def submit(self, **kwargs: object) -> None:
+        assert self._repository.messages[-1].role == "ASSISTANT"
+        self.calls.append(kwargs)
+
+
 def build_service(
     agent: Any = None,
 ) -> tuple[ChatService, FakeConversationRepository, FakeSession, Any]:
@@ -259,6 +269,20 @@ async def test_succeeded_request_replays_saved_response_without_running_agent() 
     assert replay.replayed is True
     assert replay.response == first.response
     assert agent.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_successful_answer_registers_memory_after_assistant_message() -> None:
+    session = FakeSession()
+    repository = FakeConversationRepository()
+    memory_agent = _RecordingMemoryAgent(repository)
+    service = ChatService(session, repository, CountingAgent(), memory_agent=memory_agent)  # type: ignore[arg-type]
+
+    execution = await service.submit(CONTEXT, chat_request(), request_id="memory-submit")
+
+    assert execution.replayed is False
+    assert memory_agent.calls[0]["question"] == "昨天总 GMV 是多少？"
+    assert memory_agent.calls[0]["answer"] == execution.response.answer
 
 
 @pytest.mark.asyncio
