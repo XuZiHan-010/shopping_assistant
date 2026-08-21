@@ -39,7 +39,7 @@ def test_registry_matches_the_metric_seed() -> None:
         assert seed[code].unit == spec.unit, code
 
 
-@pytest.mark.parametrize("code", ["paying_user_count", "return_rate"])
+@pytest.mark.parametrize("code", ["ordering_user_count", "paying_user_count", "return_rate"])
 def test_non_additive_metrics_are_marked(code: str) -> None:
     """去重计数和比例跨区间相加就是错的；标记丢失时 B5 会把它们求和。"""
 

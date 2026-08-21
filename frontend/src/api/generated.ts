@@ -173,6 +173,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/reports/daily": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Daily Report
+         * @description 返回当前已验证商家的业务时区昨日经营日报。
+         */
+        get: operations["get_daily_report_api_reports_daily_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/ops/status": {
         parameters: {
             query?: never;
@@ -507,6 +527,38 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /** DailyReportMetric */
+        DailyReportMetric: {
+            /** Metric Code */
+            metric_code: string;
+            /** Display Name */
+            display_name: string;
+            /** Unit */
+            unit: string;
+            /** Value */
+            value: string | number;
+        };
+        /** DailyReportResponse */
+        DailyReportResponse: {
+            /**
+             * Answer Id
+             * Format: uuid
+             */
+            answer_id: string;
+            /**
+             * Report Date
+             * Format: date
+             */
+            report_date: string;
+            /** Metrics */
+            metrics?: components["schemas"]["DailyReportMetric"][];
+            /** Suggestions */
+            suggestions: string[];
+            /** Degraded */
+            degraded: boolean;
+            /** Degraded Reason */
+            degraded_reason?: string | null;
         };
         /** DemoMerchant */
         DemoMerchant: {
@@ -1310,6 +1362,71 @@ export interface operations {
             };
             /** @description 请求参数不合法 */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_daily_report_api_reports_daily_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DailyReportResponse"];
+                };
+            };
+            /** @description 缺少或提供了无效的商家凭证 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求过于频繁 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 服务内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 依赖服务暂时不可用 */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

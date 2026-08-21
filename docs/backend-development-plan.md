@@ -648,7 +648,7 @@ attachments
 | P0 | `GET` | `/api/health` | — | — | `HealthResponse` | — |
 | P0 | `GET` | `/api/ready` | — | — | `ReadyResponse` | 503 |
 | P0 | `GET` | `/api/admin/ops/status` | A | — | `OpsStatusResponse` | 401 403 |
-| P1 | `GET` | `/api/reports/daily` | M | 日期参数 | `DailyReportResponse` | 401 422 |
+| P1 | `GET` | `/api/reports/daily` | M | 无参数；业务时区昨日由后端固定 | `DailyReportResponse` | 401 422 429 500 503 |
 | P1 | `POST` | `/api/attachments` | M | `multipart/form-data` | `AttachmentResponse` | 401 413 415 422 429 |
 | P1 | `GET` | `/api/attachments/{id}` | M | — | `AttachmentResponse` | 401 403 404 |
 | P1 | `DELETE` | `/api/attachments/{id}` | M | — | `204` | 401 403 404 409 |
@@ -1565,14 +1565,12 @@ PRD 的里程碑是 M0–M4 完成 MVP 并上线，M5 才是 P1。把 Railway �
 
 ### Daily Report
 
-- [ ] `GET /api/reports/daily`；
-- [ ] 昨日核心指标；
-- [ ] 摘要；
-- [ ] 至少两条建议；
-- [ ] **日报建议复用回答反馈通道**：日报响应返回可反馈的 `answer_id`，前端"采纳"直接调用 `POST /api/answers/{id}/feedback`，不新增反馈接口；
-- [ ] 无数据日报；
-- [ ] 昨日区间按业务时区 `Asia/Shanghai` 计算；
-- [ ] 定时 Worker。
+- [x] `GET /api/reports/daily`：仅商家认证，不接受 `merchant_id` 或日期参数，固定返回业务时区昨日；
+- [x] 按固定顺序返回 `gmv` 、`ordering_user_count` 、`order_count` 、`successful_order_count` 、`return_count` 、`refund_amount`；响应的 `metrics` 是含 `metric_code` 的数组；
+- [x] 日报建议固定两条：第一条按退款金额分支，第二条仅按工单占订单量是否超过 20% 分支；无近七日数据或查询失败均显式降级，不伪造零指标；
+- [x] 为每个商家建立唯一 `DAILY_REPORT` 系统会话；`daily-report:{report_date}` 复用既有 `answers` 幂等约束，并发首次请求回读胜出的已物化结果；
+- [x] **日报建议复用回答反馈通道**：日报响应返回可反馈的 `answer_id`，前端"采纳"直接调用 `POST /api/answers/{id}/feedback`，不新增反馈接口；
+- [x] 本阶段不引入 Railway Cron、Worker、Redis 或推送；按需在后续业务要求中另行设计。
 
 ### Attachment API
 

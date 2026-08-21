@@ -43,6 +43,7 @@ from app.services.chat_service import ChatService
 from app.services.export_service import ExportService
 from app.services.memory_agent import MemoryAgent
 from app.services.merchant_scope import MerchantScopeService
+from app.services.report_service import DailyReportService
 from app.services.safe_query import SafeQueryService
 
 _bearer = HTTPBearer(auto_error=False)
@@ -228,6 +229,20 @@ def get_conversation_repository(
     session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> ConversationRepository:
     return ConversationRepository(session)
+
+
+def get_daily_report_service(
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> DailyReportService:
+    """日报不使用 LLM；只装配受控经营数据与会话持久化依赖。"""
+
+    return DailyReportService(
+        session,
+        ConversationRepository(session),
+        AnalyticsRepository(session),
+        business_timezone=settings.business_timezone,
+    )
 
 
 def get_conversation_scope_service(

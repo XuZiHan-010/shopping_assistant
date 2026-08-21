@@ -178,6 +178,7 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
   // 的会话表——真实后端按 Token 过滤，Mock 至少要在传输实例这一级做到同样
   // 的隔离，Playwright 的隔离 e2e 才不会在假绿的 Mock 上通过。
   const conversationsByTenant = new Map<string, Map<string, ConversationRecord>>()
+  const dailyReportsByTenant = new Map<string, components['schemas']['DailyReportResponse']>()
   const knowledgeDocuments = new Map([
     ['index/运营手册.md', { content: '# 运营手册\n\n初始内容', read_only: false, version: '1' }],
     [
@@ -194,6 +195,38 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
       conversationsByTenant.set(key, table)
     }
     return table
+  }
+
+  function dailyReportFor(request: TransportRequest): components['schemas']['DailyReportResponse'] {
+    const tenantKey = tenantKeyFor(request)
+    const existing = dailyReportsByTenant.get(tenantKey)
+    if (existing) return existing
+
+    const report = {
+      answer_id: crypto.randomUUID(),
+      report_date: '2026-08-20',
+      metrics: [
+        { metric_code: 'gmv', display_name: '成交金额', unit: '元', value: '12680.00' },
+        { metric_code: 'ordering_user_count', display_name: '下单用户数', unit: '人', value: 86 },
+        { metric_code: 'order_count', display_name: '订单量', unit: '单', value: 92 },
+        {
+          metric_code: 'successful_order_count',
+          display_name: '交易成功订单量',
+          unit: '单',
+          value: 75,
+        },
+        { metric_code: 'return_count', display_name: '退货量', unit: '单', value: 4 },
+        { metric_code: 'refund_amount', display_name: '退款金额', unit: '元', value: '385.00' },
+      ],
+      suggestions: [
+        '近 7 日存在退款金额，建议优先查看退货退款明细，定位高频原因并优化发货、售后说明。',
+        '建议继续关注 GMV、交易成功订单量和优惠使用效果，挑选转化较好的商品加大运营。',
+      ],
+      degraded: false,
+      degraded_reason: null,
+    } satisfies components['schemas']['DailyReportResponse']
+    dailyReportsByTenant.set(tenantKey, report)
+    return report
   }
 
   return async (request: TransportRequest, signal: AbortSignal): Promise<Response> => {
@@ -215,6 +248,10 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
       return jsonResponse({
         merchants: [...MOCK_MERCHANTS],
       } satisfies components['schemas']['DemoMerchantListResponse'])
+    }
+
+    if (request.path === '/api/reports/daily' && request.method === 'GET') {
+      return jsonResponse(dailyReportFor(request))
     }
 
     if (request.path === '/api/admin/knowledge/tree' && request.method === 'GET') {

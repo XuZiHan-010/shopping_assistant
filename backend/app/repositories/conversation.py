@@ -6,6 +6,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import and_, exists, func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.answer import Answer, Feedback
@@ -22,6 +23,41 @@ class ConversationRepository:
         await self._session.flush()
         return conversation
 
+    async def get_or_create_daily_report_conversation(self, merchant_id: UUID) -> Conversation:
+        """返回每商家唯一的日报系统会话，不按标题识别系统资源。"""
+
+        existing = await self._session.scalar(
+            select(Conversation).where(
+                Conversation.merchant_id == merchant_id,
+                Conversation.conversation_kind == "DAILY_REPORT",
+            )
+        )
+        if existing is not None:
+            return existing
+
+        try:
+            # 并发首建时，条件唯一索引才是最终裁决；savepoint 让输家可以继续在
+            # 同一请求事务中重读赢家行，而不是把整个 AsyncSession 标记为失败。
+            async with self._session.begin_nested():
+                created = Conversation(
+                    merchant_id=merchant_id,
+                    title="每日经营报告",
+                    conversation_kind="DAILY_REPORT",
+                )
+                self._session.add(created)
+                await self._session.flush()
+        except IntegrityError:
+            raced = await self._session.scalar(
+                select(Conversation).where(
+                    Conversation.merchant_id == merchant_id,
+                    Conversation.conversation_kind == "DAILY_REPORT",
+                )
+            )
+            if raced is not None:
+                return raced
+            raise
+        return created
+
     async def list_for_merchant(
         self,
         merchant_id: UUID,
@@ -31,7 +67,10 @@ class ConversationRepository:
     ) -> list[Conversation]:
         result = await self._session.scalars(
             select(Conversation)
-            .where(Conversation.merchant_id == merchant_id)
+            .where(
+                Conversation.merchant_id == merchant_id,
+                Conversation.conversation_kind == "CHAT",
+            )
             .order_by(Conversation.created_at.desc(), Conversation.id.desc())
             .limit(limit)
             .offset(offset)

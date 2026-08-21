@@ -3,6 +3,7 @@ import { BookOpen, MessageSquarePlus, PanelLeft } from '@lucide/vue'
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import ConversationColumn from '@/components/chat/ConversationColumn.vue'
+import DailyReportCard from '@/components/chat/DailyReportCard.vue'
 import MetricDefinitionPanel from '@/components/insights/MetricDefinitionPanel.vue'
 import RecommendationPanel from '@/components/insights/RecommendationPanel.vue'
 import ConversationDrawer from '@/components/layout/ConversationDrawer.vue'
@@ -10,10 +11,47 @@ import MerchantSwitcher from '@/components/layout/MerchantSwitcher.vue'
 import { useAppError } from '@/composables/useAppError'
 import { useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
+import { getDailyReport } from '@/api/report'
+import { submitFeedback } from '@/api/chat'
+import type { DailyReport } from '@/types/report'
 
 const authStore = useAuthStore()
 const chatStore = useChatStore()
 const { showError } = useAppError()
+const dailyReport = ref<DailyReport>()
+const dailyReportController = ref<AbortController>()
+const dailyReportPending = ref(false)
+const dailyReportAdopted = ref(false)
+
+async function loadDailyReport(): Promise<void> {
+  dailyReportController.value?.abort()
+  const controller = new AbortController()
+  dailyReportController.value = controller
+  dailyReport.value = undefined
+  dailyReportAdopted.value = false
+  try {
+    dailyReport.value = await getDailyReport(controller.signal)
+  } catch {
+    if (!controller.signal.aborted) showError('每日经营日报加载失败，请稍后重试。')
+  }
+}
+
+async function adoptDailyReport(): Promise<void> {
+  if (!dailyReport.value || dailyReportPending.value || dailyReportAdopted.value) return
+  dailyReportPending.value = true
+  try {
+    await submitFeedback(
+      dailyReport.value.answerId,
+      { isAdopted: true, reaction: null },
+      new AbortController().signal,
+    )
+    dailyReportAdopted.value = true
+  } catch {
+    showError('采纳日报建议失败，请稍后重试。')
+  } finally {
+    dailyReportPending.value = false
+  }
+}
 
 const MetricChartPanel = defineAsyncComponent(
   () => import('@/components/insights/MetricChartPanel.vue'),
@@ -59,6 +97,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(clearChartMountSchedule)
+onBeforeUnmount(() => dailyReportController.value?.abort())
 
 // 空闲回调还没轮到就先来了图表回答时，立即挂载，不让用户等待空闲。
 watch(
@@ -131,6 +170,7 @@ onMounted(async () => {
   // 并发发出去的话，会话请求会赶在身份就绪之前到达服务端，直接 401。
   // F2 的 Mock 不校验身份，所以这个顺序现在看不出差别——正因为看不出，更要现在就定死。
   await authStore.restore()
+  await loadDailyReport()
   refreshConversations()
 })
 
@@ -149,6 +189,7 @@ function selectMerchant(displayName: string): void {
   // 都已经是真隔离了（见 `src/api/transport.ts` 里那个测试专用的丢弃函数）。
   chatStore.reset()
   chatStore.clearConversations()
+  void loadDailyReport()
 }
 
 function startNewConversation(): void {
@@ -204,6 +245,12 @@ function startNewConversation(): void {
         data-testid="workspace-column"
         aria-label="指标与洞察"
       >
+        <DailyReportCard
+          :report="dailyReport"
+          :pending="dailyReportPending"
+          :adopted="dailyReportAdopted"
+          @adopt="adoptDailyReport"
+        />
         <MetricDefinitionPanel :answer="chatStore.currentAnswer" />
         <MetricChartPanel v-if="chartMountable" :answer="chatStore.currentAnswer" />
         <section

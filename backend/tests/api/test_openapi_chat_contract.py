@@ -72,6 +72,7 @@ EXPECTED_ERROR_CODES: dict[tuple[str, str], set[str]] = {
     ("get", "/api/demo/merchants"): {"404"},
     ("get", "/api/metrics/{code}"): {"401", "404", "422"},
     ("get", "/api/ready"): {"503"},
+    ("get", "/api/reports/daily"): {"401", "422", "429", "500", "503"},
     ("post", "/api/answers/{answer_id}/feedback"): {"401", "403", "404", "422"},
     ("get", "/api/exports/{export_id}"): {"403", "404", "410"},
 }
@@ -202,6 +203,16 @@ def test_b6_feedback_and_export_routes_are_exposed(app: FastAPI) -> None:
 
     assert "post" in paths["/api/answers/{answer_id}/feedback"]
     assert "get" in paths["/api/exports/{export_id}"]
+
+
+def test_daily_report_contract_has_no_caller_selected_date(app: FastAPI) -> None:
+    operation = app.openapi()["paths"]["/api/reports/daily"]["get"]
+    response = operation["responses"]["200"]
+
+    assert operation.get("parameters", []) == []
+    assert response["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/DailyReportResponse"
+    }
 
 
 def test_enums_match_the_documented_values(app: FastAPI) -> None:

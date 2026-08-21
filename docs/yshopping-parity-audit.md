@@ -171,7 +171,7 @@ Railway 控制台部署与线上验收、B8/B9、F7–F9 尚未完成。R9 阶�
 | 参考项目 | 我们的归属阶段 |
 | --- | --- |
 | `AttachmentService` / `AttachmentStore` / `ChatMessage.vue` 附件区块 | B8 / F7 |
-| `DailyReportService` / `DailyReportCard.vue` | B8 / F7 |
+| `DailyReportService` / `DailyReportCard.vue` | 已于 2026-08-21 完成；附件仍留在 B8 / F7 |
 | `MemoryConsolidationService`（商家记忆固化） | B8 |
 
 `ChatMessage.vue` 的 `quality-audit` 质检块与 `message-actions` 反馈操作已在 F5 实现：四种质量状态、校验次数、备注和全部来源均如实展示；采纳、点赞、点踩已接入 B6 反馈端点，并覆盖失败保留、同值重试与并发中止。R9 Task 8 已将质量状态、备注、`answer_id` 和已有反馈状态随脱敏历史载荷返回，因此历史消息同样展示可信质量轨迹和反馈状态；由于详情契约不保存 `analysis_sources`，历史消息不会编造来源标签。
@@ -225,6 +225,15 @@ PRD §10 Metric Catalog 与 §6.2。
 参考项目的商家侧没有任何记忆读写入口；记忆仅以管理员知识目录树中的只读 `memory` 根露出
 （`WikiAdminService.java:62`）。因此我方撤回原先规划的 `GET`、`PATCH`、`DELETE /api/memories`，
 由 OpenAPI 契约测试永久禁止重新暴露这些路径。2026-08-21 用户裁定。
+
+---
+
+### 5.10 日报路径与响应形状偏离
+
+参考项目使用 `GET /api/daily-report`，我方保留已定义的
+`GET /api/reports/daily`；这是 Borough 公共 API 的命名统一选择。参考响应指标使用名称到值的 Map，我方使用带稳定 `metric_code`、展示名称、单位和值的数组，以避免中文指标名作为契约键。
+
+本轮日报不引入定时推送：只在商家请求时对业务时区昨日执行一次幂等物化，避免在未定义推送通道、失败重试和定时任务监控前伪装成完整的定时日报能力。建议也只使用已实际查询的退款、订单与工单信号，不虚构商品排查分支。
 
 ---
 
