@@ -787,9 +787,6 @@ GET    /api/reports/daily
 POST   /api/attachments
 GET    /api/attachments/{id}
 DELETE /api/attachments/{id}
-GET    /api/memories
-PATCH  /api/memories/{id}
-DELETE /api/memories/{id}
 GET    /api/admin/knowledge/tree
 GET    /api/admin/knowledge/documents/{id}
 POST   /api/admin/knowledge/documents
@@ -803,7 +800,6 @@ POST   /api/admin/knowledge/memories/compress
 
 - 知识目录由 `GET /api/admin/knowledge/tree` 提供，**没有** `GET /api/admin/knowledge/documents` 列表接口，文档按 `{id}` 单独读取；
 - 业务域三端点由参考项目既有实现反查补入：创建时建立固定四板块、改名需 `If-Match`、删除需 `If-Match` 且以 `recursive` 显式确认非空删除（R9）。
-- `/api/memories` 三条让商家查询、纠错和删除自己的记忆，用**商家 Token**——记忆归商家所有，管理员不替商家改记忆。
 
 ### 10.2.1 两套凭证
 

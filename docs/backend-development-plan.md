@@ -652,9 +652,6 @@ attachments
 | P1 | `POST` | `/api/attachments` | M | `multipart/form-data` | `AttachmentResponse` | 401 413 415 422 429 |
 | P1 | `GET` | `/api/attachments/{id}` | M | — | `AttachmentResponse` | 401 403 404 |
 | P1 | `DELETE` | `/api/attachments/{id}` | M | — | `204` | 401 403 404 409 |
-| P1 | `GET` | `/api/memories` | M | 分页与业务域参数 | `MemoryListResponse` | 401 |
-| P1 | `PATCH` | `/api/memories/{id}` | M | `MemoryCorrection` | `MemoryResponse` | 401 403 404 422 |
-| P1 | `DELETE` | `/api/memories/{id}` | M | — | `204` | 401 403 404 |
 | P1 | `GET` | `/api/admin/knowledge/tree` | A | — | `KnowledgeTreeResponse` | 401 403 |
 | P1 | `GET` | `/api/admin/knowledge/documents/{id}` | A | — | `KnowledgeDocumentResponse` | 401 403 404 |
 | P1 | `POST` | `/api/admin/knowledge/documents` | A | `KnowledgeDocumentCreate` | `KnowledgeDocumentResponse` | 401 403 422 |
@@ -666,7 +663,6 @@ attachments
 
 - **没有** `GET /api/admin/knowledge/documents` 列表接口，目录由 `tree` 提供；
 - `PUT` 知识文档使用乐观锁或 ETag，版本冲突返回 `409`；
-- `/api/memories` 三条是商家自己的记忆，用商家 Token 而非管理员令牌——记忆归商家所有，管理员不应替商家改记忆。语义见 §9 B8「商家记忆闭环」；
 - `/api/admin/knowledge/memories/compress` 使用 `X-Admin-Token` 对指定商家分类执行人工重压；先写独立审计日志再提交记忆，模型不可用时响应必须返回 `degraded=true` 与原因；
 - `/api/admin/ops/status` 见 §9 B7 的运维端点定义；
 - 每条路由至少有一条"未认证"、一条"跨商家越权"用例，越权必须返回 `403` 并写 `audit_logs`。
@@ -1646,26 +1642,10 @@ B3 建立的是六种 `AnswerMode`，本阶段扩展为七种。仅在 ChatRespo
 | Memory Validation | 提取结果必须通过结构校验和白名单检查；**不得把未审核的模型输出升级为团队知识** |
 | Memory Persistence | ✅ 写入时机为一轮问答成功落库之后的异步任务；以 `(merchant_id, category)` 唯一约束保证覆盖写入 |
 | Memory Retrieval | ✅ 检索优先级：团队知识 > 商家记忆；命中记忆时 `analysis_sources` 含 `MEMORY` |
-| Memory Deletion | 见下方 API；**删除会话时同时删除由该会话产生的记忆** |
-
-记忆必须对商家可见可控，否则它就是个不可审查的黑盒。三条正式接口（已进 §8.0 路由表，用商家 Token）：
-
-| 方法 | 路径 | 用途 |
-| --- | --- | --- |
-| `GET` | `/api/memories` | 列出本商家记忆，支持按业务域筛选与分页；返回内容、来源会话 ID、生成时间、状态 |
-| `PATCH` | `/api/memories/{id}` | **纠错**：修正内容或置为 `INVALIDATED`，请求体 `MemoryCorrection` |
-| `DELETE` | `/api/memories/{id}` | 删除单条记忆 |
-
-- [ ] 记忆状态：`ACTIVE`、`INVALIDATED`（商家标记失效，保留痕迹但不再召回）；
-- [ ] `PATCH` 修正后的内容**不再经过模型改写**，直接作为事实存储，并标记为商家确认；
-- [ ] 商家确认过的记忆在检索时优先级高于模型自动提取的记忆；
-- [ ] 三条接口全部强制 `merchant_id` 过滤，跨商家记忆 ID 返回 `403` 并写 `audit_logs`；
-- [ ] 删除和失效都要立刻影响后续召回，不依赖缓存过期。
-
 - [ ] 压缩与去重：同一事实重复出现时合并，不无限增长；
 - [ ] 过期策略：超过保留期的记忆自动失效（清理策略本身属于 P2）；
 - [ ] 提取失败时静默降级，不影响主回答链路；
-- [ ] 必测：记忆提取、召回、列表、纠错、删除各一条；**跨商家记忆 ID 返回 403**；会话删除后记忆不再被召回；标记 `INVALIDATED` 后不再进入 Prompt。
+- [ ] 必测：记忆提取、召回、压缩各一条；提取失败不影响主回答，过期记忆不再进入 Prompt。
 
 ### Worker 独立工程
 

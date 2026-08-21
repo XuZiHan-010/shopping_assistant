@@ -582,9 +582,6 @@ SQL 口径回答“这个数怎么算出来的”。契约层不得把两者合�
 | `POST` | `/api/attachments` | 上传附件 |
 | `GET` | `/api/attachments/{id}` | 查询解析状态 |
 | `DELETE` | `/api/attachments/{id}` | 删除附件 |
-| `GET` | `/api/memories` | 查询本商家记忆 |
-| `PATCH` | `/api/memories/{id}` | 纠正记忆或标记失效 |
-| `DELETE` | `/api/memories/{id}` | 删除记忆 |
 | `GET` | `/api/admin/knowledge/tree` | 知识目录 |
 | `GET` | `/api/admin/knowledge/documents/{id}` | 读取知识文档 |
 | `POST` | `/api/admin/knowledge/documents` | 新建知识文档 |
@@ -594,8 +591,6 @@ SQL 口径回答“这个数怎么算出来的”。契约层不得把两者合�
 | `PUT` | `/api/admin/knowledge/business-domains` | 改业务域名，需 `If-Match`（按 R9 从参考项目补入） |
 | `DELETE` | `/api/admin/knowledge/business-domains` | 删业务域，需 `If-Match` 与 `recursive` 确认（按 R9 从参考项目补入） |
 | `POST` | `/api/admin/knowledge/memories/compress` | 管理员按商家与分类手动重压记忆；使用 `X-Admin-Token`，响应明确降级状态 |
-
-商家记忆必须对商家**可查、可纠错、可删除**，否则它就是不可审查的黑盒。这三条接口用商家 Token，管理员不替商家修改记忆。
 
 `/api/admin/*` 使用独立请求头 `X-Admin-Token`（值为 `ADMIN_TOKEN`），不复用 `Authorization`；`/api/exports/{id}` 用自带签名的 URL，不要求请求头，以便浏览器原生下载。
 

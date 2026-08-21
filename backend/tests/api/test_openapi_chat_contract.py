@@ -186,6 +186,7 @@ def test_openapi_exposes_admin_knowledge_routes_but_not_unimplemented_merchant_r
     paths = set(app.openapi()["paths"])
 
     assert not {path for path in paths if path.startswith("/api/attachments")}
+    # R9 已裁定撤回商家自助记忆 API；这是永久契约，不是暂未实现的临时守卫。
     assert not {path for path in paths if path.startswith("/api/memories")}
     assert "/api/admin/knowledge/tree" in paths
     assert "/api/admin/knowledge/documents/{document_path}" in paths
