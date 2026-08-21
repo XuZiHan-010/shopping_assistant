@@ -14,6 +14,9 @@ from app.prompts.memory import MEMORY_MARKER
 
 logger = logging.getLogger(__name__)
 _MEMORY_TASK_MAX_TOKENS = 4_000
+# 参考实现 MemoryConsolidationService 取 recentAnswers(merchantId, 80)；
+# 保持同一条数，压缩输入的信息量才对得上。
+_MEMORY_HISTORY_LIMIT = 80
 _SKIPPED_CATEGORIES = frozenset({"UNKNOWN", ""})
 
 _MANUAL_TEMPLATE = """## {marker}
@@ -111,6 +114,7 @@ class MemoryAgent:
             from app.llm.deepseek import DeepSeekLlmClient
             from app.llm.fake import FakeLlmClient
             from app.llm.guard import LlmCostGuard
+            from app.repositories.answer import AnswerRepository
             from app.repositories.llm_budget import LlmBudgetRepository
             from app.repositories.memory import MerchantMemoryRepository
             from app.services.memory_service import MemoryService
@@ -131,13 +135,20 @@ class MemoryAgent:
             else:
                 llm = FakeLlmClient(configured=False)
             async with self._database.session() as session:
+                # 沉淀的输入不只有本轮：参考实现会把该商家该分类的近期问答一并压缩，
+                # 记忆才能随轮次累积成画像，而不是每轮把上一版覆盖成一句话摘要。
+                history = await AnswerRepository(session).recent_answers_for_category(
+                    merchant_id=self._merchant_id,
+                    category=category,
+                    limit=_MEMORY_HISTORY_LIMIT,
+                )
                 service = MemoryService(llm, MerchantMemoryRepository(session))
                 await service.consolidate(
                     merchant_id=self._merchant_id,
                     merchant_display=self._merchant_display,
                     category=category,
                     manual_markdown=manual,
-                    history=[],
+                    history=history,
                     budget=LlmBudget(max_calls=1, max_tokens=_MEMORY_TASK_MAX_TOKENS),
                 )
                 await session.commit()
