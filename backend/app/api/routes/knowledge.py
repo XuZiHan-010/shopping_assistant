@@ -4,12 +4,21 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, Response, status
+from fastapi import APIRouter, Depends, Header, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import get_app_settings, get_db_session, require_admin_token
+from app.api.dependencies import (
+    build_guarded_llm,
+    get_app_settings,
+    get_database,
+    get_db_session,
+    require_admin_token,
+)
 from app.core.config import Settings
-from app.core.errors import error_responses
+from app.core.errors import ResourceNotFoundError, error_responses
+from app.db.session import Database
+from app.repositories.audit import AuditRepository
+from app.repositories.merchant import MerchantRepository
 from app.schemas.knowledge import (
     BusinessDomainRenameRequest,
     BusinessDomainRequest,
@@ -18,8 +27,11 @@ from app.schemas.knowledge import (
     KnowledgeDocumentUpdateRequest,
     KnowledgeTreeNode,
     KnowledgeTreeResponse,
+    MemoryCompressRequest,
+    MemoryCompressResponse,
 )
 from app.services.knowledge_admin_service import KnowledgeAdminService
+from app.services.memory_admin_service import MemoryAdminService
 
 router = APIRouter(prefix="/admin/knowledge", tags=["admin-knowledge"])
 
@@ -168,3 +180,41 @@ async def delete_business_domain(
     await _service(session, settings).delete_business_domain(name, if_match, recursive=recursive)
     await session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/memories/compress",
+    response_model=MemoryCompressResponse,
+    responses=error_responses(401, 403, 404, 422),
+)
+async def compress_memory(
+    payload: MemoryCompressRequest,
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    database: Annotated[Database, Depends(get_database)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+    _admin: Annotated[None, Depends(require_admin_token)],
+) -> MemoryCompressResponse:
+    """以管理员身份手动重压指定商家的分类记忆。"""
+
+    display_name = await MerchantRepository(session).get_display_name(payload.merchant_id)
+    if display_name is None:
+        raise ResourceNotFoundError("商家")
+
+    service = MemoryAdminService(
+        session,
+        llm=build_guarded_llm(
+            settings,
+            database,
+            request_id=str(request.state.request_id),
+            merchant_id=payload.merchant_id,
+        ),
+        audit=AuditRepository(database),
+    )
+    return await service.compress(
+        merchant_id=payload.merchant_id,
+        display_name=display_name,
+        category=payload.category.value,
+        manual_markdown=payload.manual_markdown,
+        request_id=str(request.state.request_id),
+    )

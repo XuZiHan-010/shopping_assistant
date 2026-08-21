@@ -52,7 +52,7 @@ async def test_marker_is_injected_when_model_output_lacks_it() -> None:
     repository = _StubRepository()
     service = MemoryService(_StubLlm("模型没写标记"), repository)
 
-    content = await service.consolidate(
+    result = await service.consolidate(
         merchant_id=uuid4(),
         merchant_display="Borough商家100",
         category="TRADE",
@@ -61,6 +61,9 @@ async def test_marker_is_injected_when_model_output_lacks_it() -> None:
         budget=_budget(),
     )
 
+    content = result.content
+    assert result.degraded is False
+    assert result.degraded_reason is None
     assert MEMORY_MARKER in content
     assert content.startswith("# TRADE")
     assert repository.saved[0][1:] == ("TRADE", content)
@@ -71,7 +74,7 @@ async def test_model_output_with_marker_is_kept_verbatim() -> None:
     text = f"# TRADE\n\n## {MEMORY_MARKER}\n\n已经带标记"
     service = MemoryService(_StubLlm(text), _StubRepository())
 
-    content = await service.consolidate(
+    result = await service.consolidate(
         merchant_id=uuid4(),
         merchant_display="Borough商家100",
         category="TRADE",
@@ -80,7 +83,9 @@ async def test_model_output_with_marker_is_kept_verbatim() -> None:
         budget=_budget(),
     )
 
-    assert content == text
+    assert result.degraded is False
+    assert result.degraded_reason is None
+    assert result.content == text
 
 
 @pytest.mark.asyncio
@@ -89,7 +94,7 @@ async def test_llm_failure_falls_back_to_deterministic_text(failure: Exception) 
     repository = _StubRepository()
     service = MemoryService(_StubLlm(raises=failure), repository)
 
-    content = await service.consolidate(
+    result = await service.consolidate(
         merchant_id=uuid4(),
         merchant_display="Borough商家100",
         category="REFUND",
@@ -98,6 +103,9 @@ async def test_llm_failure_falls_back_to_deterministic_text(failure: Exception) 
         budget=_budget(),
     )
 
+    content = result.content
+    assert result.degraded is True
+    assert result.degraded_reason
     assert MEMORY_MARKER in content
     assert "人工补充正文" in content
     assert "更新时间：" in content
@@ -108,7 +116,7 @@ async def test_llm_failure_falls_back_to_deterministic_text(failure: Exception) 
 async def test_blank_model_output_falls_back() -> None:
     service = MemoryService(_StubLlm("   "), _StubRepository())
 
-    content = await service.consolidate(
+    result = await service.consolidate(
         merchant_id=uuid4(),
         merchant_display="Borough商家100",
         category="TRADE",
@@ -117,5 +125,8 @@ async def test_blank_model_output_falls_back() -> None:
         budget=_budget(),
     )
 
+    content = result.content
+    assert result.degraded is True
+    assert result.degraded_reason
     assert "补充" in content
     assert MEMORY_MARKER in content

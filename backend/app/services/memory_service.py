@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Protocol
 from uuid import UUID
 
@@ -15,6 +16,15 @@ from app.prompts.memory import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class MemoryConsolidation:
+    """压缩结果。degraded 为真表示模型未参与，content 是确定性兜底文本。"""
+
+    content: str
+    degraded: bool
+    degraded_reason: str | None
 
 
 class _MemoryRepositoryLike(Protocol):
@@ -36,9 +46,11 @@ class MemoryService:
         history: list[dict[str, object]],
         budget: LlmBudget,
         use_llm: bool = True,
-    ) -> str:
+    ) -> MemoryConsolidation:
         fallback = build_fallback_memory(category=category, manual_markdown=manual_markdown)
         content = fallback
+        degraded = True
+        degraded_reason: str | None = "未启用模型压缩，本次写入确定性兜底文本"
         if use_llm:
             prompt = build_memory_prompt(
                 merchant_display=merchant_display,
@@ -55,12 +67,17 @@ class MemoryService:
                 )
                 if not result.degraded and result.text.strip():
                     content = result.text
+                    degraded = False
+                    degraded_reason = None
+                else:
+                    degraded_reason = "模型压缩不可用，本次写入确定性兜底文本"
             except Exception:
                 logger.warning(
                     "记忆压缩调用模型失败，改写确定性兜底文本",
                     extra={"category": category},
                     exc_info=True,
                 )
+                degraded_reason = "模型压缩调用失败，本次写入确定性兜底文本"
 
         content = _ensure_marker(content, category)
         await self._repository.upsert(
@@ -68,7 +85,11 @@ class MemoryService:
             category=category,
             content=content,
         )
-        return content
+        return MemoryConsolidation(
+            content=content,
+            degraded=degraded,
+            degraded_reason=degraded_reason,
+        )
 
 
 def _ensure_marker(content: str, category: str) -> str:

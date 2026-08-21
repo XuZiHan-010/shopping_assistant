@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import cast
 from uuid import UUID
 
 from sqlalchemy import select
@@ -35,3 +36,13 @@ class MerchantRepository:
             MerchantSummary(merchant_id=merchant_id, display_name=display_name)
             for merchant_id, display_name in result.all()
         ]
+
+    async def get_display_name(self, merchant_id: UUID) -> str | None:
+        """管理端按 id 取商家展示名；不筛 is_demo，管理员操作对象可以是任意商家。"""
+
+        return cast(
+            str | None,
+            await self._session.scalar(
+                select(Merchant.display_name).where(Merchant.id == merchant_id)
+            ),
+        )

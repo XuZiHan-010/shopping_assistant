@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, Field
+
+from app.schemas.chat import QuestionCategory
 
 
 class KnowledgeTreeNode(BaseModel):
@@ -45,3 +48,24 @@ class BusinessDomainRequest(BaseModel):
 
 class BusinessDomainRenameRequest(BaseModel):
     new_name: str
+
+
+class MemoryCompressRequest(BaseModel):
+    """管理员手动重压某商家某分类的记忆。
+
+    对应参考项目 ``WikiCompressRequest``：``manual_markdown`` 是人工补充内容，
+    压缩时优先保留（见 ``app/prompts/memory.py`` 的提示词第 3 条）。
+    """
+
+    merchant_id: UUID
+    category: QuestionCategory
+    manual_markdown: str = Field(default="", max_length=20_000)
+
+
+class MemoryCompressResponse(BaseModel):
+    merchant_id: UUID
+    category: QuestionCategory
+    content: str
+    history_rows: int
+    degraded: bool
+    degraded_reason: str | None

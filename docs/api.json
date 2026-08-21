@@ -1545,6 +1545,78 @@
           }
         }
       }
+    },
+    "/api/admin/knowledge/memories/compress": {
+      "post": {
+        "tags": [
+          "admin-knowledge"
+        ],
+        "summary": "Compress Memory",
+        "description": "以管理员身份手动重压指定商家的分类记忆。",
+        "operationId": "compress_memory_api_admin_knowledge_memories_compress_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryCompressRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryCompressResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "缺少或提供了无效的商家凭证",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权访问该资源或管理端点",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "资源不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "请求参数不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2602,6 +2674,76 @@
           "roots"
         ],
         "title": "KnowledgeTreeResponse"
+      },
+      "MemoryCompressRequest": {
+        "properties": {
+          "merchant_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Merchant Id"
+          },
+          "category": {
+            "$ref": "#/components/schemas/QuestionCategory"
+          },
+          "manual_markdown": {
+            "type": "string",
+            "maxLength": 20000,
+            "title": "Manual Markdown",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "merchant_id",
+          "category"
+        ],
+        "title": "MemoryCompressRequest",
+        "description": "管理员手动重压某商家某分类的记忆。\n\n对应参考项目 ``WikiCompressRequest``：``manual_markdown`` 是人工补充内容，\n压缩时优先保留（见 ``app/prompts/memory.py`` 的提示词第 3 条）。"
+      },
+      "MemoryCompressResponse": {
+        "properties": {
+          "merchant_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Merchant Id"
+          },
+          "category": {
+            "$ref": "#/components/schemas/QuestionCategory"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "history_rows": {
+            "type": "integer",
+            "title": "History Rows"
+          },
+          "degraded": {
+            "type": "boolean",
+            "title": "Degraded"
+          },
+          "degraded_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Degraded Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "merchant_id",
+          "category",
+          "content",
+          "history_rows",
+          "degraded",
+          "degraded_reason"
+        ],
+        "title": "MemoryCompressResponse"
       },
       "MetricDefinitionResponse": {
         "properties": {

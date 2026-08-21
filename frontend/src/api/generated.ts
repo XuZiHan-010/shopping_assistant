@@ -262,6 +262,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/knowledge/memories/compress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Compress Memory
+         * @description 以管理员身份手动重压指定商家的分类记忆。
+         */
+        post: operations["compress_memory_api_admin_knowledge_memories_compress_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -634,6 +654,43 @@ export interface components {
         KnowledgeTreeResponse: {
             /** Roots */
             roots: components["schemas"]["KnowledgeTreeNode"][];
+        };
+        /**
+         * MemoryCompressRequest
+         * @description 管理员手动重压某商家某分类的记忆。
+         *
+         *     对应参考项目 ``WikiCompressRequest``：``manual_markdown`` 是人工补充内容，
+         *     压缩时优先保留（见 ``app/prompts/memory.py`` 的提示词第 3 条）。
+         */
+        MemoryCompressRequest: {
+            /**
+             * Merchant Id
+             * Format: uuid
+             */
+            merchant_id: string;
+            category: components["schemas"]["QuestionCategory"];
+            /**
+             * Manual Markdown
+             * @default
+             */
+            manual_markdown: string;
+        };
+        /** MemoryCompressResponse */
+        MemoryCompressResponse: {
+            /**
+             * Merchant Id
+             * Format: uuid
+             */
+            merchant_id: string;
+            category: components["schemas"]["QuestionCategory"];
+            /** Content */
+            content: string;
+            /** History Rows */
+            history_rows: number;
+            /** Degraded */
+            degraded: boolean;
+            /** Degraded Reason */
+            degraded_reason: string | null;
         };
         /** MetricDefinitionResponse */
         MetricDefinitionResponse: {
@@ -1950,6 +2007,66 @@ export interface operations {
             };
             /** @description 请求缺少条件版本 */
             428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    compress_memory_api_admin_knowledge_memories_compress_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemoryCompressRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryCompressResponse"];
+                };
+            };
+            /** @description 缺少或提供了无效的商家凭证 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权访问该资源或管理端点 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求参数不合法 */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

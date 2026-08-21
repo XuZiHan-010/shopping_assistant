@@ -143,7 +143,7 @@ class MemoryAgent:
                     limit=_MEMORY_HISTORY_LIMIT,
                 )
                 service = MemoryService(llm, MerchantMemoryRepository(session))
-                await service.consolidate(
+                consolidation = await service.consolidate(
                     merchant_id=self._merchant_id,
                     merchant_display=self._merchant_display,
                     category=category,
@@ -151,6 +151,11 @@ class MemoryAgent:
                     history=history,
                     budget=LlmBudget(max_calls=1, max_tokens=_MEMORY_TASK_MAX_TOKENS),
                 )
+                if consolidation.degraded:
+                    logger.info(
+                        "记忆沉淀降级为确定性兜底",
+                        extra={"category": category, "reason": consolidation.degraded_reason},
+                    )
                 await session.commit()
         except Exception:
             logger.warning("记忆沉淀失败", extra={"category": category}, exc_info=True)

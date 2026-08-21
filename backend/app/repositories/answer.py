@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -70,6 +70,7 @@ class AnswerRepository:
             .join(Message, Message.id == Answer.user_message_id)
             .where(
                 Answer.merchant_id == merchant_id,
+                Message.merchant_id == merchant_id,
                 Answer.processing_status == "SUCCEEDED",
                 Answer.response_payload["category"].astext == category,
             )
@@ -86,3 +87,38 @@ class AnswerRepository:
             }
             for created_at, payload, question in rows
         ]
+
+    async def top_category_questions(
+        self,
+        *,
+        merchant_id: UUID,
+        category: str,
+        limit: int,
+    ) -> list[str]:
+        """取商家指定分类的历史高频问题，供「猜你想问」使用。
+
+        问题按出现次数降序，相同频次再按最近回答时间降序。Answer 与关联的
+        用户 Message 均强制使用商家范围，且仅统计有分类标记的成功回答。
+        """
+
+        occurrences = func.count().label("occurrences")
+        latest = func.max(Answer.created_at).label("latest")
+        statement = (
+            select(Message.content)
+            .join(Answer, Answer.user_message_id == Message.id)
+            .where(
+                Answer.merchant_id == merchant_id,
+                Message.merchant_id == merchant_id,
+                Answer.processing_status == "SUCCEEDED",
+                Answer.response_payload["category"].astext == category,
+                Message.content != "",
+            )
+            .group_by(Message.content)
+            .order_by(occurrences.desc(), latest.desc())
+            .limit(limit)
+        )
+        # 推荐问题是主回答之外的可选能力。SQL 错误必须仅回滚这里的 savepoint，
+        # 不能让共享的 ChatService 会话进入 PostgreSQL 的 aborted 状态。
+        async with self._session.begin_nested():
+            rows = (await self._session.execute(statement)).all()
+        return [question for (question,) in rows]

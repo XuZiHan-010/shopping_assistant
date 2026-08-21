@@ -156,6 +156,14 @@ Railway 控制台部署与线上验收、B8/B9、F7–F9 尚未完成。R9 阶�
 **遗留**：指标口径 catalog 的提示词（`app/metrics/catalog.py`）只声明了三个字段名、未列枚举，
 未做真实模型验收；`knowledge_documents` 线上为 0 行，规则类问题没有知识依据。
 
+### 3.8 「猜你想问」未按商家历史高频问题排序
+
+**状态：✅ 已于 2026-08-21 修复。** 参考项目的 `topCategoryQuestions` 按问题出现次数降序、
+同频次按最近回答时间降序；我方 `AnswerRepository.top_category_questions()` 现将聚合、分类过滤、
+成功状态过滤和上限全部下推到 PostgreSQL，并同时约束 Answer 和 Message 的 `merchant_id`。
+图节点在历史结果非空时仅替换 `suggestions`，静态 `suggestion_alternates` 保留；历史库未注入、
+无结果或读取异常时均安全回落，不影响主回答。
+
 ---
 
 ## 4. 🟡 阶段未到（与计划一致，无需处置）
@@ -204,6 +212,13 @@ PRD §10 Metric Catalog 与 §6.2。
 ### 5.7 不实现 `SYMLINK_NOT_ALLOWED`
 
 数据库中不存在符号链接，因此无对应攻击面；其余 13 个知识库路径/写入错误码均已实现并有测试。
+
+### 5.8 手动记忆压缩路径偏离
+
+参考项目使用 `POST /api/wiki/compress`。我方有意使用
+`POST /api/admin/knowledge/memories/compress`：这是管理员对知识/记忆资源的跨商家写入，
+复用现有 `X-Admin-Token` 鉴权并保持 Borough 命名。行为等价，包括按商家和分类读取历史、
+优先保留人工 Markdown、覆盖该分类记忆、独立审计先于记忆提交，以及模型不可用时显式返回降级状态。
 
 ---
 

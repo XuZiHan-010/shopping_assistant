@@ -5,6 +5,7 @@ from __future__ import annotations
 import hmac
 from collections.abc import AsyncIterator
 from typing import Annotated, cast
+from uuid import UUID
 
 from fastapi import BackgroundTasks, Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -29,6 +30,7 @@ from app.llm.guard import LlmCostGuard
 from app.metrics.catalog import MetricCatalog
 from app.models.conversation import Conversation
 from app.repositories.analytics import AnalyticsRepository
+from app.repositories.answer import AnswerRepository
 from app.repositories.audit import AuditRepository
 from app.repositories.conversation import ConversationRepository
 from app.repositories.export import ExportRepository
@@ -126,6 +128,31 @@ def require_admin_token(
         raise AdminForbiddenError
 
 
+def build_guarded_llm(
+    settings: Settings,
+    database: Database,
+    *,
+    request_id: str,
+    merchant_id: UUID,
+) -> LlmCostGuard:
+    """构造带费用守卫的模型客户端。
+
+    merchant_id 必须是已确认存在的商家：它决定 token 用量与每日预算的归属，
+    不能直接采信请求体（R5）。
+    """
+
+    raw: LlmClient = (
+        DeepSeekLlmClient(settings) if settings.llm_api_key else FakeLlmClient(configured=False)
+    )
+    return LlmCostGuard(
+        raw,
+        LlmBudgetRepository(database),
+        settings,
+        request_id=request_id,
+        merchant_id=merchant_id,
+    )
+
+
 async def get_chat_service(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_db_session)],
@@ -141,13 +168,9 @@ async def get_chat_service(
     那是可以被前端随意篡改的输入。
     """
 
-    raw_llm: LlmClient = (
-        DeepSeekLlmClient(settings) if settings.llm_api_key else FakeLlmClient(configured=False)
-    )
-    guard = LlmCostGuard(
-        raw_llm,
-        LlmBudgetRepository(database),
+    guard = build_guarded_llm(
         settings,
+        database,
         request_id=str(request.state.request_id),
         merchant_id=context.merchant_id,
     )
@@ -172,6 +195,7 @@ async def get_chat_service(
         answer_llm=llm,
         reviewer_llm=llm,
         node_timer=request.app.state.metrics,
+        history_questions=AnswerRepository(session),
     )
     return ChatService(
         session,

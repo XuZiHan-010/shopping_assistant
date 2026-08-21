@@ -600,7 +600,7 @@ OpenAPI → api/generated.ts → api/adapters/*.ts → types/*.ts → Store → 
 | `backend/app/api/routes/attachments.py` | 附件上传、状态和删除 |
 | `backend/app/api/routes/reports.py` | 每日经营报告 |
 | `backend/app/api/routes/exports.py` | CSV 导出 |
-| `backend/app/api/routes/knowledge.py` | P1 已实现：管理员知识库目录树、文档 CRUD、业务域维护；独立 `X-Admin-Token` 鉴权 |
+| `backend/app/api/routes/knowledge.py` | P1 已实现：管理员知识库目录树、文档 CRUD、业务域维护和手动记忆压缩；独立 `X-Admin-Token` 鉴权 |
 | `backend/app/api/routes/metrics.py` | 指标检索和口径查询 |
 | `backend/app/api/routes/health.py` | Railway 健康检查 |
 
@@ -798,6 +798,7 @@ DELETE /api/admin/knowledge/documents/{id}
 POST   /api/admin/knowledge/business-domains
 PUT    /api/admin/knowledge/business-domains
 DELETE /api/admin/knowledge/business-domains
+POST   /api/admin/knowledge/memories/compress
 ```
 
 - 知识目录由 `GET /api/admin/knowledge/tree` 提供，**没有** `GET /api/admin/knowledge/documents` 列表接口，文档按 `{id}` 单独读取；
@@ -1047,7 +1048,7 @@ docs/deployment.md
 9. 实现回答、图表、建议和 Reviewer；
 10. 实现基础限流、单请求 LLM 上限和每日预算熔断（**部署到公开地址前必须完成**）；
 11. Docker 化并部署 Railway；
-12. P1：附件、日报、对象存储、知识库后台和商家记忆；
+12. P1：附件、日报、对象存储和异步任务；知识库后台和商家记忆已完成；
 13. P2：真实用户体系、完整审计系统和数据保留策略；
 14. 数据规模证明 PostgreSQL 不够时，再评估 Doris。
 

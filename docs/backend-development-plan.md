@@ -660,12 +660,14 @@ attachments
 | P1 | `POST` | `/api/admin/knowledge/documents` | A | `KnowledgeDocumentCreate` | `KnowledgeDocumentResponse` | 401 403 422 |
 | P1 | `PUT` | `/api/admin/knowledge/documents/{id}` | A | `KnowledgeDocumentUpdate` | `KnowledgeDocumentResponse` | 401 403 404 409 422 |
 | P1 | `DELETE` | `/api/admin/knowledge/documents/{id}` | A | — | `204` | 401 403 404 |
+| P1 | `POST` | `/api/admin/knowledge/memories/compress` | A | `MemoryCompressRequest` | `MemoryCompressResponse` | 401 403 404 422 |
 
 说明：
 
 - **没有** `GET /api/admin/knowledge/documents` 列表接口，目录由 `tree` 提供；
 - `PUT` 知识文档使用乐观锁或 ETag，版本冲突返回 `409`；
 - `/api/memories` 三条是商家自己的记忆，用商家 Token 而非管理员令牌——记忆归商家所有，管理员不应替商家改记忆。语义见 §9 B8「商家记忆闭环」；
+- `/api/admin/knowledge/memories/compress` 使用 `X-Admin-Token` 对指定商家分类执行人工重压；先写独立审计日志再提交记忆，模型不可用时响应必须返回 `degraded=true` 与原因；
 - `/api/admin/ops/status` 见 §9 B7 的运维端点定义；
 - 每条路由至少有一条"未认证"、一条"跨商家越权"用例，越权必须返回 `403` 并写 `audit_logs`。
 
