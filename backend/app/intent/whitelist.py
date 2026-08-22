@@ -21,6 +21,7 @@ METRIC_WHITELIST: Final[frozenset[str]] = frozenset(
     {
         "gmv",
         "order_count",
+        "ordering_user_count",
         "paying_user_count",
         "successful_order_count",
         "refund_count",

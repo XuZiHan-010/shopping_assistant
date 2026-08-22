@@ -305,4 +305,72 @@ describe('AssistantView', () => {
     wrapper.unmount()
     expect(clearTimeoutSpy).toHaveBeenCalledWith(42)
   })
+
+  /**
+   * Q8 裁定「本轮按整份日报采纳」——卡片只有一个按钮，点击必须只提交
+   * answer-level 的 {is_adopted, reaction}，不能编造建议级 id。
+   */
+  it('采纳日报只提交整份日报级别的反馈，不带建议级 id', async () => {
+    const healthy = createMockTransport({ chunkSizes: [16], stepDelayMs: 0 })
+    const feedbackRequests: unknown[] = []
+    setChatTransport(async (request: TransportRequest, signal: AbortSignal) => {
+      if (request.path.startsWith('/api/answers/') && request.method === 'POST') {
+        feedbackRequests.push(request.body)
+        return new Response(JSON.stringify({ is_adopted: true, reaction: null }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      return healthy(request, signal)
+    })
+
+    const wrapper = await mountView()
+    await flushPromises()
+
+    const adoptButton = wrapper.get('.daily-report__adopt')
+    await adoptButton.trigger('click')
+    await flushPromises()
+
+    expect(feedbackRequests).toEqual([{ is_adopted: true, reaction: null }])
+    expect(adoptButton.text()).toContain('已采纳本期建议')
+  })
+
+  it('日报降级时展示降级原因，不展示指标网格（不得用假数据顶替）', async () => {
+    const healthy = createMockTransport({ chunkSizes: [16], stepDelayMs: 0 })
+    setChatTransport(async (request: TransportRequest, signal: AbortSignal) => {
+      if (request.path === '/api/reports/daily' && request.method === 'GET') {
+        return new Response(
+          JSON.stringify({
+            answer_id: '00000000-0000-0000-0000-0000000000f1',
+            report_date: '2026-08-20',
+            metrics: [],
+            suggestions: ['建议一', '建议二'],
+            degraded: true,
+            degraded_reason: '查询失败，暂无法生成经营数据摘要',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        )
+      }
+      return healthy(request, signal)
+    })
+
+    const wrapper = await mountView()
+    await flushPromises()
+
+    expect(wrapper.find('.daily-report__degraded').text()).toContain(
+      '查询失败，暂无法生成经营数据摘要',
+    )
+    expect(wrapper.find('.daily-report__metrics').exists()).toBe(false)
+  })
+
+  it('日报加载失败时提示错误，且不阻塞主界面其余功能', async () => {
+    setChatTransport(transportFailingOn('/api/reports/daily'))
+
+    const wrapper = await mountView()
+    await flushPromises()
+
+    expect(useAppError().message.value).toContain('每日经营日报加载失败')
+    expect(wrapper.find('.daily-report').exists()).toBe(false)
+    expect(wrapper.find('textarea[aria-label="输入问题"]').exists()).toBe(true)
+  })
 })

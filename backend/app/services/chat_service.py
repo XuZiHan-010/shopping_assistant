@@ -31,6 +31,7 @@ from app.repositories.conversation import ConversationRepository
 from app.schemas.chat import AnswerMode, ChatRequest, ChatResponse, ThinkingStep
 from app.services.export_service import ExportService
 from app.services.merchant_scope import MerchantScopeService
+from app.services.safe_query import QueryResult
 
 # §8.5：请求本身有问题时重试没有意义，落 FAILED_FINAL；其余按瞬时故障处理，
 # 允许同一 client_request_id 重跑。限流和预算耗尽也属于可重试，不在此列。
@@ -39,6 +40,20 @@ _FINAL_STATUS_CODES = frozenset({400, 403, 404, 413, 415, 422})
 
 class ChatAgentProtocol(Protocol):
     async def run(self, message: str, session_id: UUID) -> AgentRunResult: ...
+
+
+class MemoryAgentProtocol(Protocol):
+    def submit(
+        self,
+        *,
+        category: str,
+        question: str,
+        answer: str,
+        source_tables: list[str],
+        quality_notes: list[str],
+        suggestions: list[str],
+        export_id: str | None,
+    ) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -61,6 +76,7 @@ class ChatService:
         cost_guard: CostGuardProtocol | None = None,
         budget_gate: CostGuardProtocol | None = None,
         metrics: OperationalMetrics | None = None,
+        memory_agent: MemoryAgentProtocol | None = None,
     ) -> None:
         self._session = session
         self._conversations = conversations
@@ -70,6 +86,7 @@ class ChatService:
         self._cost_guard = cost_guard
         self._budget_gate = budget_gate
         self._metrics = metrics
+        self._memory_agent = memory_agent
 
     async def submit(
         self,
@@ -201,6 +218,18 @@ class ChatService:
                 "ASSISTANT",
                 response.answer,
             )
+            if self._memory_agent is not None:
+                self._memory_agent.submit(
+                    category=response.category.value
+                    if response.category is not None
+                    else "UNKNOWN",
+                    question=request.message,
+                    answer=response.answer,
+                    source_tables=_queried_tables(result.query_result),
+                    quality_notes=list(response.quality_notes),
+                    suggestions=list(response.suggestions),
+                    export_id=str(response.export.id) if response.export is not None else None,
+                )
             await self._conversations.touch_conversation(context.merchant_id, conversation_id)
             await self._conversations.mark_answer_succeeded(
                 answer,
@@ -291,6 +320,14 @@ def _request_digest(request: ChatRequest) -> str:
     }
     encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _queried_tables(query_result: QueryResult | None) -> list[str]:
+    """返回本轮回答实际查询的经营表。"""
+
+    if query_result is None:
+        return []
+    return list(query_result.source_tables)
 
 
 def _is_retryable(exc: BaseException) -> bool:

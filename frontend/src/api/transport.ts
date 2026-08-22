@@ -14,9 +14,10 @@ import { AppError, toAppError } from './errors'
 
 export interface TransportRequest {
   path: string
-  method: 'GET' | 'POST' | 'DELETE'
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE'
   body?: unknown
   accept?: string
+  headers?: Record<string, string>
   /**
    * 这次请求要携带哪种凭证，见 `credentials.ts` 的 `buildAuthHeaders`。
    * 省略时默认为 `'merchant'`——绝大多数接口都是商家接口，只有少数公开接口
@@ -116,6 +117,7 @@ export function createFetchTransport(): ChatTransport {
     const base = resolveApiBaseUrl()
     const headers: Record<string, string> = {
       ...buildAuthHeaders(req.auth ?? 'merchant'),
+      ...req.headers,
       'X-Request-Id': crypto.randomUUID(),
     }
     if (req.accept) headers.Accept = req.accept

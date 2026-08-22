@@ -2,8 +2,21 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Boolean, CheckConstraint, Index, Integer, String, Text, text
+from uuid import UUID
+
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, validates
 
 from app.metrics.report_url import normalize_report_url
@@ -71,6 +84,48 @@ class KnowledgeDocument(UuidPrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, Bas
         nullable=False,
         server_default=text("true"),
     )
+    version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("1"),
+    )
+    status: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        server_default=text("'ACTIVE'"),
+    )
+
+
+class MerchantMemory(UuidPrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, Base):
+    """商家级 AI 记忆。
+
+    与 ``knowledge_documents`` 物理分表构成双知识库：人工知识永远优先，
+    本表只在人工库未命中时作为 fallback 参与检索。参考实现把记忆写在
+    ``memory/merchants/{商家}/{分类}.md``；数据库中不存在路径穿越，改用
+    ``(merchant_id, category)`` 唯一约束表达每商家每分类各一份、全量覆盖。
+    """
+
+    __tablename__ = "merchant_memories"
+    __table_args__ = (
+        UniqueConstraint(
+            "merchant_id",
+            "category",
+            name="uq_merchant_memories_merchant_category",
+        ),
+        CheckConstraint(
+            "status IN ('ACTIVE', 'ARCHIVED')",
+            name="ck_merchant_memories_status",
+        ),
+        Index("ix_merchant_memories_merchant_status", "merchant_id", "status"),
+    )
+
+    merchant_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("merchants.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    category: Mapped[str] = mapped_column(String(32), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
     version: Mapped[int] = mapped_column(
         Integer,
         nullable=False,

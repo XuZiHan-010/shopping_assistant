@@ -37,6 +37,19 @@ class ErrorCode(StrEnum):
     FORBIDDEN = "FORBIDDEN"
     HTTP_ERROR = "HTTP_ERROR"
     INTERNAL_ERROR = "INTERNAL_ERROR"
+    INVALID_WIKI_PATH = "INVALID_WIKI_PATH"
+    WIKI_READ_ONLY = "WIKI_READ_ONLY"
+    INVALID_FILE_TYPE = "INVALID_FILE_TYPE"
+    INVALID_WIKI_PARENT = "INVALID_WIKI_PARENT"
+    WIKI_NODE_EXISTS = "WIKI_NODE_EXISTS"
+    WIKI_NODE_NOT_FOUND = "WIKI_NODE_NOT_FOUND"
+    WIKI_DIRECTORY_NOT_EMPTY = "WIKI_DIRECTORY_NOT_EMPTY"
+    WIKI_VERSION_REQUIRED = "WIKI_VERSION_REQUIRED"
+    WIKI_VERSION_CONFLICT = "WIKI_VERSION_CONFLICT"
+    WIKI_DOCUMENT_TOO_LARGE = "WIKI_DOCUMENT_TOO_LARGE"
+    INVALID_WIKI_ENCODING = "INVALID_WIKI_ENCODING"
+    INVALID_WIKI_CONTENT = "INVALID_WIKI_CONTENT"
+    WIKI_IO_ERROR = "WIKI_IO_ERROR"
 
 
 class ErrorResponse(BaseModel):
@@ -52,11 +65,16 @@ class ErrorResponse(BaseModel):
 # 供 OpenAPI 声明使用的状态码描述。前端按 `code` 分支渲染（见前端方案 §10），
 # 但先得能从契约里看出某条路由会发出哪些码——不声明就只能靠读后端源码。
 _STATUS_DESCRIPTIONS: dict[int, str] = {
+    400: "请求内容不符合业务规则",
     401: "缺少或提供了无效的商家凭证",
     403: "无权访问该资源或管理端点",
     404: "资源不存在",
     405: "请求方法不被允许",
     409: "幂等键冲突或同一请求正在处理中",
+    412: "资源已被其他维护者更新",
+    413: "请求内容超过允许大小",
+    415: "请求内容编码不受支持",
+    428: "请求缺少条件版本",
     410: "导出链接已过期",
     422: "请求参数不合法",
     429: "请求过于频繁",
@@ -213,6 +231,13 @@ class AdminTokenRequiredError(AppError):
 class AdminForbiddenError(AppError):
     def __init__(self) -> None:
         super().__init__(code=ErrorCode.FORBIDDEN, message="无管理员权限", status_code=403)
+
+
+class KnowledgeAdminError(AppError):
+    """知识库维护接口的受控错误。"""
+
+    def __init__(self, code: ErrorCode, message: str, status_code: int) -> None:
+        super().__init__(code=code, message=message, status_code=status_code)
 
 
 def _request_id(request: Request) -> str:

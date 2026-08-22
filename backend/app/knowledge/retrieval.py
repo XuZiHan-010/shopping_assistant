@@ -10,13 +10,23 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Protocol
+from uuid import UUID
 
 from app.knowledge.domains import DOMAIN_KEYWORDS, INDEX_PATH_MARKERS, MAX_KNOWLEDGE_CHARS
 from app.schemas.chat import QuestionCategory
 
 _METRIC_SUFFIX = re.compile(r"(指标|明细|数据|情况|趋势|数量|金额|次数|量|数)$")
 _MIN_STEM_LENGTH = 2
+
+
+class KnowledgeSource(StrEnum):
+    """检索来源，取值与参考实现的 LLM_WIKI_SOURCE 标记一致。"""
+
+    MAINTAINED = "maintained"
+    MEMORY_FALLBACK = "memory-fallback"
+    NONE = "none"
 
 
 def strip_metric_suffix(keyword: str) -> str:
@@ -41,6 +51,7 @@ class KnowledgeResult:
     hits: tuple[KnowledgeHit, ...]
     matched: bool
     has_incomplete: bool
+    source: KnowledgeSource = KnowledgeSource.NONE
 
 
 _EMPTY = KnowledgeResult(text="", hits=(), matched=False, has_incomplete=False)
@@ -57,9 +68,28 @@ class _RepositoryLike(Protocol):
     async def list_active(self) -> Sequence[_DocumentLike]: ...
 
 
+class _MemoryLike(Protocol):
+    category: str
+    content: str
+
+
+class _MemoryRepositoryLike(Protocol):
+    async def list_for_merchant(
+        self, merchant_id: UUID, category: str
+    ) -> Sequence[_MemoryLike]: ...
+
+
 class KnowledgeRetrieval:
-    def __init__(self, repository: _RepositoryLike) -> None:
+    def __init__(
+        self,
+        repository: _RepositoryLike,
+        *,
+        memories: _MemoryRepositoryLike | None = None,
+        merchant_id: UUID | None = None,
+    ) -> None:
         self._repository = repository
+        self._memories = memories
+        self._merchant_id = merchant_id
 
     async def load_index(self) -> KnowledgeResult:
         """业务域未知时，只加载目录与规则文档。"""
@@ -70,7 +100,8 @@ class KnowledgeRetrieval:
                 document
                 for document in documents
                 if any(marker in document.source_path.lower() for marker in INDEX_PATH_MARKERS)
-            ]
+            ],
+            KnowledgeSource.MAINTAINED,
         )
 
     async def load_domain(
@@ -90,8 +121,17 @@ class KnowledgeRetrieval:
                 document for document in hits if _matches_keywords(_haystack(document), keywords)
             ]
 
-        # 团队知识未命中后的商家记忆回退属于 P1/B8；当前必须显式表明未命中。
-        return _render(hits)
+        if hits:
+            return _render(hits, KnowledgeSource.MAINTAINED)
+        return await self._load_memory_fallback(category)
+
+    async def _load_memory_fallback(self, category: QuestionCategory) -> KnowledgeResult:
+        if self._memories is None or self._merchant_id is None:
+            return _EMPTY
+        memories = await self._memories.list_for_merchant(self._merchant_id, str(category))
+        if not memories:
+            return _EMPTY
+        return _render_memories(memories, category)
 
 
 def _haystack(document: _DocumentLike) -> str:
@@ -130,7 +170,7 @@ def _matches_keywords(haystack: str, keywords: Sequence[str]) -> bool:
     return False
 
 
-def _render(documents: list[_DocumentLike]) -> KnowledgeResult:
+def _render(documents: list[_DocumentLike], source: KnowledgeSource) -> KnowledgeResult:
     if not documents:
         return _EMPTY
 
@@ -165,8 +205,32 @@ def _render(documents: list[_DocumentLike]) -> KnowledgeResult:
         chunks = [first.content[:MAX_KNOWLEDGE_CHARS]]
 
     return KnowledgeResult(
-        text="\n".join(chunks)[:MAX_KNOWLEDGE_CHARS],
+        text=(f"[LLM_WIKI_SOURCE={source.value}]\n" + "\n".join(chunks))[:MAX_KNOWLEDGE_CHARS],
         hits=tuple(hits),
         matched=True,
         has_incomplete=any(not hit.is_complete for hit in hits),
+        source=source,
+    )
+
+
+def _render_memories(
+    memories: Sequence[_MemoryLike], category: QuestionCategory
+) -> KnowledgeResult:
+    source = KnowledgeSource.MEMORY_FALLBACK
+    hits = tuple(
+        KnowledgeHit(
+            source_path=f"memory/{category}",
+            title=str(category),
+            content=memory.content,
+            is_complete=True,
+        )
+        for memory in memories
+    )
+    blocks = [f"## {memory.category}\n{memory.content}\n" for memory in memories]
+    return KnowledgeResult(
+        text=(f"[LLM_WIKI_SOURCE={source.value}]\n" + "\n".join(blocks))[:MAX_KNOWLEDGE_CHARS],
+        hits=hits,
+        matched=True,
+        has_incomplete=False,
+        source=source,
     )

@@ -45,6 +45,16 @@ METRIC_SEED: Final[tuple[MetricSeedItem, ...]] = (
         "orders",
     ),
     MetricSeedItem(
+        "ordering_user_count",
+        "下单用户数",
+        "人",
+        "统计周期内创建订单的去重用户数，不要求完成付款。",
+        "COUNT(DISTINCT orders.buyer_key)",
+        ("date", "product", "category"),
+        "public",
+        "orders",
+    ),
+    MetricSeedItem(
         "paying_user_count",
         "付款用户数",
         "人",

@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
+from decimal import Decimal
 from typing import Any, Literal, cast
 from uuid import UUID
 
@@ -64,6 +65,16 @@ class DetailResult:
     source_tables: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class DailyReportSignals:
+    """日报建议所需的近七日聚合信号。"""
+
+    has_data: bool
+    refund_amount: Decimal
+    order_count: int
+    ticket_count: int
+
+
 def _order_identity(*, via_order_items: bool) -> ColumnElement[Any]:
     """`orders` 行标识列：join 展开成多行时必须 distinct，否则同一张订单
 
@@ -91,6 +102,8 @@ def _metric_expression(metric: MetricSpec, *, via_order_items: bool = False) -> 
         )
     if metric.code == "order_count":
         return func.count(_order_identity(via_order_items=via_order_items))
+    if metric.code == "ordering_user_count":
+        return func.count(func.distinct(Order.buyer_key))
     if metric.code == "paying_user_count":
         # distinct(buyer_key) 按值去重，不按行去重，join 展开不会放大它。
         return func.count(func.distinct(Order.buyer_key)).filter(Order.paid_at.is_not(None))
@@ -225,6 +238,109 @@ class AnalyticsRepository:
             source_tables=self._source_tables(
                 metric, specs, filters, via_order_items=via_order_items
             ),
+        )
+
+    async def daily_report_metrics(
+        self,
+        *,
+        merchant_id: UUID,
+        report_date: date,
+    ) -> dict[str, Decimal | int]:
+        """以日报固定口径读取单一业务日的六项指标。
+
+        不把不相关的事实表放进同一个 FROM，避免订单、退款、退货和工单相互笛卡尔
+        放大。所有表、列、状态和日期条件均固定在本方法内，调用方不能影响 SQL 结构。
+        """
+
+        order_metrics = await self._session.execute(
+            select(
+                func.coalesce(
+                    func.sum(Order.paid_amount).filter(
+                        Order.order_status.in_(("PAID", "SHIPPED", "COMPLETED"))
+                    ),
+                    Decimal("0.00"),
+                ).label("gmv"),
+                func.count(func.distinct(Order.buyer_key)).label("ordering_user_count"),
+                func.count(Order.id).label("order_count"),
+                func.count(Order.id)
+                .filter(Order.order_status == "COMPLETED")
+                .label("successful_order_count"),
+            ).where(Order.merchant_id == merchant_id, Order.business_date == report_date)
+        )
+        order_row = order_metrics.mappings().one()
+        return_count = await self._session.scalar(
+            select(func.coalesce(func.sum(ReturnRecord.return_quantity), 0)).where(
+                ReturnRecord.merchant_id == merchant_id,
+                ReturnRecord.business_date == report_date,
+            )
+        )
+        refund_amount = await self._session.scalar(
+            select(
+                func.coalesce(
+                    func.sum(Refund.refund_amount).filter(Refund.refund_status == "REFUNDED"),
+                    Decimal("0.00"),
+                )
+            ).where(Refund.merchant_id == merchant_id, Refund.business_date == report_date)
+        )
+        return {
+            "gmv": Decimal(order_row["gmv"] or 0),
+            "ordering_user_count": int(order_row["ordering_user_count"] or 0),
+            "order_count": int(order_row["order_count"] or 0),
+            "successful_order_count": int(order_row["successful_order_count"] or 0),
+            "return_count": int(return_count or 0),
+            "refund_amount": Decimal(refund_amount or 0),
+        }
+
+    async def recent_daily_report_signals(
+        self,
+        *,
+        merchant_id: UUID,
+        report_date: date,
+    ) -> DailyReportSignals:
+        """读取含报表日在内的最近七个业务日，用于确定性建议。"""
+
+        start = report_date.fromordinal(report_date.toordinal() - 6)
+        order_count = await self._session.scalar(
+            select(func.count(Order.id)).where(
+                Order.merchant_id == merchant_id,
+                Order.business_date >= start,
+                Order.business_date <= report_date,
+            )
+        )
+        refund_count, refund_amount = (
+            await self._session.execute(
+                select(
+                    func.count(Refund.id).filter(Refund.refund_status == "REFUNDED"),
+                    func.coalesce(
+                        func.sum(Refund.refund_amount).filter(Refund.refund_status == "REFUNDED"),
+                        Decimal("0.00"),
+                    ),
+                ).where(
+                    Refund.merchant_id == merchant_id,
+                    Refund.business_date >= start,
+                    Refund.business_date <= report_date,
+                )
+            )
+        ).one()
+        ticket_count = await self._session.scalar(
+            select(func.count(SupportTicket.id)).where(
+                SupportTicket.merchant_id == merchant_id,
+                SupportTicket.business_date >= start,
+                SupportTicket.business_date <= report_date,
+            )
+        )
+        return_count = await self._session.scalar(
+            select(func.count(ReturnRecord.id)).where(
+                ReturnRecord.merchant_id == merchant_id,
+                ReturnRecord.business_date >= start,
+                ReturnRecord.business_date <= report_date,
+            )
+        )
+        return DailyReportSignals(
+            has_data=any((order_count, refund_count, ticket_count, return_count)),
+            refund_amount=Decimal(refund_amount or 0),
+            order_count=int(order_count or 0),
+            ticket_count=int(ticket_count or 0),
         )
 
     async def generated_metric(

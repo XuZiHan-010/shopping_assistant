@@ -527,7 +527,7 @@ merchant_assistant/
 | --- | --- | --- |
 | `frontend/src/views/AssistantView.vue` | P0 | 商家助手三栏主页面 |
 | `frontend/src/components/layout/MerchantSwitcher.vue` | P0 | 演示商家切换器，MVP 的唯一身份入口 |
-| `frontend/src/views/KnowledgeBaseView.vue` | P1 | 知识库维护后台，用 `ADMIN_TOKEN` 进入 |
+| `frontend/src/views/KnowledgeBaseView.vue` | P1 已实现 | 知识库维护后台；令牌仅内存持有，通过 `X-Admin-Token` 进入 |
 | `frontend/src/views/LoginView.vue` | **P2** | 真实用户体系上线后才创建。**MVP 和 P1 都不做登录页**，不要提前建这个文件 |
 
 ### 7.3 聊天组件
@@ -602,7 +602,7 @@ OpenAPI → api/generated.ts → api/adapters/*.ts → types/*.ts → Store → 
 | `backend/app/api/routes/attachments.py` | 附件上传、状态和删除 |
 | `backend/app/api/routes/reports.py` | 每日经营报告 |
 | `backend/app/api/routes/exports.py` | CSV 导出 |
-| `backend/app/api/routes/knowledge.py` | 知识库目录和文档 CRUD |
+| `backend/app/api/routes/knowledge.py` | P1 已实现：管理员知识库目录树、文档 CRUD、业务域维护和手动记忆压缩；独立 `X-Admin-Token` 鉴权 |
 | `backend/app/api/routes/metrics.py` | 指标检索和口径查询 |
 | `backend/app/api/routes/health.py` | Railway 健康检查 |
 
@@ -640,7 +640,7 @@ OpenAPI → api/generated.ts → api/adapters/*.ts → types/*.ts → Store → 
 | `backend/app/services/attachment_service.py` | 图片、PDF、Excel、CSV 解析 |
 | `backend/app/services/export_service.py` | P0 动态生成受权限保护的 CSV（不引入 S3 SDK）；P1 再增加对象存储和签名对象 URL |
 | `backend/app/services/report_service.py` | 每日经营报告 |
-| `backend/app/services/memory_service.py` | 商家记忆提取、压缩和召回 |
+| `backend/app/services/memory_service.py` | 商家记忆提取、压缩和召回（已实现） |
 | `backend/app/jobs/seed_demo_rolling.py` | 专用演示数据库的增量滚动 Seed；需显式写权限与商家集合精确匹配 |
 
 ### 8.5 数据库和 Repository
@@ -720,7 +720,7 @@ ORM 模型与 API Schema 分开，禁止直接把 ORM 对象作为外部接口�
 [P0] metric_definitions # 含 metric_code 与 display_name
 [P0] knowledge_documents
 [P0] orders / order_items / refunds / products / support_tickets
-[P1] merchant_memories
+[P1，已落地] merchant_memories
 [P1] attachments
 [P2] users              # 真实用户体系上线时才创建
 ```
@@ -790,18 +790,19 @@ GET    /api/reports/daily
 POST   /api/attachments
 GET    /api/attachments/{id}
 DELETE /api/attachments/{id}
-GET    /api/memories
-PATCH  /api/memories/{id}
-DELETE /api/memories/{id}
 GET    /api/admin/knowledge/tree
 GET    /api/admin/knowledge/documents/{id}
 POST   /api/admin/knowledge/documents
 PUT    /api/admin/knowledge/documents/{id}
 DELETE /api/admin/knowledge/documents/{id}
+POST   /api/admin/knowledge/business-domains
+PUT    /api/admin/knowledge/business-domains
+DELETE /api/admin/knowledge/business-domains
+POST   /api/admin/knowledge/memories/compress
 ```
 
 - 知识目录由 `GET /api/admin/knowledge/tree` 提供，**没有** `GET /api/admin/knowledge/documents` 列表接口，文档按 `{id}` 单独读取；
-- `/api/memories` 三条让商家查询、纠错和删除自己的记忆，用**商家 Token**——记忆归商家所有，管理员不替商家改记忆。
+- 业务域三端点由参考项目既有实现反查补入：创建时建立固定四板块、改名需 `If-Match`、删除需 `If-Match` 且以 `recursive` 显式确认非空删除（R9）。
 
 ### 10.2.1 两套凭证
 
@@ -1046,7 +1047,7 @@ docs/deployment.md
 9. 实现回答、图表、建议和 Reviewer；
 10. 实现基础限流、单请求 LLM 上限和每日预算熔断（**部署到公开地址前必须完成**）；
 11. Docker 化并部署 Railway；
-12. P1：附件、日报、对象存储、知识库后台和商家记忆；
+12. P1：附件、对象存储和异步任务；日报、知识库后台和商家记忆已完成；
 13. P2：真实用户体系、完整审计系统和数据保留策略；
 14. 数据规模证明 PostgreSQL 不够时，再评估 Doris。
 

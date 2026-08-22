@@ -256,7 +256,7 @@ SQL 口径回答“这个数怎么算出来的”。契约层不得把两者合�
 ### 6.11 日报和记忆
 
 60. [P1] 作为商家负责人，我希望看到昨日经营日报，以便快速了解整体情况。
-61. [P1] 作为商家负责人，我希望日报包含核心指标、摘要和建议，以便快速行动。
+61. [P1] 作为商家负责人，我希望日报固定展示昨日的核心指标和两条有数据依据的建议，并可采纳该期建议，以便快速行动。
 62. [P1] 作为商家经营人员，我希望助手记住已确认的业务偏好，以减少重复说明。
 63. [P1] 作为系统管理员，我希望不同商家的记忆完全隔离，以防知识串用。
 64. [P0] 作为商家用户，我希望可以删除会话，以满足数据管理要求。（记忆删除随 P1 商家记忆一并提供）
@@ -582,16 +582,15 @@ SQL 口径回答“这个数怎么算出来的”。契约层不得把两者合�
 | `POST` | `/api/attachments` | 上传附件 |
 | `GET` | `/api/attachments/{id}` | 查询解析状态 |
 | `DELETE` | `/api/attachments/{id}` | 删除附件 |
-| `GET` | `/api/memories` | 查询本商家记忆 |
-| `PATCH` | `/api/memories/{id}` | 纠正记忆或标记失效 |
-| `DELETE` | `/api/memories/{id}` | 删除记忆 |
 | `GET` | `/api/admin/knowledge/tree` | 知识目录 |
 | `GET` | `/api/admin/knowledge/documents/{id}` | 读取知识文档 |
 | `POST` | `/api/admin/knowledge/documents` | 新建知识文档 |
 | `PUT` | `/api/admin/knowledge/documents/{id}` | 更新知识文档 |
 | `DELETE` | `/api/admin/knowledge/documents/{id}` | 删除知识文档 |
-
-商家记忆必须对商家**可查、可纠错、可删除**，否则它就是不可审查的黑盒。这三条接口用商家 Token，管理员不替商家修改记忆。
+| `POST` | `/api/admin/knowledge/business-domains` | 建业务域并创建固定四板块（按 R9 从参考项目补入） |
+| `PUT` | `/api/admin/knowledge/business-domains` | 改业务域名，需 `If-Match`（按 R9 从参考项目补入） |
+| `DELETE` | `/api/admin/knowledge/business-domains` | 删业务域，需 `If-Match` 与 `recursive` 确认（按 R9 从参考项目补入） |
+| `POST` | `/api/admin/knowledge/memories/compress` | 管理员按商家与分类手动重压记忆；使用 `X-Admin-Token`，响应明确降级状态 |
 
 `/api/admin/*` 使用独立请求头 `X-Admin-Token`（值为 `ADMIN_TOKEN`），不复用 `Authorization`；`/api/exports/{id}` 用自带签名的 URL，不要求请求头，以便浏览器原生下载。
 
@@ -1011,7 +1010,7 @@ MVP 完成必须同时满足：
 - 附件与 `ATTACHMENT` 模式；
 - 对象存储；
 - 知识库后台与管理员认证；
-- 日报；
+- 日报（已完成：固定昨日、六项指标、两条建议与采纳反馈）；
 - 反馈记录查看；
 - 商家记忆；
 - Redis 与异步 Worker。

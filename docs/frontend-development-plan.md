@@ -891,11 +891,11 @@ Mock 的边界：只有传输层是假的。载荷是后端 FakeAgent 的真实�
 
 ### 7.1 Daily Report
 
-- [ ] 创建 `components/chat/DailyReportCard.vue`；
-- [ ] 展示日期、摘要和核心指标；
-- [ ] 展示日报建议；
-- [ ] **建议采纳复用回答反馈接口**：日报响应返回 `answer_id`，采纳时调用 `POST /api/answers/{id}/feedback`，不新增接口；
-- [ ] 无日报时不阻塞主界面。
+- [x] 创建 `components/chat/DailyReportCard.vue`，使用 `report.ts` Adapter 将 OpenAPI 的 snake_case 响应映射为前端领域模型；
+- [x] 展示固定昨日、六项核心指标和两条日报建议；降级原因可见且不以模拟数据代替；
+- [x] **建议采纳复用回答反馈接口**：日报响应返回 `answer_id`，采纳时调用 `POST /api/answers/{id}/feedback`，不新增接口；
+- [x] 商家身份恢复后加载，切换商家时取消旧请求并清空旧日报；加载失败不阻塞主界面；
+- [x] Mock transport 按商家隔离并重放同一份日报契约。
 
 ### 7.2 Attachments
 
@@ -941,6 +941,8 @@ Mock 的边界：只有传输层是假的。载荷是后端 FakeAgent 的真实�
 ---
 
 ## F8 · 知识库后台（P1）
+
+管理员手动记忆压缩端点属于 API-only：本轮只通过 OpenAPI 更新生成类型，不在知识库页面新增入口；未来增加入口前需单独完成交互设计。
 
 ### 页面结构
 

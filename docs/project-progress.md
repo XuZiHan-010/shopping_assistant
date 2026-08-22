@@ -1,10 +1,15 @@
 # 项目进度快照
 
-> 本文件只保留当前可继续开发的事实快照，不追加每日流水账。每次完成一段可验证工作后，更新日期、状态、验证结果、下一步和风险。
+> 本文件只保留当前可继续开发的事实快照，不追加每日流水账。
 
-**最后更新：2026-08-20**
+**最后更新：2026-08-22**
 
-> **本轮校正**：知识库已重新导入，当前本机库为 **23 篇**（十个业务分类各 2 篇、`UNKNOWN` 3 篇；此前“43 份”是过期估计）；T3 已证明指标口径三级兜底经统一 `LlmCostGuard` 记录真实用量，无需增加重复记账。T4 将默认 `QUALITY_MAX_ATTEMPTS` 定为 2，并为业务关键词收到 `INVALID/UNKNOWN` 的 classify 增加一次受预算约束的重试；最坏调用路径为 classify 2 + understand 3 + catalog 1 +（生成 + 复核）×2 = **10 次**，与 `MAX_LLM_CALLS_PER_REQUEST=10` 对齐。2026-08-20 实测：真实 PostgreSQL 回归 **864 passed / 0 failed / 0 skipped**；后端 Ruff/mypy 与前端 26 文件 / 254 项 Vitest 及全部静态门禁均通过。B7 首轮九题真实调用（30 次、17,397 token、无上游失败）发生在经营表为空时，不能作为有数据验收通过。Docker 恢复后，二轮九题实际使用 `deepseek-v4-flash` **18 次调用、25,060 token**，均返回 HTTP 200 且上游成功，但全部被模型输出的 `CHAT/UNKNOWN` 或 `INVALID` 分类短路，未进入预期的数据/知识路径，**B7 仍不通过**。已用 TDD 修复业务关键词在 `CHAT/UNKNOWN` 时漏掉第二次 classify 重试，以及规则提示词错误使用 `PLATFORM` 而非 `PLATFORM_RULE`；修复后的真实 PostgreSQL 回归为 864 项全绿。不得自动重跑；需新的 R3 计费授权后才可在有数据环境复验。当前本地库已恢复为 5,670 笔订单（2026-02-22 至 2026-08-20）与 23 篇知识文档。Railway Cron 的控制台创建、变量配置和手工触发亦未完成：Railway CLI 未安装，Windows 控制台自动化运行时不可用，须由有控制台权限的用户完成。
+> **本次合并说明**：本文件由 `feature/memory-consolidation-agent` 与 `feature/f2-mock-conversation`
+> 两条并行分支的快照合并而来。后者覆盖的是 MVP 整体收口（R9 阶段 B、Railway 上线、质量循环
+> 重构、B7 多轮真实验收）；前者新增的是本文件其余部分未曾出现的两项能力——**管理员手动记忆
+> 压缩端点**与**每日经营日报**——已实现并通过本地全量门禁，详见「本分支新增」一节。
+
+> **2026-08-20 校正（来自 f2-mock-conversation）**：知识库已重新导入，当前本机库为 **23 篇**（十个业务分类各 2 篇、`UNKNOWN` 3 篇；此前“43 份”是过期估计）；T3 已证明指标口径三级兜底经统一 `LlmCostGuard` 记录真实用量，无需增加重复记账。T4 将默认 `QUALITY_MAX_ATTEMPTS` 定为 2，并为业务关键词收到 `INVALID/UNKNOWN` 的 classify 增加一次受预算约束的重试；最坏调用路径为 classify 2 + understand 3 + catalog 1 +（生成 + 复核）×2 = **10 次**，与 `MAX_LLM_CALLS_PER_REQUEST=10` 对齐。2026-08-20 实测：真实 PostgreSQL 回归 **864 passed / 0 failed / 0 skipped**；后端 Ruff/mypy 与前端 26 文件 / 254 项 Vitest 及全部静态门禁均通过。B7 首轮九题真实调用（30 次、17,397 token、无上游失败）发生在经营表为空时，不能作为有数据验收通过。Docker 恢复后，二轮九题实际使用 `deepseek-v4-flash` **18 次调用、25,060 token**，均返回 HTTP 200 且上游成功，但全部被模型输出的 `CHAT/UNKNOWN` 或 `INVALID` 分类短路，未进入预期的数据/知识路径，**B7 仍不通过**。已用 TDD 修复业务关键词在 `CHAT/UNKNOWN` 时漏掉第二次 classify 重试，以及规则提示词错误使用 `PLATFORM` 而非 `PLATFORM_RULE`；修复后的真实 PostgreSQL 回归为 864 项全绿。不得自动重跑；需新的 R3 计费授权后才可在有数据环境复验。当前本地库已恢复为 5,670 笔订单（2026-02-22 至 2026-08-20）与 23 篇知识文档。Railway Cron 的控制台创建、变量配置和手工触发亦未完成：Railway CLI 未安装，Windows 控制台自动化运行时不可用，须由有控制台权限的用户完成。
 
 ## 当前快照
 
@@ -36,32 +41,81 @@ R9 阶段 B（四个能力切片：指标口径、纯明细、跨业务查询、
 
 首次适用是指标口径契约（差异审计结论：参考项目 13 个字段，我方原只兑现 7 个，已于 R9 阶段 B Task 9 补齐，见「已完成」）。已同步修订 `AGENTS.md`（新增 R9）、`docs/PRD.md`、`docs/backend-development-plan.md`、`docs/frontend-development-plan.md`。
 
+## 本分支新增：管理员记忆压缩与每日经营日报
+
+以下两项能力是 `feature/memory-consolidation-agent` 分支独有、`feature/f2-mock-conversation` 尚未包含的新增功能，均已实现并通过本地全量门禁（后端 930 passed、前端 275 passed，`ruff`/`mypy`/`lint`/`format` 全绿）：
+
+- **每日经营日报**：`GET /api/reports/daily` 固定返回 `Asia/Shanghai` 昨日的六项指标与两条确定性建议，使用商家级 `DAILY_REPORT` 系统会话和 `daily-report:{report_date}` 答案幂等键物化结果。并发首次请求回读同一份已完成报告；查询失败或无近七日数据均显式降级，不调用 LLM，也未引入 Cron、Worker 或推送。前端 `DailyReportCard.vue` 已接入，采纳按钮只提交整份日报级别的反馈（Q8 裁定），降级原因可见且不渲染虚假指标。
+- **管理员手动记忆压缩端点**：`POST /api/admin/knowledge/memories/compress`（对齐参考项目 `POST /api/wiki/compress`，路径按 Ruling 1 改为 REST 资源语义），按商家与分类读取历史问答并重压记忆，先写独立审计再提交记忆写入，模型不可用时返回可见的 `degraded`/`degraded_reason`。
+- **猜你想问按历史高频排序**：`AnswerRepository.top_category_questions()` 把聚合、排序、`LIMIT` 全部下推 SQL，图节点在历史结果非空时优先使用，查询异常时用 savepoint 隔离、安全回落静态推荐，不污染主聊天事务。
+- **2026-08-22 真实模型排查与修复**：`llm_max_output_tokens_per_call` 默认值从 `4096` 提到字段上限 `8000`（详见下方「下一步」）——`deepseek-v4-flash` 是推理模型，环比/同比这类需要更多推理步骤的回答生成会把该值耗尽在 reasoning 上、正文吐空，被判定模型不可用而降级；已用真实模型复测确认修复生效，同时发现该值调高后暴露出更深一层的根因：查询层没有"环比/同比需要两个可比周期"的概念（见下）。
+
 ## 当前阶段
 
-- 后端：**B4–B7 代码均已收口并完成终审修复轮**；`REQUIRE_INTEGRATION_DB=1 pytest` 历次在真实 PostgreSQL 上跑通（数字随后续切片增长，见「最近验证」）；`ruff`/`ruff format`/`mypy app` 全绿。**未完成的只剩需要人工在 Railway 控制台操作的部分**。
-- 后端：**R9 阶段 B（Task 9–15，四个能力切片）与阶段 2.5（可信 IP 契约）代码均已完成**，`TRUSTED_PROXY_IPS` 策略已由用户裁定（采用留空方案，依赖 Railway 单跳代理边界）。
-- 前端：**F0–F6 代码与文档已完成，Railway 已部署上线；MVP 尚未宣告完成。** `docs/specs/2026-08-11-mvp-exit-evidence-matrix.md` 仍停在 2026-08-12：其中 R9 未完成、Playwright `exit 124` 和 Vitest 245 条等记录均已过期，不能直接作为当前完成度结论；Railway 未验证项仍然有效。
-- F1 遗留：1440×1000 人工视觉比对待本地 Windows Computer Use helper 可用后补做；不影响已通过的结构、几何和无障碍自动化验收。
-- **P1 状态**：B8–B9、F7–F9 基本未开工。`ATTACHMENT`/`MEMORY` 目前只有枚举或契约占位，附件、日报、商家记忆闭环、对象存储、异步 Worker、知识库 CRUD 均无正式实现；`KnowledgeBaseView.vue` 仍是占位页，`worker/` 尚未创建。
-- **仓库结构（2026-08-17 确认）**：主目录当前签出分支为 `main`，已包含 `feature/integrate-b7-f4` 全部内容，并与本地 `origin/main` 一致。历史 worktree `.worktrees/feature-b5-b6-answer-feedback-export/`、`.worktrees/feature-f3-real-api-integration/` 内容均已并入主线，留作对照，不再是主线。
+P1 的日报已完成：`GET /api/reports/daily` 固定返回 `Asia/Shanghai` 昨日的六项指标与两条建议，使用商家级 `DAILY_REPORT` 系统会话和 `daily-report:{report_date}` 答案幂等键物化结果。并发首次请求回读同一份已完成报告；查询失败或无近七日数据均显式降级，不调用 LLM，也未引入 Cron、Worker 或推送。本地后端与前端门禁均已复跑通过。
+
+P1 的记忆沉淀子 agent 与知识库维护后台的**结构**已实现，本地门禁全绿。
+
+2026-08-21 按 R9 逐条对照参考项目后发现记忆链路存在一处静默行为退化——沉淀时不读历史问答，
+导致记忆无法累积；**当天已修复并提交**（`98e40d0`）。同时确认此前登记为"缺口"的
+`/api/memories` 一项在参考项目中并不存在，用户已裁定不还原；相关文档说明已删除，
+OpenAPI 契约测试永久禁止重新暴露这些路径。
+
+同日核对出的两处记忆缺口——管理员手动记忆压缩端点、`suggestQuestions` 未按历史高频问题排序——
+均已实现并通过全量后端门禁。手动压缩沿用我方管理员知识库路径；历史推荐查询使用
+savepoint 隔离，统计查询失败只会回落静态推荐，不会污染主聊天事务。
 
 ## 已完成
 
-### 后端 B0–B7（详细提交与验证记录见「最近验证」）
+- 从参考运行时目录导入 23 篇团队知识文档；
+- `merchant_memories` 迁移、商家隔离仓储、团队知识优先/商家记忆回退、可见 `MEMORY` 来源，
+  以及回答成功后的异步沉淀；
+- 记忆沉淀已接入**同商家同分类的历史问答**（`AnswerRepository.recent_answers_for_category`，
+  取 80 条，2026-08-21 修复），不再是每轮覆盖写入的单句摘要；
+- 管理员手动压缩端点 `POST /api/admin/knowledge/memories/compress`：`X-Admin-Token` 鉴权、
+  商家存在性校验在费用守卫构造前完成、审计独立提交先于记忆写入；模型不可用时返回可见的
+  `degraded` / `degraded_reason`，并仍落盘确定性兜底文本；
+- 「猜你想问」已按同商家同分类的历史**高频**问题排序（频次降序、同频按最近回答时间降序），
+  静态 `suggestion_alternates` 保持可用；历史查询异常由 savepoint 隔离并回落静态推荐；
+- 知识库目录树固定为 `index`、`业务`、`memory` 三根，业务域固定四板块，记忆仅可读；
+- 管理员文档 CRUD、13 个适用的路径/写入错误码、大小写冲突检测、428/412 乐观锁与业务域端点；
+- OpenAPI、生成前端类型与领域 Adapter 同步；前端包含内存令牌对话框、目录树、编辑器、
+  412 冲突保留输入和只读记忆文档；
+- Mock Playwright E2E 覆盖未授权、授权后目录、编辑保存及记忆只读。
+
+### 后端 B0–B7（来自 f2-mock-conversation 分支，详细提交与验证记录见「最近验证」）
 
 - B0–B3：FastAPI 工程、演示商家身份与商家隔离、PostgreSQL/Alembic、会话和回答持久化、Chat JSON/SSE 双路径、幂等、跨商家审计和服务端推荐问题；指标/维度/筛选白名单、知识检索、Fake/DeepSeek LLM Client、两阶段结构化意图和 LangGraph 问答图均已落地。
 - B4：六张经营数据表与迁移、180 天可重复 Seed、指标/维度/筛选 SQL 契约、业务时区日期解析、受控聚合与五类明细查询、Safe Query Service（白名单路由 + 商家范围强制 + 绑定筛选值）、`GET /api/metrics/{code}` 指标口径接口、`MerchantQaGraph` 接入真实查询、REFUND 明细路由三级信号分流修复、终审修复轮（自洽性不变量、异常边界、日期筛选校验、`limit` 下界）。
 - B5：`VisualizationService`（只用已登记维度/指标列）、`AnswerService`（结构化回答草稿 + 本地确定性校验）、`ReviewService` 与可配置（最多 3 轮）的统一质量循环均已接入问答图；`quality_status`/`quality_attempts`/`quality_notes` 如实记录。受控降级只汇总来自当前查询的事实，截断明细不提供不完整总计。
 - B6：`POST /api/answers/{id}/feedback`（幂等采纳/点赞点踩，跨商家 403 + 审计）、`GET /api/exports/{id}`（HMAC 签名、15 分钟过期、UTF-8 BOM、公式注入防护）均已实现。
-- B7：`LlmCostGuard`/`SlidingWindowRateLimiter`/`resolve_client_ip` 补齐必测；`OperationalMetrics` 可观测性；`GET /api/admin/ops/status` 运维端点（只认 `X-Admin-Token`，未配置时整体不挂载路由）；`railway.json`、`docs/deployment.md`。实际 Railway 部署未执行。
+- B7：`LlmCostGuard`/`SlidingWindowRateLimiter`/`resolve_client_ip` 补齐必测；`OperationalMetrics` 可观测性；`GET /api/admin/ops/status` 运维端点（只认 `X-Admin-Token`，未配置时整体不挂载路由）；`railway.json`、`docs/deployment.md`。**Railway 实际部署已完成**（见下方「Railway 已部署」），但 B7 真实模型验收多轮未通过，详见「下一步」。
 
-### 前端 F0–F6
+## 2026-08-21 R9 对照结论
 
-- F0–F2：Vue 3 + TypeScript + Vite 工程、三栏商家助手布局、SSE 解析、Mock 传输、会话状态机、取消/重试、演示商家切换、会话历史与轮次目录；F2 审查整改含降级状态展示、商家切换清理和并发提交保护。
-- F5（提交 `414d267`）：质量轨迹、反馈与无障碍收口，按 `docs/specs/2026-08-10-frontend-f5-design.md` 与 `plans/2026-08-11-frontend-f5-implementation.md` 实现。历史消息因会话详情缺 `answer_id` 与当前反馈状态而不开放反馈，边界已由 R9 阶段 B Task 8 补齐。
-- F6 Task 1–8、Task 12（提交 `d0dcace`、`49fadc4`）：生产演示模式（`demo_deployment_mode`）、未配置 LLM 客户端时的费用守卫修正、首屏 ECharts 移出（`defineAsyncComponent` + 显式挂载开关 + 三层静态门禁）、生产构建 Mock 硬防线、密钥扫描、`frontend/railway.json`、部署手册与出口证据矩阵。Task 9–11（Railway 控制台部署与线上验收）待用户操作。
+参考项目共 3 个 Controller、14 个端点（`ChatController` 5 个、`AttachmentController` 1 个、
+`WikiAdminController` 8 个）。逐条对照结果：
 
-### B7/F4 分支整合与文档整改（2026-08-09～2026-08-10）
+| 项 | 参考项目 | 我方 | 结论 |
+| --- | --- | --- | --- |
+| 沉淀输入含历史问答 | `recentAnswers(merchantId, 80)` 按分类过滤后一并压缩 | 已接入同款仓储方法 | ✅ **已修复（2026-08-21，`98e40d0`）** |
+| `POST /api/wiki/compress` 手动压缩 | 有，可指定 `categoryName` + `manualMarkdown` | `POST /api/admin/knowledge/memories/compress` | ✅ 已修复（2026-08-21）；路径差异已登记为有意偏离 |
+| `suggestQuestions` 按历史高频问题排序 | `topCategoryQuestions` 按 `COUNT(*) DESC` 排序 | 已按频次、同频最近时间取同商家同分类历史问题 | ✅ 已修复（2026-08-21） |
+| 知识库版本历史与回滚 | **没有**，`version()` 仅 SHA-256 乐观锁 | 428/412 乐观锁已实现 | ✅ 已 1:1 还原 |
+| 商家自助记忆端点 | **没有**，商家无任何记忆读写入口 | 无 | ✅ 已裁定不还原（2026-08-21），文档与永久契约已同步 |
+
+处置记录：
+
+1. **`history=[]` 静默退化已修复**。`MemoryService.consolidate()` 的 `history` 形参此前从未被
+   传值，参考语义是"该分类下最近 80 条问答的累积压缩"，我方之前是"只有本轮这一问一答"。
+   已在 `backend/app/services/memory_agent.py` 接入 `AnswerRepository.recent_answers_for_category`
+   并补齐输入内容断言测试（`test_answer_history.py`、`test_memory_agent_history.py`），
+   commit `98e40d0`。
+2. **`GET/PATCH/DELETE /api/memories` 已按用户裁定撤回**。参考项目本无对应设计；
+   文档已同步删除，`test_openapi_chat_contract.py` 的路径断言现为永久契约，差异登记见
+   `docs/yshopping-parity-audit.md` §5.13。
+
+### B7/F4 分支整合与 Railway 上线历史（来自 f2-mock-conversation 分支）
 
 - 以 B7 为后端基线、按路径移植 F3/F4 前端（不引入 F3 的替代 analytics/export 后端），重新生成 OpenAPI/`generated.ts`/Chat fixture，新增真实数据库端到端测试装配（提交 `3faef8a`…`ac042a0`）。SDD 账本见 `.superpowers/sdd/2026-08-09-b7-f4-integration-and-r9-remediation/progress.md`（只记到该阶段出口，后续 R9 阶段 B 未在账本中回填，以本文件和 Git 提交为准）。
 - **治理事件（2026-08-10）**：用户已裁定 `main` 为唯一主线，但当时创建并合并的 PR #2 base 分支是 `feature/f2-mock-conversation` 而非 `main`，`main` 实际上直到 2026-08-13（本地快进至 `8966fb1`）才第一次收到成果——分支收口拖延超过 3 天，是本项目 4 次审阅门违规之外的另一类治理问题（分支操作未对齐已裁定决策）。
@@ -136,43 +190,129 @@ R9 阶段 B（四个能力切片：指标口径、纯明细、跨业务查询、
 
 ## 最近验证
 
-- **当前工作树复核（2026-08-17）**：复核开始时 Git 工作区干净；完成复核后仅 `docs/project-progress.md` 因本次快照同步产生未提交改动。`main` 与本地 `origin/main` ahead 0 / behind 0。后端默认 pytest **653 passed / 128 skipped**，128 条均因 `127.0.0.1:55432` 真实 PostgreSQL 测试库未运行而跳过；`ruff check`、`ruff format --check`、`mypy app`（90 个源文件）全绿。前端 Vitest **26 文件 / 254 passed**，ESLint、Prettier、TypeScript、OpenAPI 生成类型漂移、fixture 漂移、生产构建、生产 Mock 载荷、构建产物密钥与首屏静态依赖门禁均通过；Mock Playwright **25 passed**，生产首屏 Playwright **1 passed**，两条命令均以退出码 0 正常结束。生产构建仍有 ECharts chunk 超过 500 kB 的 Vite 警告，但首屏测试确认入口不会请求该 chunk。全程使用 Fake/确定性 LLM，DeepSeek 调用 0、费用 0。
+后端门禁于 2026-08-21（本轮）跑出：
 
-- **本轮 code review 修复验证（2026-08-13，含三轮修复：3 个正确性缺陷 + 文档整理 + 低优先级复用/效率清理）**：`tests/integration/repositories/test_analytics_repository.py` 全量 17 passed（含 2 条新增）；`tests/integration/services/test_safe_query.py` 全量 45 passed（跨业务查询全部场景覆盖 `_fetch_with_total` 重构）；`tests/unit/intent/` 全量 31 passed（含 1 条新增断言）；`tests/unit/services/test_export_service.py` 5 passed；`tests/api/test_exports.py` 真实库 7 passed；`tests/unit/agent/test_graph_query_data.py` 11 passed；`tests/unit/services/test_visualization_service.py` 7 passed；后端非数据库全量 pytest **653 passed / 128 skipped**；`ruff check`/`ruff format --check`/`mypy app` 全绿。真实数据库全量回归**连续三次干净通过**：**781 passed / 0 failed**（66.95s、74.64s、211.70s——第三次耗时明显更长是因为与前端 Mock Playwright 并发抢占本机资源，但结果仍是零失败，进一步支持「此前的死锁只与多 Agent 并发写同一容器相关」的判断）。前端 Vitest **26 文件 / 254 passed**、`format:check` 通过、Mock Playwright `--workers=1` **25 passed**。
+- 专用 PostgreSQL 测试库：`REQUIRE_INTEGRATION_DB=1; uv run pytest -q` **930 passed, 1 warning**；
+  唯一警告为第三方 LangGraph 的 `LangChainPendingDeprecationWarning`；
+- 管理员压缩 API（6 条）、记忆服务降级信号（2 条）、历史高频仓储（5 条）、图节点回落
+  （4 条）、既有记忆历史回归（3 条）全部通过；
+- 历史推荐的事务回归使用真实 PostgreSQL 在共享 Session 内触发 `LIMIT -1` 查询错误：修复前主回答
+  写入遭遇 `InFailedSqlTransaction`，修复后由 `begin_nested()` 隔离，主回答仍以 `SUCCEEDED`
+  持久化且 USER/ASSISTANT 消息均落库；
+- `uv run ruff check .`、`uv run ruff format --check .`、`uv run mypy app` 与前端
+  `npm run codegen:check` 全绿；全程使用 Fake/Mock LLM，真实 DeepSeek 调用 **0**、费用 **0**。
 
-- **真实数据库全量测试可复现性调查（2026-08-13）**：在同一对无卷隔离容器（55442/55443）上连续运行 `REQUIRE_INTEGRATION_DB=1 pytest` 共五次。前三次（code review 修复前，且当时另有 Agent 在同一工作树并发活动）结果为 **777 passed/2 errors → 764 passed/8 failed/7 errors → 776 passed/3 errors**，三次报错的具体用例互不相同，均指向 `TRUNCATE_ALL_TABLES` 与其他连接之间的锁竞争（`DeadlockDetected`/`QueryCanceled: statement timeout`），偶尔连锁到迁移测试被打断后 schema 残缺，单次耗时 260–360 秒。后两次（code review 修复完成后，确认无其他 Agent 并发访问同一容器）结果为**连续两次 781 passed / 0 failed**，单次耗时缩短到 66–75 秒。此前记录的「779 passed / 0 failed」只是没撞上而已，不能脱离并发上下文单独作为已通过的门禁证据；但结合后两次的稳定复现，当前证据更倾向于「失败与多 Agent 并发访问同一测试容器相关，而非本轮所修的三处代码缺陷本身」，`tests/conftest.py` 里已有的 `SET LOCAL statement_timeout = 0` 可能也起到了缓解作用。**未完全排除死锁在并发场景下复现的可能**，因此仍建议在无并发写入的前提下作为部署前置证据，不建议在多 Agent 同时跑测试时依赖这个数字。
+前端门禁**本轮未重跑**，以下结果仍是 2026-08-20 的快照，与本轮后端改动无关联：
 
-- **前端门禁复核（2026-08-13）**：`Vitest` **26 文件 / 254 passed**、`format:check` 通过；Mock Playwright `--workers=1` **25 passed**；生产 preview 首屏 Playwright **1 passed（16.8s，正常退出）**。
+- 前端 `typecheck`、`lint`、`format:check`、`codegen:check`、`fixtures:check` 与 Vitest **271 passed** 全绿；
+  `build` 与 `secrets:check` 全绿（仅既有 ECharts chunk size 非阻塞警告）；
+- `npx.cmd playwright test e2e/knowledge-base.spec.ts` **1 passed**。
 
-- **B7 收口 + 真实 PostgreSQL 首次复核（2026-08-06）**：修复 `llm_daily_budget` 未纳入 `TRUNCATE_ALL_TABLES` 的测试隔离缺陷（提交 `64e60e3`）后，真实库全量 **703 passed、0 skipped、0 failed**；`ruff`/`ruff format`/`mypy`（88 源文件）全绿。
+2026-08-22 复核（每日经营日报交付后，`046c32b` 已提交）：
 
-- **集成分支全量复核 + 测试隔离缺陷修复（2026-08-11）**：修复测试未与开发者 `backend/.env` 隔离的缺陷（新增 `isolate_settings_from_ambient_config` autouse fixture，覆盖 dotenv 与环境变量两条来源），修复后真实库全量 **709 passed、0 skipped、0 failed**。该隔离同时消除了一个此前存在的费用风险面：修复前测试构造的 Settings 会拿到真实 `LLM_API_KEY`。
-
-- **阶段 0 全量门禁复核（2026-08-12）**：独立空库 `borough_stage0_20260812_test` 上真实数据库 pytest **717 passed / 0 failed**；前端 Vitest **245 passed**，lint/格式/codegen/fixtures/类型检查/构建/Mock/密钥/首屏门禁均通过。
-
-- **R9 阶段 B Task 9–14 完成验证（2026-08-13）**：两个无卷隔离 PostgreSQL 容器销毁重建后复验，后端真实库回归 **767 → 772 passed**（随 Task 12 完成增长）；真实数据库 Playwright **8 passed**，覆盖纯明细、跨商家反例、生成指标图表/截断导出与历史会话脱敏回放；Mock Playwright **25 passed**，首屏测试 **1 passed**。此前的 Playwright CLI 退出挂起已定位为 Windows 下 `webServer` 的 shell 进程树收尾问题，已修复（见「已完成」E2E 脚本重构条目）。
-
-- 更早期（B4/B5/B6 收口、F3/F5 验证）的详细提交号、测试数字与手工变异验证记录：见 Git 历史与 `.superpowers/sdd/2026-08-04-backend-b4-safe-analytics-query/`、`.superpowers/sdd/2026-08-09-b7-f4-integration-and-r9-remediation/` 账本目录。
+- 后端 `REQUIRE_INTEGRATION_DB=1 uv run pytest -q` **930 passed, 1 warning**、`ruff check`/
+  `ruff format --check`/`mypy app` 全绿；前端 `codegen:check`/`typecheck`/`lint`/`format:check`/
+  Vitest（**271 passed**）/`build`/`secrets:check` 全绿；均为 Mock/Fake LLM，零真实调用；
+- **B7 九题真实模型验收（T7）**：已按 R3 取得同意执行，`deepseek-v4-flash`，实际 29 次调用、
+  48,235 token，因触及自设 45,000 token 预算上限提前停止（7/9 题），停止时机符合约定；
+  已测 5 类 METRIC 中 2 类（按类目拆分、环比）返回 `degraded=true`。**已排查并修复根因**（见下）；
+- **根因排查**：先在 `answer_service.py` 加诊断日志、按 R3 追加同意后只重跑那 2 题定位。类目
+  拆分这次直接通过校验（证明当时是模型输出的偶发波动，不是系统性 bug）；环比复现降级，但诊断
+  日志完全没有被触发——说明失败发生在校验之前。追查到 `app/llm/deepseek.py:59` 的
+  `degraded = not bool(text)`：`deepseek-v4-flash` 是推理模型，环比这类需要比较两个周期、算
+  百分比的回答生成会把 `llm_max_output_tokens_per_call`（原 4096）全部耗在 reasoning 上，正文
+  返回空串，被判定为模型不可用而降级——**降级机制本身工作正确（R7），只是把本可回答的问题
+  错杀了**。**已修复该项**：`llm_max_output_tokens_per_call` 默认值提到字段上限 `8000`
+  （`backend/app/core/config.py`、`.env.example`、`docs/deployment.md` 已同步），本地全量门禁
+  （后端 930 passed、`ruff`/`mypy` 全绿）已重新验证。
+- **修复效果已用真实模型复测（同题再打 2 次）**：正文不再吐空——但**暴露出第二个、更深的根因**：
+  `QueryIntent`（`app/intent/models.py:102`）只有单一 `date_range` 字段，**整个系统没有"环比/
+  同比需要同时取两个可比周期"这个概念**。真实回答草稿显示模型为了回应"环比"，凭空编出了一个
+  "上月合计"数字去凑百分比（如实记录：草稿把 8 月至今与一个模型自称的 7 月合计对比算出
+  "下降约 31.8%"，但当次查询 `total_rows=1`，压根没有第二期数据支撑这个对比）——`_validate()`
+  正确识别出这是查询结果之外的数字并打回，**这次降级是校验机制的正确行为，不是 bug**。
+  真正缺失的是查询层从未按"环比/同比"取两个周期的数据。这是一个**需要单独设计的功能缺口**
+  （比照附件/Chat BI 的处理方式：先定契约再排实施计划），不是这次能顺手打的小补丁；
+  详见下方「下一步」第 6 条。
+- **T7 剩余 RULE、CHAT 两题已补测（5 次调用，6,932 token）**：CHAT 正常（`degraded=false`，
+  按 R1 中文问候）；**RULE 意外零命中**——`analysis_sources=["NONE"]`，`quality_notes` 显示
+  "未命中与当前问题相关的知识条目"，如实答复未能提供依据，未伪造规则内容（这本身是正确的
+  R7 行为）。但复核 `knowledge_documents` 表确认知识库**确实存在**对应内容（`GOODS` 分类
+  「商品规则」657 字、`PLATFORM_RULE` 分类「平台规则详解」267 字），说明问题出在**检索匹配
+  逻辑**，不是知识导入缺失。这是本轮测试新发现的问题，**按你的要求本轮不展开排查**，留作后续
+  排查任务；
+- **T7 最终结果（9/9 题已全部测过，跨两次会话）**：趋势 ✅、空结果 ✅、非加和 ✅、明细超限
+  截断 ✅（落入 `DETAIL` 而非 `METRIC`）、CHAT ✅；类目拆分：一次降级一次通过（模型输出
+  存在波动）；环比：两次均降级（第二层根因未解决前无法通过）；DETAIL（退款明细）`NOT_RUN`
+  （知识不完整提示）；RULE 零命中（检索缺陷，见上）。**T7 出口判据（6 条 METRIC 全部
+  `degraded=false`）尚未达成**，卡在环比的查询层缺口和 RULE 的检索缺陷这两处，均已排入
+  「下一步」，且都需要先设计/排查、不适合在测试阶段顺手改。
 
 ## 下一步
 
-1. **取得当前提交的真实数据库绿灯**：启动独立 PostgreSQL 测试库，在无其他 Agent 并发写入的前提下运行 `REQUIRE_INTEGRATION_DB=1 pytest`；必须得到 0 failed / 0 skipped 后，才能把 2026-08-13 的历史 781/781 更新为当前证据。
-2. **补 F1 人工视觉证据**：按 1440×1000 对照 Prototype，记录布局、间距、字体、颜色和主要交互差异；自动化响应式测试不能替代这一项。
-3. **同步剩余进度文档**：更新 `docs/specs/2026-08-11-mvp-exit-evidence-matrix.md` 的 R9、Vitest、Playwright 与当前未验证项；校正 `docs/yshopping-parity-audit.md` 的旧分支基线；回填 `plans/2026-08-12-post-f6-execution-roadmap.md` 阶段 0–2.5 的实际状态。
-4. **补完阶段 3 的剩余线上验收项**：Railway 部署本身已完成（见「已完成 · 首次真实模型验收与 Railway 上线」），仍未做的是**转发头伪造验收**（同一演示 Token 连续更换 `X-Real-IP`/`X-Forwarded-For`，超限仍须返回 429；零费用）、SIGTERM 收尾验收、日志脱敏抽查。
-5. **回答闭环整改**：已完成 A1–A3、B1–B3、B5–B6 的本地实现；真实模型验收（A4、B4、B7）和 Railway Cron（C3）仍须分别获得用户许可。滚动 Seed 的真实 PostgreSQL 验收待测试库可用后执行。
-6. **保持知识库可用**：当前本机已导入 23 篇 Wiki 文档；每次在该库运行会清空表的真实 PostgreSQL 全量测试后，均须重跑 `backend/scripts/import_wiki.py --root <legacy-llm-wiki>`，再进行 RULE 或指标口径的真实验收。零 LLM 费用。
-7. **扩大真实模型验收面**（阶段 4）：目前只验通了 METRIC 一条路径。指标口径 catalog 提示词只点了三个字段名、未给枚举取值，未证实但可疑；DETAIL / RULE / IDENTITY / 生成指标 / 跨业务查询均未验。之后再按完整问题集评估意图准确率是否 ≥90% 并裁定 MVP；执行前必须按 R3 说明调用次数与预计费用。
-8. **MVP 完成后进入 P1**：按 B8 → F7、B9 → F8、F9 推进附件与日报、商家记忆、对象存储/Worker、知识库后台和内部可用版收口；P2 的真实 SSO/登录页仍不提前实施。
+按优先级（前 6 项来自 `feature/memory-consolidation-agent` 分支，均已完成；第 7 项起是合并后的合并清单）：
+
+1. ~~修 `memory_agent.py:140` 的 `history=[]`~~ **已完成（2026-08-21，`98e40d0`）**；
+2. ~~执行 `/api/memories` 裁定的文档同步~~ **已完成（2026-08-21）**：文档已清理，
+   OpenAPI 路径断言已正名为永久契约；
+3. ~~执行 `plans/2026-08-21-memory-compress-and-history-suggestions.md`~~ **已完成（2026-08-21）**：
+   管理员手动压缩端点与历史高频「猜你想问」均已实现；
+4. ~~裁定并落地 `docs/specs/2026-08-21-daily-report-contract.md` 里的 8 个问题并实施每日经营报告（B8/F7）~~ **已完成（2026-08-21）**：Q1–Q8 均按 A 实现，日报前后端、Mock、并发幂等与采纳反馈已有定向测试；
+5. ~~**T3**：`backend/app/metrics/catalog.py:99` 的 `complete()` 调用未上报 usage~~
+   **2026-08-22 复核：已由 `build_guarded_llm()` 的共享守卫解决**——`dependencies.py`
+   现在只构造一个 `LlmCostGuard` 实例（`guard`），意图识别、指标口径、回答生成、
+   Reviewer 与记忆压缩全部复用同一个，`MetricCatalog` 也不例外（唯一实例化点见
+   `dependencies.py:189`），因此没有绕开记账的调用路径；
+6. ~~**B7 九题真实模型验收**（T7，`feature/memory-consolidation-agent` 分支的一轮）~~
+   **2026-08-22 已完成执行（9/9 题，跨两次会话，累计约 51 次真实调用、约 94,200 token，
+   均按 R3 逐次取得同意）**：`deepseek-v4-flash`。已修复 `llm_max_output_tokens_per_call`
+   （4096→8000）解决的推理型答案正文吐空问题，真实复测确认生效。**出口判据（6 条 METRIC
+   全部 `degraded=false`）尚未达成**，卡在两处均需要单独设计、不适合顺手改的缺口：
+   环比/同比缺失两期对比查询能力（见第 7 条）、RULE 检索零命中（见第 8 条）——
+   注意这与下方第 15 条 `feature/f2-mock-conversation` 分支自己那轮 B7（classify 短路）
+   是**同一验收目标下的两轮独立复测**，本轮是在对方那轮的 classify 修复之上进行的；
+7. **环比/同比查询能力缺口**：`QueryIntent`（`app/intent/models.py:102`）没有"取两个可比
+   周期"的概念，模型被迫凭空编造对比数字，被 `_validate()` 正确拦下。需要先写设计说明（比照
+   `docs/specs/2026-08-21-daily-report-contract.md` 的方式）：`QueryIntent` 如何表达对比周期、
+   `SafeQueryService`/`AnalyticsRepository` 如何一次取两期数据、`_validate()` 如何放行由两期
+   真实数值算出的合法百分比（而不是简单放宽到允许任意数字）；
+8. **RULE 知识检索零命中**：真实模型验收里"商品上架有哪些规则要求"返回
+   `analysis_sources=["NONE"]`，如实说未命中知识（正确的 R7 行为，没有编造规则），但
+   `knowledge_documents` 表里确认存在对应内容（`GOODS`「商品规则」657 字、`PLATFORM_RULE`
+   「平台规则详解」267 字）——问题出在检索/匹配逻辑，不是知识导入缺失，需要单独排查
+   `app/knowledge/retrieval.py` 为什么没匹配到这两篇；
+9. **取得合并后代码的真实数据库绿灯**：两分支合并涉及 `answer_service.py`/`graph.py` 等核心文件的非平凡冲突解决，合并后必须重跑一次 `REQUIRE_INTEGRATION_DB=1 pytest` 全量与前端全量门禁，不能只信任合并前各自分支的绿灯；
+10. **补 F1 人工视觉证据**：按 1440×1000 对照 Prototype，记录布局、间距、字体、颜色和主要交互差异；自动化响应式测试不能替代这一项；
+11. **同步剩余进度文档**：更新 `docs/specs/2026-08-11-mvp-exit-evidence-matrix.md` 的 R9、Vitest、Playwright 与当前未验证项；校正 `docs/yshopping-parity-audit.md` 的旧分支基线；回填 `plans/2026-08-12-post-f6-execution-roadmap.md` 阶段 0–2.5 的实际状态；
+12. **补完阶段 3 的剩余线上验收项**：Railway 部署本身已完成，仍未做的是**转发头伪造验收**（同一演示 Token 连续更换 `X-Real-IP`/`X-Forwarded-For`，超限仍须返回 429；零费用）、SIGTERM 收尾验收、日志脱敏抽查；
+13. **Railway Cron Service 未创建**：`backend/railway.cron.json`、`app/jobs/seed_demo_rolling.py`、`app/core/seed_config.py` 代码侧已就绪，仍需用户在 Railway 控制台建 Service、配置四个变量并手工触发首次执行；
+14. **扩大真实模型验收面**（阶段 4）：`classify`/`understand`/`RULE`/`IDENTITY`/生成指标/跨业务查询的真实模型验收覆盖仍不完整，需按完整问题集评估意图准确率是否 ≥90% 并裁定 MVP；执行前必须按 R3 说明调用次数与预计费用；
+15. P1 剩余的**附件**：参考项目有 `POST /api/attachments`，我方尚未实现对应服务（对象存储、OCR/解析路线均未定），详细缺口清单见 `plans/2026-08-21-gap-roadmap.md` §2；商家记忆闭环与知识库后台已在本分支完成，不再属于剩余项；
+16. `DeepSeekLlmClient` 吞掉全部上游错误（`app/llm/deepseek.py` 的 `except (httpx.HTTPError, ValueError): return LlmResult(fallback, 0, True)`）：401、超时、限流、网络不通被压成同一个无声降级；建议把状态码与异常类型写进结构化日志，并让 `record_usage` 区分「上游拒绝」与「模型输出不合格」。
 
 ## 风险与约束
 
-- **（倾向于已解决，未完全确认，2026-08-13）真实数据库全量 pytest 此前不是可复现绿灯**：`TRUNCATE_ALL_TABLES` 与其他测试连接之间曾出现死锁/超时竞争，三次运行报错的具体用例都不同，但那三次都发生在有另一 Agent 并发访问同一测试容器期间。本轮在确认无并发访问后连续两次干净通过（781 passed / 0 failed，见「最近验证」）。**结论：单 Agent 独占运行时可信任结果；多 Agent 并发跑同一容器时不要信任「XXX passed / 0 failed」为稳定基线**，未来若在并发场景下再次复现死锁，应视为该假设被推翻，需要专项排查而非归因于环境噪音。
-- **治理：本项目已出现 4 次同类「绕过用户审阅门」问题**（详见「已完成」的治理记录条目），其中第 4 次是编造用户决策原文并写入部署文档。核对任何标注「用户已裁定」「用户已确认」的条目时，应能在对话记录或本文件中找到对应的真实用户发言，找不到则视为未裁定。
-- **`FakeLlmClient` 会掩盖整类缺陷**：它返回预写好的合法 JSON，因此「提示词有没有告诉模型该输出什么」这件事在自动化测试里完全不可见。2026-08-17 首次真实模型调用一次暴露两个此类缺陷（见「已完成」）。新增或修改任何 LLM 提示词时，**必须同时加一条从 Pydantic 模型推导期望值的提示词契约测试**（范式见 `backend/tests/unit/intent/test_prompts.py`），否则 Fake 全绿而线上必挂。`classify`、指标口径、回答、Reviewer 四处目前都还没有这类测试。
-- **两套重试是乘加关系，调参时必须一起看**：`app/intent/service.py` 的 `MAX_INTENT_RETRIES=2`（understand 最坏跑 3 次）与 `QUALITY_MAX_ATTEMPTS`（每轮最多 2 次模型请求）互相独立，但四个调用点共用同一个 `LlmBudget`。当前最坏路径 9 次，`MAX_LLM_CALLS_PER_REQUEST` 定 10。任何一边加码都要重算这条路径，否则会以「预算耗尽」的面目暴露成意图识别问题。
-- 未获用户明确同意，不得调用真实 DeepSeek API、收费 OCR 或日报生成；单元测试必须 mock LLM。真实模型调用前须先说明模型、调用次数和预期费用。
-- 商家身份只可由 Bearer Token 解析；后端所有经营查询必须强制注入 `merchant_id`，不得信任前端传入的商家编号。
+- **门禁全绿不等于行为正确**：`history=[]` 曾在 899 passed 的前提下存活到 2026-08-21 才被发现。
+  凡是"参考项目传了值、我方传空值"的形参，都要有一条断言输入内容的测试，而不只断言不抛异常；
+- 本地 PostgreSQL 测试容器是**一次性数据卷**：`alembic_version` 一旦记录了已被删除/重命名的
+  历史迁移号，`command.upgrade(config, "head")` 会直接报错而非自动修复，需重建容器与卷
+  （`docker-compose -p borough down postgres && docker volume rm borough_borough_postgres_data`）；
+- 真实 PostgreSQL 测试必须独占测试库；并发 `TRUNCATE_ALL_TABLES` 曾导致锁竞争；
+- 不得调用真实 LLM；所有自动化测试继续 mock/Fake；
+- 团队知识与商家记忆保持单向边界：团队知识优先，记忆仅作同商家回退，绝不升级写回团队库；
+- 参考目录 `yshopping-merchant-ai 4/` 只读；业务板块按计划指定的四板块执行，
+  即使 importer 排除项与之不一致也不得自行扩大范围；
+- **治理：本项目已出现 4 次同类「绕过用户审阅门」问题**（详见「已完成」的治理记录条目），其中第 4 次是编造用户决策原文并写入部署文档。核对任何标注「用户已裁定」「用户已确认」的条目时，应能在对话记录或本文件中找到对应的真实用户发言，找不到则视为未裁定；
+- **`FakeLlmClient` 会掩盖整类缺陷**：它返回预写好的合法 JSON，因此「提示词有没有告诉模型该输出什么」这件事在自动化测试里完全不可见。新增或修改任何 LLM 提示词时，**必须同时加一条从 Pydantic 模型推导期望值的提示词契约测试**（范式见 `backend/tests/unit/intent/test_prompts.py`），否则 Fake 全绿而线上必挂；
+- **两套重试是乘加关系，调参时必须一起看**：`app/intent/service.py` 的 `MAX_INTENT_RETRIES=2`（understand 最坏跑 3 次）与 `QUALITY_MAX_ATTEMPTS`（每轮最多 2 次模型请求）互相独立，但四个调用点共用同一个 `LlmBudget`。当前最坏路径 10 次，`MAX_LLM_CALLS_PER_REQUEST` 定 10。任何一边加码都要重算这条路径，否则会以「预算耗尽」的面目暴露成意图识别问题；
+- 未获用户明确同意，不得调用真实 DeepSeek API、收费 OCR 或日报生成；单元测试必须 mock LLM。真实模型调用前须先说明模型、调用次数和预期费用；
+- 商家身份只可由 Bearer Token 解析；后端所有经营查询必须强制注入 `merchant_id`，不得信任前端传入的商家编号；
+- **Docker Desktop 在本机环境偶发无法启动或运行中容器意外退出**：曾出现引擎持续返回 `500 Internal Server Error`，或测试库容器在两次真实模型调用之间自行退出；重启 Docker Desktop 并确认容器 `docker ps` 健康后再继续，不要假设代码或配置有问题；
+- **真实 PostgreSQL 测试库会在每次全量 `pytest` 后清空 `knowledge_documents`/经营数据表**：真实模型验收前必须重新执行 `backend/scripts/import_wiki.py` 与 `backend/scripts/seed_demo_analytics.py`，不能假设上一次的种子数据仍在；
+- `backend/tests/unit/agent/test_stage_reference_hygiene.py` 的 `CURRENT_STAGE` 常量只扫 `app/agent/**` 的字符串字面量；若后续引入新的后端 stage 标记，记得同步推进；
+- **`GET /api/admin/ops/status` 是敏感面**：只认 `X-Admin-Token`（`hmac.compare_digest` 比较），`Authorization` 头一律忽略；`ADMIN_TOKEN` 未配置时端点整体不挂载路由（404，而非 401/403）；
+- `yshopping-merchant-ai 4/` 与 `yshopping-prototype/` 只读；新代码、文案和资源必须使用 Borough；
+- 本机可能存在多个 git worktree 或并行分支；核对进度前先用 `git worktree list`、`git branch -vv` 和 `git log <branch> --oneline` 确认自己看的是哪个分支的状态，不要只看主目录当前签出分支的文件是否存在就下结论——本次合并本身就是这类多分支并行工作在 GitHub 上以 PR 形式汇合的结果。
 - `backend/tests/unit/agent/test_stage_reference_hygiene.py` 的 `CURRENT_STAGE` 常量停在 `"B7"`（随 B5/B6/B7 收口时的值）。该常量只扫 `app/agent/**` 的字符串字面量；若后续引入新的后端 stage 标记，记得同步推进，否则该防线会继续只挡旧阶段字样。
 - **Docker Desktop 在本机环境偶发无法启动**：曾出现引擎持续返回 `500 Internal Server Error`，完全重启 Docker Desktop 进程后仍未恢复，等了将近 20 分钟后才自行恢复正常。如果下次又遇到真实 PostgreSQL 集成测试连不上库，先确认这不是环境本身的瞬时故障，必要时重启并耐心等待，而不是假设代码或配置有问题。
 - **（已解决，2026-08-13）本机 Playwright CLI 曾在执行完用例后不会自行退出**：根因是 Windows 下 Playwright 自带 `webServer` 启动的是 shell 进程树，`child.kill()` 只终止 Node 自身，Vite 派生的子进程会残留占用端口。已改为 `frontend/scripts/e2e-process.mjs` 统一管理 Vite Node 子进程并按真实 PID 收尾（Windows 走 `taskkill /T`，非 Windows 走 `SIGKILL`），常规 Mock E2E 与首屏 E2E 均已验证可正常退出码 0 结束。改动 Playwright 配置或 `mock-e2e-server.mjs`/`first-paint-server.mjs` 时，公共逻辑已抽到 `e2e-process.mjs`，不要重新退回 Playwright 自带的 `webServer`。
@@ -211,3 +351,6 @@ R9 阶段 B（四个能力切片：指标口径、纯明细、跨业务查询、
 - `plans/2026-08-11-frontend-f6-railway-mvp-closeout.md`：F6「Railway 部署就绪」实施计划，Task 1–8、12 已完成，Task 9–11 待用户操作。
 - `docs/specs/2026-08-11-mvp-exit-evidence-matrix.md`：MVP 出口证据矩阵，尚未回填 R9 阶段 B / 阶段 2.5 的完成状态。
 - `docs/yshopping-parity-audit.md`：R9 还原度差异清单，🔴 真实缺口 §3.1–§3.6 已全部标记修复。
+- `backend/app/services/memory_admin_service.py`、`memory_service.py`、`memory_agent.py`：管理员手动记忆压缩编排、压缩结果与降级信号、异步沉淀子 agent（本分支新增）。
+- `backend/app/services/report_service.py`、`app/api/routes/reports.py`、`app/schemas/report.py`：每日经营日报的服务、路由与契约（本分支新增）。
+- `frontend/src/components/chat/DailyReportCard.vue`、`frontend/src/api/report.ts`：日报前端卡片与 API 封装（本分支新增）。

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 
+import type { components } from '@/api/generated'
 import { setCredentialProvider } from '../credentials'
 import { readChatStream } from '../sse'
 import type { ChatTransport } from '../transport'
@@ -118,6 +119,31 @@ describe('createMockTransport', () => {
     const payload = await response.json()
     expect(payload.merchants).toEqual(MOCK_MERCHANTS)
     expect(payload.merchants.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('日报按商家隔离并在同一期内重放同一份结果', async () => {
+    const reportTransport = createMockTransport()
+    const getReport = async (token: string) => {
+      setCredentialProvider(() => ({ merchantToken: token }))
+      try {
+        const response = await reportTransport(
+          { path: '/api/reports/daily', method: 'GET', auth: 'merchant' },
+          new AbortController().signal,
+        )
+        return (await response.json()) as components['schemas']['DailyReportResponse']
+      } finally {
+        setCredentialProvider(undefined)
+      }
+    }
+
+    const first = await getReport('demo-token-100')
+    const repeated = await getReport('demo-token-100')
+    const other = await getReport('demo-token-101')
+
+    expect(first.answer_id).toBe(repeated.answer_id)
+    expect(first.answer_id).not.toBe(other.answer_id)
+    expect(first.metrics).toHaveLength(6)
+    expect(first.suggestions).toHaveLength(2)
   })
 
   it('已中止的 signal 会让请求以 AbortError 拒绝', async () => {

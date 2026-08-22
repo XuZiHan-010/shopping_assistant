@@ -40,6 +40,14 @@ FIELD_COMMENT_DEFINITIONS: Final[dict[str, FieldCommentDefinition]] = {
         "public",
         "orders",
     ),
+    "ordering_user_count": FieldCommentDefinition(
+        "ordering_user_count",
+        "统计周期内创建订单的去重买家数，不要求完成付款。",
+        "COUNT(DISTINCT orders.buyer_key)",
+        ("date", "product", "category"),
+        "public",
+        "orders",
+    ),
     "paying_user_count": FieldCommentDefinition(
         "paying_user_count",
         "已付款订单中的去重买家数。",

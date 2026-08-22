@@ -156,6 +156,14 @@ Railway 控制台部署与线上验收、B8/B9、F7–F9 尚未完成。R9 阶�
 **遗留**：指标口径 catalog 的提示词（`app/metrics/catalog.py`）只声明了三个字段名、未列枚举，
 未做真实模型验收；`knowledge_documents` 线上为 0 行，规则类问题没有知识依据。
 
+### 3.8 「猜你想问」未按商家历史高频问题排序
+
+**状态：✅ 已于 2026-08-21 修复。** 参考项目的 `topCategoryQuestions` 按问题出现次数降序、
+同频次按最近回答时间降序；我方 `AnswerRepository.top_category_questions()` 现将聚合、分类过滤、
+成功状态过滤和上限全部下推到 PostgreSQL，并同时约束 Answer 和 Message 的 `merchant_id`。
+图节点在历史结果非空时仅替换 `suggestions`，静态 `suggestion_alternates` 保留；历史库未注入、
+无结果或读取异常时均安全回落，不影响主回答。
+
 ---
 
 ## 4. 🟡 阶段未到（与计划一致，无需处置）
@@ -163,9 +171,8 @@ Railway 控制台部署与线上验收、B8/B9、F7–F9 尚未完成。R9 阶�
 | 参考项目 | 我们的归属阶段 |
 | --- | --- |
 | `AttachmentService` / `AttachmentStore` / `ChatMessage.vue` 附件区块 | B8 / F7 |
-| `DailyReportService` / `DailyReportCard.vue` | B8 / F7 |
+| `DailyReportService` / `DailyReportCard.vue` | 已于 2026-08-21 完成；附件仍留在 B8 / F7 |
 | `MemoryConsolidationService`（商家记忆固化） | B8 |
-| `WikiAdminService` / `WikiAdminController` / `KnowledgeBaseApp.vue` | B9 / F8（我方已有 `KnowledgeBaseView.vue` 骨架，完成度见 ❓5.5） |
 
 `ChatMessage.vue` 的 `quality-audit` 质检块与 `message-actions` 反馈操作已在 F5 实现：四种质量状态、校验次数、备注和全部来源均如实展示；采纳、点赞、点踩已接入 B6 反馈端点，并覆盖失败保留、同值重试与并发中止。R9 Task 8 已将质量状态、备注、`answer_id` 和已有反馈状态随脱敏历史载荷返回，因此历史消息同样展示可信质量轨迹和反馈状态；由于详情契约不保存 `analysis_sources`，历史消息不会编造来源标签。
 
@@ -204,6 +211,44 @@ PRD §10 Metric Catalog 与 §6.2。
 
 参考实现依赖其运行时 Wiki 提供分类语境。我方在分类提示词中保留交易、退款、工单和平台规则的最小业务域映射，且只在知识索引为空或检索异常时作为基础路由。它不提供规则正文、指标口径或查询字段；这些内容仍只能来自已导入的知识库和后端白名单。2026-08-19 已导入 23 篇知识文档，因此该映射不替代知识检索。
 
+### 5.8 记忆存储介质：文件系统 → PostgreSQL
+
+依据 `AGENTS.md` §8.7，商家记忆存入 `merchant_memories`，不依赖 Railway 临时文件系统。
+参考实现的 `ensureNoSymbolicLinks` 没有数据库等价物，故不实现；其余知识路径校验保留给知识库维护后台。
+
+### 5.9 记忆文件名 `isolatedPathSegment()` → `(merchant_id, category)` 唯一约束
+
+数据库没有路径穿越语义，以唯一约束表达同一商家同一分类的全量覆盖；商家范围由查询条件和外键共同约束。
+
+### 5.10 建业务域写占位文档而非空目录
+
+数据库中不存在空目录。创建业务域时，四个固定板块各写一篇 `is_complete=False` 的占位说明，
+使目录树可显示且检索层能如实提示资料未完整；这与参考文件系统中的空目录表现等价。
+
+### 5.11 不实现 `SYMLINK_NOT_ALLOWED`
+
+数据库中不存在符号链接，因此无对应攻击面；其余 13 个知识库路径/写入错误码均已实现并有测试。
+
+### 5.12 手动记忆压缩路径偏离
+
+参考项目使用 `POST /api/wiki/compress`。我方有意使用
+`POST /api/admin/knowledge/memories/compress`：这是管理员对知识/记忆资源的跨商家写入，
+复用现有 `X-Admin-Token` 鉴权并保持 Borough 命名。行为等价，包括按商家和分类读取历史、
+优先保留人工 Markdown、覆盖该分类记忆、独立审计先于记忆提交，以及模型不可用时显式返回降级状态。
+
+### 5.13 撤回商家自助记忆 API
+
+参考项目的商家侧没有任何记忆读写入口；记忆仅以管理员知识目录树中的只读 `memory` 根露出
+（`WikiAdminService.java:62`）。因此我方撤回原先规划的 `GET`、`PATCH`、`DELETE /api/memories`，
+由 OpenAPI 契约测试永久禁止重新暴露这些路径。2026-08-21 用户裁定。
+
+### 5.14 日报路径与响应形状偏离
+
+参考项目使用 `GET /api/daily-report`，我方保留已定义的
+`GET /api/reports/daily`；这是 Borough 公共 API 的命名统一选择。参考响应指标使用名称到值的 Map，我方使用带稳定 `metric_code`、展示名称、单位和值的数组，以避免中文指标名作为契约键。
+
+本轮日报不引入定时推送：只在商家请求时对业务时区昨日执行一次幂等物化，避免在未定义推送通道、失败重试和定时任务监控前伪装成完整的定时日报能力。建议也只使用已实际查询的退款、订单与工单信号，不虚构商品排查分支。
+
 ---
 
 ## 6. ❓ 待核实（需单独一轮逐行对照）
@@ -212,9 +257,7 @@ PRD §10 Metric Catalog 与 §6.2。
 | --- | --- | --- | --- |
 | `DorisQueryService` | 1050 | `repositories/analytics.py` + `services/safe_query.py` | 数据源不同（Doris vs PostgreSQL），需按「查询能力」而非按代码逐条比 |
 | ~~`LlmIntentAnalysisService`~~ | 603 | `app/intent/` | **提示词部分已于 2026-08-17 完成对照，结论见 §3.7（真实缺口，已修复）。** 重试策略仍未逐条比对 |
-| `WikiMemoryService` | 441 | `app/knowledge/` | 知识检索分层与记忆写入策略未比对 |
 | `PromptLoopAnalysisService` | 354 | `services/answer_service.py` + `services/review_service.py` | 已确认 `loopStatus`/`loopAttempts`/`loopNotes` 三元组在我方有对应（`quality_status`/`quality_attempts`/`quality_notes`），但校验规则清单未逐条比 |
-| `WikiAdminService` | 498 | F8/B9 未开工 | 阶段未到，但需在开工前先做一次逐条对照 |
 
 `AnswerComposeService`(323) / `VisualizationService`(103) / `CsvExportService`(91) /
 `FeedbackService`(66) 已确认存在对应实现，字段级差异未逐条比对。
@@ -248,6 +291,7 @@ PRD §10 Metric Catalog 与 §6.2。
 
 | 能力 | 参考证据（均已只读核对） | 输入、校验、输出与失败语义 | 我方状态 |
 | --- | --- | --- | --- |
+| 双知识库与记忆沉淀 | `WikiMemoryService`、`MemoryConsolidationService`、`MerchantQaLangGraph` | 人工库命中即返回且记忆不参与；未命中才取该商家记忆；记忆强制带 `本轮自动沉淀` 标记；沉淀异步且失败只记日志 | ✅ 已实现，来源经 `analysis_sources` 的 `MEMORY` 对用户可见 |
 | 纯明细 | `QuestionIntent`、`LlmIntentAnalysisService`、`SemanticLayerService`、`MerchantQaLangGraph` | 模型仅声明是否要求分析；`DETAIL` 且未要求分析时设 table-only；`repairAnswer()` 清空正文，`outputMatchesIntent()` 强制正文为空。 | ✅ `analysis_requested` 内部字段 + 响应空正文不变量、表格/导出保留、历史 Answer payload 可重放均已实现；空正文助手消息不会渲染为空白卡片。 |
 | 跨业务计划 | `QuestionIntent`、`SemanticLayerService`、`DorisQueryService` | 仅 `ORDER_TO_REFUND`、`ORDER_TO_GOODS`、`ORDER_REFUND_GOODS`；以商家范围和子订单号串行查订单、退款、商品；计划参数非法时移除该计划并记录说明，基础意图继续执行。 | ✅ 已实现受控计划、固定 ORM 路由、商家范围解析、可见降级说明与 CSV 重放；不存在与跨商家订单统一回退，避免存在性探测。 |
 | 临时分组指标 | `QuestionIntent`、`LlmIntentAnalysisService`、`SemanticLayerService`、`DorisQueryService`、`MetricDefinitionService`、`VisualizationService`，以及 `DorisQueryServiceTest`、`LlmIntentAnalysisServiceTest`、`MetricDefinitionServiceTest`、`VisualizationServiceTest` | 白名单仅 `spu_id`、`address_city_name`；按交易/退款类别选择固定聚合；城市筛选可替代分组；金额由分转元；非法维度整体 `INVALID`；截断时生成 CSV 与提示；图表只取查询结果已有字段。 | ✅ 已实现受控计划、类别驱动固定 SQLAlchemy 模板、精确截断、签名 CSV 重放与安全图表字段映射；2026-08-13 已由真实 PostgreSQL 浏览器场景验证截断下载、图表和待核验提示；不接受自由公式、自由列名或 `measure` 枚举。 |
@@ -255,6 +299,7 @@ PRD §10 Metric Catalog 与 §6.2。
 | Reviewer 循环 | `PromptLoopAnalysisService`、`PromptLoopAnalysisServiceTest`、`MerchantQaLangGraph` | 本地校验与独立 reviewer 均通过才 PASS；最多 3 次总尝试后确定性 FALLBACK；loop notes 记录每轮退回原因；纯明细不允许被 loop 生成正文。 | ✅ 我方已有质量状态/次数/备注，R9 Task 8 已随脱敏历史助手载荷回放。 |
 | CSV 导出 | `QueryBundle`、`CsvExportService`、`DorisQueryService` | 截断时保存文件名、URL、notice；文件名净化、UTF-8 BOM、列顺序稳定；参考实现未实现公式注入和签名过期。 | ✅ 我方签名、过期、公式防护更强；生成指标下载会重放已签名的受控计划，拒绝被篡改的计划、类别或列集合。 |
 | 图表 | `VisualizationService`、`VisualizationServiceTest` | 仅 METRIC 且有行时启用；趋势用 `pt/value`，分组用白名单维度；金额优先金额列，单一筛选值禁用饼图。 | ✅ 安全图表原则一致；生成指标仅从固定结果列选择金额字段，字段映射已有测试。 |
+| 知识库维护后台 | `WikiAdminService`、`WikiAdminController`、`KnowledgeBaseApp.vue` | 三根目录、业务域固定四板块、路径校验、ETag 乐观锁、管理员令牌独立于商家 Token，记忆仅可读。 | ✅ B9/F8 已实现；数据库路径策略保留参考的 13 个可适用错误码，业务域用不完整占位文档表达空目录。 |
 
 `SemanticLayerService`、`CsvExportService`、`QueryBundle` 与 `MerchantQaLangGraph` 在参考测试目录没有同名单测；
 已如实记录为“源代码行为已核对”，未把不存在的测试虚构为证据。其余表列测试只证明已覆盖的样例，

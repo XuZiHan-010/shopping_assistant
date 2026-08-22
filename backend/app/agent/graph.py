@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
@@ -22,7 +23,7 @@ from app.agent.state import AgentState
 from app.core.security import MerchantContext
 from app.intent.models import QueryIntent
 from app.intent.service import IntentService
-from app.knowledge.retrieval import KnowledgeResult, KnowledgeRetrieval
+from app.knowledge.retrieval import KnowledgeResult, KnowledgeRetrieval, KnowledgeSource
 from app.llm.client import LlmBudget, LlmClient
 from app.metrics.catalog import MetricCatalog, MetricPayload
 from app.schemas.chat import (
@@ -46,6 +47,8 @@ from app.services.safe_query import QueryResult, UnsupportedQueryError
 from app.services.suggested_questions import suggestions_for
 from app.services.visualization_service import VisualizationService
 
+logger = logging.getLogger(__name__)
+
 
 class QueryServiceLike(Protocol):
     """`_query_data` 需要的最小接口；真实实现是 B4 的 `SafeQueryService`。"""
@@ -64,6 +67,14 @@ class NodeTimerLike(Protocol):
     """记录 Agent 节点耗时的最小接口。"""
 
     def record_node_duration(self, node: str, duration_seconds: float) -> None: ...
+
+
+class HistoryQuestionsLike(Protocol):
+    """`_suggest_questions` 读取商家历史高频问题需要的最小接口。"""
+
+    async def top_category_questions(
+        self, *, merchant_id: UUID, category: str, limit: int
+    ) -> list[str]: ...
 
 
 #: 只在「查询服务根本没注入」时用（查询被拒时 `degraded_reason` 取
@@ -125,6 +136,7 @@ class MerchantQaGraph:
         quality_max_attempts: int = 3,
         visualization_service: VisualizationService | None = None,
         node_timer: NodeTimerLike | None = None,
+        history_questions: HistoryQuestionsLike | None = None,
     ) -> None:
         self._retrieval = retrieval
         self._intent_service = IntentService(intent_service_llm)
@@ -143,6 +155,7 @@ class MerchantQaGraph:
         )
         self._visualization_service = visualization_service or VisualizationService()
         self._node_timer = node_timer
+        self._history_questions = history_questions
         self._graph = self._build_graph()
 
     async def run(self, message: str, session_id: UUID) -> AgentRunResult:
@@ -271,6 +284,8 @@ class MerchantQaGraph:
             notes.append("命中的知识资料尚未完整，回答仅基于现有内容")
         if not detail.matched:
             notes.append("未命中与当前问题相关的知识资料")
+        elif detail.source is KnowledgeSource.MEMORY_FALLBACK:
+            notes.append("团队知识库未命中，本次依据该商家的历史记忆作答")
         # 口径检索放在正文层之后：三级检索的第三级要靠知识正文生成候选口径，
         # 而索引层只有目录词汇。节点顺序由计划 §10 固定，正文层在此才可用。
         metric: MetricPayload | None = None
@@ -403,9 +418,23 @@ class MerchantQaGraph:
     async def _suggest_questions(self, state: AgentState) -> dict[str, object]:
         intent = _required(state["intent"])
         suggested = suggestions_for(intent.category, intent.answer_mode)
+        current = suggested.current
+        if self._history_questions is not None and self._merchant_id is not None:
+            try:
+                history = await self._history_questions.top_category_questions(
+                    merchant_id=self._merchant_id,
+                    category=intent.category.value,
+                    limit=len(suggested.current) or 3,
+                )
+            except Exception:
+                # 推荐问题不可用不影响已经生成的主回答。
+                logger.warning("读取历史推荐问题失败，已回落到静态推荐", exc_info=True)
+            else:
+                if history:
+                    current = history
         return {
             **self._step(state, "suggest_questions"),
-            "suggestions": suggested.current,
+            "suggestions": current,
             "suggestion_alternates": suggested.alternates,
         }
 
@@ -539,7 +568,11 @@ class MerchantQaGraph:
             )
         knowledge_detail = state["knowledge_detail"]
         sources = (
-            [AnalysisSource.KNOWLEDGE]
+            [
+                AnalysisSource.MEMORY
+                if knowledge_detail.source is KnowledgeSource.MEMORY_FALLBACK
+                else AnalysisSource.KNOWLEDGE
+            ]
             if mode is AnswerMode.RULE and knowledge_detail is not None and knowledge_detail.matched
             else [AnalysisSource.FALLBACK]
             if state["degraded"]

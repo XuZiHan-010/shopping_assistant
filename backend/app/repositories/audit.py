@@ -32,3 +32,32 @@ class AuditRepository:
                 )
             )
             await session.commit()
+
+    async def record_admin_action(
+        self,
+        *,
+        merchant_id: UUID,
+        event_type: str,
+        resource_type: str,
+        resource_id: str,
+        request_id: str,
+        metadata: dict[str, str] | None = None,
+    ) -> None:
+        """记录管理员对某个商家资源的写操作。
+
+        管理员令牌可以跨商家写入，这类操作必须留痕才能事后追责（R5）；
+        与越权审计一样使用独立事务，避免业务回滚把审计一起吞掉。
+        """
+
+        async with self._database.session() as session:
+            session.add(
+                AuditLog(
+                    merchant_id=merchant_id,
+                    event_type=event_type,
+                    resource_type=resource_type,
+                    resource_id=resource_id,
+                    request_id=request_id,
+                    event_metadata=metadata or {},
+                )
+            )
+            await session.commit()

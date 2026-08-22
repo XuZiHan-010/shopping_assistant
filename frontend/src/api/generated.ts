@@ -173,6 +173,135 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/reports/daily": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Daily Report
+         * @description 返回当前已验证商家的业务时区昨日经营日报。
+         */
+        get: operations["get_daily_report_api_reports_daily_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/ops/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Ops Status */
+        get: operations["ops_status_api_admin_ops_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/knowledge/tree": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Knowledge Tree */
+        get: operations["get_knowledge_tree_api_admin_knowledge_tree_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/knowledge/documents/{document_path}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Document */
+        get: operations["get_document_api_admin_knowledge_documents__document_path__get"];
+        /** Update Document */
+        put: operations["update_document_api_admin_knowledge_documents__document_path__put"];
+        post?: never;
+        /** Delete Document */
+        delete: operations["delete_document_api_admin_knowledge_documents__document_path__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/knowledge/documents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Document */
+        post: operations["create_document_api_admin_knowledge_documents_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/knowledge/business-domains": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Rename Business Domain */
+        put: operations["rename_business_domain_api_admin_knowledge_business_domains_put"];
+        /** Create Business Domain */
+        post: operations["create_business_domain_api_admin_knowledge_business_domains_post"];
+        /** Delete Business Domain */
+        delete: operations["delete_business_domain_api_admin_knowledge_business_domains_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/knowledge/memories/compress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Compress Memory
+         * @description 以管理员身份手动重压指定商家的分类记忆。
+         */
+        post: operations["compress_memory_api_admin_knowledge_memories_compress_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -188,6 +317,16 @@ export interface components {
          * @enum {string}
          */
         AnswerMode: "METRIC" | "DETAIL" | "RULE" | "IDENTITY" | "CHAT" | "INVALID" | "ATTACHMENT";
+        /** BusinessDomainRenameRequest */
+        BusinessDomainRenameRequest: {
+            /** New Name */
+            new_name: string;
+        };
+        /** BusinessDomainRequest */
+        BusinessDomainRequest: {
+            /** Name */
+            name: string;
+        };
         /**
          * ChartType
          * @description 后端允许的图表类型。
@@ -389,6 +528,38 @@ export interface components {
              */
             updated_at: string;
         };
+        /** DailyReportMetric */
+        DailyReportMetric: {
+            /** Metric Code */
+            metric_code: string;
+            /** Display Name */
+            display_name: string;
+            /** Unit */
+            unit: string;
+            /** Value */
+            value: string | number;
+        };
+        /** DailyReportResponse */
+        DailyReportResponse: {
+            /**
+             * Answer Id
+             * Format: uuid
+             */
+            answer_id: string;
+            /**
+             * Report Date
+             * Format: date
+             */
+            report_date: string;
+            /** Metrics */
+            metrics?: components["schemas"]["DailyReportMetric"][];
+            /** Suggestions */
+            suggestions: string[];
+            /** Degraded */
+            degraded: boolean;
+            /** Degraded Reason */
+            degraded_reason?: string | null;
+        };
         /** DemoMerchant */
         DemoMerchant: {
             /**
@@ -417,7 +588,7 @@ export interface components {
          *     后续阶段（B3 起的意图、查询、限流、附件等）按需扩充。
          * @enum {string}
          */
-        ErrorCode: "AUTH_REQUIRED" | "MERCHANT_SCOPE_VIOLATION" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "INVALID_REQUEST" | "IDEMPOTENCY_KEY_REUSED" | "REQUEST_IN_PROGRESS" | "DATA_SOURCE_UNAVAILABLE" | "EXPORT_LINK_EXPIRED" | "RATE_LIMITED" | "LLM_BUDGET_EXCEEDED" | "FORBIDDEN" | "HTTP_ERROR" | "INTERNAL_ERROR";
+        ErrorCode: "AUTH_REQUIRED" | "MERCHANT_SCOPE_VIOLATION" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "INVALID_REQUEST" | "IDEMPOTENCY_KEY_REUSED" | "REQUEST_IN_PROGRESS" | "DATA_SOURCE_UNAVAILABLE" | "EXPORT_LINK_EXPIRED" | "RATE_LIMITED" | "LLM_BUDGET_EXCEEDED" | "FORBIDDEN" | "HTTP_ERROR" | "INTERNAL_ERROR" | "INVALID_WIKI_PATH" | "WIKI_READ_ONLY" | "INVALID_FILE_TYPE" | "INVALID_WIKI_PARENT" | "WIKI_NODE_EXISTS" | "WIKI_NODE_NOT_FOUND" | "WIKI_DIRECTORY_NOT_EMPTY" | "WIKI_VERSION_REQUIRED" | "WIKI_VERSION_CONFLICT" | "WIKI_DOCUMENT_TOO_LARGE" | "INVALID_WIKI_ENCODING" | "INVALID_WIKI_CONTENT" | "WIKI_IO_ERROR";
         /**
          * ErrorResponse
          * @description 对外稳定错误契约。
@@ -485,6 +656,94 @@ export interface components {
             /** Version */
             version: string;
         };
+        /** KnowledgeDocumentRequest */
+        KnowledgeDocumentRequest: {
+            /** Path */
+            path: string;
+            /** Content */
+            content: string;
+        };
+        /** KnowledgeDocumentResponse */
+        KnowledgeDocumentResponse: {
+            /** Path */
+            path: string;
+            /** Content */
+            content: string;
+            /** Read Only */
+            read_only: boolean;
+            /** Version */
+            version: string;
+        };
+        /** KnowledgeDocumentUpdateRequest */
+        KnowledgeDocumentUpdateRequest: {
+            /** Content */
+            content: string;
+        };
+        /**
+         * KnowledgeTreeNode
+         * @description 虚拟知识库树的一个目录或文档节点。
+         */
+        KnowledgeTreeNode: {
+            /** Name */
+            name: string;
+            /** Path */
+            path: string;
+            /**
+             * Node Type
+             * @enum {string}
+             */
+            node_type: "directory" | "document";
+            /** Read Only */
+            read_only: boolean;
+            /** Size */
+            size: number;
+            /** Version */
+            version: string;
+            /** Children */
+            children?: components["schemas"]["KnowledgeTreeNode"][];
+        };
+        /** KnowledgeTreeResponse */
+        KnowledgeTreeResponse: {
+            /** Roots */
+            roots: components["schemas"]["KnowledgeTreeNode"][];
+        };
+        /**
+         * MemoryCompressRequest
+         * @description 管理员手动重压某商家某分类的记忆。
+         *
+         *     对应参考项目 ``WikiCompressRequest``：``manual_markdown`` 是人工补充内容，
+         *     压缩时优先保留（见 ``app/prompts/memory.py`` 的提示词第 3 条）。
+         */
+        MemoryCompressRequest: {
+            /**
+             * Merchant Id
+             * Format: uuid
+             */
+            merchant_id: string;
+            category: components["schemas"]["QuestionCategory"];
+            /**
+             * Manual Markdown
+             * @default
+             */
+            manual_markdown: string;
+        };
+        /** MemoryCompressResponse */
+        MemoryCompressResponse: {
+            /**
+             * Merchant Id
+             * Format: uuid
+             */
+            merchant_id: string;
+            category: components["schemas"]["QuestionCategory"];
+            /** Content */
+            content: string;
+            /** History Rows */
+            history_rows: number;
+            /** Degraded */
+            degraded: boolean;
+            /** Degraded Reason */
+            degraded_reason: string | null;
+        };
         /** MetricDefinitionResponse */
         MetricDefinitionResponse: {
             /** Metric Code */
@@ -524,6 +783,32 @@ export interface components {
          * @enum {string}
          */
         MetricStatus: "ACTIVE" | "DEPRECATED" | "UNVERIFIED";
+        /**
+         * OpsStatusResponse
+         * @description 系统级聚合快照，不含商家标识、Token 明文或 Prompt 内容。
+         */
+        OpsStatusResponse: {
+            /** Llm Tokens Used Today */
+            llm_tokens_used_today: number;
+            /** Llm Tokens Remaining Today */
+            llm_tokens_remaining_today: number;
+            /** Llm Calls Today */
+            llm_calls_today: number;
+            /** Rate Limit Hits */
+            rate_limit_hits: number;
+            /** Degraded Count */
+            degraded_count: number;
+            /** Error Code Counts */
+            error_code_counts: {
+                [key: string]: number;
+            };
+            /** Agent Node Average Ms */
+            agent_node_average_ms: {
+                [key: string]: number;
+            };
+            /** Demo Deployment Mode */
+            demo_deployment_mode: boolean;
+        };
         /**
          * QualityStatus
          * @enum {string}
@@ -1059,6 +1344,828 @@ export interface operations {
             };
             /** @description 缺少或提供了无效的商家凭证 */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_daily_report_api_reports_daily_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DailyReportResponse"];
+                };
+            };
+            /** @description 缺少或提供了无效的商家凭证 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求过于频繁 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 服务内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 依赖服务暂时不可用 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    ops_status_api_admin_ops_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpsStatusResponse"];
+                };
+            };
+            /** @description 缺少或提供了无效的商家凭证 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权访问该资源或管理端点 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_knowledge_tree_api_admin_knowledge_tree_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeTreeResponse"];
+                };
+            };
+            /** @description 缺少或提供了无效的商家凭证 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权访问该资源或管理端点 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_document_api_admin_knowledge_documents__document_path__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeDocumentResponse"];
+                };
+            };
+            /** @description 请求内容不符合业务规则 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 缺少或提供了无效的商家凭证 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权访问该资源或管理端点 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_document_api_admin_knowledge_documents__document_path__put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "if-match"?: string | null;
+            };
+            path: {
+                document_path: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KnowledgeDocumentUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeDocumentResponse"];
+                };
+            };
+            /** @description 请求内容不符合业务规则 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 缺少或提供了无效的商家凭证 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权访问该资源或管理端点 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源已被其他维护者更新 */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求内容超过允许大小 */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求内容编码不受支持 */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求缺少条件版本 */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_document_api_admin_knowledge_documents__document_path__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "if-match"?: string | null;
+            };
+            path: {
+                document_path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 请求内容不符合业务规则 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 缺少或提供了无效的商家凭证 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权访问该资源或管理端点 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源已被其他维护者更新 */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求缺少条件版本 */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_document_api_admin_knowledge_documents_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KnowledgeDocumentRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeDocumentResponse"];
+                };
+            };
+            /** @description 请求内容不符合业务规则 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 缺少或提供了无效的商家凭证 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权访问该资源或管理端点 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 幂等键冲突或同一请求正在处理中 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求内容超过允许大小 */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求内容编码不受支持 */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    rename_business_domain_api_admin_knowledge_business_domains_put: {
+        parameters: {
+            query: {
+                name: string;
+            };
+            header?: {
+                "if-match"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BusinessDomainRenameRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeTreeNode"];
+                };
+            };
+            /** @description 请求内容不符合业务规则 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 缺少或提供了无效的商家凭证 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权访问该资源或管理端点 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 幂等键冲突或同一请求正在处理中 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源已被其他维护者更新 */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求缺少条件版本 */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_business_domain_api_admin_knowledge_business_domains_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BusinessDomainRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeTreeNode"];
+                };
+            };
+            /** @description 请求内容不符合业务规则 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 缺少或提供了无效的商家凭证 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权访问该资源或管理端点 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 幂等键冲突或同一请求正在处理中 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_business_domain_api_admin_knowledge_business_domains_delete: {
+        parameters: {
+            query: {
+                name: string;
+                recursive?: boolean;
+            };
+            header?: {
+                "if-match"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 请求内容不符合业务规则 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 缺少或提供了无效的商家凭证 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权访问该资源或管理端点 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 幂等键冲突或同一请求正在处理中 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源已被其他维护者更新 */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求缺少条件版本 */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    compress_memory_api_admin_knowledge_memories_compress_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemoryCompressRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryCompressResponse"];
+                };
+            };
+            /** @description 缺少或提供了无效的商家凭证 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权访问该资源或管理端点 */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

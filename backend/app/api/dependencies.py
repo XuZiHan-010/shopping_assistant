@@ -5,8 +5,9 @@ from __future__ import annotations
 import hmac
 from collections.abc import AsyncIterator
 from typing import Annotated, cast
+from uuid import UUID
 
-from fastapi import Depends, Request
+from fastapi import BackgroundTasks, Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,16 +30,20 @@ from app.llm.guard import LlmCostGuard
 from app.metrics.catalog import MetricCatalog
 from app.models.conversation import Conversation
 from app.repositories.analytics import AnalyticsRepository
+from app.repositories.answer import AnswerRepository
 from app.repositories.audit import AuditRepository
 from app.repositories.conversation import ConversationRepository
 from app.repositories.export import ExportRepository
 from app.repositories.knowledge import KnowledgeRepository
 from app.repositories.llm_budget import LlmBudgetRepository
+from app.repositories.memory import MerchantMemoryRepository
 from app.repositories.merchant import MerchantRepository
 from app.repositories.metric import MetricRepository
 from app.services.chat_service import ChatService
 from app.services.export_service import ExportService
+from app.services.memory_agent import MemoryAgent
 from app.services.merchant_scope import MerchantScopeService
+from app.services.report_service import DailyReportService
 from app.services.safe_query import SafeQueryService
 
 _bearer = HTTPBearer(auto_error=False)
@@ -124,12 +129,38 @@ def require_admin_token(
         raise AdminForbiddenError
 
 
-def get_chat_service(
+def build_guarded_llm(
+    settings: Settings,
+    database: Database,
+    *,
+    request_id: str,
+    merchant_id: UUID,
+) -> LlmCostGuard:
+    """构造带费用守卫的模型客户端。
+
+    merchant_id 必须是已确认存在的商家：它决定 token 用量与每日预算的归属，
+    不能直接采信请求体（R5）。
+    """
+
+    raw: LlmClient = (
+        DeepSeekLlmClient(settings) if settings.llm_api_key else FakeLlmClient(configured=False)
+    )
+    return LlmCostGuard(
+        raw,
+        LlmBudgetRepository(database),
+        settings,
+        request_id=request_id,
+        merchant_id=merchant_id,
+    )
+
+
+async def get_chat_service(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_db_session)],
     database: Annotated[Database, Depends(get_database)],
     settings: Annotated[Settings, Depends(get_app_settings)],
     context: Annotated[MerchantContext, Depends(get_merchant_context)],
+    background: BackgroundTasks,
 ) -> ChatService:
     """构造请求级 ChatService；B3 起由 MerchantQaGraph 处理问题。
 
@@ -138,20 +169,22 @@ def get_chat_service(
     那是可以被前端随意篡改的输入。
     """
 
-    raw_llm: LlmClient = (
-        DeepSeekLlmClient(settings) if settings.llm_api_key else FakeLlmClient(configured=False)
-    )
-    guard = LlmCostGuard(
-        raw_llm,
-        LlmBudgetRepository(database),
+    guard = build_guarded_llm(
         settings,
+        database,
         request_id=str(request.state.request_id),
         merchant_id=context.merchant_id,
     )
     llm: LlmClient = guard
     conversations = ConversationRepository(session)
+    merchant_summaries = await MerchantRepository(session).list_demo_by_ids([context.merchant_id])
+    merchant_display = merchant_summaries[0].display_name if merchant_summaries else "商家"
     graph = MerchantQaGraph(
-        retrieval=KnowledgeRetrieval(KnowledgeRepository(session)),
+        retrieval=KnowledgeRetrieval(
+            KnowledgeRepository(session),
+            memories=MerchantMemoryRepository(session),
+            merchant_id=context.merchant_id,
+        ),
         intent_service_llm=llm,
         catalog=MetricCatalog(MetricRepository(session), llm),
         max_llm_calls=settings.llm_max_calls_per_request,
@@ -164,6 +197,7 @@ def get_chat_service(
         reviewer_llm=llm,
         quality_max_attempts=settings.quality_max_attempts,
         node_timer=request.app.state.metrics,
+        history_questions=AnswerRepository(session),
     )
     return ChatService(
         session,
@@ -174,6 +208,14 @@ def get_chat_service(
         guard,
         guard,
         metrics=request.app.state.metrics,
+        memory_agent=MemoryAgent(
+            background=background,
+            database=database,
+            settings=settings,
+            merchant_id=context.merchant_id,
+            merchant_display=merchant_display,
+            request_id=str(request.state.request_id),
+        ),
     )
 
 
@@ -188,6 +230,20 @@ def get_conversation_repository(
     session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> ConversationRepository:
     return ConversationRepository(session)
+
+
+def get_daily_report_service(
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> DailyReportService:
+    """日报不使用 LLM；只装配受控经营数据与会话持久化依赖。"""
+
+    return DailyReportService(
+        session,
+        ConversationRepository(session),
+        AnalyticsRepository(session),
+        business_timezone=settings.business_timezone,
+    )
 
 
 def get_conversation_scope_service(

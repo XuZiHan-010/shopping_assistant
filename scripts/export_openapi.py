@@ -35,6 +35,8 @@ def export_settings() -> Settings:
         app_env="test",
         database_url="postgresql+psycopg://user:pass@localhost/test",
         frontend_origin="http://localhost:5173",
+        # 管理端路由按 ADMIN_TOKEN 条件挂载；导出契约必须包含已实现的后台接口。
+        admin_token="openapi-export-admin-token",
     )
 
 

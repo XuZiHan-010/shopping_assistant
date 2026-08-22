@@ -648,24 +648,22 @@ attachments
 | P0 | `GET` | `/api/health` | — | — | `HealthResponse` | — |
 | P0 | `GET` | `/api/ready` | — | — | `ReadyResponse` | 503 |
 | P0 | `GET` | `/api/admin/ops/status` | A | — | `OpsStatusResponse` | 401 403 |
-| P1 | `GET` | `/api/reports/daily` | M | 日期参数 | `DailyReportResponse` | 401 422 |
+| P1 | `GET` | `/api/reports/daily` | M | 无参数；业务时区昨日由后端固定 | `DailyReportResponse` | 401 422 429 500 503 |
 | P1 | `POST` | `/api/attachments` | M | `multipart/form-data` | `AttachmentResponse` | 401 413 415 422 429 |
 | P1 | `GET` | `/api/attachments/{id}` | M | — | `AttachmentResponse` | 401 403 404 |
 | P1 | `DELETE` | `/api/attachments/{id}` | M | — | `204` | 401 403 404 409 |
-| P1 | `GET` | `/api/memories` | M | 分页与业务域参数 | `MemoryListResponse` | 401 |
-| P1 | `PATCH` | `/api/memories/{id}` | M | `MemoryCorrection` | `MemoryResponse` | 401 403 404 422 |
-| P1 | `DELETE` | `/api/memories/{id}` | M | — | `204` | 401 403 404 |
 | P1 | `GET` | `/api/admin/knowledge/tree` | A | — | `KnowledgeTreeResponse` | 401 403 |
 | P1 | `GET` | `/api/admin/knowledge/documents/{id}` | A | — | `KnowledgeDocumentResponse` | 401 403 404 |
 | P1 | `POST` | `/api/admin/knowledge/documents` | A | `KnowledgeDocumentCreate` | `KnowledgeDocumentResponse` | 401 403 422 |
 | P1 | `PUT` | `/api/admin/knowledge/documents/{id}` | A | `KnowledgeDocumentUpdate` | `KnowledgeDocumentResponse` | 401 403 404 409 422 |
 | P1 | `DELETE` | `/api/admin/knowledge/documents/{id}` | A | — | `204` | 401 403 404 |
+| P1 | `POST` | `/api/admin/knowledge/memories/compress` | A | `MemoryCompressRequest` | `MemoryCompressResponse` | 401 403 404 422 |
 
 说明：
 
 - **没有** `GET /api/admin/knowledge/documents` 列表接口，目录由 `tree` 提供；
 - `PUT` 知识文档使用乐观锁或 ETag，版本冲突返回 `409`；
-- `/api/memories` 三条是商家自己的记忆，用商家 Token 而非管理员令牌——记忆归商家所有，管理员不应替商家改记忆。语义见 §9 B8「商家记忆闭环」；
+- `/api/admin/knowledge/memories/compress` 使用 `X-Admin-Token` 对指定商家分类执行人工重压；先写独立审计日志再提交记忆，模型不可用时响应必须返回 `degraded=true` 与原因；
 - `/api/admin/ops/status` 见 §9 B7 的运维端点定义；
 - 每条路由至少有一条"未认证"、一条"跨商家越权"用例，越权必须返回 `403` 并写 `audit_logs`。
 
@@ -1567,14 +1565,12 @@ PRD 的里程碑是 M0–M4 完成 MVP 并上线，M5 才是 P1。把 Railway �
 
 ### Daily Report
 
-- [ ] `GET /api/reports/daily`；
-- [ ] 昨日核心指标；
-- [ ] 摘要；
-- [ ] 至少两条建议；
-- [ ] **日报建议复用回答反馈通道**：日报响应返回可反馈的 `answer_id`，前端"采纳"直接调用 `POST /api/answers/{id}/feedback`，不新增反馈接口；
-- [ ] 无数据日报；
-- [ ] 昨日区间按业务时区 `Asia/Shanghai` 计算；
-- [ ] 定时 Worker。
+- [x] `GET /api/reports/daily`：仅商家认证，不接受 `merchant_id` 或日期参数，固定返回业务时区昨日；
+- [x] 按固定顺序返回 `gmv` 、`ordering_user_count` 、`order_count` 、`successful_order_count` 、`return_count` 、`refund_amount`；响应的 `metrics` 是含 `metric_code` 的数组；
+- [x] 日报建议固定两条：第一条按退款金额分支，第二条仅按工单占订单量是否超过 20% 分支；无近七日数据或查询失败均显式降级，不伪造零指标；
+- [x] 为每个商家建立唯一 `DAILY_REPORT` 系统会话；`daily-report:{report_date}` 复用既有 `answers` 幂等约束，并发首次请求回读胜出的已物化结果；
+- [x] **日报建议复用回答反馈通道**：日报响应返回可反馈的 `answer_id`，前端"采纳"直接调用 `POST /api/answers/{id}/feedback`，不新增反馈接口；
+- [x] 本阶段不引入 Railway Cron、Worker、Redis 或推送；按需在后续业务要求中另行设计。
 
 ### Attachment API
 
@@ -1630,34 +1626,24 @@ B3 建立的是六种 `AnswerMode`，本阶段扩展为七种。仅在 ChatRespo
 
 ### 商家记忆闭环
 
-当前只有 `merchant_memories` 表和"检索时可读取"，不足以实现。P1 需要完整链路：
+**已完成（2026-08-20）**：`merchant_memories` 已由独立迁移创建；成功回答持久化后通过
+`BackgroundTasks` 异步提交 `MemoryAgent`，使用独立数据库 Session 与单次 LLM 预算完成按
+`(merchant_id, category)` 覆盖式压缩。团队知识优先，未命中才按已验证的 `merchant_id` 读取记忆，
+命中记忆时 `analysis_sources` 返回 `MEMORY`；每日预算耗尽、数据库或模型异常只记录日志，绝不影响主回答。
+本轮没有调用真实模型，记忆压缩的真实模型验收仍须按 R3 单独申报。
+
+仍未实现的 P1 后续能力如下：
 
 | 环节 | 要求 |
 | --- | --- |
-| Memory Extraction | 从**已成功回答的会话**中提取，不从原始用户输入直接提取；有独立 Prompt 和 Pydantic Schema |
+| Memory Extraction | ✅ 从**已成功回答的会话**中提取，不从原始用户输入直接提取；有独立 Prompt；真实模型验收待 R3 单独申报 |
 | Memory Validation | 提取结果必须通过结构校验和白名单检查；**不得把未审核的模型输出升级为团队知识** |
-| Memory Persistence | 写入时机为一轮问答成功落库之后的异步任务；带幂等键，重试不产生重复记忆 |
-| Memory Retrieval | 检索优先级：团队知识 > 商家记忆；命中记忆时 `analysis_sources` 含 `MEMORY` |
-| Memory Deletion | 见下方 API；**删除会话时同时删除由该会话产生的记忆** |
-
-记忆必须对商家可见可控，否则它就是个不可审查的黑盒。三条正式接口（已进 §8.0 路由表，用商家 Token）：
-
-| 方法 | 路径 | 用途 |
-| --- | --- | --- |
-| `GET` | `/api/memories` | 列出本商家记忆，支持按业务域筛选与分页；返回内容、来源会话 ID、生成时间、状态 |
-| `PATCH` | `/api/memories/{id}` | **纠错**：修正内容或置为 `INVALIDATED`，请求体 `MemoryCorrection` |
-| `DELETE` | `/api/memories/{id}` | 删除单条记忆 |
-
-- [ ] 记忆状态：`ACTIVE`、`INVALIDATED`（商家标记失效，保留痕迹但不再召回）；
-- [ ] `PATCH` 修正后的内容**不再经过模型改写**，直接作为事实存储，并标记为商家确认；
-- [ ] 商家确认过的记忆在检索时优先级高于模型自动提取的记忆；
-- [ ] 三条接口全部强制 `merchant_id` 过滤，跨商家记忆 ID 返回 `403` 并写 `audit_logs`；
-- [ ] 删除和失效都要立刻影响后续召回，不依赖缓存过期。
-
+| Memory Persistence | ✅ 写入时机为一轮问答成功落库之后的异步任务；以 `(merchant_id, category)` 唯一约束保证覆盖写入 |
+| Memory Retrieval | ✅ 检索优先级：团队知识 > 商家记忆；命中记忆时 `analysis_sources` 含 `MEMORY` |
 - [ ] 压缩与去重：同一事实重复出现时合并，不无限增长；
 - [ ] 过期策略：超过保留期的记忆自动失效（清理策略本身属于 P2）；
 - [ ] 提取失败时静默降级，不影响主回答链路；
-- [ ] 必测：记忆提取、召回、列表、纠错、删除各一条；**跨商家记忆 ID 返回 403**；会话删除后记忆不再被召回；标记 `INVALIDATED` 后不再进入 Prompt。
+- [ ] 必测：记忆提取、召回、压缩各一条；提取失败不影响主回答，过期记忆不再进入 Prompt。
 
 ### Worker 独立工程
 
@@ -2004,6 +1990,19 @@ REQUEST_IN_PROGRESS
 EXPORT_LINK_EXPIRED
 HTTP_ERROR
 INTERNAL_ERROR
+INVALID_WIKI_PATH
+WIKI_READ_ONLY
+INVALID_FILE_TYPE
+INVALID_WIKI_PARENT
+WIKI_NODE_EXISTS
+WIKI_NODE_NOT_FOUND
+WIKI_DIRECTORY_NOT_EMPTY
+WIKI_VERSION_REQUIRED
+WIKI_VERSION_CONFLICT
+WIKI_DOCUMENT_TOO_LARGE
+INVALID_WIKI_ENCODING
+INVALID_WIKI_CONTENT
+WIKI_IO_ERROR
 ```
 
 **本表是后端错误码的唯一登记处。** 代码侧的唯一出处是 `app.core.errors.ErrorCode` 枚举，两者由

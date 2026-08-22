@@ -41,6 +41,7 @@ class DimensionSpec:
 METRIC_SPECS: Final[Mapping[str, MetricSpec]] = {
     "gmv": MetricSpec("gmv", "成交 GMV", "元", "orders", True),
     "order_count": MetricSpec("order_count", "订单量", "单", "orders", True),
+    "ordering_user_count": MetricSpec("ordering_user_count", "下单用户数", "人", "orders", False),
     "paying_user_count": MetricSpec("paying_user_count", "付款用户数", "人", "orders", False),
     "successful_order_count": MetricSpec(
         "successful_order_count", "成功订单量", "单", "orders", True

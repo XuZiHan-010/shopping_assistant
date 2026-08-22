@@ -81,11 +81,18 @@ class Settings(BaseSettings):
     # 1024 对推理模型是错的：2026-08-17 实测单次结构化意图光 reasoning_tokens 就要
     # 1400–2200，正文一个字都吐不出来，content 返回空串，三次重试全部失败后回落
     # CHAT 模式——每次提问真实扣费却只得到兜底文案。这是上限不是花费，留足即可。
-    llm_max_output_tokens_per_call: int = Field(default=4_096, ge=64, le=8_000)
+    # 4_096 同样不够：2026-08-22 真实模型验收发现环比/同比这类需要更多推理步骤的
+    # 回答生成（比较两个周期、算百分比、组织语言）会把 4_096 全部耗在推理上，
+    # 正文同样吐空，answer_service.py 把它当作模型不可用而降级为确定性摘要
+    # （这是 R7 要求的正确兜底，但让本可回答的问题白白降级）。提到本字段允许的
+    # 上限 8_000 留出足够推理余量；`remaining = budget.max_tokens - budget.tokens`
+    # 仍会在单请求预算耗尽时把它按比例砍下去，不会让单次调用绕开每请求上限。
+    llm_max_output_tokens_per_call: int = Field(default=8_000, ge=64, le=8_000)
     rate_limit_per_minute: int = Field(default=10, ge=1, le=10_000)
     trusted_proxy_hops: int = Field(default=0, ge=0, le=4)
     trusted_proxy_ips: str = ""
     admin_token: str | None = None
+    knowledge_max_document_bytes: int = Field(default=262_144, ge=1, le=2_097_152)
     export_signing_secret: str | None = None
     export_url_ttl_minutes: int = Field(default=15, ge=1, le=60)
 
