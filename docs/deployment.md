@@ -65,9 +65,11 @@ Railway 的 Config File Path 不跟随 Root Directory。即使 Service Root 已�
 | `TRUSTED_PROXY_HOPS=1` | Railway 单层代理。 |
 | `TRUSTED_PROXY_IPS` | **留空，不填任何值。** Railway 不发布稳定的边界代理地址；配置具体值会在重新部署后静默失效并导致限流退化，因此本项目明确不配置该变量。 |
 | `RATE_LIMIT_PER_MINUTE` | 单 Token 与可信 IP 的每分钟上限。 |
-| `LLM_DAILY_BUDGET_TOKENS` | **全局**每日模型 token 预算——`llm_daily_budget` 表只按 `usage_date` 聚合，不分商家、不分访客，公开演示时所有人共用这一个池子，它是唯一的总量闸门。默认 `500000` = 单请求上限 `20000` × 25，最坏情况也保证 25 个完整问题；按真实模型实测（每问约 6000 token）实际约 80 个。耗尽后所有人收到 `LLM_BUDGET_EXCEEDED` 的可见降级，不会静默继续扣费。 |
+| `LLM_DAILY_BUDGET_TOKENS` | **全局**每日模型 token 预算——`llm_daily_budget` 表只按 `usage_date` 聚合，不分商家、不分访客，公开演示时所有人共用这一个池子，它是唯一的总量闸门。默认 `500000` = 单请求上限 `25000` × 20，最坏情况也保证 20 个完整问题；按真实模型实测（每问约 6000 token）实际约 80 个。耗尽后所有人收到 `LLM_BUDGET_EXCEEDED` 的可见降级，不会静默继续扣费。 |
 | `LLM_MAX_OUTPUT_TOKENS_PER_CALL` | 默认 `8000`（字段允许的上限）。**推理模型不得低于此值**：`deepseek-v4-flash` 单次结构化意图的 `reasoning_tokens` 就要 1400–2200，设为 1024 时正文返回空串，三次重试全废、回落 CHAT 模式；2026-08-22 真实模型验收又发现环比/同比这类需要更多推理步骤的回答生成在 `4096` 下同样会把预算耗尽在推理上、正文吐空，因此把默认值提到上限。这是上限不是花费。 |
-| `MAX_LLM_TOKENS_PER_REQUEST` | 默认 `20000`，覆盖一轮问答 5–6 次推理调用。 |
+| `MAX_LLM_TOKENS_PER_REQUEST` | 默认 `25000`，覆盖一轮问答最坏 10 次模型请求。 |
+| `MAX_LLM_CALLS_PER_REQUEST` | 默认 `10`。最坏调用路径为 classify 2（业务关键词收到 `INVALID/UNKNOWN` 时重试 1 次）+ understand 3（意图服务自带 2 次重试）+ 指标口径 1 + （回答生成 + 独立复核）× 2 = 10 次，四个调用点共用同一个单请求预算。设低于 10 会让意图重试把质量循环挤成「预算耗尽」降级，把排查方向带偏。 |
+| `QUALITY_MAX_ATTEMPTS` | 回答质量循环的最大轮次，代码支持 1–3，默认 `2`。与 `MAX_LLM_CALLS_PER_REQUEST` 联动：每加一轮最多多 2 次模型请求；若设为 `3`，完整最坏路径为 12 次，必须同步提高调用上限。 |
 | `LLM_TIMEOUT_SECONDS` | 默认 `90`。推理模型出一次意图耗时明显；超时会被 `DeepSeekLlmClient` 吞成 fallback + degraded，表现为「模型没理解」而不是「超时」，很难查。 |
 
 现有代码已强制精确 CORS、生产 JSON 日志、`create_app()` 不启用 Debug，以及数据库连接重试。B8 附件功能尚未实现，不得把正式附件写入容器临时磁盘。
@@ -81,6 +83,29 @@ Railway 的 Config File Path 不跟随 Root Directory。即使 Service Root 已�
 因此上线后必须完成「转发头伪造验收」：经 Railway 公网域名，使用同一演示 Token，连续发送超过 `RATE_LIMIT_PER_MINUTE` 的请求，并在每次请求中更换 `X-Real-IP`；超限后仍必须返回 429。再以 `X-Forwarded-For` 重复同一测试。记录 429 的实际触发次序。该验收不需要 LLM Key，费用为零。
 
 若任一伪造头能够获得新限流桶（超限后未返回 429），立即将 Railway 配置改为 `TRUSTED_PROXY_HOPS=0`，接受限流收敛为按 Token 的已知可用性限制，并在 `docs/project-progress.md` 记录；后续在 F6 之后改用「按 XFF 最右跳解析」或引入 Redis 限流解决。在得到该实测证据前，不得宣告线上部署验收通过。
+
+## 演示数据的每日滚动
+
+演示库的经营数据有两个写入入口，**互斥**，不得同时生效：
+
+| 入口 | 用途 | 触发方式 |
+| --- | --- | --- |
+| `python -m app.jobs.seed_demo_rolling` | 唯一常态入口：补齐所有漏跑业务日、清理 180 天窗口外事实，历史分区一行不改写。 | 独立 Cron Service，每日 `10 16 * * *`（UTC，等于 Asia/Shanghai 00:10） |
+| `backend/scripts/seed_demo_analytics.py --force-full-rebuild` | 一次性整体重置：先 DELETE 六张经营表该商家全部行再重写。 | 仅人工执行，且必须先停用或跳过一次 Cron |
+
+全量重灌会连同已落库 `answers` 引用的数据依据一起抹掉，因此它已改为必须显式传 `--force-full-rebuild`，缺参数时直接非零退出。
+
+滚动任务的护栏（任一不满足即在写入前失败）：
+
+- `ALLOW_DEMO_DATA_REFRESH=true` 必须显式设置。它是**非密钥但高风险的写权限**，默认 false，绝不下发给前端或写进构建产物；
+- 数据库里的商家 UUID 集合必须与三个固定演示商家**精确相等**，多一个少一个都拒绝。真实商家数据库永远不得配置该 Cron Service；
+- 校验、追加与窗口清理在同一事务内完成，入口先取 `pg_advisory_xact_lock`，两个实例同时触发时第二个等待而不是交叉写入；
+- 只读取 `DATABASE_URL`、`APP_ENV`、`ALLOW_DEMO_DATA_REFRESH`、`BUSINESS_TIMEZONE` 四个变量（`app/core/seed_config.py` 的 `SeedSettings`），**不注入** `LLM_API_KEY`、`ADMIN_TOKEN`、`EXPORT_SIGNING_SECRET`、`FRONTEND_ORIGIN`；
+- 随机基线为 `DEMO_ANALYTICS_SEED_BASE = 20260804`，第 i 个演示商家用 `BASE + i`，与全量重灌脚本共用同一常量。
+
+任务本身不跑 Alembic 迁移：启用前先确认同环境 Backend 已迁移到位并通过 `/api/ready`，缺表时任务必须失败退出而不是自动修库。Railway Cron 按 UTC 调度、不保证精确到秒，上一次未结束时可能跳过本次，因此漏跑追赶是正确性要求而非容错优化。
+
+已新增 `backend/railway.cron.json`（无 `healthcheckPath`、无 `preDeployCommand`、`restartPolicyType: NEVER`），不复用 `backend/railway.json`。**Cron Service 尚未创建。** 创建 Service、配置上述四个变量与手工触发首次执行均为 Railway 控制台操作；完成后必须按本节的验收项核对。
 
 ## 运维验收
 

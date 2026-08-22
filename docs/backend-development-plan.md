@@ -705,7 +705,7 @@ attachments
 | `category` | `QuestionCategory \| null` | 是 | 业务分类枚举，见下方枚举表 |
 | `thinking_steps` | `list[ThinkingStep]` | 否 | 与 SSE `step` 事件同构，可为空数组 |
 | `quality_status` | `QualityStatus` | 否 | 见下方枚举 |
-| `quality_attempts` | `int` | 否 | Reviewer 尝试次数，0–2 |
+| `quality_attempts` | `int` | 否 | 质量循环尝试次数，0–3 |
 | `quality_notes` | `list[str]` | 否 | Reviewer 备注，**数组**，无备注时为空数组而非 `null`。语义说明也走这里，不新增 `semantic_notes` |
 | `analysis_sources` | `list[AnalysisSource]` | 否 | **有序数组**，主要来源在前，至少一个元素 |
 | `degraded` | `bool` | 否 | 是否降级 |
@@ -747,8 +747,8 @@ B2 的 Fake Agent 只覆盖 `TRADE`、`REFUND`、`PLATFORM_RULE` 三类场景与
 | --- | --- | --- |
 | 一次通过 | `PASSED` | 1 |
 | 重试后通过 | `PASSED` | 2 |
-| 重试后仍失败 | `FAILED` | 2 |
-| 校验后降级返回 | `DEGRADED` | 1 或 2 |
+| 重试后仍未通过 | `DEGRADED` | 2 或 3 |
+| 上游、预算或缺 Reviewer 降级 | `DEGRADED` | 0 至 3 |
 | 未执行校验 | `NOT_RUN` | 0 |
 
 `analysis_sources` 是数组而非单值，因为组合场景是常态：查了数据并引用了口径返回 `["DATABASE", "KNOWLEDGE"]`，附件联合分析返回 `["ATTACHMENT", "DATABASE"]`。
@@ -834,7 +834,7 @@ R9 补充约束：纯明细模式的 `answer` **必须是空字符串**且 `reco
 - `CHAT`、`INVALID` 返回 `["NONE"]` 且 `degraded=false` 时校验通过；
 - `NONE` 与其他来源共存时校验失败；
 - 含 `FALLBACK` 但 `degraded=false` 时校验失败；
-- `quality_attempts > 2` 时校验失败。
+- `quality_attempts > 3` 时校验失败。
 
 ## 8.3 Error Response
 
@@ -1360,7 +1360,7 @@ PostgreSQL 钉住的一条（`test_return_count_reads_returns_not_refunds`）。
 - [x] 创建 Recommendation Schema；
 - [x] 实现本地确定性校验；
 - [x] 实现独立 Reviewer；
-- [x] 固定最大尝试次数 `MAX_REVIEW_ATTEMPTS=2`；
+- [x] 可配置最大质量循环次数 `QUALITY_MAX_ATTEMPTS`（代码最多 3 轮）；
 - [x] 实现 `PASSED` / `DEGRADED` / `FAILED` / `NOT_RUN` **四种最终状态**（无 `RETRIED`，重试次数由 `quality_attempts` 表达，见 §8.2）；
 - [x] 保存 `quality_attempts` 和 `quality_notes`；
 - [x] 按实际使用的来源填充 `analysis_sources` 有序数组；
@@ -1394,8 +1394,8 @@ PostgreSQL 钉住的一条（`test_return_count_reads_returns_not_refunds`）。
 - 有数据回答至少两条建议；
 - 图表字段完全来自查询结果；
 - Reviewer 不重写回答；
-- 最多执行 2 次尝试，达到上限后不再重试；
-- 重试后通过返回 `PASSED` + `quality_attempts=2`，重试后失败返回 `FAILED` + `quality_attempts=2`；
+- 最多执行 `QUALITY_MAX_ATTEMPTS` 次尝试（代码最大 3），达到上限后返回确定性 `DEGRADED` 摘要；
+- 重试后通过返回 `PASSED`；上游、预算、缺 Reviewer 或校验用尽时返回可见的 `DEGRADED`；
 - Reviewer 不可用时返回显式 `DEGRADED`；
 - 回答记录保存最终候选和质量摘要。
 
@@ -1716,11 +1716,7 @@ START
   → retrieve_knowledge_detail     # 第二层：业务域已知，加载对应正文
   → query_data
   → compose_answer
-  → local_validate
-  → review_answer
-  → decide_retry                  # attempt < MAX_REVIEW_ATTEMPTS(=2) 才可重试
-      ├── retry → compose_answer
-      └── finish
+  → quality_loop                  # 生成 → 本地校验 → 独立复核 → 回喂重试
   → suggest_questions             # 从预置配置取，不调用 LLM
   → persist_answer
   → END
@@ -1865,7 +1861,7 @@ docker-compose -p borough up -d postgres
 - [ ] Reviewer 重试后失败（`FAILED` / attempts=2）；
 - [ ] Reviewer 降级（`DEGRADED`）；
 - [ ] Reviewer 未执行（`NOT_RUN` / attempts=0）；
-- [ ] 达到 `MAX_REVIEW_ATTEMPTS` 后不再重试；
+- [ ] 达到 `QUALITY_MAX_ATTEMPTS` 后返回确定性降级摘要；
 - [ ] 每日预算熔断后的降级；
 - [ ] `ATTACHMENT` 模式路由（P1）；
 - [ ] 商家记忆提取、召回、删除与跨商家隔离（P1）；
@@ -1936,8 +1932,8 @@ ADMIN_TOKEN=<development-placeholder>   # P0 起必需（运维端点），P1 �
 EXPORT_URL_TTL_MINUTES=15
 MAX_QUERY_DAYS=180
 MAX_DETAIL_ROWS=200
-MAX_REVIEW_ATTEMPTS=2
-MAX_LLM_CALLS_PER_REQUEST=6
+QUALITY_MAX_ATTEMPTS=3
+MAX_LLM_CALLS_PER_REQUEST=10
 MAX_LLM_TOKENS_PER_REQUEST=<int>
 LLM_DAILY_BUDGET_TOKENS=<int>
 RATE_LIMIT_PER_MINUTE=<int>

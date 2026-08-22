@@ -26,7 +26,6 @@ from app.intent.service import IntentService
 from app.knowledge.retrieval import KnowledgeResult, KnowledgeRetrieval, KnowledgeSource
 from app.llm.client import LlmBudget, LlmClient
 from app.metrics.catalog import MetricCatalog, MetricPayload
-from app.schemas.answer import AnswerDraft
 from app.schemas.chat import (
     AnalysisSource,
     AnswerMode,
@@ -41,6 +40,8 @@ from app.schemas.chat import (
     Visualization,
 )
 from app.services.answer_service import AnswerFacts, AnswerService
+from app.services.quality_loop import QualityLoop
+from app.services.quality_types import DegradeReason
 from app.services.review_service import ReviewService
 from app.services.safe_query import QueryResult, UnsupportedQueryError
 from app.services.suggested_questions import suggestions_for
@@ -76,8 +77,6 @@ class HistoryQuestionsLike(Protocol):
     ) -> list[str]: ...
 
 
-MAX_REVIEW_ATTEMPTS: Final[int] = 2
-
 #: 只在「查询服务根本没注入」时用（查询被拒时 `degraded_reason` 取
 #: `UnsupportedQueryError.reason`，那条更具体）。不写「将在某阶段接入」——受控查询
 #: 本身已经交付，这么说会让用户以为功能还没上线，而实际是这次请求没能查成。
@@ -91,9 +90,7 @@ GRAPH_NODES: Final[tuple[str, ...]] = (
     "retrieve_knowledge_detail",
     "query_data",
     "compose_answer",
-    "local_validate",
-    "review_answer",
-    "decide_retry",
+    "quality_loop",
     "suggest_questions",
     "persist_answer",
 )
@@ -106,9 +103,7 @@ _STEP_LABELS: Final[dict[str, str]] = {
     "retrieve_knowledge_detail": "读取业务知识正文",
     "query_data": "查询经营数据",
     "compose_answer": "整理回答",
-    "local_validate": "本地校验回答",
-    "review_answer": "复核回答质量",
-    "decide_retry": "判断是否需要重试",
+    "quality_loop": "校验并复核回答质量",
     "suggest_questions": "生成推荐问题",
     "persist_answer": "保存本轮回答",
 }
@@ -138,6 +133,7 @@ class MerchantQaGraph:
         reviewer_llm: LlmClient | None = None,
         answer_service: AnswerService | None = None,
         review_service: ReviewService | None = None,
+        quality_max_attempts: int = 3,
         visualization_service: VisualizationService | None = None,
         node_timer: NodeTimerLike | None = None,
         history_questions: HistoryQuestionsLike | None = None,
@@ -152,7 +148,11 @@ class MerchantQaGraph:
         self._answer_llm = answer_llm
         self._reviewer_llm = reviewer_llm
         self._answer_service = answer_service or AnswerService()
-        self._review_service = review_service or ReviewService()
+        self._quality_loop_service = QualityLoop(
+            max_attempts=quality_max_attempts,
+            answer_service=self._answer_service,
+            review_service=review_service,
+        )
         self._visualization_service = visualization_service or VisualizationService()
         self._node_timer = node_timer
         self._history_questions = history_questions
@@ -358,32 +358,17 @@ class MerchantQaGraph:
                 query_result=_required(state["query_result"]),
             )
             if self._answer_llm is not None:
-                composed = await self._answer_service.compose(
-                    facts,
-                    self._answer_llm,
-                    state["budget"],
-                )
                 return {
                     **self._step(state, "compose_answer"),
                     "answer_facts": facts,
-                    "candidate_answer": composed.draft.answer,
-                    "recommendations": composed.draft.recommendations,
+                    "candidate_answer": "",
+                    "recommendations": [],
                     "visualization": self._visualization_service.build(
                         facts.query_result,
                         facts.metric,
                     ),
                     "analysis_sources": [AnalysisSource.DATABASE],
-                    "quality_status": (
-                        QualityStatus.DEGRADED if composed.degraded else QualityStatus.NOT_RUN
-                    ),
-                    "quality_notes": [*state["quality_notes"], *composed.notes],
-                    "attempt": 1 if composed.degraded else 0,
-                    "degraded": state["degraded"] or composed.degraded,
-                    "degraded_reason": (
-                        "回答生成服务暂不可用，已返回受控数据摘要。"
-                        if composed.degraded
-                        else state["degraded_reason"]
-                    ),
+                    "quality_status": QualityStatus.NOT_RUN,
                 }
         if intent.answer_mode is AnswerMode.METRIC:
             answer = (
@@ -408,63 +393,27 @@ class MerchantQaGraph:
             answer = "该请求包含不受支持或不安全的查询字段，无法执行。"
         return {**self._step(state, "compose_answer"), "candidate_answer": answer}
 
-    async def _local_validate(self, state: AgentState) -> dict[str, object]:
-        # AnswerService 在模型草稿解析后立即校验；本节点保留可见轨迹。
-        return self._step(state, "local_validate")
-
-    async def _review_answer(self, state: AgentState) -> dict[str, object]:
+    async def _quality_loop(self, state: AgentState) -> dict[str, object]:
         facts = state["answer_facts"]
-        if facts is None or self._reviewer_llm is None or state["degraded"]:
-            return self._step(state, "review_answer")
-
-        draft = _draft_from_state(state)
-        first = await self._review_service.review(
-            draft,
-            self._answer_service.facts_json(facts),
-            self._reviewer_llm,
-            state["budget"],
+        if facts is None or self._answer_llm is None:
+            return self._step(state, "quality_loop")
+        outcome = await self._quality_loop_service.run(
+            facts, self._answer_llm, self._reviewer_llm, state["budget"]
         )
-        if first.degraded:
-            return _review_degraded(state, first.notes, 1)
-        if first.verdict.passed:
-            return {
-                **self._step(state, "review_answer"),
-                "quality_status": QualityStatus.PASSED,
-                "attempt": 1,
-            }
-
-        retried = await self._answer_service.compose(
-            facts, self._answer_llm_or_raise(), state["budget"]
-        )
-        if retried.degraded:
-            return _review_degraded(state, retried.notes, 2)
-        second = await self._review_service.review(
-            retried.draft,
-            self._answer_service.facts_json(facts),
-            self._reviewer_llm,
-            state["budget"],
-        )
-        if second.degraded:
-            return _review_degraded(state, second.notes, 2)
         return {
-            **self._step(state, "review_answer"),
-            "candidate_answer": retried.draft.answer,
-            "recommendations": retried.draft.recommendations,
-            "quality_status": QualityStatus.PASSED
-            if second.verdict.passed
-            else QualityStatus.FAILED,
-            "attempt": 2,
-            "quality_notes": [*state["quality_notes"], *second.verdict.issues],
+            **self._step(state, "quality_loop"),
+            "candidate_answer": outcome.draft.answer,
+            "recommendations": outcome.draft.recommendations,
+            "quality_status": outcome.status,
+            "attempt": outcome.attempts,
+            "quality_notes": [*state["quality_notes"], *outcome.notes],
+            "degraded": state["degraded"] or outcome.status is QualityStatus.DEGRADED,
+            "degraded_reason": (
+                _quality_degrade_reason(outcome.reason)
+                if outcome.reason is not None
+                else state["degraded_reason"]
+            ),
         }
-
-    async def _decide_retry(self, state: AgentState) -> dict[str, object]:
-        # 重试已在 review_answer 内受 MAX_REVIEW_ATTEMPTS=2 限制执行。
-        return self._step(state, "decide_retry")
-
-    def _answer_llm_or_raise(self) -> LlmClient:
-        if self._answer_llm is None:
-            raise RuntimeError("回答模型未注入")
-        return self._answer_llm
 
     async def _suggest_questions(self, state: AgentState) -> dict[str, object]:
         intent = _required(state["intent"])
@@ -671,28 +620,18 @@ class _QueryOutcome:
     succeeded: bool
 
 
-def _draft_from_state(state: AgentState) -> AnswerDraft:
-    return AnswerDraft(
-        answer=state["candidate_answer"],
-        recommendations=state["recommendations"],
-    )
-
-
 def _is_table_only_detail(intent: QueryIntent) -> bool:
     """判断是否只展示 DETAIL 表格；模型布尔值不参与任何查询标识符选择。"""
 
     return intent.answer_mode is AnswerMode.DETAIL and not intent.analysis_requested
 
 
-def _review_degraded(state: AgentState, notes: list[str], attempt: int) -> dict[str, object]:
+def _quality_degrade_reason(reason: DegradeReason) -> str:
     return {
-        **MerchantQaGraph._step(state, "review_answer"),
-        "quality_status": QualityStatus.DEGRADED,
-        "attempt": attempt,
-        "quality_notes": [*state["quality_notes"], *notes],
-        "degraded": True,
-        "degraded_reason": "回答质量复核服务暂不可用，已返回受控数据摘要。",
-    }
+        DegradeReason.UPSTREAM: "回答生成或独立复核暂不可用，已返回受控数据摘要。",
+        DegradeReason.BUDGET: "模型预算已达上限，已返回受控数据摘要。",
+        DegradeReason.VALIDATION: "回答未通过质量校验，已返回受控数据摘要。",
+    }[reason]
 
 
 def _response_quality(state: AgentState, outcome: _QueryOutcome) -> QualityStatus:

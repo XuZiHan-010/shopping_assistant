@@ -164,7 +164,7 @@ class ChatResponse(BaseModel):
     category: QuestionCategory | None
     thinking_steps: list[ThinkingStep] = Field(default_factory=list)
     quality_status: QualityStatus
-    quality_attempts: int = Field(ge=0, le=2)
+    quality_attempts: int = Field(ge=0, le=3)
     quality_notes: list[str] = Field(default_factory=list)
     analysis_sources: list[AnalysisSource] = Field(min_length=1)
     degraded: bool
@@ -312,7 +312,7 @@ class ConversationAnswerPayload(BaseModel):
     answer_mode: AnswerMode
     thinking_steps: list[ThinkingStep] = Field(default_factory=list)
     quality_status: QualityStatus
-    quality_attempts: int = Field(ge=0, le=2)
+    quality_attempts: int = Field(ge=0, le=3)
     quality_notes: list[str] = Field(default_factory=list)
     degraded: bool
     degraded_reason: str | None

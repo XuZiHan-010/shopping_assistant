@@ -7,7 +7,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from enum import StrEnum
+from typing import Literal, Protocol
 
 
 class LlmUnavailableError(RuntimeError):
@@ -24,6 +25,30 @@ class LlmBudgetExceededError(LlmBudgetError):
 
 class LlmDailyBudgetExceededError(LlmBudgetError):
     """每日全局 LLM 费用预算已耗尽。"""
+
+
+class LlmFailureKind(StrEnum):
+    """可安全记录和对外归因的上游失败类型。"""
+
+    HTTP_401 = "HTTP_401"
+    HTTP_403 = "HTTP_403"
+    HTTP_429 = "HTTP_429"
+    HTTP_OTHER = "HTTP_OTHER"
+    TIMEOUT = "TIMEOUT"
+    NETWORK = "NETWORK"
+    BAD_PAYLOAD = "BAD_PAYLOAD"
+
+
+@dataclass(frozen=True)
+class LlmCallOptions:
+    """单次模型调用的可选上游能力，默认保持普通对话行为。"""
+
+    json_output: bool = False
+    thinking: Literal["enabled", "disabled"] = "enabled"
+
+
+STRUCTURED_CALL_OPTIONS = LlmCallOptions(json_output=True, thinking="disabled")
+DEFAULT_LLM_CALL_OPTIONS = LlmCallOptions()
 
 
 @dataclass
@@ -49,6 +74,10 @@ class LlmResult:
     text: str
     tokens: int
     degraded: bool
+    input_tokens: int = 0
+    output_tokens: int = 0
+    failure_kind: LlmFailureKind | None = None
+    usage_known: bool = False
 
 
 class LlmClient(Protocol):
@@ -61,4 +90,5 @@ class LlmClient(Protocol):
         user: str,
         fallback: str,
         budget: LlmBudget,
+        options: LlmCallOptions = DEFAULT_LLM_CALL_OPTIONS,
     ) -> LlmResult: ...

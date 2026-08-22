@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import json
+from datetime import date
+from uuid import UUID
 
 import pytest
 
+from app.core.config import AppEnvironment, Settings
 from app.intent.models import QueryIntent
-from app.llm.client import LlmBudget
+from app.llm.client import STRUCTURED_CALL_OPTIONS, LlmBudget
 from app.llm.fake import FakeLlmClient
+from app.llm.guard import LlmCostGuard
 from app.metrics.catalog import GENERATED_NOTICE, MetricCatalog
 from app.metrics.field_comments import FIELD_COMMENT_DEFINITIONS
 from app.schemas.chat import AnswerMode, QuestionCategory
@@ -32,6 +36,26 @@ class _FakeMetricRepository:
 
     async def get_by_code(self, metric_code: str) -> _FakeMetricRow | None:
         return self._rows.get(metric_code)
+
+
+class _UsageRecordingBudgetRepository:
+    """记录费用守卫写入的用量，避免指标目录绕过统一审计入口。"""
+
+    def __init__(self) -> None:
+        self.usage_rows: list[dict[str, object]] = []
+
+    async def reserve(self, *, usage_date: date, tokens: int, budget: int) -> int:
+        del usage_date, budget
+        return tokens
+
+    async def reconcile(self, *, usage_date: date, delta: int) -> None:
+        del usage_date, delta
+
+    async def snapshot(self, *, usage_date: date) -> object:
+        raise AssertionError("本测试不应读取每日快照")
+
+    async def record_usage(self, **row: object) -> None:
+        self.usage_rows.append(row)
 
 
 def _intent(metric: str | None) -> QueryIntent:
@@ -66,7 +90,8 @@ async def test_generated_metric_is_explicitly_unverified() -> None:
     generated = json.dumps(
         {"display_name": "临时口径", "unit": "单", "definition": "由模型生成"}, ensure_ascii=False
     )
-    catalog = MetricCatalog(_FakeMetricRepository({}), FakeLlmClient(responses=[generated]))
+    llm = FakeLlmClient(responses=[generated])
+    catalog = MetricCatalog(_FakeMetricRepository({}), llm)
 
     payload = await catalog.resolve(_intent("unknown_metric_1d"), "知识正文", _budget())
 
@@ -76,6 +101,43 @@ async def test_generated_metric_is_explicitly_unverified() -> None:
     assert payload.source == "AI_GENERATED"
     assert payload.notice == GENERATED_NOTICE
     assert "yshopping" not in payload.notice.lower()
+    assert llm.call_options == [STRUCTURED_CALL_OPTIONS]
+
+
+@pytest.mark.asyncio
+async def test_generated_metric_records_usage_through_the_shared_cost_guard() -> None:
+    """三级检索的 LLM 兜底也必须经过与主流程相同的用量审计。"""
+
+    raw_llm = FakeLlmClient(
+        responses=[json.dumps({"display_name": "临时口径", "unit": "元", "definition": "说明"})],
+        tokens_per_call=37,
+    )
+    repository = _UsageRecordingBudgetRepository()
+    settings = Settings(
+        app_env=AppEnvironment.TEST,
+        database_url="postgresql+psycopg://user:pass@localhost/db",
+        frontend_origin="https://merchant.example.com",
+        llm_daily_budget_tokens=1_000,
+        llm_max_output_tokens_per_call=200,
+    )
+    catalog = MetricCatalog(
+        _FakeMetricRepository({}),
+        LlmCostGuard(
+            raw_llm,
+            repository,  # type: ignore[arg-type]
+            settings,
+            request_id="metric-catalog-test",
+            merchant_id=UUID("00000000-0000-0000-0000-000000000001"),
+        ),
+    )
+
+    payload = await catalog.resolve(_intent("unknown_metric_1d"), "知识正文", _budget())
+
+    assert payload is not None
+    assert raw_llm.calls
+    assert len(repository.usage_rows) == 1
+    assert repository.usage_rows[0]["total_tokens"] == 37
+    assert repository.usage_rows[0]["status"] == "SUCCEEDED"
 
 
 @pytest.mark.asyncio
@@ -117,3 +179,28 @@ async def test_invalid_llm_json_does_not_emit_a_metric_payload() -> None:
     catalog = MetricCatalog(_FakeMetricRepository({}), FakeLlmClient(behaviour="invalid_json"))
 
     assert await catalog.resolve(_intent("unknown_metric_1d"), "", _budget()) is None
+
+
+@pytest.mark.asyncio
+async def test_empty_llm_content_does_not_emit_a_metric_payload() -> None:
+    """空正文与非法 JSON 一样不能成为临时指标口径。"""
+
+    catalog = MetricCatalog(_FakeMetricRepository({}), FakeLlmClient(responses=[""]))
+
+    assert await catalog.resolve(_intent("unknown_metric_1d"), "", _budget()) is None
+
+
+@pytest.mark.asyncio
+async def test_generated_metric_prompt_carries_a_full_json_example() -> None:
+    """只报字段名不给形状，模型就会自造嵌套结构（2026-08-17 的 understand 事故同因）。"""
+
+    from app.metrics.catalog import METRIC_CATALOG_EXAMPLE
+
+    llm = FakeLlmClient(responses=[METRIC_CATALOG_EXAMPLE])
+    catalog = MetricCatalog(_FakeMetricRepository({}), llm)
+
+    payload = await catalog.resolve(_intent("unknown_metric_1d"), "知识正文", _budget())
+
+    assert METRIC_CATALOG_EXAMPLE in llm.calls[0][1]
+    assert payload is not None
+    assert payload.display_name == "退货量"

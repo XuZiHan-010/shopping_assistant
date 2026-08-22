@@ -88,7 +88,7 @@ const semanticGuard = z
       .number()
       .int()
       .min(0, 'quality_attempts 不能为负')
-      .max(2, 'quality_attempts 最多为 2'),
+      .max(3, 'quality_attempts 最多为 3'),
     degraded: z.boolean(),
     degraded_reason: z.string().nullable().optional(),
   })

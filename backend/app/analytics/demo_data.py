@@ -24,6 +24,10 @@ _LOGISTICS_STATUSES = ("PENDING", "SHIPPED", "DELIVERED", "LOST")
 _TICKET_STATUSES = ("OPEN", "PENDING", "RESOLVED", "CLOSED")
 _TICKET_REASONS = ("物流查询", "退款进度", "商品咨询", "投诉建议")
 _CITIES = ("杭州市", "深圳市", "广州市", "成都市", "武汉市")
+DEMO_CATALOG_EPOCH = date(2026, 1, 1)
+#: 演示经营数据的随机基线：第 i 个演示商家用 BASE + i。
+#: 全量重灌脚本与每日滚动 Job 必须共用它，否则新旧两段历史会落在两条随机序列上。
+DEMO_ANALYTICS_SEED_BASE = 20260804
 
 
 @dataclass(frozen=True)
@@ -57,19 +61,19 @@ def _row_id(rng: random.Random) -> UUID:
     return UUID(int=rng.getrandbits(128), version=4)
 
 
-def build_demo_dataset(
-    *,
-    merchant_id: UUID,
-    end_date: date,
-    days: int = 180,
-    seed: int,
-) -> DemoDataset:
-    rng = random.Random(seed)
-    start_date = end_date - timedelta(days=days - 1)
+def _day_rng(merchant_id: UUID, business_day: date, seed: int) -> random.Random:
+    """同一商家同一业务日使用固定随机序列，与生成窗口无关。"""
 
+    return random.Random(f"{seed}:{merchant_id}:{business_day.isoformat()}")
+
+
+def build_demo_catalog(*, merchant_id: UUID, seed: int) -> list[dict[str, object]]:
+    """生成稳定的商品目录，绝不随事实窗口或业务日改变。"""
+
+    rng = random.Random(f"{seed}:{merchant_id}:catalog")
     products: list[dict[str, object]] = []
     for index in range(24):
-        listed_day = start_date + timedelta(days=rng.randrange(days))
+        listed_day = DEMO_CATALOG_EPOCH + timedelta(days=rng.randrange(180))
         products.append(
             {
                 "id": _row_id(rng),
@@ -84,6 +88,21 @@ def build_demo_dataset(
                 "listed_at": _utc_moment(listed_day, 10, 0),
             }
         )
+    return products
+
+
+def build_demo_dataset(
+    *,
+    merchant_id: UUID,
+    end_date: date,
+    days: int = 180,
+    seed: int,
+    catalog: list[dict[str, object]] | None = None,
+) -> DemoDataset:
+    start_date = end_date - timedelta(days=days - 1)
+    products = (
+        catalog if catalog is not None else build_demo_catalog(merchant_id=merchant_id, seed=seed)
+    )
 
     orders: list[dict[str, object]] = []
     order_items: list[dict[str, object]] = []
@@ -93,6 +112,8 @@ def build_demo_dataset(
 
     for offset in range(days):
         business_day = start_date + timedelta(days=offset)
+        rng = _day_rng(merchant_id, business_day, seed)
+        ticket_sequence = 0
         # 周末单量略高，让「最近 7 天趋势」这类问题有可见的形状。
         daily_orders = rng.randrange(6, 14) + (3 if business_day.weekday() >= 5 else 0)
 
@@ -145,7 +166,10 @@ def build_demo_dataset(
             # 三类售后样本按固定比例产出，保证「只退款」「只退货」「退货并退款」都存在。
             draw = rng.random()
             item = item_rows[0]
-            refund_day = min(business_day + timedelta(days=rng.randrange(1, 6)), end_date)
+            # 售后事件与来源订单同日：这样一个业务日的全部事实自成一个分区，既让同一天
+            # 无论在哪个窗口里生成都完全一致（滚动 Seed 的前提），也让按业务日清理窗口外
+            # 数据时不会留下指向已删订单的悬空外键。代价是不再模拟跨日退款延迟。
+            refund_day = business_day
             if draw < 0.08:
                 refunds.append(_refund_row(merchant_id, item, refund_day, rng))
             elif draw < 0.14:
@@ -155,19 +179,20 @@ def build_demo_dataset(
                 returns.append(_return_row(merchant_id, item, refund_day, rng))
 
             if rng.random() < 0.10:
-                ticket_day = min(business_day + timedelta(days=rng.randrange(0, 4)), end_date)
+                ticket_day = business_day
                 tickets.append(
                     {
                         "id": _row_id(rng),
                         "merchant_id": merchant_id,
                         "business_date": ticket_day,
-                        "ticket_no": f"TK{ticket_day:%Y%m%d}{len(tickets):04d}",
+                        "ticket_no": f"TK{ticket_day:%Y%m%d}{ticket_sequence:04d}",
                         "order_id": order_id,
                         "ticket_status": _TICKET_STATUSES[rng.randrange(len(_TICKET_STATUSES))],
                         "ticket_reason": _TICKET_REASONS[rng.randrange(len(_TICKET_REASONS))],
                         "opened_at": _utc_moment(ticket_day, rng.randrange(9, 21), 0),
                     }
                 )
+                ticket_sequence += 1
 
     return DemoDataset(products, orders, order_items, refunds, returns, tickets)
 

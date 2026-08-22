@@ -86,6 +86,7 @@ class _MetricRow:
             if metric_code == "return_count"
             else "已支付订单金额之和。"
         )
+        self.sql_definition = ""
         self.source = "Borough 指标目录"
         self.owner = "经营分析组"
         self.status = "ACTIVE"
@@ -274,6 +275,11 @@ async def build_fixture(case: FixtureCase) -> ChatResponse:
         merchant_id=_FIXTURE_MERCHANT_ID,
         answer_llm=(
             FakeLlmClient(responses=[_answer_draft()])
+            if case.name in {"metric-refund", "metric-gmv", "detail-order"}
+            else None
+        ),
+        reviewer_llm=(
+            FakeLlmClient(responses=['{"passed":true,"issues":[]}'])
             if case.name in {"metric-refund", "metric-gmv", "detail-order"}
             else None
         ),

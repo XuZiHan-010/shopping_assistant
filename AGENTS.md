@@ -81,6 +81,7 @@ LLM_API_KEY                   [P0] DeepSeek API Key
 LLM_BASE_URL                  [P0] 固定为 https://api.deepseek.com
 DEMO_MERCHANT_TOKENS          [P0] 演示 Token 到 merchant_id 的映射
 DEMO_DEPLOYMENT_MODE          [P0] 对外演示部署时显式开放生产环境的演示商家端点，默认 false
+ALLOW_DEMO_DATA_REFRESH       [P0] 非密钥但高风险的演示数据写权限；仅独立 Cron 使用，默认 false，绝不暴露给前端
 ADMIN_TOKEN                   [P0] 运维端点；[P1] 兼作知识库后台管理员令牌；请求头 X-Admin-Token
 REDIS_URL                     [P1]
 OBJECT_STORAGE_ACCESS_KEY     [P1]
@@ -587,6 +588,7 @@ OpenAPI → api/generated.ts → api/adapters/*.ts → types/*.ts → Store → 
 | --- | --- |
 | `backend/app/main.py` | 创建 FastAPI 应用、注册路由、中间件和生命周期 |
 | `backend/app/core/config.py` | 使用 Pydantic Settings 读取环境变量 |
+| `backend/app/core/seed_config.py` | 演示数据滚动 Cron 的最小配置，仅读取数据库与显式写权限 |
 | `backend/app/core/security.py` | 演示 Token 解析与商家身份校验 [P0]；管理员令牌 [P1]；JWT 属于 P2，MVP 不实现 |
 | `backend/app/core/logging.py` | 结构化日志与敏感字段脱敏 |
 | `backend/app/core/errors.py` | 统一业务异常和 API 错误格式 |
@@ -639,6 +641,7 @@ OpenAPI → api/generated.ts → api/adapters/*.ts → types/*.ts → Store → 
 | `backend/app/services/export_service.py` | P0 动态生成受权限保护的 CSV（不引入 S3 SDK）；P1 再增加对象存储和签名对象 URL |
 | `backend/app/services/report_service.py` | 每日经营报告 |
 | `backend/app/services/memory_service.py` | 商家记忆提取、压缩和召回（已实现） |
+| `backend/app/jobs/seed_demo_rolling.py` | 专用演示数据库的增量滚动 Seed；需显式写权限与商家集合精确匹配 |
 
 ### 8.5 数据库和 Repository
 
