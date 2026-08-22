@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -54,6 +55,8 @@ _UUID = re.compile(
 # B5 本地校验清单第 6 条。
 _ADDITIVE_CLAIM_PHRASES = ("合计", "总计", "累计", "总和", "加总", "汇总")
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True)
 class AnswerFacts:
@@ -79,6 +82,7 @@ class AnswerService:
         budget: LlmBudget,
     ) -> AnswerDraftResult:
         fallback = self._fallback(facts)
+        raw_text: str | None = None
         try:
             result = await llm.complete(
                 system=ANSWER_SYSTEM_PROMPT,
@@ -88,6 +92,7 @@ class AnswerService:
             )
             if result.degraded:
                 return _degraded(fallback)
+            raw_text = result.text
             draft = AnswerDraft.model_validate_json(result.text)
             self._validate(draft, facts)
         except LlmDailyBudgetExceededError:
@@ -96,7 +101,14 @@ class AnswerService:
                 degraded=True,
                 notes=["今日模型用量已达上限，本次只提供受控数据摘要"],
             )
-        except (ValueError, LlmUnavailableError, LlmBudgetError):
+        except (ValueError, LlmUnavailableError, LlmBudgetError) as error:
+            # 排查 2026-08-22 真实模型验收发现的问题：多行/环比查询下答案频繁降级。
+            # 草稿只在这里短暂存在于内存，不落库也不回传给商家——记日志才能看见
+            # 模型到底写了什么、被 _validate 的哪条规则拦下。
+            logger.warning(
+                "回答草稿校验失败，已降级为受控摘要",
+                extra={"error": str(error), "draft_text": raw_text},
+            )
             return _degraded(fallback)
         return AnswerDraftResult(draft=draft, degraded=False, notes=[])
 

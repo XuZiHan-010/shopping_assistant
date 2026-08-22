@@ -2,7 +2,7 @@
 
 > 本文件只保留当前可继续开发的事实快照，不追加每日流水账。
 
-**最后更新：2026-08-21**
+**最后更新：2026-08-22**
 
 ## 当前阶段
 
@@ -74,13 +74,52 @@ savepoint 隔离，统计查询失败只会回落静态推荐，不会污染主�
   持久化且 USER/ASSISTANT 消息均落库；
 - `uv run ruff check .`、`uv run ruff format --check .`、`uv run mypy app` 与前端
   `npm run codegen:check` 全绿；全程使用 Fake/Mock LLM，真实 DeepSeek 调用 **0**、费用 **0**。
-- 全程使用 Fake/Mock LLM，真实 DeepSeek 调用 **0**、费用 **0**。
 
 前端门禁**本轮未重跑**，以下结果仍是 2026-08-20 的快照，与本轮后端改动无关联：
 
 - 前端 `typecheck`、`lint`、`format:check`、`codegen:check`、`fixtures:check` 与 Vitest **271 passed** 全绿；
   `build` 与 `secrets:check` 全绿（仅既有 ECharts chunk size 非阻塞警告）；
 - `npx.cmd playwright test e2e/knowledge-base.spec.ts` **1 passed**。
+
+2026-08-22 复核（每日经营日报交付后，`046c32b` 已提交）：
+
+- 后端 `REQUIRE_INTEGRATION_DB=1 uv run pytest -q` **930 passed, 1 warning**、`ruff check`/
+  `ruff format --check`/`mypy app` 全绿；前端 `codegen:check`/`typecheck`/`lint`/`format:check`/
+  Vitest（**271 passed**）/`build`/`secrets:check` 全绿；均为 Mock/Fake LLM，零真实调用；
+- **B7 九题真实模型验收（T7）**：已按 R3 取得同意执行，`deepseek-v4-flash`，实际 29 次调用、
+  48,235 token，因触及自设 45,000 token 预算上限提前停止（7/9 题），停止时机符合约定；
+  已测 5 类 METRIC 中 2 类（按类目拆分、环比）返回 `degraded=true`。**已排查并修复根因**（见下）；
+- **根因排查**：先在 `answer_service.py` 加诊断日志、按 R3 追加同意后只重跑那 2 题定位。类目
+  拆分这次直接通过校验（证明当时是模型输出的偶发波动，不是系统性 bug）；环比复现降级，但诊断
+  日志完全没有被触发——说明失败发生在校验之前。追查到 `app/llm/deepseek.py:59` 的
+  `degraded = not bool(text)`：`deepseek-v4-flash` 是推理模型，环比这类需要比较两个周期、算
+  百分比的回答生成会把 `llm_max_output_tokens_per_call`（原 4096）全部耗在 reasoning 上，正文
+  返回空串，被判定为模型不可用而降级——**降级机制本身工作正确（R7），只是把本可回答的问题
+  错杀了**。**已修复该项**：`llm_max_output_tokens_per_call` 默认值提到字段上限 `8000`
+  （`backend/app/core/config.py`、`.env.example`、`docs/deployment.md` 已同步），本地全量门禁
+  （后端 930 passed、`ruff`/`mypy` 全绿）已重新验证。
+- **修复效果已用真实模型复测（同题再打 2 次）**：正文不再吐空——但**暴露出第二个、更深的根因**：
+  `QueryIntent`（`app/intent/models.py:102`）只有单一 `date_range` 字段，**整个系统没有"环比/
+  同比需要同时取两个可比周期"这个概念**。真实回答草稿显示模型为了回应"环比"，凭空编出了一个
+  "上月合计"数字去凑百分比（如实记录：草稿把 8 月至今与一个模型自称的 7 月合计对比算出
+  "下降约 31.8%"，但当次查询 `total_rows=1`，压根没有第二期数据支撑这个对比）——`_validate()`
+  正确识别出这是查询结果之外的数字并打回，**这次降级是校验机制的正确行为，不是 bug**。
+  真正缺失的是查询层从未按"环比/同比"取两个周期的数据。这是一个**需要单独设计的功能缺口**
+  （比照附件/Chat BI 的处理方式：先定契约再排实施计划），不是这次能顺手打的小补丁；
+  详见下方「下一步」第 6 条。
+- **T7 剩余 RULE、CHAT 两题已补测（5 次调用，6,932 token）**：CHAT 正常（`degraded=false`，
+  按 R1 中文问候）；**RULE 意外零命中**——`analysis_sources=["NONE"]`，`quality_notes` 显示
+  "未命中与当前问题相关的知识条目"，如实答复未能提供依据，未伪造规则内容（这本身是正确的
+  R7 行为）。但复核 `knowledge_documents` 表确认知识库**确实存在**对应内容（`GOODS` 分类
+  「商品规则」657 字、`PLATFORM_RULE` 分类「平台规则详解」267 字），说明问题出在**检索匹配
+  逻辑**，不是知识导入缺失。这是本轮测试新发现的问题，**按你的要求本轮不展开排查**，留作后续
+  排查任务；
+- **T7 最终结果（9/9 题已全部测过，跨两次会话）**：趋势 ✅、空结果 ✅、非加和 ✅、明细超限
+  截断 ✅（落入 `DETAIL` 而非 `METRIC`）、CHAT ✅；类目拆分：一次降级一次通过（模型输出
+  存在波动）；环比：两次均降级（第二层根因未解决前无法通过）；DETAIL（退款明细）`NOT_RUN`
+  （知识不完整提示）；RULE 零命中（检索缺陷，见上）。**T7 出口判据（6 条 METRIC 全部
+  `degraded=false`）尚未达成**，卡在环比的查询层缺口和 RULE 的检索缺陷这两处，均已排入
+  「下一步」，且都需要先设计/排查、不适合在测试阶段顺手改。
 
 ## 下一步
 
@@ -92,13 +131,28 @@ savepoint 隔离，统计查询失败只会回落静态推荐，不会污染主�
 3. ~~执行 `plans/2026-08-21-memory-compress-and-history-suggestions.md`~~ **已完成（2026-08-21）**：
    管理员手动压缩端点与历史高频「猜你想问」均已实现；
 4. ~~裁定并落地 `docs/specs/2026-08-21-daily-report-contract.md` 里的 8 个问题并实施每日经营报告（B8/F7）~~ **已完成（2026-08-21）**：Q1–Q8 均按 A 实现，日报前后端、Mock、并发幂等与采纳反馈已有定向测试；
-5. **T3**：`backend/app/metrics/catalog.py:99` 的 `complete()` 调用仍未上报 usage，
-   该次 token 落进未知，`llm_usage` 记账有洞；
-6. **B7 九题真实模型验收**（T7）：须先按 R3 说明模型、调用次数与预计费用并获明确许可；
-   预算配置已从计划预填值收敛为 `llm_max_calls_per_request=6`、`llm_max_tokens_per_request=20_000`，
-   但九题验收本身从未执行；
-7. P1 剩余的**附件**：参考项目有 `POST /api/attachments`，我方尚未实现对应服务；详细缺口清单见 `plans/2026-08-21-gap-roadmap.md` §2；
-8. 上线另需单独完成 Railway 环境变量、管理员令牌与真实数据库部署验收。
+5. ~~**T3**：`backend/app/metrics/catalog.py:99` 的 `complete()` 调用未上报 usage~~
+   **2026-08-22 复核：已由 `build_guarded_llm()` 的共享守卫解决**——`dependencies.py`
+   现在只构造一个 `LlmCostGuard` 实例（`guard`），意图识别、指标口径、回答生成、
+   Reviewer 与记忆压缩全部复用同一个，`MetricCatalog` 也不例外（唯一实例化点见
+   `dependencies.py:189`），因此没有绕开记账的调用路径；
+6. ~~**B7 九题真实模型验收**（T7）~~ **2026-08-22 已完成执行（9/9 题，跨两次会话，累计约 51 次
+   真实调用、约 94,200 token，均按 R3 逐次取得同意）**：`deepseek-v4-flash`。已修复
+   `llm_max_output_tokens_per_call`（4096→8000）解决的推理型答案正文吐空问题，真实复测确认
+   生效。**出口判据（6 条 METRIC 全部 `degraded=false`）尚未达成**，卡在两处均需要单独设计、
+   不适合顺手改的缺口：环比/同比缺失两期对比查询能力（见第 7 条）、RULE 检索零命中（见第 8 条）；
+7. **新增·环比/同比查询能力缺口**：`QueryIntent`（`app/intent/models.py:102`）没有"取两个可比
+   周期"的概念，模型被迫凭空编造对比数字，被 `_validate()` 正确拦下。需要先写设计说明（比照
+   `docs/specs/2026-08-21-daily-report-contract.md` 的方式）：`QueryIntent` 如何表达对比周期、
+   `SafeQueryService`/`AnalyticsRepository` 如何一次取两期数据、`_validate()` 如何放行由两期
+   真实数值算出的合法百分比（而不是简单放宽到允许任意数字）；
+8. **新增·RULE 知识检索零命中**：真实模型验收里"商品上架有哪些规则要求"返回
+   `analysis_sources=["NONE"]`，如实说未命中知识（正确的 R7 行为，没有编造规则），但
+   `knowledge_documents` 表里确认存在对应内容（`GOODS`「商品规则」657 字、`PLATFORM_RULE`
+   「平台规则详解」267 字）——问题出在检索/匹配逻辑，不是知识导入缺失，需要单独排查
+   `app/knowledge/retrieval.py` 为什么没匹配到这两篇；
+9. P1 剩余的**附件**：参考项目有 `POST /api/attachments`，我方尚未实现对应服务；详细缺口清单见 `plans/2026-08-21-gap-roadmap.md` §2；
+10. 上线另需单独完成 Railway 环境变量、管理员令牌与真实数据库部署验收。
 
 ## 风险与约束
 
