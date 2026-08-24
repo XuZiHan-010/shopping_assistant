@@ -3,6 +3,7 @@
 from app.models import (
     Answer,
     AuditLog,
+    ChatBiQaDaily,
     Conversation,
     ExportFile,
     Feedback,
@@ -26,6 +27,7 @@ __all__ = [
     "Answer",
     "AuditLog",
     "Base",
+    "ChatBiQaDaily",
     "Conversation",
     "ExportFile",
     "Feedback",

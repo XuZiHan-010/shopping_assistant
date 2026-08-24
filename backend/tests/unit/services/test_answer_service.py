@@ -620,3 +620,120 @@ def test_equivalent_decimal_display_forms_are_citable() -> None:
     forms = _numeric_forms(Decimal("15.00"))
 
     assert {"15", "15.0", "15.00"} <= forms
+
+
+def _comparison_facts(*, change_ratio: Decimal | None = Decimal("50.0")):
+    """D3 裁定：环比/同比事实包，两期数值与变化率均由查询层预先算好。"""
+
+    from datetime import date
+
+    from app.intent.models import ComparisonMode, DateRange
+    from app.services.answer_service import AnswerFacts
+    from app.services.safe_query import ComparisonResult
+
+    return AnswerFacts(
+        question="这个月GMV相比上个月环比变化多少",
+        metric=MetricPayload(
+            metric_code="gmv",
+            display_name="成交 GMV",
+            unit="元",
+            definition="已付款订单金额之和",
+            source="Borough 指标目录",
+            owner="经营分析组",
+            status="ACTIVE",
+            generated=False,
+            notice=None,
+        ),
+        query_result=QueryResult(
+            columns=(ResultColumn("gmv", "成交 GMV", "METRIC"),),
+            rows=[{"gmv": Decimal("150.00")}],
+            total_rows=1,
+            truncated=False,
+            source_tables=("orders",),
+            plan_steps=("按月汇总成交 GMV",),
+            export_spec=None,
+            notes=(),
+            non_additive=False,
+            comparison=ComparisonResult(
+                mode=ComparisonMode.PREVIOUS_PERIOD,
+                current_range=DateRange(start=date(2026, 8, 1), end=date(2026, 8, 22)),
+                baseline_range=DateRange(start=date(2026, 7, 1), end=date(2026, 7, 22)),
+                current_value=Decimal("150.00"),
+                baseline_value=Decimal("100.00"),
+                change_ratio=change_ratio,
+            ),
+        ),
+    )
+
+
+def test_comparison_change_ratio_computed_by_the_backend_is_citable() -> None:
+    """后端已经算出 50.0%，模型只是复述它，不应被判成编造数字。"""
+
+    from app.schemas.answer import AnswerDraft
+    from app.schemas.chat import Recommendation
+    from app.services.answer_service import AnswerService
+
+    draft = AnswerDraft(
+        answer="本月成交 GMV 为 150.00 元，环比上月的 100.00 元增长 50.0%。",
+        recommendations=[
+            Recommendation(title="关注环比", evidence="环比增长 50.0%。", action="持续观察。"),
+            Recommendation(title="核对基期", evidence="上月为 100.00 元。", action="核对口径。"),
+        ],
+    )
+
+    assert AnswerService()._validate(draft, _comparison_facts()) == []
+
+
+def test_comparison_ratio_the_model_invents_itself_is_rejected() -> None:
+    """基期无法计算变化率时（change_ratio=None），模型不得自己编一个百分比。
+
+    这正是 R4「模型不得推算对比结果」的落点：编出的 31.8% 不在允许集合里，
+    必须被 `_validate` 拦下，而不是被当成正常回答放行。
+    """
+
+    from app.schemas.answer import AnswerDraft
+    from app.schemas.chat import Recommendation
+    from app.services.answer_service import AnswerService
+
+    draft = AnswerDraft(
+        answer="本月成交 GMV 环比增长约 31.8%。",
+        recommendations=[
+            Recommendation(title="关注环比", evidence="环比增长 31.8%。", action="持续观察。"),
+            Recommendation(title="核对口径", evidence="基期数据缺失。", action="核对时间范围。"),
+        ],
+    )
+
+    issues = AnswerService()._validate(draft, _comparison_facts(change_ratio=None))
+
+    assert any("31.8" in issue for issue in issues)
+
+
+def test_facts_json_carries_the_comparison_object_for_the_model_to_cite() -> None:
+    from app.services.answer_service import AnswerService
+
+    payload = AnswerService().facts_json(_comparison_facts())
+
+    assert '"comparison"' in payload
+    assert '"change_ratio":"50.0"' in payload
+    assert '"baseline_value":"100.00"' in payload
+
+
+def test_fallback_reports_both_periods_and_the_change_ratio() -> None:
+    from app.services.answer_service import AnswerService
+
+    draft = AnswerService().fallback_draft(_comparison_facts())
+
+    assert "150.00" in draft.answer
+    assert "100.00" in draft.answer
+    assert "50.0%" in draft.answer
+
+
+def test_fallback_explains_when_the_baseline_makes_the_ratio_uncomputable() -> None:
+    """基期算不出比例时，兜底文案必须如实说明，不能假装给出了一个环比结论（R7）。"""
+
+    from app.services.answer_service import AnswerService
+
+    draft = AnswerService().fallback_draft(_comparison_facts(change_ratio=None))
+
+    assert "无法计算变化率" in draft.answer
+    assert "%" not in draft.answer

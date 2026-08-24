@@ -649,6 +649,9 @@ attachments
 | P0 | `GET` | `/api/ready` | — | — | `ReadyResponse` | 503 |
 | P0 | `GET` | `/api/admin/ops/status` | A | — | `OpsStatusResponse` | 401 403 |
 | P1 | `GET` | `/api/reports/daily` | M | 无参数；业务时区昨日由后端固定 | `DailyReportResponse` | 401 422 429 500 503 |
+| P1 | `GET` | `/api/admin/analytics/chatbi/overview` | A | `ChatBiWindow` 查询参数 | `ChatBiOverviewResponse` | 401 403 422 |
+| P1 | `GET` | `/api/admin/analytics/chatbi/categories` | A | `ChatBiWindow` 查询参数 | `ChatBiCategoriesResponse` | 401 403 422 |
+| P1 | `POST` | `/api/admin/analytics/chatbi/rollup` | A | `ChatBiWindow` | `ChatBiRollupResponse` | 401 403 422 |
 | P1 | `POST` | `/api/attachments` | M | `multipart/form-data` | `AttachmentResponse` | 401 413 415 422 429 |
 | P1 | `GET` | `/api/attachments/{id}` | M | — | `AttachmentResponse` | 401 403 404 |
 | P1 | `DELETE` | `/api/attachments/{id}` | M | — | `204` | 401 403 404 409 |
@@ -666,6 +669,17 @@ attachments
 - `/api/admin/knowledge/memories/compress` 使用 `X-Admin-Token` 对指定商家分类执行人工重压；先写独立审计日志再提交记忆，模型不可用时响应必须返回 `degraded=true` 与原因；
 - `/api/admin/ops/status` 见 §9 B7 的运维端点定义；
 - 每条路由至少有一条"未认证"、一条"跨商家越权"用例，越权必须返回 `403` 并写 `audit_logs`。
+
+### 8.0.1 Chat BI 衡量层契约
+
+三个端点的精确字段由 `app/schemas/analytics.py` 定义并以导出的 OpenAPI 为最终来源。`ChatBiWindow` 的 `start_date` 与 `end_date` 是闭区间，必须满足起日不晚于止日且窗口不超过 180 天；GET 端点使用查询参数，Rollup 使用 JSON 请求体。
+
+- `ChatBiOverviewResponse`：窗口、问答/业务问题/反馈/思考样本计数、六项北极星指标与每日趋势；
+- `ChatBiCategoriesResponse`：窗口与按问答量降序的分类项，每项带分类代码、中文展示名、问答量和六项指标；
+- `ChatBiRollupResponse`：已执行的窗口和写入行数；
+- 六项比率字段均为 `float | null`，其中 `null` 仅表示样本不足，前端必须区别于 0。
+
+看板响应不得包含 `merchant_id`、问题原文或回答正文；它只服务全平台质量聚合，不提供商家数据检索能力。
 
 ### 导出下载为什么不带 Bearer
 

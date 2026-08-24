@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 from datetime import date
 
+from app.intent.models import ComparisonMode
 from app.intent.whitelist import DIMENSION_WHITELIST, FILTER_WHITELIST, METRIC_WHITELIST
 from app.schemas.chat import AnswerMode, QuestionCategory
 
@@ -29,7 +30,7 @@ EXAMPLE_MARKER = "输出示例："
 _NO_MARKDOWN = "必须只输出单个 JSON 对象，不要输出 Markdown 代码围栏或任何解释文字。"
 
 
-def _values(enum: type[AnswerMode] | type[QuestionCategory]) -> str:
+def _values(enum: type[AnswerMode] | type[QuestionCategory] | type[ComparisonMode]) -> str:
     return "|".join(member.value for member in enum)
 
 
@@ -59,7 +60,12 @@ OUTPUT_CONTRACT = (
     "  needs_attachment      可选  布尔\n"
     "  cross_business_plan   可选  见上方跨业务说明\n"
     "  generated_metric_plan 可选  见上方生成指标说明\n"
+    f"  comparison            可选  枚举，取值之一：{_values(ComparisonMode)}，默认 NONE\n"
     "不得输出 intent、business_domain、metrics 等上表之外的字段。\n"
+    "\n"
+    "comparison 说明：问题里出现「环比」「同比」「和上个月比」「相比去年同期」这类\n"
+    "对比表述时才输出对应取值；只表达要不要对比、对比哪种周期，**不要自己计算或\n"
+    "编造基准期的日期、数值或变化百分比**——那些由后端查询和计算，你给了也会被拒收。\n"
 ) + _example(
     {
         "answer_mode": "METRIC",

@@ -1,6 +1,17 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 
+withDefaults(
+  defineProps<{
+    title?: string
+    eyebrow?: string
+  }>(),
+  {
+    title: '知识库维护后台',
+    eyebrow: 'BOROUGH · KNOWLEDGE OPS',
+  },
+)
+
 const emit = defineEmits<{ submit: [token: string] }>()
 const token = ref('')
 
@@ -12,9 +23,14 @@ function submit(): void {
 </script>
 
 <template>
-  <section class="admin-token-dialog" aria-labelledby="admin-token-title">
-    <p class="admin-token-dialog__eyebrow">BOROUGH · KNOWLEDGE OPS</p>
-    <h1 id="admin-token-title">知识库维护后台</h1>
+  <section
+    class="admin-token-dialog"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="admin-token-title"
+  >
+    <p class="admin-token-dialog__eyebrow">{{ eyebrow }}</p>
+    <h1 id="admin-token-title">{{ title }}</h1>
     <p>请输入管理员令牌后继续。令牌仅保留在当前页面内存中。</p>
     <form @submit.prevent="submit">
       <label for="admin-token">管理员令牌</label>

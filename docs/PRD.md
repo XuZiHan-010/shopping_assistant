@@ -579,6 +579,9 @@ SQL 口径回答“这个数怎么算出来的”。契约层不得把两者合�
 | 方法 | 接口 | 用途 |
 | --- | --- | --- |
 | `GET` | `/api/reports/daily` | 每日经营报告 |
+| `GET` | `/api/admin/analytics/chatbi/overview` | Chat BI 窗口总览，需 `X-Admin-Token` |
+| `GET` | `/api/admin/analytics/chatbi/categories` | Chat BI 问题分类下钻，需 `X-Admin-Token` |
+| `POST` | `/api/admin/analytics/chatbi/rollup` | 手动重刷 Chat BI 日汇总，需 `X-Admin-Token` |
 | `POST` | `/api/attachments` | 上传附件 |
 | `GET` | `/api/attachments/{id}` | 查询解析状态 |
 | `DELETE` | `/api/attachments/{id}` | 删除附件 |
@@ -593,6 +596,10 @@ SQL 口径回答“这个数怎么算出来的”。契约层不得把两者合�
 | `POST` | `/api/admin/knowledge/memories/compress` | 管理员按商家与分类手动重压记忆；使用 `X-Admin-Token`，响应明确降级状态 |
 
 `/api/admin/*` 使用独立请求头 `X-Admin-Token`（值为 `ADMIN_TOKEN`），不复用 `Authorization`；`/api/exports/{id}` 用自带签名的 URL，不要求请求头，以便浏览器原生下载。
+
+#### Chat BI 双口径准确率
+
+Chat BI 不把任何单一数值冒充为“真实准确率”：没有人工标注的正确答案，无法直接计算它。`user_accuracy_rate` 衡量商家的点赞满意度，样本较少但来自真实用户；`system_accuracy_rate` 衡量 Reviewer 一次放行率，样本完整但属于系统自评。两者分开展示、分开命名，供运营人员结合判断。
 
 ### 11.3 Chat Response 字段
 

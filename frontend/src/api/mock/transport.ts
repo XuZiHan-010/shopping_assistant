@@ -254,6 +254,93 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
       return jsonResponse(dailyReportFor(request))
     }
 
+    const pathname = request.path.split('?')[0]
+
+    if (pathname.startsWith('/api/admin/analytics/chatbi/')) {
+      if (tenantKeyFor(request) !== MOCK_ADMIN_TOKEN) {
+        return errorResponse('AUTH_REQUIRED', '管理员令牌无效', 401)
+      }
+
+      if (pathname === '/api/admin/analytics/chatbi/overview' && request.method === 'GET') {
+        return jsonResponse({
+          start_date: '2026-08-17',
+          end_date: '2026-08-23',
+          answer_total: 18,
+          business_question_total: 15,
+          feedback_total: 7,
+          thinking_sample_count: 16,
+          adoption_rate: null,
+          user_accuracy_rate: 0.75,
+          system_accuracy_rate: 0.875,
+          avg_thinking_ms: 2250,
+          hit_rate: 0.8,
+          failure_rate: 0.05,
+          daily: [
+            {
+              stat_date: '2026-08-22',
+              answer_total: 7,
+              adoption_rate: 0.5,
+              user_accuracy_rate: null,
+              system_accuracy_rate: 1,
+              avg_thinking_ms: 2100,
+              hit_rate: 1,
+              failure_rate: 0,
+            },
+            {
+              stat_date: '2026-08-23',
+              answer_total: 11,
+              adoption_rate: null,
+              user_accuracy_rate: 0.75,
+              system_accuracy_rate: 0.8,
+              avg_thinking_ms: 2400,
+              hit_rate: null,
+              failure_rate: 0.1,
+            },
+          ],
+        } satisfies components['schemas']['ChatBiOverviewResponse'])
+      }
+
+      if (pathname === '/api/admin/analytics/chatbi/categories' && request.method === 'GET') {
+        return jsonResponse({
+          start_date: '2026-08-17',
+          end_date: '2026-08-23',
+          items: [
+            {
+              category: 'TRADE',
+              category_display_name: '交易分析',
+              answer_total: 12,
+              adoption_rate: null,
+              user_accuracy_rate: 0.75,
+              system_accuracy_rate: 0.9,
+              avg_thinking_ms: 2200,
+              hit_rate: 0.9,
+              failure_rate: 0,
+            },
+            {
+              category: 'UNKNOWN',
+              category_display_name: '未分类',
+              answer_total: 6,
+              adoption_rate: 0,
+              user_accuracy_rate: null,
+              system_accuracy_rate: null,
+              avg_thinking_ms: null,
+              hit_rate: null,
+              failure_rate: 1 / 6,
+            },
+          ],
+        } satisfies components['schemas']['ChatBiCategoriesResponse'])
+      }
+
+      if (pathname === '/api/admin/analytics/chatbi/rollup' && request.method === 'POST') {
+        const body = request.body as components['schemas']['ChatBiWindow']
+        return jsonResponse({
+          start_date: body.start_date,
+          end_date: body.end_date,
+          rows_written: 4,
+        } satisfies components['schemas']['ChatBiRollupResponse'])
+      }
+    }
+
     if (request.path === '/api/admin/knowledge/tree' && request.method === 'GET') {
       if (tenantKeyFor(request) !== MOCK_ADMIN_TOKEN) {
         return errorResponse('AUTH_REQUIRED', '管理员令牌无效', 401)
@@ -398,8 +485,6 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
     }
 
     // listConversations 现在带 ?limit=，这里只按路径部分匹配，query 由真实后端解释。
-    const pathname = request.path.split('?')[0]
-
     if (pathname === '/api/conversations' && request.method === 'GET') {
       const items: components['schemas']['ConversationSummary'][] = [
         ...conversationsFor(request).values(),

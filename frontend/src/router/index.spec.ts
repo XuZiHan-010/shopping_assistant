@@ -24,11 +24,12 @@ describe('路由表', () => {
     setChatTransport(createMockTransport({ chunkSizes: [16], stepDelayMs: 0 }))
   })
 
-  it('注册 / 与 /knowledge-base', () => {
+  it('注册助手、知识库与管理员看板入口', () => {
     const router = buildRouter()
 
     expect(router.resolve('/').matched).not.toHaveLength(0)
     expect(router.resolve('/knowledge-base').matched).not.toHaveLength(0)
+    expect(router.resolve('/ops-dashboard').matched[0]?.name).toBe('ops-dashboard')
   })
 
   // 挂载完整 App 是全量套件里最重的用例之一；即使传输层已 Mock，全量并发跑

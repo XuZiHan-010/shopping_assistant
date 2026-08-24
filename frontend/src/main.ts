@@ -4,6 +4,7 @@ import { createApp } from 'vue'
 import '@/assets/styles.css'
 import { setCredentialProvider } from '@/api/credentials'
 import { useAuthStore } from '@/stores/auth'
+import { useAnalyticsStore } from '@/stores/analytics'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import App from './App.vue'
 import router from './router'
@@ -18,7 +19,9 @@ app.use(pinia)
 // 拿不到。
 setCredentialProvider(() => ({
   merchantToken: useAuthStore(pinia).selected?.token,
-  adminToken: useKnowledgeStore(pinia).adminToken,
+  // 两个管理员页面都只把令牌留在各自 Pinia 内存 store；transport 只认一个
+  // `adminToken` 凭证来源，因此在请求瞬间取当前已授权页面持有的那一个。
+  adminToken: useAnalyticsStore(pinia).adminToken || useKnowledgeStore(pinia).adminToken,
 }))
 
 app.use(router).mount('#app')

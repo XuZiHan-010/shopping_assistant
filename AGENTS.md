@@ -603,6 +603,7 @@ OpenAPI → api/generated.ts → api/adapters/*.ts → types/*.ts → Store → 
 | `backend/app/api/routes/reports.py` | 每日经营报告 |
 | `backend/app/api/routes/exports.py` | CSV 导出 |
 | `backend/app/api/routes/knowledge.py` | P1 已实现：管理员知识库目录树、文档 CRUD、业务域维护和手动记忆压缩；独立 `X-Admin-Token` 鉴权 |
+| `backend/app/api/routes/analytics.py` | P1 Chat BI 管理员总览、分类下钻与汇总重刷；仅 `X-Admin-Token` |
 | `backend/app/api/routes/metrics.py` | 指标检索和口径查询 |
 | `backend/app/api/routes/health.py` | Railway 健康检查 |
 
@@ -640,8 +641,10 @@ OpenAPI → api/generated.ts → api/adapters/*.ts → types/*.ts → Store → 
 | `backend/app/services/attachment_service.py` | 图片、PDF、Excel、CSV 解析 |
 | `backend/app/services/export_service.py` | P0 动态生成受权限保护的 CSV（不引入 S3 SDK）；P1 再增加对象存储和签名对象 URL |
 | `backend/app/services/report_service.py` | 每日经营报告 |
+| `backend/app/services/chatbi_service.py` | Chat BI 日汇总上卷、窗口总览与问题分类下钻 |
 | `backend/app/services/memory_service.py` | 商家记忆提取、压缩和召回（已实现） |
 | `backend/app/jobs/seed_demo_rolling.py` | 专用演示数据库的增量滚动 Seed；需显式写权限与商家集合精确匹配 |
+| `backend/app/jobs/chatbi_rollup.py` | Chat BI 日粒度汇总的幂等重刷 CLI |
 
 ### 8.5 数据库和 Repository
 
@@ -721,6 +724,7 @@ ORM 模型与 API Schema 分开，禁止直接把 ORM 对象作为外部接口�
 [P0] knowledge_documents
 [P0] orders / order_items / refunds / products / support_tickets
 [P1，已落地] merchant_memories
+[P1] chatbi_qa_daily   # 日 × 商家 × 问题分类的可重算 Chat BI 计数汇总
 [P1] attachments
 [P2] users              # 真实用户体系上线时才创建
 ```
@@ -787,6 +791,9 @@ GET    /api/admin/ops/status
 
 ```text
 GET    /api/reports/daily
+GET    /api/admin/analytics/chatbi/overview
+GET    /api/admin/analytics/chatbi/categories
+POST   /api/admin/analytics/chatbi/rollup
 POST   /api/attachments
 GET    /api/attachments/{id}
 DELETE /api/attachments/{id}

@@ -20,10 +20,22 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   submit: [message: string]
+  attachmentsSelected: [files: File[]]
 }>()
 
 const message = ref('')
 const textareaElement = ref<HTMLTextAreaElement | null>(null)
+const attachmentInput = ref<HTMLInputElement | null>(null)
+
+function openAttachmentPicker(): void {
+  attachmentInput.value?.click()
+}
+
+function selectAttachments(event: Event): void {
+  const input = event.target as HTMLInputElement
+  emit('attachmentsSelected', Array.from(input.files ?? []))
+  input.value = ''
+}
 
 /**
  * 输入框随内容长高。没有用 CSS 的 field-sizing: content——它目前只有 Chromium
@@ -67,12 +79,20 @@ function handleKeydown(event: KeyboardEvent): void {
       <button
         class="chat-composer__attachment"
         type="button"
-        aria-label="附件功能将在后续版本提供"
-        title="附件功能将在后续版本提供"
-        disabled
+        aria-label="选择附件"
+        title="选择附件"
+        @click="openAttachmentPicker"
       >
         <Paperclip :size="18" aria-hidden="true" />
       </button>
+      <input
+        ref="attachmentInput"
+        class="chat-composer__file-input"
+        type="file"
+        accept="image/png,image/jpeg,image/webp,application/pdf,.xlsx,text/csv,.csv"
+        multiple
+        @change="selectAttachments"
+      />
       <textarea
         ref="textareaElement"
         v-model="message"
@@ -94,7 +114,7 @@ function handleKeydown(event: KeyboardEvent): void {
     </div>
     <div class="chat-composer__footnote">
       <span>Enter 发送 · Shift + Enter 换行</span>
-      <span>附件分析将在后续版本提供</span>
+      <span>支持图片、PDF、Excel、CSV</span>
     </div>
   </form>
 </template>
@@ -149,6 +169,14 @@ function handleKeydown(event: KeyboardEvent): void {
 .chat-composer__attachment:disabled {
   color: var(--color-text-muted);
   cursor: default;
+}
+
+.chat-composer__file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
 }
 
 textarea {
