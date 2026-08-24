@@ -3,7 +3,7 @@ import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import AssistantView from '@/views/AssistantView.vue'
 
 /**
- * F0 只注册两条路由。
+ * F0 / P1 共注册三条路由：助手、知识库后台和管理员 Chat BI 看板。
  *
  * **不创建 `/login`**：MVP 与 P1 都没有登录页，商家身份来自演示 Token 白名单，
  * 真实 SSO 属于 P2（前端方案 §7.2、§11）。未知路径回到助手入口，因此
@@ -20,6 +20,11 @@ export const routes: RouteRecordRaw[] = [
     name: 'knowledge-base',
     // 占位页用最终文件名，F8 在同一文件填实现，不留下待改名的临时文件。
     component: () => import('@/views/KnowledgeBaseView.vue'),
+  },
+  {
+    path: '/ops-dashboard',
+    name: 'ops-dashboard',
+    component: () => import('@/views/OpsDashboardView.vue'),
   },
   {
     path: '/:pathMatch(.*)*',
