@@ -1,5 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import ChatComposer from './ChatComposer.vue'
 
@@ -84,9 +84,13 @@ describe('ChatComposer', () => {
     expect(textarea.element.style.height).toBe('24px')
   })
 
-  it('在附件功能尚未实现时明确禁用附件控件', () => {
+  it('附件控件可用并唤起隐藏的文件选择框', async () => {
     const wrapper = mount(ChatComposer)
+    const picker = wrapper.get('input[type="file"]')
+    const click = vi.spyOn(picker.element as HTMLInputElement, 'click')
 
-    expect(wrapper.get('.chat-composer__attachment').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('.chat-composer__attachment').attributes('disabled')).toBeUndefined()
+    await wrapper.get('.chat-composer__attachment').trigger('click')
+    expect(click).toHaveBeenCalledOnce()
   })
 })
