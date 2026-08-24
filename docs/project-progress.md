@@ -2,7 +2,13 @@
 
 > 本文件只保留当前可继续开发的事实快照，不追加每日流水账。
 
-**最后更新：2026-08-22**
+**最后更新：2026-08-24**
+
+> **2026-08-24 核对说明**：本次仅核对并回填快照，未新增代码改动。核对时发现主工作副本
+> （`feature/memory-consolidation-agent`，HEAD `84e2e39`）存在大量**尚未提交**的工作树改动
+> （`git status` 约 60 个文件，含 D1/D3 两项此前已在本文件登记为「已实现」的能力，以及全新的
+> **Chat BI 衡量看板**后端服务/路由/汇总 Job 与前端管理员看板、一枚仍是孤立桩代码的附件选择器
+> UI）；详见下方「本轮核对：Chat BI 衡量看板」与「最近验证」。
 
 > **本次合并说明**：本文件由 `feature/memory-consolidation-agent` 与 `feature/f2-mock-conversation`
 > 两条并行分支的快照合并而来。后者覆盖的是 MVP 整体收口（R9 阶段 B、Railway 上线、质量循环
@@ -49,6 +55,77 @@ R9 阶段 B（四个能力切片：指标口径、纯明细、跨业务查询、
 - **管理员手动记忆压缩端点**：`POST /api/admin/knowledge/memories/compress`（对齐参考项目 `POST /api/wiki/compress`，路径按 Ruling 1 改为 REST 资源语义），按商家与分类读取历史问答并重压记忆，先写独立审计再提交记忆写入，模型不可用时返回可见的 `degraded`/`degraded_reason`。
 - **猜你想问按历史高频排序**：`AnswerRepository.top_category_questions()` 把聚合、排序、`LIMIT` 全部下推 SQL，图节点在历史结果非空时优先使用，查询异常时用 savepoint 隔离、安全回落静态推荐，不污染主聊天事务。
 - **2026-08-22 真实模型排查与修复**：`llm_max_output_tokens_per_call` 默认值从 `4096` 提到字段上限 `8000`（详见下方「下一步」）——`deepseek-v4-flash` 是推理模型，环比/同比这类需要更多推理步骤的回答生成会把该值耗尽在 reasoning 上、正文吐空，被判定模型不可用而降级；已用真实模型复测确认修复生效，同时发现该值调高后暴露出更深一层的根因：查询层没有"环比/同比需要两个可比周期"的概念（见下）。
+
+## 本轮核对：Chat BI 衡量看板（功能与验证已达标，仅剩提交）
+
+> **2026-08-24 收口验证**：已补齐 `app/repositories/chatbi.py` 的返回类型、迁移文件格式、
+> `ChatComposer.spec.ts` 的 DOM 类型，并在 `docs/yshopping-parity-audit.md` 新增 §5.16，登记
+> Chat BI 为我方增强。真实 PostgreSQL 已启动；`REQUIRE_INTEGRATION_DB=1 uv run pytest -q`
+> 结果为 **1049 passed / 0 skipped / 0 failed**（155.32 秒），此前未实际执行的
+> `test_chatbi_rollup.py`、`test_chatbi_qa_daily_schema.py`、`test_safe_query_comparison.py` 均通过。
+> `uv run ruff check .`、`uv run mypy .`、`uv run alembic check`、`uv run alembic heads`（唯一 head
+> `20260823_0014`）均通过；手工 `python -m app.jobs.chatbi_rollup` 也已用本地测试库执行并退出 0。
+> 前端 `npm run test` 为 **295 passed（40 文件）**、`npm run test:e2e` 为 **29 passed**；`lint`、
+> `typecheck`、`build`、`codegen:check`、`fixtures:check`、`firstpaint:check`、`secrets:check`、
+> `mock:check` 均通过。本轮只运行测试替身和本地 PostgreSQL，**未调用真实 LLM**。
+> 至此 10 个 Task 的开发和验证内容均已完成；每个 Task 末尾的 `git commit` 仍按 R2 保持未执行，
+> 需用户另行明确授权。下面保留修复前记录，便于追溯发现问题到收口的过程。
+
+呼应「下一步」第 18 条登记的缺口——简历承诺的「回复采纳率/准确率/平均思考时长/问题命中率/
+回答失效率」统一看板此前完全未实现。本次核对发现工作树里已经写了一套完整实现，但**全部
+未提交**，也**未过静态检查门禁**，因此不能记为「已完成」，只按「进行中」登记：
+
+- **后端**：`app/models/chatbi.py`（`ChatBiQaDaily` 汇总表 ORM）、
+  `app/repositories/chatbi.py`（按 `Answer.response_payload` 与 `Feedback` 计算六项指标并
+  幂等物化到汇总表）、`app/analytics/chatbi_metrics.py`（`QaCounters` 计数与比率公式，比率
+  分母为 0 时返回 `None` 而非 0，前端需区分「样本不足」与「真实 0%」）、
+  `app/services/chatbi_service.py`（总览/分类下钻两条只读路径）、
+  `app/jobs/chatbi_rollup.py`（幂等重刷 CLI）；两条迁移
+  `20260823_0013_answer_elapsed_ms`（`answers` 表新增回答耗时字段，为「平均思考时长」指标
+  补事实）与 `20260823_0014_create_chatbi_qa_daily`（汇总表建表，`(stat_date, merchant_id,
+  category)` 唯一约束 + 计数列非负 CHECK）。
+- **新增端点**（已按 AGENTS.md/PRD 索引登记，`docs/api.json`/`docs/api.md` 已同步导出）：
+  `GET /api/admin/analytics/chatbi/overview`、`GET /api/admin/analytics/chatbi/categories`、
+  `POST /api/admin/analytics/chatbi/rollup`，均只认 `X-Admin-Token`。
+- **前端**：新路由 `/ops-dashboard`（`OpsDashboardView.vue`）、`stores/analytics.ts`、
+  `api/analytics.ts` + `api/adapters/analytics.ts`、三个展示组件
+  `NorthStarCards.vue`/`CategoryTable.vue`/`TrendChart.vue`；`main.ts` 的凭证提供者已改为
+  「知识库后台、Chat BI 看板两个管理员页面各自持有内存态 `adminToken`，取当前已授权的那一个」，
+  而不是只认知识库后台一处。
+- **对照 `plans/2026-08-23-chatbi-measurement-layer.md`（10 个 Task）逐条核对结论**：
+  代码交付物本身（文件、接口、字段）与计划一致，10 个 Task 都已落地；但按该计划自己定义的
+  「完成」标准（每个 Task 末尾的静态检查 + 真实库回归 + 需用户批准的提交），**还没有一个
+  Task 真正走完全部收尾步骤**。已单独验证、比此前记录更完整的结果：
+  - ✅ 无需数据库的部分全部通过：后端 `uv run pytest -q`（不带 `REQUIRE_INTEGRATION_DB`）
+    **854 passed, 195 skipped**（chatbi 相关单元测试与 26 条 API 契约测试——含
+    `test_chatbi_analytics.py`、`test_openapi_chat_contract.py::test_openapi_exposes_chatbi_analytics_paths`
+    ——均在其中，全部 PASS，这两类按计划设计本就不依赖真实库）；
+  - ✅ 前端 Vitest **295 passed（40 文件）**、`lint`、`codegen:check`、`fixtures:check`、
+    `mock:check`、`secrets:check`、`npm run build`、`firstpaint:check`（ECharts 未进首屏静态
+    引入链）**均通过**；专门补跑的 `frontend/e2e/ops-dashboard.spec.ts` **3 passed**；
+  - ❌ `uv run ruff check .` **1 错**：`migrations/versions/20260823_0014_create_chatbi_qa_daily.py:51`
+    一行超过 100 字符；
+  - ❌ `uv run mypy app` **3 错**：`app/repositories/chatbi.py` 的 `_stat_date()`/`_source_select()`
+    缺返回类型标注，导致下游一处 untyped-call 报错；这两项是 Task 3/4/5/6/10 提交前的强制项，
+    未清零；
+  - ❌ `npm run typecheck` 失败——但失败点在 `ChatComposer.spec.ts`（附件选择器桩代码引入的
+    问题），**与 chatbi 本身无关**，不属于这份计划的验收范围，只是同一批未提交改动里混进来的；
+  - ❌ 依赖真实 PostgreSQL 的用例（Task 2 的 `test_chatbi_qa_daily_schema.py`、Task 4 的
+    `test_chatbi_rollup.py`）本机 Docker 未启动，本次仍全部 SKIPPED，**从未真正跑过一次**；
+    Task 2 Step 7 的 `alembic check`、Task 4 Step 6 的手工 CLI 试跑同样未执行；
+  - ❌ Task 10 Step 5 要求在 `docs/yshopping-parity-audit.md` 补一条「参考项目没有 Chat BI
+    衡量看板，本项目是我方增强」的条目——**核查后确认没有加**，该文档目前只有 D3 环比/同比
+    的条目，只字未提 Chat BI；
+  - ❌ 计划里每个 Task 末尾都写着需用户明确同意才执行的 `git commit` 步骤——**一次都没有执行**，
+    全部 10 个 Task 仍只是工作树里的未提交改动（`git status` 全是 `M`/`??`）。
+  **结论：功能代码基本按计划写完了，但按这份计划自己定的完工标准还差最后一段收尾
+  （补 mypy/ruff、跑一次真实库回归、补齐 parity-audit 条目、逐任务提交），现在还不能说
+  「全部完成」。**
+- **附带的孤立改动**：`ChatComposer.vue` 已把附件按钮从「禁用 + 提示后续版本提供」改为可点击，
+  新增隐藏 `<input type="file">` 与 `attachmentsSelected` 事件；但 `AssistantView.vue`、
+  `stores/chat.ts`、`api/attachments.ts` 均未改动——**没有任何父组件监听这个事件**，附件功能
+  （P1「下一步」第 15 条）本身仍未实现，这只是 UI 层先落的一小步，容易被误读成「附件已可用」。
+- **未做**：合并/提交这批改动、真实 PostgreSQL 全量回归、`vue-tsc` 类型检查（见下）。
 
 ## 当前阶段
 
@@ -248,6 +325,25 @@ savepoint 隔离，统计查询失败只会回落静态推荐，不会污染主�
   `degraded=false`）尚未达成**，卡在环比的查询层缺口和 RULE 的检索缺陷这两处，均已排入
   「下一步」，且都需要先设计/排查、不适合在测试阶段顺手改。
 
+2026-08-24 复核（仅核对当前工作树状态，未新增代码，零真实 LLM 调用）：
+
+- 主工作副本 `git status` 显示约 60 个文件为 `M`/`??`，**均未提交**：涵盖此前登记的 D1/D3
+  能力（本轮才发现它们此前一直只在工作树里，不在任何提交里）与全新的 Chat BI 衡量看板
+  （见上方「本轮核对」）；
+- 后端 `uv run pytest -q`（本机 Docker 未启动，不带 `REQUIRE_INTEGRATION_DB`）：
+  **854 passed, 195 skipped**（跳过项均为需要真实 PostgreSQL 的用例）；
+- 后端 `uv run ruff check .`：**1 error**（`migrations/versions/20260823_0014_create_chatbi_qa_daily.py`
+  行超长）；`uv run mypy app`：**3 errors**（均在 `app/repositories/chatbi.py`，缺返回类型标注）；
+- 前端 `npx vitest run`：**295 passed（40 files）**，含 `NorthStarCards`/`CategoryTable`/
+  `TrendChart`/`OpsDashboardView`/`analytics store`/`analytics adapter` 等全部新增用例；
+- 前端 `npm run lint`：全绿；`npm run codegen:check`：`generated.ts` 与 `docs/api.json` 一致；
+- 前端 `npm run typecheck`：**失败**，`ChatComposer.spec.ts:90` 一处 `vi.spyOn(picker.element,
+  'click')` 的 DOM 事件名类型推断错误（`vue-tsc` 认不出 `'click'` 是 `HTMLInputElement` 的合法
+  事件重载）——这是附件选择器桩代码改动带来的新问题，不是既有 flake；
+- 未执行：`REQUIRE_INTEGRATION_DB=1 pytest`（本机 Docker 未启动）、`npm run build`、
+  `secrets:check`、Playwright E2E；因此上面的绿灯**不能**当作可以提交或合并的证据，只说明
+  「不依赖数据库的部分暂时能跑通」。
+
 ## 下一步
 
 按优先级（前 6 项来自 `feature/memory-consolidation-agent` 分支，均已完成；第 7 项起是合并后的合并清单）：
@@ -271,27 +367,107 @@ savepoint 隔离，统计查询失败只会回落静态推荐，不会污染主�
    环比/同比缺失两期对比查询能力（见第 7 条）、RULE 检索零命中（见第 8 条）——
    注意这与下方第 15 条 `feature/f2-mock-conversation` 分支自己那轮 B7（classify 短路）
    是**同一验收目标下的两轮独立复测**，本轮是在对方那轮的 classify 修复之上进行的；
-7. **环比/同比查询能力缺口**：`QueryIntent`（`app/intent/models.py:102`）没有"取两个可比
-   周期"的概念，模型被迫凭空编造对比数字，被 `_validate()` 正确拦下。需要先写设计说明（比照
-   `docs/specs/2026-08-21-daily-report-contract.md` 的方式）：`QueryIntent` 如何表达对比周期、
-   `SafeQueryService`/`AnalyticsRepository` 如何一次取两期数据、`_validate()` 如何放行由两期
-   真实数值算出的合法百分比（而不是简单放宽到允许任意数字）；
-8. **RULE 知识检索零命中**：真实模型验收里"商品上架有哪些规则要求"返回
-   `analysis_sources=["NONE"]`，如实说未命中知识（正确的 R7 行为，没有编造规则），但
-   `knowledge_documents` 表里确认存在对应内容（`GOODS`「商品规则」657 字、`PLATFORM_RULE`
-   「平台规则详解」267 字）——问题出在检索/匹配逻辑，不是知识导入缺失，需要单独排查
-   `app/knowledge/retrieval.py` 为什么没匹配到这两篇；
+7. ~~**【D3 已裁定：做】环比/同比作为我方增强实现**~~ **已实现（2026-08-23）**。
+   参考项目**没有**该能力（`QuestionIntent.referencesPriorData` 是「分析上文明细」语义，非对比周期），
+   简历口径也未声明，因此这是**⚪ 我方增强**，已登记到 `docs/yshopping-parity-audit.md` §5。
+   **实现**：`app/intent/models.py` 新增 `ComparisonMode`（`NONE`/`PREVIOUS_PERIOD`/`YEAR_OVER_YEAR`）
+   与 `QueryIntent.comparison` 字段，模型只表达比较意图，不提供第二期日期、公式或百分比（R4）；
+   `app/analytics/dates.py` 新增 `shift_baseline_period()`，按自然月/自然年整体平移主周期得到基期，
+   未结束的自然月与上月/去年同期比较（避免"本月至今"对"完整上月"），月末/闰年溢出均收敛不进位；
+   `SafeQueryService._metric()` 对比时额外查一次基期聚合值，`ComparisonResult` 携带两期数值与
+   `Decimal` 算出的变化率；基期为 `None` 或 0 时不算比例、写入可见 `notes`（R7）；对比与维度拆分
+   同时请求时显式拒绝（两期行数/行序无法一一对应）。`AnswerService` 把两期数值与变化率纳入
+   `_allowed_numbers`/`_facts_json`，模型只能复述已算好的比例，自行编造的百分比仍被 `_validate()`
+   拦下（新增反例测试验证）；兜底文案基期无法算出比例时显式说明"无法计算变化率"，不省略这一步。
+   `app/intent/prompts.py` 的 `OUTPUT_CONTRACT` 已同步声明该字段（提示词契约测试锁死，遗漏新字段
+   会立即报错）。TDD 全流程：日期平移→查询层→回答事实三层均先写失败测试；查询层的负向测试补了
+   同域干扰基期（完整上月里但不在同期窗口内的订单不得计入）与跨商家隔离。
+   `AGENTS.md:225`「同比或环比分析」现在真实可用，无需改动；`docs/frontend-development-plan.md:765`
+   与 `docs/specs/2026-08-06-frontend-f4-design.md:115` 描述的是前端 `summarizeChart` 从单一时间
+   序列首尾点算出的**图表内趋势句**（另一套既有机制，与本次后端两期对比无关），核实后确认无需同步；
+   真实数据库全量门禁 **1025 passed**，`ruff`/`ruff format`/`mypy` 全绿；
+8. ~~**【D1 已裁定：做】知识检索召回增强**~~ **已实现（2026-08-23）**。
+   **归类更正**：经核实参考项目 `WikiMemoryService.matchesIntentKeywords`（`WikiMemoryService.java:287-300`）
+   同样是「整词子串 → 去后缀词干子串」，与我方 `_matches_keywords` 逐条等价，**那道 RULE 题在参考项目
+   里同样命不中**——这不是还原缺口，而是 **⚪ 我方增强**（做的理由：PRD 已承诺「商品上架和审核规则」，
+   且内置推荐问题点进去直接未命中）。**方案边界（裁定内容）**：
+   - **不引入** Jieba、Embedding、向量库或额外 LLM 调用；采用**确定性相关性评分 + TopN**；
+   - 把复合问法拆成受控业务词（「商品上架有哪些规则要求」→ 商品／上架／规则）；标题、路径、正文分别加权；
+   - 要求**至少命中一个强业务词 + 一个动作/规则词**，按相关性取 Top 3，而非任一弱词命中即全量返回；
+   - **必测反例**：同域干扰文档「商品定价」「商品库存」不得被召回。
+     实测依据：初稿曾提议的「二元拆分」会让「商品」命中全域三篇文档，使关键词过滤退化为空过滤；
+     原单文档测试结构上无法发现该问题，故新增测试必须含同域干扰文档。
+   - **实现**：`app/knowledge/domains.py` 新增 `ACTION_RULE_TERMS`（动作/规则受控词表），
+     `app/knowledge/retrieval.py` 新增 `_narrow_by_keywords`：问法同时含业务词与动作/规则词时，
+     要求文档两类词表各至少命中一个，再按标题(3)/路径(2)/正文(1)加权取 Top 3；单一业务词问法
+     （如「退货量」）维持原有「命中任一关键词」行为不变。TDD 全流程：先写 4 条新测试看着失败，
+     实现后转绿，并做过反转验证（临时去掉动作/规则门槛，确认干扰文档测试会红，恢复后再转绿），
+     证明测试真的能抓住误召回而非摆设。`tests/unit/knowledge/test_retrieval.py` 20 条全过，
+     真实 PostgreSQL 全量门禁 **1008 passed**，`ruff`/`ruff format`/`mypy` 全绿；
+8b. **【D2 已裁定：不做通用跨域，仅锁 `PLATFORM_RULE` 特例】**（2026-08-22 用户裁定）。
+   参考项目 `loadRelevantWiki()` 每次只接收单一 `QuestionCategory`，**无通用多分类返回协议**；
+   但 `PLATFORM_RULE` 是特例（`WikiMemoryService.java:276`）：在 `categoryKeywords()` 之前就 return，
+   走「路径含 `rule` **或** 路径+正文含 规则／政策／平台要求」的**全库扫描**。
+   **核实结论：我方已经等价，无需改代码**——`app/knowledge/domains.py:24` 的 PLATFORM_RULE 别名正是
+   `("规则", "政策", "平台要求", "rule")`，与参考四词一致；`retrieval.py:153` 对该分类豁免索引路径排除，
+   保住了全库可达性。**动作项仅为补一条回归测试锁住这个等价**，防止后续改动无声破坏。
+   任意多域 TopN 合并 = 我方增强，**本轮不做**；RULE 零命中的实际修复落在第 8 条的 D1 评分，
+   而不是扩大全域召回；
 9. **取得合并后代码的真实数据库绿灯**：两分支合并涉及 `answer_service.py`/`graph.py` 等核心文件的非平凡冲突解决，合并后必须重跑一次 `REQUIRE_INTEGRATION_DB=1 pytest` 全量与前端全量门禁，不能只信任合并前各自分支的绿灯；
 10. **补 F1 人工视觉证据**：按 1440×1000 对照 Prototype，记录布局、间距、字体、颜色和主要交互差异；自动化响应式测试不能替代这一项；
 11. **同步剩余进度文档**：更新 `docs/specs/2026-08-11-mvp-exit-evidence-matrix.md` 的 R9、Vitest、Playwright 与当前未验证项；校正 `docs/yshopping-parity-audit.md` 的旧分支基线；回填 `plans/2026-08-12-post-f6-execution-roadmap.md` 阶段 0–2.5 的实际状态；
 12. **补完阶段 3 的剩余线上验收项**：Railway 部署本身已完成，仍未做的是**转发头伪造验收**（同一演示 Token 连续更换 `X-Real-IP`/`X-Forwarded-For`，超限仍须返回 429；零费用）、SIGTERM 收尾验收、日志脱敏抽查；
 13. **Railway Cron Service 未创建**：`backend/railway.cron.json`、`app/jobs/seed_demo_rolling.py`、`app/core/seed_config.py` 代码侧已就绪，仍需用户在 Railway 控制台建 Service、配置四个变量并手工触发首次执行；
 14. **扩大真实模型验收面**（阶段 4）：`classify`/`understand`/`RULE`/`IDENTITY`/生成指标/跨业务查询的真实模型验收覆盖仍不完整，需按完整问题集评估意图准确率是否 ≥90% 并裁定 MVP；执行前必须按 R3 说明调用次数与预计费用；
-15. P1 剩余的**附件**：参考项目有 `POST /api/attachments`，我方尚未实现对应服务（对象存储、OCR/解析路线均未定），详细缺口清单见 `plans/2026-08-21-gap-roadmap.md` §2；商家记忆闭环与知识库后台已在本分支完成，不再属于剩余项；
-16. `DeepSeekLlmClient` 吞掉全部上游错误（`app/llm/deepseek.py` 的 `except (httpx.HTTPError, ValueError): return LlmResult(fallback, 0, True)`）：401、超时、限流、网络不通被压成同一个无声降级；建议把状态码与异常类型写进结构化日志，并让 `record_usage` 区分「上游拒绝」与「模型输出不合格」。
+15. P1 剩余的**附件**：参考项目有 `POST /api/attachments`（`AttachmentController` / `AttachmentService`），
+    我方尚未实现对应服务，属 **A 类还原**。**路线并非「均未定」（此前描述有误，已更正）**：
+    `docs/PRD.md` §7.2 与附件流程已裁定**对象存储**；`docs/backend-development-plan.md` 已裁定
+    **默认本地 OCR（PaddleOCR/Tesseract），不默认调用收费多模态模型**，改用收费模型须先走 R3。
+    因此实施前**不得重开这两项决策**，只需定尚未确定的参数：输入尺寸/页数上限、OCR 超时、
+    `OcrAdapter` Protocol 与 `FakeOcrAdapter` 注入点、识别结果脱敏规则、同步还是异步解析、
+    对象存储具体服务与两个新密钥（R6）。另注意**扫描版 PDF 无文本层，PyMuPDF 取不到文字，仍需 OCR**，
+    实施时须区分文本层 PDF 与扫描版 PDF；详细缺口清单见 `plans/2026-08-21-gap-roadmap.md` §2；
+16. **【D4 已裁定：不涨预算，先重排】**（2026-08-22 用户裁定）。语义层三项（语义校验闭环、
+    新词补齐、简单问题短路）**复用现有重试槽，不新增必经 LLM 调用**。执行顺序：①简单问题确定性
+    短路，命中时零 LLM；②新词先走白名单别名映射；③语义校验优先用本地规则与 Pydantic，不增加模型调用；
+    ④首次语义校验失败时才按字符上限加载 Session 与同商家记忆；⑤再分析复用 `understand` 现有的
+    最多三次机会，**不另加「语义 Reviewer」调用**；⑥预算不足时显式降级，不挤占回答生成与 Reviewer；
+    ⑦完成 Fake 评测后再按 R3 做小样本真实费用标定，**只有数据证明不够才另行申请提高上限**。
+    最坏路径维持 `classify 2 + understand 3 + metric catalog 1 + (answer + reviewer) × 2 = 10` 次。
+    **暂不修改**（现值已由合并带入的预算重新校准确定）：`MAX_LLM_CALLS_PER_REQUEST=10`、
+    `MAX_LLM_TOKENS_PER_REQUEST=25000`、`LLM_DAILY_BUDGET_TOKENS=500000`；
+17. `DeepSeekLlmClient` 吞掉全部上游错误（`app/llm/deepseek.py` 的 `except (httpx.HTTPError, ValueError): return LlmResult(fallback, 0, True)`）：401、超时、限流、网络不通被压成同一个无声降级；建议把状态码与异常类型写进结构化日志，并让 `record_usage` 区分「上游拒绝」与「模型输出不合格」；
+18. **简历口径核对（2026-08-23，纯核对，无代码变更）**：逐条对照简历原文（V2/V3/V4 迭代描述）与当前实现，确认以下四块简历承诺的能力**均未实现**，且现状与 `plans/2026-08-22-parity-and-resume-roadmap.md` 已有裁定一致，未发现新缺口：
+    - 指标体系 2000+ 并同步至 Doris——**明确不做**（`AGENTS.md` §9.3 裁定，数据规模远未触发）；
+    - 语义层三项：简单问题绕过大模型省 Token、语义层 Agent 二次校验（不符合意图则读 Session+历史记忆再分析）、新词语义层补齐——❌ 全部未实现（roadmap §8，D4 已裁定预算处置原则但功能本身未写）；
+    - 无效意图不写入记录表 + 引导用户提工单——❌ 未实现（roadmap §5，我方 `client_request_id` 幂等约束依赖 Answer 行，不能直接照搬"不落库"，需独立设计）；
+    - Chat BI 衡量看板（回复采纳率/准确率/平均思考时长/问题命中率/回答失效率的统一看板）——🟢 **功能已实现、验证已达标，仅剩提交（2026-08-24 二次核对更正）**：`ruff`/`mypy`/前端 `typecheck` 已全部转绿，真实 PostgreSQL 全量回归 1049 passed/0 skipped，`docs/yshopping-parity-audit.md` §5.16 已补，详见「本轮核对」一节。唯一未完成项是逐 Task 的 `git commit`（需用户同意）。
+    已实现、简历同样有提及的能力（供交叉核对）：意图识别→SQL→自然语言生成+2 条建议、CHAT 自然回答、异步记忆沉淀子 agent（含运营侧人工补充的知识库后台）、按历史高频排序的"猜你想问"、跨业务串行查询 Plan、指标不存在时的受控生成指标兜底、指标命中/未命中的口径展示、前端目录导航与左图右建议布局、双知识库（团队优先/记忆回退）。
+19. **收尾 Chat BI 衡量看板并提交**（2026-08-24 新增，接续第 18 条；对照
+    `plans/2026-08-23-chatbi-measurement-layer.md` 10 个 Task 逐条核对）：
+    - ~~修 mypy/ruff 错误~~ **已完成（2026-08-24，Codex 修复）**：`ruff check`、`mypy app` 均转绿；
+    - ~~跑真实 PostgreSQL 回归~~ **已完成（2026-08-24）**：`REQUIRE_INTEGRATION_DB=1 pytest`
+      **1049 passed, 0 skipped, 0 failed**，`test_chatbi_rollup.py`/`test_chatbi_qa_daily_schema.py`/
+      `test_safe_query_comparison.py` 首次真正执行且通过；
+    - ~~补 `docs/yshopping-parity-audit.md` Chat BI 条目~~ **已完成（2026-08-24）**：§5.16 已补；
+    - ~~修 `npm run typecheck`~~ **已完成（2026-08-24）**：`ChatComposer.spec.ts` 类型错误已修，
+      前端 typecheck 现在干净；
+    - **仍未做**：Task 2 Step 7 的 `alembic check`、Task 4 Step 6 的手工 CLI 试跑
+      （`uv run python -m app.jobs.chatbi_rollup ...`）未确认执行过；
+    - 决定 `ChatComposer.vue` 里孤立的 `attachmentsSelected` 桩代码是随本次一起先落地为
+      「UI 已就绪但未接线」，还是等第 15 条附件功能整体设计后再一次性接上——目前没有任何
+      父组件监听这个事件，属未完成状态，不要在文案里描述成「附件可选择」；
+    - **唯一实质剩余项**：计划里每个 Task 末尾「需用户明确同意」的 `git commit` 步骤一次都
+      没执行，`git log` 无新提交。需要你决定是按计划逐 Task 分别提交，还是整体一次提交
+      （注意 D1/D3 两项能力，见第 7、8 条，与本次 Chat BI 改动在工作树里已经耦合在一起）。
 
 ## 风险与约束
 
+- **主工作副本当前有大量未提交改动**（2026-08-24 发现）：`git status` 约 60 个文件为
+  `M`/`??`，涵盖 D1/D3 能力与全新的 Chat BI 衡量看板，均只存在于工作树里，不在任何提交或
+  远端分支上。查看这些能力「是否已完成」时不能只看本文件的文字描述，要先跑 `git status`/
+  `git diff` 确认它们是否已落进某次提交——本文件此前把 D1/D3 记成「已实现」但未标注提交号，
+  已属于这类未提交状态，本次核对才发现；
 - **门禁全绿不等于行为正确**：`history=[]` 曾在 899 passed 的前提下存活到 2026-08-21 才被发现。
   凡是"参考项目传了值、我方传空值"的形参，都要有一条断言输入内容的测试，而不只断言不抛异常；
 - 本地 PostgreSQL 测试容器是**一次性数据卷**：`alembic_version` 一旦记录了已被删除/重命名的
@@ -354,3 +530,5 @@ savepoint 隔离，统计查询失败只会回落静态推荐，不会污染主�
 - `backend/app/services/memory_admin_service.py`、`memory_service.py`、`memory_agent.py`：管理员手动记忆压缩编排、压缩结果与降级信号、异步沉淀子 agent（本分支新增）。
 - `backend/app/services/report_service.py`、`app/api/routes/reports.py`、`app/schemas/report.py`：每日经营日报的服务、路由与契约（本分支新增）。
 - `frontend/src/components/chat/DailyReportCard.vue`、`frontend/src/api/report.ts`：日报前端卡片与 API 封装（本分支新增）。
+- `backend/app/services/chatbi_service.py`、`app/repositories/chatbi.py`、`app/analytics/chatbi_metrics.py`、`app/jobs/chatbi_rollup.py`、`app/api/routes/analytics.py`：Chat BI 衡量看板的服务、汇总仓储、指标公式、幂等重刷 Job 与管理员端点（2026-08-24 核对发现，**尚未提交**，见「本轮核对」）。
+- `frontend/src/views/OpsDashboardView.vue`、`frontend/src/stores/analytics.ts`、`frontend/src/api/analytics.ts`：Chat BI 管理员看板页面、Store 与 API 封装（同上，**尚未提交**）。

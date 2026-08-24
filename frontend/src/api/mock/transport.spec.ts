@@ -172,4 +172,42 @@ describe('createMockTransport', () => {
     expect(response.headers.get('content-type')).toContain('text/csv')
     expect(await response.text()).toContain('order_no')
   })
+
+  it('管理员可在 Mock 中读取 Chat BI 总览、分类并重刷汇总', async () => {
+    const adminTransport = createMockTransport()
+    setCredentialProvider(() => ({ adminToken: 'mock-admin-token' }))
+
+    const overview = await adminTransport(
+      {
+        path: '/api/admin/analytics/chatbi/overview?start_date=2026-08-17&end_date=2026-08-23',
+        method: 'GET',
+        auth: 'admin',
+      },
+      new AbortController().signal,
+    )
+    const categories = await adminTransport(
+      {
+        path: '/api/admin/analytics/chatbi/categories?start_date=2026-08-17&end_date=2026-08-23',
+        method: 'GET',
+        auth: 'admin',
+      },
+      new AbortController().signal,
+    )
+    const rollup = await adminTransport(
+      {
+        path: '/api/admin/analytics/chatbi/rollup',
+        method: 'POST',
+        auth: 'admin',
+        body: { start_date: '2026-08-17', end_date: '2026-08-23' },
+      },
+      new AbortController().signal,
+    )
+
+    const overviewPayload = (await overview.json()) as { adoption_rate: number | null }
+    const categoriesPayload = (await categories.json()) as { items: unknown[] }
+    const rollupPayload = (await rollup.json()) as { rows_written: number }
+    expect(overviewPayload.adoption_rate).toBeNull()
+    expect(categoriesPayload.items.length).toBeGreaterThan(0)
+    expect(rollupPayload.rows_written).toBeGreaterThanOrEqual(0)
+  })
 })
