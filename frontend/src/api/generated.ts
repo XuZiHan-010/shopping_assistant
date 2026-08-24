@@ -302,6 +302,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/analytics/chatbi/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Chatbi Overview */
+        get: operations["chatbi_overview_api_admin_analytics_chatbi_overview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/analytics/chatbi/categories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Chatbi Categories */
+        get: operations["chatbi_categories_api_admin_analytics_chatbi_categories_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/analytics/chatbi/rollup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Chatbi Rollup
+         * @description 手动重刷汇总。幂等，可任意重跑，用于演示与历史补数。
+         */
+        post: operations["chatbi_rollup_api_admin_analytics_chatbi_rollup_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -335,6 +389,127 @@ export interface components {
          * @enum {string}
          */
         ChartType: "LINE" | "BAR" | "PIE";
+        /** ChatBiCategoriesResponse */
+        ChatBiCategoriesResponse: {
+            /**
+             * Start Date
+             * Format: date
+             */
+            start_date: string;
+            /**
+             * End Date
+             * Format: date
+             */
+            end_date: string;
+            /** Items */
+            items?: components["schemas"]["ChatBiCategoryItem"][];
+        };
+        /** ChatBiCategoryItem */
+        ChatBiCategoryItem: {
+            /** Adoption Rate */
+            adoption_rate: number | null;
+            /** User Accuracy Rate */
+            user_accuracy_rate: number | null;
+            /** System Accuracy Rate */
+            system_accuracy_rate: number | null;
+            /** Avg Thinking Ms */
+            avg_thinking_ms: number | null;
+            /** Hit Rate */
+            hit_rate: number | null;
+            /** Failure Rate */
+            failure_rate: number | null;
+            /** Category */
+            category: string;
+            /** Category Display Name */
+            category_display_name: string;
+            /** Answer Total */
+            answer_total: number;
+        };
+        /** ChatBiDailyPoint */
+        ChatBiDailyPoint: {
+            /** Adoption Rate */
+            adoption_rate: number | null;
+            /** User Accuracy Rate */
+            user_accuracy_rate: number | null;
+            /** System Accuracy Rate */
+            system_accuracy_rate: number | null;
+            /** Avg Thinking Ms */
+            avg_thinking_ms: number | null;
+            /** Hit Rate */
+            hit_rate: number | null;
+            /** Failure Rate */
+            failure_rate: number | null;
+            /**
+             * Stat Date
+             * Format: date
+             */
+            stat_date: string;
+            /** Answer Total */
+            answer_total: number;
+        };
+        /** ChatBiOverviewResponse */
+        ChatBiOverviewResponse: {
+            /** Adoption Rate */
+            adoption_rate: number | null;
+            /** User Accuracy Rate */
+            user_accuracy_rate: number | null;
+            /** System Accuracy Rate */
+            system_accuracy_rate: number | null;
+            /** Avg Thinking Ms */
+            avg_thinking_ms: number | null;
+            /** Hit Rate */
+            hit_rate: number | null;
+            /** Failure Rate */
+            failure_rate: number | null;
+            /**
+             * Start Date
+             * Format: date
+             */
+            start_date: string;
+            /**
+             * End Date
+             * Format: date
+             */
+            end_date: string;
+            /** Answer Total */
+            answer_total: number;
+            /** Business Question Total */
+            business_question_total: number;
+            /** Feedback Total */
+            feedback_total: number;
+            /** Thinking Sample Count */
+            thinking_sample_count: number;
+            /** Daily */
+            daily?: components["schemas"]["ChatBiDailyPoint"][];
+        };
+        /** ChatBiRollupResponse */
+        ChatBiRollupResponse: {
+            /**
+             * Start Date
+             * Format: date
+             */
+            start_date: string;
+            /**
+             * End Date
+             * Format: date
+             */
+            end_date: string;
+            /** Rows Written */
+            rows_written: number;
+        };
+        /** ChatBiWindow */
+        ChatBiWindow: {
+            /**
+             * Start Date
+             * Format: date
+             */
+            start_date: string;
+            /**
+             * End Date
+             * Format: date
+             */
+            end_date: string;
+        };
         /** ChatRequest */
         ChatRequest: {
             /** Message */
@@ -2175,6 +2350,157 @@ export interface operations {
             };
             /** @description 资源不存在 */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    chatbi_overview_api_admin_analytics_chatbi_overview_get: {
+        parameters: {
+            query: {
+                start_date: string;
+                end_date: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatBiOverviewResponse"];
+                };
+            };
+            /** @description 缺少或提供了无效的商家凭证 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权访问该资源或管理端点 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    chatbi_categories_api_admin_analytics_chatbi_categories_get: {
+        parameters: {
+            query: {
+                start_date: string;
+                end_date: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatBiCategoriesResponse"];
+                };
+            };
+            /** @description 缺少或提供了无效的商家凭证 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权访问该资源或管理端点 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    chatbi_rollup_api_admin_analytics_chatbi_rollup_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChatBiWindow"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatBiRollupResponse"];
+                };
+            };
+            /** @description 缺少或提供了无效的商家凭证 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权访问该资源或管理端点 */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -1699,6 +1699,214 @@
           }
         }
       }
+    },
+    "/api/admin/analytics/chatbi/overview": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Chatbi Overview",
+        "operationId": "chatbi_overview_api_admin_analytics_chatbi_overview_get",
+        "parameters": [
+          {
+            "name": "start_date",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "Start Date"
+            }
+          },
+          {
+            "name": "end_date",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "End Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatBiOverviewResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "缺少或提供了无效的商家凭证",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权访问该资源或管理端点",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "请求参数不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/analytics/chatbi/categories": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Chatbi Categories",
+        "operationId": "chatbi_categories_api_admin_analytics_chatbi_categories_get",
+        "parameters": [
+          {
+            "name": "start_date",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "Start Date"
+            }
+          },
+          {
+            "name": "end_date",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "End Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatBiCategoriesResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "缺少或提供了无效的商家凭证",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权访问该资源或管理端点",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "请求参数不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/analytics/chatbi/rollup": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Chatbi Rollup",
+        "description": "手动重刷汇总。幂等，可任意重跑，用于演示与历史补数。",
+        "operationId": "chatbi_rollup_api_admin_analytics_chatbi_rollup_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatBiWindow"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatBiRollupResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "缺少或提供了无效的商家凭证",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权访问该资源或管理端点",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "请求参数不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1764,6 +1972,390 @@
         ],
         "title": "ChartType",
         "description": "后端允许的图表类型。\n\n约束在契约侧声明后由 OpenAPI 自动传给前端，Adapter 无须自行窄化自由字符串。"
+      },
+      "ChatBiCategoriesResponse": {
+        "properties": {
+          "start_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Start Date"
+          },
+          "end_date": {
+            "type": "string",
+            "format": "date",
+            "title": "End Date"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ChatBiCategoryItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "start_date",
+          "end_date"
+        ],
+        "title": "ChatBiCategoriesResponse"
+      },
+      "ChatBiCategoryItem": {
+        "properties": {
+          "adoption_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adoption Rate"
+          },
+          "user_accuracy_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Accuracy Rate"
+          },
+          "system_accuracy_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "System Accuracy Rate"
+          },
+          "avg_thinking_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Thinking Ms"
+          },
+          "hit_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hit Rate"
+          },
+          "failure_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Rate"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "category_display_name": {
+            "type": "string",
+            "title": "Category Display Name"
+          },
+          "answer_total": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Answer Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "adoption_rate",
+          "user_accuracy_rate",
+          "system_accuracy_rate",
+          "avg_thinking_ms",
+          "hit_rate",
+          "failure_rate",
+          "category",
+          "category_display_name",
+          "answer_total"
+        ],
+        "title": "ChatBiCategoryItem"
+      },
+      "ChatBiDailyPoint": {
+        "properties": {
+          "adoption_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adoption Rate"
+          },
+          "user_accuracy_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Accuracy Rate"
+          },
+          "system_accuracy_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "System Accuracy Rate"
+          },
+          "avg_thinking_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Thinking Ms"
+          },
+          "hit_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hit Rate"
+          },
+          "failure_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Rate"
+          },
+          "stat_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Stat Date"
+          },
+          "answer_total": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Answer Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "adoption_rate",
+          "user_accuracy_rate",
+          "system_accuracy_rate",
+          "avg_thinking_ms",
+          "hit_rate",
+          "failure_rate",
+          "stat_date",
+          "answer_total"
+        ],
+        "title": "ChatBiDailyPoint"
+      },
+      "ChatBiOverviewResponse": {
+        "properties": {
+          "adoption_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adoption Rate"
+          },
+          "user_accuracy_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Accuracy Rate"
+          },
+          "system_accuracy_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "System Accuracy Rate"
+          },
+          "avg_thinking_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Thinking Ms"
+          },
+          "hit_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hit Rate"
+          },
+          "failure_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Rate"
+          },
+          "start_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Start Date"
+          },
+          "end_date": {
+            "type": "string",
+            "format": "date",
+            "title": "End Date"
+          },
+          "answer_total": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Answer Total"
+          },
+          "business_question_total": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Business Question Total"
+          },
+          "feedback_total": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Feedback Total"
+          },
+          "thinking_sample_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Thinking Sample Count"
+          },
+          "daily": {
+            "items": {
+              "$ref": "#/components/schemas/ChatBiDailyPoint"
+            },
+            "type": "array",
+            "title": "Daily"
+          }
+        },
+        "type": "object",
+        "required": [
+          "adoption_rate",
+          "user_accuracy_rate",
+          "system_accuracy_rate",
+          "avg_thinking_ms",
+          "hit_rate",
+          "failure_rate",
+          "start_date",
+          "end_date",
+          "answer_total",
+          "business_question_total",
+          "feedback_total",
+          "thinking_sample_count"
+        ],
+        "title": "ChatBiOverviewResponse"
+      },
+      "ChatBiRollupResponse": {
+        "properties": {
+          "start_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Start Date"
+          },
+          "end_date": {
+            "type": "string",
+            "format": "date",
+            "title": "End Date"
+          },
+          "rows_written": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Rows Written"
+          }
+        },
+        "type": "object",
+        "required": [
+          "start_date",
+          "end_date",
+          "rows_written"
+        ],
+        "title": "ChatBiRollupResponse"
+      },
+      "ChatBiWindow": {
+        "properties": {
+          "start_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Start Date"
+          },
+          "end_date": {
+            "type": "string",
+            "format": "date",
+            "title": "End Date"
+          }
+        },
+        "type": "object",
+        "required": [
+          "start_date",
+          "end_date"
+        ],
+        "title": "ChatBiWindow"
       },
       "ChatRequest": {
         "properties": {

@@ -148,6 +148,18 @@ def test_openapi_exposes_b2_chat_and_conversation_contract(app: FastAPI) -> None
     assert "204" in schema["paths"][CONVERSATION_ITEM_PATH]["delete"]["responses"]
 
 
+def test_openapi_exposes_chatbi_analytics_paths(app: FastAPI) -> None:
+    """看板端点是 P1 契约的一部分，不得被误删。"""
+    paths = app.openapi()["paths"]
+
+    for path in (
+        "/api/admin/analytics/chatbi/overview",
+        "/api/admin/analytics/chatbi/categories",
+        "/api/admin/analytics/chatbi/rollup",
+    ):
+        assert path in paths, f"OpenAPI 缺少 {path}"
+
+
 def test_chat_response_uses_session_id_and_never_conversation_id(app: FastAPI) -> None:
     properties = app.openapi()["components"]["schemas"]["ChatResponse"]["properties"]
 
