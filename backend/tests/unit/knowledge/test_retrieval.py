@@ -138,3 +138,104 @@ def test_strip_metric_suffix(raw: str, expected: str) -> None:
     """错误的词尾剥离会改变知识召回范围。"""
 
     assert strip_metric_suffix(raw) == expected
+
+
+def _goods_documents() -> list[_FakeDocument]:
+    """同域三篇：一篇真正相关，两篇是「只共享泛业务词」的干扰文档。
+
+    2026-08-22 真实模型验收里「商品上架有哪些规则要求」零命中；排查时提出的
+    「复合词二元拆分」方案会让「商品」命中全部三篇，把关键词过滤退化成空过滤。
+    干扰文档因此是本组测试的必要组成，不能只留正例。
+    """
+
+    return [
+        _FakeDocument(
+            "业务/商品/业务性质介绍/商品规则.md",
+            "商品规则",
+            "上架需提供资质与类目信息。",
+            category="GOODS",
+        ),
+        _FakeDocument(
+            "业务/商品/业务性质介绍/商品定价.md",
+            "商品定价",
+            "定价策略与折扣区间说明。",
+            category="GOODS",
+        ),
+        _FakeDocument(
+            "业务/商品/业务性质介绍/商品库存.md",
+            "商品库存",
+            "库存同步与预占逻辑。",
+            category="GOODS",
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_compound_question_recalls_the_relevant_rule_document() -> None:
+    """复合问法必须能召回真正回答它的那篇，否则内置推荐问题点进去就是未命中。"""
+
+    result = await KnowledgeRetrieval(_FakeRepository(_goods_documents())).load_domain(
+        QuestionCategory.GOODS, ("商品上架", "规则要求")
+    )
+
+    assert [hit.source_path for hit in result.hits] == ["业务/商品/业务性质介绍/商品规则.md"]
+
+
+@pytest.mark.asyncio
+async def test_compound_question_excludes_same_domain_distractors() -> None:
+    """只共享泛业务词「商品」的同域文档不得被召回，否则过滤等于没做。"""
+
+    result = await KnowledgeRetrieval(_FakeRepository(_goods_documents())).load_domain(
+        QuestionCategory.GOODS, ("商品上架", "规则要求")
+    )
+
+    paths = {hit.source_path for hit in result.hits}
+    assert "业务/商品/业务性质介绍/商品定价.md" not in paths
+    assert "业务/商品/业务性质介绍/商品库存.md" not in paths
+
+
+@pytest.mark.asyncio
+async def test_compound_recall_is_ranked_and_capped() -> None:
+    """命中过多时按相关性取前若干篇，标题与路径命中应排在只有正文命中的前面。"""
+
+    documents = [
+        _FakeDocument("业务/商品/上架规则.md", "上架规则", "商品上架规则总览。", category="GOODS"),
+        _FakeDocument("业务/商品/审核规范.md", "审核规范", "商品上架审核标准。", category="GOODS"),
+        _FakeDocument(
+            "业务/商品/类目要求.md", "类目要求", "商品上架的类目规则。", category="GOODS"
+        ),
+        _FakeDocument(
+            "业务/商品/资质说明.md", "资质说明", "商品上架需要的规则资质。", category="GOODS"
+        ),
+    ]
+
+    result = await KnowledgeRetrieval(_FakeRepository(documents)).load_domain(
+        QuestionCategory.GOODS, ("商品上架", "规则要求")
+    )
+
+    assert len(result.hits) == 3
+    assert result.hits[0].source_path == "业务/商品/上架规则.md"
+
+
+@pytest.mark.asyncio
+async def test_platform_rule_keeps_whole_library_rule_view() -> None:
+    """D2 裁定：PLATFORM_RULE 的全库规则视图与参考项目等价，加锁防回归。
+
+    参考 `WikiMemoryService.java:276` 在 categoryKeywords() 之前 return，按
+    「路径含 rule 或 路径+正文含 规则/政策/平台要求」扫描全库；我方 domains.py
+    的 PLATFORM_RULE 别名正是同样四个词，且豁免索引路径排除。
+    """
+
+    documents = [
+        _FakeDocument("index/README.md", "业务索引", "各域目录", category="UNKNOWN"),
+        _FakeDocument(
+            "平台规则/rule.md", "平台规则", "平台要求与政策说明。", category="PLATFORM_RULE"
+        ),
+        _FakeDocument("业务/交易/交易流程.md", "交易流程", "下单 支付 履约", category="TRADE"),
+    ]
+
+    result = await KnowledgeRetrieval(_FakeRepository(documents)).load_domain(
+        QuestionCategory.PLATFORM_RULE, ()
+    )
+
+    assert "平台规则/rule.md" in {hit.source_path for hit in result.hits}

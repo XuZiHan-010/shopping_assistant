@@ -14,11 +14,29 @@ from enum import StrEnum
 from typing import Protocol
 from uuid import UUID
 
-from app.knowledge.domains import DOMAIN_KEYWORDS, INDEX_PATH_MARKERS, MAX_KNOWLEDGE_CHARS
+from app.knowledge.domains import (
+    ACTION_RULE_TERMS,
+    DOMAIN_KEYWORDS,
+    INDEX_PATH_MARKERS,
+    MAX_KNOWLEDGE_CHARS,
+)
 from app.schemas.chat import QuestionCategory
 
 _METRIC_SUFFIX = re.compile(r"(指标|明细|数据|情况|趋势|数量|金额|次数|量|数)$")
 _MIN_STEM_LENGTH = 2
+
+#: 所有业务域的名词合集，作为复合问法拆词的「业务词」受控表。
+_BUSINESS_TERMS: tuple[str, ...] = tuple(
+    {term for terms in DOMAIN_KEYWORDS.values() for term in terms}
+)
+
+#: 相关性权重：标题最能代表文档主题，路径次之，正文里出现一次最弱。
+_TITLE_WEIGHT = 3
+_PATH_WEIGHT = 2
+_CONTENT_WEIGHT = 1
+
+#: 复合问法命中过多时只保留前若干篇，避免整域文档灌进模型上下文。
+_TOP_N = 3
 
 
 class KnowledgeSource(StrEnum):
@@ -117,9 +135,7 @@ class KnowledgeRetrieval:
             document for document in documents if _is_domain_document(document, category, aliases)
         ]
         if keywords:
-            hits = [
-                document for document in hits if _matches_keywords(_haystack(document), keywords)
-            ]
+            hits = _narrow_by_keywords(hits, keywords)
 
         if hits:
             return _render(hits, KnowledgeSource.MAINTAINED)
@@ -155,6 +171,73 @@ def _is_domain_document(
     ):
         return False
     return _contains_any(_haystack(document), aliases)
+
+
+def _weighted_fields(document: _DocumentLike) -> tuple[str, str, str]:
+    return (
+        document.title.lower(),
+        document.source_path.lower(),
+        document.content.lower(),
+    )
+
+
+def _decompose(keywords: Sequence[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """把问法拆成受控词表里的「业务词」与「动作/规则词」。
+
+    只在两张已知词表里找子串，不做通用分词（D1 裁定）。返回两个元组，
+    调用方据此判断这是不是一个「业务词 + 动作/规则词」的复合问法。
+    """
+
+    text = " ".join(keyword.strip().lower() for keyword in keywords if keyword.strip())
+    business = tuple(term for term in _BUSINESS_TERMS if term.lower() in text)
+    action_rule = tuple(term for term in ACTION_RULE_TERMS if term.lower() in text)
+    return business, action_rule
+
+
+def _relevance_score(document: _DocumentLike, terms: Sequence[str]) -> int:
+    title, path, content = _weighted_fields(document)
+    score = 0
+    for raw in terms:
+        term = raw.lower()
+        if term in title:
+            score += _TITLE_WEIGHT
+        if term in path:
+            score += _PATH_WEIGHT
+        if term in content:
+            score += _CONTENT_WEIGHT
+    return score
+
+
+def _narrow_by_keywords(
+    documents: list[_DocumentLike],
+    keywords: Sequence[str],
+) -> list[_DocumentLike]:
+    """按意图关键词收窄正文层。
+
+    复合问法（同时给出业务词与动作/规则词）走「两张词表各命中至少一个」的
+    门槛再按相关性取前 N 篇；否则维持原有的「命中任一关键词」行为。
+
+    只对复合问法启用更严的门槛，是为了不改变「退货量」这类单业务词问法的召回：
+    对它们要求动作词会让本来能答的问题变成未命中。
+    """
+
+    business, action_rule = _decompose(keywords)
+    if not business or not action_rule:
+        return [
+            document for document in documents if _matches_keywords(_haystack(document), keywords)
+        ]
+
+    # 「商品定价」这类同域文档只共享泛业务词「商品」，缺动作/规则词，必须排除，
+    # 否则关键词过滤在该域内退化为空过滤（2026-08-22 实测）。
+    gated = [
+        document
+        for document in documents
+        if _contains_any(" ".join(_weighted_fields(document)), business)
+        and _contains_any(" ".join(_weighted_fields(document)), action_rule)
+    ]
+    terms = (*business, *action_rule)
+    # sorted 是稳定排序：同分文档保持仓储给出的原始顺序，结果可复现。
+    return sorted(gated, key=lambda document: -_relevance_score(document, terms))[:_TOP_N]
 
 
 def _matches_keywords(haystack: str, keywords: Sequence[str]) -> bool:
