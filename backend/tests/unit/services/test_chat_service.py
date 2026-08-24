@@ -79,6 +79,7 @@ class FakeConversationRepository:
 
     def __init__(self) -> None:
         self.answers: dict[str, FakeAnswer] = {}
+        self.last_elapsed_ms: int | None = None
         self.messages: list[FakeMessage] = []
         self.conversations: dict[UUID, FakeConversation] = {}
         self.touched: list[UUID] = []
@@ -127,11 +128,16 @@ class FakeConversationRepository:
         return answer
 
     async def mark_answer_succeeded(
-        self, answer: FakeAnswer, response_payload: dict[str, Any]
+        self,
+        answer: FakeAnswer,
+        response_payload: dict[str, Any],
+        *,
+        elapsed_ms: int | None = None,
     ) -> None:
         answer.processing_status = "SUCCEEDED"
         answer.response_payload = response_payload
         answer.error_payload = None
+        self.last_elapsed_ms = elapsed_ms
 
     async def mark_answer_failed(
         self, answer: FakeAnswer, *, retryable: bool, error_payload: dict[str, Any]
@@ -494,3 +500,14 @@ async def test_finalized_degraded_response_increments_metrics() -> None:
     await service.submit(CONTEXT, chat_request(key="req-degraded-1"), request_id="req-1")
 
     assert metrics.degraded_count == 1
+
+
+@pytest.mark.asyncio
+async def test_successful_turn_records_elapsed_ms() -> None:
+    """删除耗时透传时，本测试应失败，防止思考时长指标失去事实来源。"""
+    service, repository, _, _ = build_service()
+
+    await service.submit(CONTEXT, chat_request(key="elapsed-ms-1"), request_id="r1")
+
+    assert repository.last_elapsed_ms is not None
+    assert repository.last_elapsed_ms >= 0

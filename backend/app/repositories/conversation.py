@@ -215,10 +215,13 @@ class ConversationRepository:
         self,
         answer: Answer,
         response_payload: dict[str, Any],
+        *,
+        elapsed_ms: int | None = None,
     ) -> None:
         answer.processing_status = "SUCCEEDED"
         answer.response_payload = response_payload
         answer.error_payload = None
+        answer.elapsed_ms = elapsed_ms
         await self._session.flush()
 
     async def mark_answer_failed(

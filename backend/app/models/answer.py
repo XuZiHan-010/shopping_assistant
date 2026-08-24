@@ -10,6 +10,7 @@ from sqlalchemy import (
     CheckConstraint,
     ForeignKey,
     Index,
+    Integer,
     String,
     UniqueConstraint,
     text,
@@ -32,6 +33,10 @@ class Answer(UuidPrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, Base):
         CheckConstraint(
             "processing_status IN ('PROCESSING', 'SUCCEEDED', 'FAILED_RETRYABLE', 'FAILED_FINAL')",
             name="ck_answers_processing_status",
+        ),
+        CheckConstraint(
+            "elapsed_ms IS NULL OR elapsed_ms >= 0",
+            name="ck_answers_elapsed_ms_nonnegative",
         ),
         UniqueConstraint(
             "merchant_id",
@@ -65,6 +70,7 @@ class Answer(UuidPrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, Base):
     )
     response_payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     error_payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    elapsed_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class Feedback(UuidPrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, Base):

@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 from dataclasses import dataclass
+from time import monotonic
 from typing import Any, Protocol
 from uuid import UUID
 
@@ -168,6 +169,7 @@ class ChatService:
         answer: Answer,
     ) -> ChatExecution:
         try:
+            started_at = monotonic()
             result = await self._agent.run(request.message, conversation_id)
             response = result.response.model_copy(
                 update={
@@ -234,6 +236,7 @@ class ChatService:
             await self._conversations.mark_answer_succeeded(
                 answer,
                 response.model_dump(mode="json"),
+                elapsed_ms=int((monotonic() - started_at) * 1000),
             )
             await self._session.commit()
             return ChatExecution(response=response, steps=result.steps, replayed=False)
