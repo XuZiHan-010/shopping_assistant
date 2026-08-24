@@ -3,6 +3,7 @@
 from fastapi import APIRouter
 
 from app.api.routes.admin import router as admin_router
+from app.api.routes.analytics import router as analytics_router
 from app.api.routes.chat import router as chat_router
 from app.api.routes.demo import router as demo_router
 from app.api.routes.exports import router as exports_router
@@ -22,4 +23,4 @@ api_router.include_router(metrics_router)
 api_router.include_router(reports_router)
 
 # 这些路由仅在已配置 ADMIN_TOKEN 时由应用工厂挂载。
-admin_routers = (admin_router, knowledge_router)
+admin_routers = (admin_router, knowledge_router, analytics_router)
