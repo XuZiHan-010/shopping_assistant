@@ -42,7 +42,7 @@ class MetricDefinition(UuidPrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, Base
     unit: Mapped[str] = mapped_column(String(32), nullable=False)
     business_definition: Mapped[str] = mapped_column(Text, nullable=False)
     sql_definition: Mapped[str] = mapped_column(Text, nullable=False)
-    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    source: Mapped[str] = mapped_column(String(200), nullable=False)
     owner: Mapped[str] = mapped_column(String(120), nullable=False)
     dimensions: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     source_database: Mapped[str] = mapped_column(String(64), nullable=False)

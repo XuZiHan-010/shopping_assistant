@@ -14,8 +14,9 @@ from app.analytics.dates import (
     FutureRangeError,
     business_today,
     resolve_range,
+    shift_baseline_period,
 )
-from app.intent.models import DateRange
+from app.intent.models import ComparisonMode, DateRange
 from app.intent.whitelist import MAX_QUERY_DAYS
 
 TZ = "Asia/Shanghai"
@@ -100,3 +101,63 @@ def test_reversed_range_not_in_the_future_collapses_to_a_single_day() -> None:
 
     assert resolved.start == resolved.end == date(2026, 8, 1)
     assert any("起止" in note or "颠倒" in note or "收敛" in note for note in notes)
+
+
+def test_previous_period_shifts_an_unfinished_month_to_the_same_day_range_last_month() -> None:
+    """「本月至今」（8/1–8/22）必须比上月同期（7/1–7/22），不能比完整上月。
+
+    D3 裁定明确要求避免这个错误：完整上月总量天然更大，会把「持平」误判成「下降」。
+    """
+
+    current = DateRange(start=date(2026, 8, 1), end=date(2026, 8, 22))
+
+    baseline = shift_baseline_period(current, mode=ComparisonMode.PREVIOUS_PERIOD)
+
+    assert baseline == DateRange(start=date(2026, 7, 1), end=date(2026, 7, 22))
+
+
+def test_previous_period_clamps_the_day_when_the_prior_month_is_shorter() -> None:
+    """3/31 上一个月没有 31 号，必须收敛到 2 月的最后一天，而不是溢出到 3 月。"""
+
+    current = DateRange(start=date(2026, 3, 31), end=date(2026, 3, 31))
+
+    baseline = shift_baseline_period(current, mode=ComparisonMode.PREVIOUS_PERIOD)
+
+    assert baseline == DateRange(start=date(2026, 2, 28), end=date(2026, 2, 28))
+
+
+def test_previous_period_crosses_the_year_boundary() -> None:
+    """1 月的上一期是去年 12 月，年份必须跟着回退。"""
+
+    current = DateRange(start=date(2026, 1, 1), end=date(2026, 1, 10))
+
+    baseline = shift_baseline_period(current, mode=ComparisonMode.PREVIOUS_PERIOD)
+
+    assert baseline == DateRange(start=date(2025, 12, 1), end=date(2025, 12, 10))
+
+
+def test_year_over_year_shifts_back_exactly_one_year() -> None:
+    current = DateRange(start=date(2026, 8, 1), end=date(2026, 8, 22))
+
+    baseline = shift_baseline_period(current, mode=ComparisonMode.YEAR_OVER_YEAR)
+
+    assert baseline == DateRange(start=date(2025, 8, 1), end=date(2025, 8, 22))
+
+
+def test_year_over_year_clamps_leap_day_to_february_28() -> None:
+    """2024 是闰年有 2/29，2023 不是闰年，必须收敛到 2/28 而不是报错或溢出到 3/1。"""
+
+    current = DateRange(start=date(2024, 2, 29), end=date(2024, 2, 29))
+
+    baseline = shift_baseline_period(current, mode=ComparisonMode.YEAR_OVER_YEAR)
+
+    assert baseline == DateRange(start=date(2023, 2, 28), end=date(2023, 2, 28))
+
+
+def test_shift_baseline_period_rejects_none_mode() -> None:
+    """NONE 表示不对比，调用方必须先判断过滤，不应该走到这里还要求平移。"""
+
+    current = DateRange(start=date(2026, 8, 1), end=date(2026, 8, 22))
+
+    with pytest.raises(ValueError, match="NONE"):
+        shift_baseline_period(current, mode=ComparisonMode.NONE)

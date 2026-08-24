@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Final, Literal
 
 from sqlalchemy.exc import SQLAlchemyError
@@ -20,15 +21,22 @@ from app.analytics.contract import (
     REFUND_CATEGORY_REFUND_KEYWORDS,
     REFUND_CATEGORY_RETURN_KEYWORDS,
     DetailSpec,
+    MetricSpec,
     UnknownFieldError,
     compatible_dimensions,
     detail_spec,
     dimension_spec,
     metric_spec,
 )
-from app.analytics.dates import FutureRangeError, resolve_range
+from app.analytics.dates import FutureRangeError, resolve_range, shift_baseline_period
 from app.core.security import MerchantContext
-from app.intent.models import CrossBusinessPlan, DateRange, GeneratedMetricPlan, QueryIntent
+from app.intent.models import (
+    ComparisonMode,
+    CrossBusinessPlan,
+    DateRange,
+    GeneratedMetricPlan,
+    QueryIntent,
+)
 from app.intent.whitelist import MAX_DETAIL_LIMIT
 from app.repositories.analytics import AnalyticsRepository, ResultColumn
 from app.schemas.chat import CATEGORY_DISPLAY_NAMES, AnswerMode, QuestionCategory
@@ -84,6 +92,24 @@ class ExportSpec:
 
 
 @dataclass(frozen=True)
+class ComparisonResult:
+    """环比/同比两期对比（D3 裁定：⚪ 我方增强）。
+
+    两期数值与变化率均由后端查询和计算得出；`AnswerService` 据此把它们纳入
+    模型可引用的事实集合，模型本身不推算基期日期、数值或百分比（R4）。
+    """
+
+    mode: ComparisonMode
+    current_range: DateRange
+    baseline_range: DateRange
+    current_value: Decimal | None
+    baseline_value: Decimal | None
+    #: 基期为 None 或 0 时不计算（会产出无意义或除零的百分比），此时为 None，
+    #: 调用方必须显式说明算不出来，不能省略这一步（R7）。
+    change_ratio: Decimal | None
+
+
+@dataclass(frozen=True)
 class QueryResult:
     columns: tuple[ResultColumn, ...]
     rows: list[dict[str, object]]
@@ -95,6 +121,7 @@ class QueryResult:
     notes: tuple[str, ...]
     #: True 表示结果里的指标不可跨行相加（去重计数、比例）。B5 据此避免错误求和。
     non_additive: bool
+    comparison: ComparisonResult | None = None
 
 
 class SafeQueryService:
@@ -214,6 +241,11 @@ class SafeQueryService:
         except UnknownFieldError as error:
             raise UnsupportedQueryError(f"指标 {intent.metric} 不在可查询范围内") from error
 
+        if intent.comparison is not ComparisonMode.NONE and intent.dimensions:
+            # 对比只支持单一聚合值：按维度拆分后两期行数、行序都不保证对应，
+            # 无法一一算出每行的变化率，与其展示一份错位的对比不如直接拒绝。
+            raise UnsupportedQueryError("对比分析暂不支持按维度拆分，请分别查询两个时间段")
+
         allowed = compatible_dimensions(metric)
         for code in intent.dimensions:
             try:
@@ -254,6 +286,22 @@ class SafeQueryService:
             raise UnsupportedQueryError(_QUERY_FAILED_REASON) from error
         truncated = len(result.rows) > _METRIC_PREVIEW_LIMIT
         rows = result.rows[:_METRIC_PREVIEW_LIMIT] if truncated else result.rows
+
+        comparison = None
+        if intent.comparison is not ComparisonMode.NONE:
+            current_value = _single_metric_value(rows, metric.code)
+            try:
+                comparison, notes = await self._compare_periods(
+                    context,
+                    metric,
+                    mode=intent.comparison,
+                    current_range=date_range,
+                    current_value=current_value,
+                    notes=notes,
+                )
+            except SQLAlchemyError as error:
+                raise UnsupportedQueryError(_QUERY_FAILED_REASON) from error
+
         return QueryResult(
             columns=result.columns,
             rows=rows,
@@ -264,6 +312,57 @@ class SafeQueryService:
             export_spec=None,
             notes=notes,
             non_additive=not metric.additive,
+            comparison=comparison,
+        )
+
+    async def _compare_periods(
+        self,
+        context: MerchantContext,
+        metric: MetricSpec,
+        *,
+        mode: ComparisonMode,
+        current_range: DateRange,
+        current_value: Decimal | None,
+        notes: tuple[str, ...],
+    ) -> tuple[ComparisonResult, tuple[str, ...]]:
+        """取基期同一指标的单一聚合值，并用 Decimal 算出变化率。
+
+        dimensions=() 恒定只聚合出一行（`_metric` 已经拒绝了对比 + 维度的组合），
+        因此这里永远只需要「一个数」，不必再处理多行对应关系。
+        """
+
+        baseline_range = shift_baseline_period(current_range, mode=mode)
+        baseline = await self._repository.aggregate(
+            merchant_id=context.merchant_id,
+            metric=metric,
+            dimensions=(),
+            filters={},
+            start=baseline_range.start,
+            end=baseline_range.end,
+            limit=1,
+        )
+        baseline_value = _single_metric_value(baseline.rows, metric.code)
+
+        change_ratio = None
+        if current_value is not None and baseline_value:
+            change_ratio = (
+                (current_value - baseline_value) / baseline_value * Decimal("100")
+            ).quantize(Decimal("0.1"))
+        elif current_value is not None:
+            # 基期是 None（无匹配行）或恰好为 0：除法要么没有分母，要么会产出一个
+            # 「相对于零」的无意义百分比，两种情况都必须显式说明而不是省略。
+            notes = (*notes, "对比基期无数据或为零，无法计算变化率")
+
+        return (
+            ComparisonResult(
+                mode=mode,
+                current_range=current_range,
+                baseline_range=baseline_range,
+                current_value=current_value,
+                baseline_value=baseline_value,
+                change_ratio=change_ratio,
+            ),
+            notes,
         )
 
     async def _generated_metric(
@@ -503,3 +602,19 @@ def _keywords_mention(keywords: Sequence[str], markers: frozenset[str]) -> bool:
     """任一关键词包含任一标记子串就算命中——分类阶段产出的是自由词，不是枚举值。"""
 
     return any(marker in keyword for keyword in keywords for marker in markers)
+
+
+def _single_metric_value(rows: Sequence[Mapping[str, object]], metric_code: str) -> Decimal | None:
+    """从「无维度拆分」的单行聚合结果里取出一个 Decimal 值。
+
+    行本身可能不存在（仓储对某些指标在零匹配时不产出行），值也可能是 SQL NULL
+    （`SUM` 在零匹配行时的返回值）——两者都表示「这段时间没有数据」，统一为 None，
+    调用方据此判断能不能算变化率，不把 None 悄悄当成 0 参与除法。
+    """
+
+    if not rows:
+        return None
+    value = rows[0].get(metric_code)
+    if value is None:
+        return None
+    return value if isinstance(value, Decimal) else Decimal(str(value))

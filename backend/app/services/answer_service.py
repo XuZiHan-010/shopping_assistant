@@ -13,7 +13,7 @@ from app.prompts.answer import ANSWER_SYSTEM_PROMPT
 from app.schemas.answer import AnswerDraft
 from app.schemas.chat import Recommendation
 from app.services.quality_types import AttemptFailureKind, DraftAttempt
-from app.services.safe_query import QueryResult
+from app.services.safe_query import ComparisonResult, QueryResult
 
 _NUMBER = re.compile(r"(?<![\d.])\d+(?:\.\d+)?(?![\d.])")
 _ISO_DATE = re.compile(r"\b\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:[+-]\d{2}:?\d{2}|Z)?)?\b")
@@ -118,7 +118,9 @@ class AnswerService:
         unit = metric.unit if metric is not None else ""
         summary = self._derive_summary(facts)
         value = _first_metric_value(result, metric.metric_code if metric is not None else None)
-        if result.truncated:
+        if result.comparison is not None:
+            answer = _comparison_answer(result.comparison, metric_label, unit)
+        elif result.truncated:
             answer = (
                 f"本次仅展示部分结果，共预览 {result.total_rows} 行{metric_label}数据，"
                 "不对预览行做合计。"
@@ -217,6 +219,22 @@ class AnswerService:
         )
 
 
+def _comparison_answer(comparison: ComparisonResult, metric_label: str, unit: str) -> str:
+    """D3 裁定：兜底文案必须如实说明环比/同比，基期算不出比例时不得省略说明（R7）。"""
+
+    if comparison.current_value is None:
+        return f"本次查询未取得可汇总的{metric_label}数值，无法进行对比。"
+    if comparison.change_ratio is not None:
+        return (
+            f"本次查询的{metric_label}为 {comparison.current_value}{unit}，"
+            f"对比周期为 {comparison.baseline_value}{unit}，变化 {comparison.change_ratio}%。"
+        )
+    return (
+        f"本次查询的{metric_label}为 {comparison.current_value}{unit}；"
+        "对比基期无数据或为零，无法计算变化率。"
+    )
+
+
 def extract_json_object(text: str) -> str:
     """截取第一个花括号至最后一个花括号，兼容模型添加的围栏和说明文字。"""
 
@@ -244,7 +262,34 @@ def _facts_json(facts: AnswerFacts) -> str:
         + f',"non_additive":{non_additive}'
         + ',"summary":'
         + _summary_json(summary)
+        + ',"comparison":'
+        + _comparison_json(facts.query_result.comparison)
         + "}"
+    )
+
+
+def _comparison_json(comparison: ComparisonResult | None) -> str:
+    import json
+
+    if comparison is None:
+        return "null"
+    return json.dumps(
+        {
+            "mode": comparison.mode.value,
+            "current_range": {
+                "start": comparison.current_range.start.isoformat(),
+                "end": comparison.current_range.end.isoformat(),
+            },
+            "baseline_range": {
+                "start": comparison.baseline_range.start.isoformat(),
+                "end": comparison.baseline_range.end.isoformat(),
+            },
+            "current_value": _json_value(comparison.current_value),
+            "baseline_value": _json_value(comparison.baseline_value),
+            "change_ratio": _json_value(comparison.change_ratio),
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
     )
 
 
@@ -296,6 +341,15 @@ def _allowed_numbers(result: QueryResult, summary: FactSummary | None = None) ->
         ):
             if value is not None:
                 values |= _numeric_forms(value)
+    comparison = result.comparison
+    if comparison is not None:
+        for value in (comparison.current_value, comparison.baseline_value, comparison.change_ratio):
+            if value is not None:
+                values |= _numeric_forms(value)
+        values |= _date_parts(comparison.current_range.start)
+        values |= _date_parts(comparison.current_range.end)
+        values |= _date_parts(comparison.baseline_range.start)
+        values |= _date_parts(comparison.baseline_range.end)
     return values
 
 

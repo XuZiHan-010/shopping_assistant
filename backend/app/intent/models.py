@@ -45,6 +45,20 @@ class DateRange(BaseModel):
     end: date
 
 
+class ComparisonMode(StrEnum):
+    """环比/同比对比意图（D3 裁定：⚪ 我方增强，参考项目没有该能力）。
+
+    模型只表达「要不要对比、对比哪种周期」，不提供基准期的具体日期、变化率或
+    公式——第二期日期由 `app.analytics.dates.shift_baseline_period` 在后端推算，
+    变化率由 `SafeQueryService` 用两期真实查询结果计算，`_validate()` 不放行
+    模型自行算出的百分比（R4）。
+    """
+
+    NONE = "NONE"
+    PREVIOUS_PERIOD = "PREVIOUS_PERIOD"
+    YEAR_OVER_YEAR = "YEAR_OVER_YEAR"
+
+
 class CrossBusinessPlanType(StrEnum):
     """后端唯一允许执行的跨业务关联类型。"""
 
@@ -104,6 +118,7 @@ class QueryIntent(BaseModel):
     limit: int | None = None
     followup_reference: bool = False
     needs_attachment: bool = False
+    comparison: ComparisonMode = ComparisonMode.NONE
     cross_business_plan: CrossBusinessPlan | None = None
     # 只在本模型的前置校验器中写入。它不会参与 model_dump，因此不会进入查询
     # 或给 LLM 的 JSON 约束；白名单校验器会把它转换为固定的用户可见说明。
