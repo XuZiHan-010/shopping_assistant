@@ -7,7 +7,7 @@ import asyncio
 from datetime import UTC, date, datetime, timedelta
 
 from app.analytics.dates import business_today
-from app.core.config import Settings
+from app.core.job_config import JobSettings
 from app.core.runtime import configure_event_loop_policy
 from app.db.session import Database
 from app.repositories.chatbi import ChatBiRepository
@@ -15,12 +15,12 @@ from app.repositories.chatbi import ChatBiRepository
 DEFAULT_WINDOW_DAYS = 7
 
 
-def default_window(settings: Settings) -> tuple[date, date]:
+def default_window(settings: JobSettings) -> tuple[date, date]:
     end = business_today(datetime.now(UTC), timezone=settings.business_timezone)
     return end - timedelta(days=DEFAULT_WINDOW_DAYS - 1), end
 
 
-async def run_rollup(settings: Settings, *, start_date: date, end_date: date) -> int:
+async def run_rollup(settings: JobSettings, *, start_date: date, end_date: date) -> int:
     if start_date > end_date:
         raise ValueError("start_date 不得晚于 end_date")
     database = Database(settings)
@@ -38,7 +38,7 @@ def main() -> None:
     parser.add_argument("--end-date", type=date.fromisoformat)
     args = parser.parse_args()
     configure_event_loop_policy()
-    settings = Settings()
+    settings = JobSettings()
     start, end = default_window(settings)
     asyncio.run(
         run_rollup(settings, start_date=args.start_date or start, end_date=args.end_date or end)

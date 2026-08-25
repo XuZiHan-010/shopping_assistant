@@ -129,6 +129,26 @@ def require_admin_token(
         raise AdminForbiddenError
 
 
+def require_admin_or_viewer_token(
+    request: Request,
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> None:
+    """只读端点专用认证：管理员令牌或只读令牌任一匹配即放行。
+
+    只挂在 GET 端点上——只读令牌本身可以公开展示，前提是它永远打不开任何写
+    操作。挂错到写端点会让「只读」这个边界名存实亡，务必只在 `GET` 路由上使用。
+    """
+
+    token = request.headers.get("x-admin-token")
+    if not token:
+        raise AdminTokenRequiredError
+    if settings.admin_token and hmac.compare_digest(token, settings.admin_token):
+        return
+    if settings.viewer_token and hmac.compare_digest(token, settings.viewer_token):
+        return
+    raise AdminForbiddenError
+
+
 def build_guarded_llm(
     settings: Settings,
     database: Database,
