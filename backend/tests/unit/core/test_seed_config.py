@@ -20,3 +20,11 @@ def test_demo_refresh_permission_requires_explicit_true_before_writing() -> None
 
     assert settings.allow_demo_data_refresh is True
     require_demo_refresh_permission(settings)
+
+
+def test_seed_settings_inherits_database_url_normalization() -> None:
+    """SeedSettings 继承 JobSettings，滚动 Seed Cron 面对同一个 Railway URL。"""
+
+    settings = SeedSettings(database_url="postgresql://user:pass@localhost/db")
+
+    assert settings.database_url == "postgresql+psycopg://user:pass@localhost/db"

@@ -28,8 +28,11 @@ Railway 的 Config File Path 不跟随 Root Directory。即使 Service Root 已�
 | --- | --- | --- |
 | `VITE_API_BASE_URL` | 是 | 后端公网地址，在**构建期**注入静态产物。修改后必须重新构建并部署前端；只改变量但不重新部署不会生效。 |
 | `VITE_USE_MOCK` | 否 | 生产环境必须不设或设为 `false`。设为 `true` 会使镜像构建直接失败；Dockerfile 已声明对应的构建参数。 |
+| `VITE_VIEWER_TOKEN` | 否 | 只读令牌，取值必须与后端服务的 `VIEWER_TOKEN` 一致。配置后知识库后台与 Chat BI 看板的令牌入口会出现「使用只读令牌浏览」勾选项，访客免手输即可只读浏览；留空则不显示该入口。同样在构建期注入，改后必须重新构建。 |
 
-`VITE_` 前缀变量会内联进公开的静态产物，绝不能用来配置任何密钥、Token 或连接串。
+`VITE_` 前缀变量会内联进公开的静态产物，绝不能用来配置任何密钥、Token 或连接串。`VITE_VIEWER_TOKEN` 是 AGENTS.md R6 明确列出的例外：它只能打开 `/api/admin/*` 的只读 GET 子集，泄露的最坏后果是「看到本来就打算公开的只读内容」。
+
+**这三个变量都必须在 `frontend/Dockerfile` 里有对应的 `ARG` 声明。** Railway 会把服务变量作为 build-arg 传给 Dockerfile 构建，但未声明的 build-arg 会被静默丢弃——只在平台上配置而 Dockerfile 漏声明，表现是「变量明明配了却完全不生效」，且没有任何报错。新增 `VITE_` 变量时务必同步改 Dockerfile。
 
 ## 演示部署模式
 

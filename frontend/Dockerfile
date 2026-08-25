@@ -21,6 +21,13 @@ ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 # 静默忽略，防线形同虚设。
 ARG VITE_USE_MOCK
 ENV VITE_USE_MOCK=$VITE_USE_MOCK
+# 只读令牌的构建期镜像。必须在这里声明才接得住 Railway 传进来的同名服务变量——
+# 只在平台上配置而 Dockerfile 不声明，构建时读到的是 undefined，
+# AdminTokenDialog.vue 的「使用只读令牌浏览」勾选项就不会渲染。
+# 它允许进入公开产物：只能开只读端点，与不得进代码的 ADMIN_TOKEN 是两回事
+# （AGENTS.md R6 的 VIEWER_TOKEN 例外）。
+ARG VITE_VIEWER_TOKEN
+ENV VITE_VIEWER_TOKEN=$VITE_VIEWER_TOKEN
 RUN npm run build
 
 FROM caddy:2-alpine AS runtime

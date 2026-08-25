@@ -11,6 +11,8 @@ from uuid import UUID
 from pydantic import AliasChoices, AnyHttpUrl, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.core.db_url import normalize_postgres_url
+
 
 class AppEnvironment(StrEnum):
     """应用运行环境。"""
@@ -109,9 +111,7 @@ class Settings(BaseSettings):
     @field_validator("database_url", mode="before")
     @classmethod
     def normalize_database_url(cls, value: Any) -> Any:
-        if isinstance(value, str) and value.startswith("postgresql://"):
-            return value.replace("postgresql://", "postgresql+psycopg://", 1)
-        return value
+        return normalize_postgres_url(value)
 
     @field_validator("frontend_origin", mode="before")
     @classmethod
