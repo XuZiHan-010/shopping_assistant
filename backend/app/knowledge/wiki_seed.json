@@ -1,0 +1,170 @@
+[
+  {
+    "source_path": "index/README.md",
+    "category": "UNKNOWN",
+    "title": "README",
+    "content": "# Borough LLM Wiki 索引\n\n## 检索顺序\n\n1. 优先检索本目录和 `业务/` 下由团队维护的知识。\n2. 只有维护知识没有命中时，才检索 `memory/` 以及兼容目录 `runtime/wiki/` 中的历史对话沉淀。\n3. 两层知识都没有命中时，允许模型基于问题和查询数据生成解释，但必须标记为“大模型生成”。\n\n## 业务索引\n\n每个业务域固定四个板块：`业务流程/`、`业务名词解释/`、`ddl/`、`指标或调用指标平台mcp的skill/`。\n\n| 业务域 | 业务分类 | 别名 | 主数据表 | 商家过滤键 |\n| --- | --- | --- | --- | --- |\n| 交易 | `TRADE` | 订单、支付、GMV、成交、履约 | `dwm_trade_order_detail_di` | `seller_id` |\n| 退货 | `REFUND` | 退款、售后、refund、return | `dwm_trade_refund_detail_di` | `seller_id` |\n| 客服工单 | `CS_TICKET` | 客服、工单、咨询、ticket | `dwm_cs_ticket_detail_di` | `seller_id` |\n| 理赔赔付 | `COMPENSATION` | 理赔、赔付、补偿、repay | `dwm_cs_repay_detail_df` | `seller_id` |\n| 优惠券 | `COUPON` | 优惠、券、coupon | `dwm_coupon_detail_di` | `seller_id` |\n| 商品 | `GOODS` | 货品、上架、goods、spu | `dwm_goods_detail_df` | `seller_id` |\n| 商家其他 | `MERCHANT_OTHER` | 保证金、申诉、处罚 | `dwd_merchant_appeal_detail_df`、`dwd_merchant_deposit_recharge_df` | **`merchant_id`** |\n| 身份信息 | `IDENTITY` | 身份、资料、dim_merchant | `dim_merchant_df` | **`merchant_id`** |\n| 供应链 | `SCM` | 入库、分拣、质检、鉴定、出库、仓库 | `dwm_scm_detail_di` | `seller_id` |\n| 平台规则 | `PLATFORM_RULE` | 规则、政策、平台要求 | 不查 Doris | — |\n\n指标类问题统一走画像表 `ads_merchant_profile`，按 `merchant_id` + `pt` 过滤。\n\n## 当前完成度\n\n- 交易、供应链：团队已维护内容。\n- 其余 8 个业务域：`ddl/` 与 `指标.../` 已按代码事实生成，`业务流程/` 与 `业务名词解释/` 为骨架，\n  含 `⚠️ 待团队补充` 标记，需要业务方补齐枚举取值与流程细节。\n\n## 维护约束\n\n- 团队维护区是事实源，自动任务不得覆盖或写入。\n- 每份文档应写清适用范围、口径、负责人和更新时间。\n- DDL 与指标口径变更时，应同步更新索引和相关业务文档。\n- 历史对话仅作为补充经验，不得覆盖团队维护口径。\n- 检索按业务分类关键词匹配「路径 + 正文」，所以文档正文里要出现该业务域的常用别名，否则可能命不中。\n\n",
+    "is_complete": false,
+    "source": "Borough 团队维护（镜像知识种子）"
+  },
+  {
+    "source_path": "业务/交易/业务名词解释/交易名词.md",
+    "category": "TRADE",
+    "title": "交易名词",
+    "content": "# 交易业务名词解释\n\n- 负责人：待团队维护\n- 更新时间：2026-07-23\n\n| 名词 | 解释 | 主要字段 |\n| --- | --- | --- |\n| 订单量 | 查询范围内创建的子订单数量；按画像口径时读取每日指标 | `order_cnt_1d`、`sub_order_id` |\n| 下单用户量 | 查询范围内发生下单行为的去重买家数量 | `order_user_cnt_1d`、`buyer_id` |\n| GMV | 商品金额与业务口径约定费用的成交规模；页面金额单位为元 | `order_gmv_amt_1d`、`product_amt`、`freight_amt` |\n| 支付 GMV | 支付成功订单的实付金额 | `pay_gmv_amt_1d`、`pay_amt` |\n| 交易成功订单量 | 状态达到交易成功的订单数量 | `trade_success_order_cnt_1d`、`sub_order_status_code` |\n| 客单价 | 支付 GMV 除以支付订单量 | `avg_pay_order_amt_1d` |\n| 退货量 | 查询范围内发起退货或退款的业务单量 | `return_cnt_1d`、`refund_id` |\n\n金额明细字段通常以分存储，画像金额指标以元存储。生成 SQL 和回答时必须明确换算口径。\n\n",
+    "is_complete": true,
+    "source": "Borough 团队维护（镜像知识种子）"
+  },
+  {
+    "source_path": "业务/交易/业务流程/交易业务流程图.md",
+    "category": "TRADE",
+    "title": "交易业务流程图",
+    "content": "# 交易业务流程\n\n- 适用范围：Borough 商家订单、支付、发货、签收、交易完成和售后关联分析。\n- 负责人：待团队维护\n- 更新时间：2026-07-23\n\n```mermaid\nflowchart LR\n  A[用户下单] --> B[创建订单]\n  B --> C{支付成功}\n  C -- 否 --> D[待支付或关闭]\n  C -- 是 --> E[商家备货]\n  E --> F[发货]\n  F --> G[运输]\n  G --> H{用户签收}\n  H -- 是 --> I[交易成功]\n  H -- 否 --> J[物流异常处理]\n  I --> K{发起售后}\n  K -- 是 --> L[退货或退款]\n  K -- 否 --> M[交易结束]\n```\n\n## 数据落点\n\n- 每日聚合指标：`Borough.ads_merchant_profile`\n- 订单明细：`Borough.dwm_trade_order_detail_di`\n- 退货退款明细：`Borough.dwm_trade_refund_detail_di`\n- 商品信息：`Borough.dwm_goods_detail_df`\n\n",
+    "is_complete": true,
+    "source": "Borough 团队维护（镜像知识种子）"
+  },
+  {
+    "source_path": "业务/优惠券/业务名词解释/优惠券名词.md",
+    "category": "COUPON",
+    "title": "优惠券名词",
+    "content": "# 优惠券域业务名词解释\n\n- 负责人：待团队维护\n- 更新时间：2026-07-28\n- 对应业务分类：`COUPON`\n\n> ⚠️ 待团队补充：以下为骨架，业务口径以团队确认为准。\n\n## 常用别名\n\n商家提问时可能使用：优惠、券、coupon。\n\n## 枚举字段取值\n\n以下字段是名称类枚举，取值含义需要团队补充。补齐后模型才能准确解释状态，也能减少「口径由大模型生成」的情况。\n\n### `discount_way_name`\n\n| 取值 | 含义 |\n| --- | --- |\n|  |  |\n\n### `found_type_name`\n\n| 取值 | 含义 |\n| --- | --- |\n|  |  |\n\n### `coupon_send_status_name`\n\n| 取值 | 含义 |\n| --- | --- |\n|  |  |\n\n### `send_source_name`\n\n| 取值 | 含义 |\n| --- | --- |\n|  |  |\n\n### `is_receive`\n\n| 取值 | 含义 |\n| --- | --- |\n|  |  |\n\n### `is_voucher`\n\n| 取值 | 含义 |\n| --- | --- |\n|  |  |\n\n## 业务术语\n\n| 术语 | 解释 |\n| --- | --- |\n|  |  |\n",
+    "is_complete": false,
+    "source": "Borough 团队维护（镜像知识种子）"
+  },
+  {
+    "source_path": "业务/优惠券/业务流程/优惠券业务流程图.md",
+    "category": "COUPON",
+    "title": "优惠券业务流程图",
+    "content": "# 优惠券域业务流程\n\n- 负责人：待团队维护\n- 更新时间：2026-07-28\n- 对应业务分类：`COUPON`\n\n> ⚠️ 待团队补充：以下为骨架，业务口径以团队确认为准。\n\n## 主流程\n\n```mermaid\nflowchart LR\n  S0[商家创建券模板]\n  S1[配置活动与发放渠道]\n  S2[用户领取]\n  S3[下单核销]\n  S4[结算与补贴分摊]\n  S0 --> S1\n  S1 --> S2\n  S2 --> S3\n  S3 --> S4\n```\n\n1. 商家创建券模板\n2. 配置活动与发放渠道\n3. 用户领取\n4. 下单核销\n5. 结算与补贴分摊\n\n## 关键节点与数据落点\n\n| 流程节点 | 落到哪张表 / 哪个字段 | 说明 |\n| --- | --- | --- |\n|  |  |  |\n\n## 常见异常场景\n\n|  异常 | 排查方向 |\n| --- | --- |\n|  |  |\n",
+    "is_complete": false,
+    "source": "Borough 团队维护（镜像知识种子）"
+  },
+  {
+    "source_path": "业务/供应链/业务名词解释/供应链名词.md",
+    "category": "SCM",
+    "title": "供应链名词",
+    "content": "# 供应链业务名词解释\n\n- 负责人：待团队维护\n- 更新时间：2026-07-23\n\n| 名词 | 解释 | 主要字段 |\n| --- | --- | --- |\n| 入库单 | 记录货品进入仓库及收货状态的业务单 | `inbound_id`、`inbound_status_code` |\n| 分拣 | 仓库对入库货品进行分类和流转的环节 | `sorting_id`、`sorting_status_code` |\n| 质检 | 对货品质量、外观和资料进行检查 | `check_id`、`check_status_code` |\n| 鉴定 | 对货品真伪进行识别的环节 | `identify_id`、`identify_result_code` |\n| 出库 | 货品离开仓库进入物流履约的环节 | `outbound_id`、`outbound_type_code` |\n| 供应链履约量 | 在统计日期内进入供应链履约口径的业务量 | `scm_performance_cnt_1d` |\n\n",
+    "is_complete": true,
+    "source": "Borough 团队维护（镜像知识种子）"
+  },
+  {
+    "source_path": "业务/供应链/业务流程/供应链业务流程图.md",
+    "category": "SCM",
+    "title": "供应链业务流程图",
+    "content": "# 供应链业务流程\n\n- 适用范围：商家货品入库、分拣、质检、鉴定、出库和履约分析。\n- 负责人：待团队维护\n- 更新时间：2026-07-23\n\n```mermaid\nflowchart LR\n  A[商家发货入仓] --> B[仓库收货]\n  B --> C[入库]\n  C --> D[分拣]\n  D --> E[质检]\n  E --> F{质检通过}\n  F -- 否 --> G[异常处理或申诉]\n  F -- 是 --> H[真伪鉴定]\n  H --> I{鉴定通过}\n  I -- 否 --> G\n  I -- 是 --> J[上架或出库]\n  J --> K[物流签收]\n```\n\n## 数据落点\n\n- 供应链明细：`Borough.dwm_scm_detail_di`\n- 商品明细：`Borough.dwm_goods_detail_df`\n- 商家申诉：`Borough.dwd_merchant_appeal_detail_df`\n\n",
+    "is_complete": true,
+    "source": "Borough 团队维护（镜像知识种子）"
+  },
+  {
+    "source_path": "业务/商品/业务名词解释/商品名词.md",
+    "category": "GOODS",
+    "title": "商品名词",
+    "content": "# 商品域业务名词解释\n\n- 负责人：待团队维护\n- 更新时间：2026-07-28\n- 对应业务分类：`GOODS`\n\n> ⚠️ 待团队补充：以下为骨架，业务口径以团队确认为准。\n\n## 常用别名\n\n商家提问时可能使用：货品、上架、goods、spu。\n\n## 枚举字段取值\n\n以下字段是名称类枚举，取值含义需要团队补充。补齐后模型才能准确解释状态，也能减少「口径由大模型生成」的情况。\n\n### `spu_status_name`\n\n| 取值 | 含义 |\n| --- | --- |\n|  |  |\n\n### `source_type_name`\n\n| 取值 | 含义 |\n| --- | --- |\n|  |  |\n\n### `audit_operate_type_name`\n\n| 取值 | 含义 |\n| --- | --- |\n|  |  |\n\n### `is_audit_pass`\n\n| 取值 | 含义 |\n| --- | --- |\n|  |  |\n\n### `is_completion_pass`\n\n| 取值 | 含义 |\n| --- | --- |\n|  |  |\n\n### `is_import_pass`\n\n| 取值 | 含义 |\n| --- | --- |\n|  |  |\n\n### `is_risk_audit_pass`\n\n| 取值 | 含义 |\n| --- | --- |\n|  |  |\n\n## 业务术语\n\n| 术语 | 解释 |\n| --- | --- |\n|  |  |\n",
+    "is_complete": false,
+    "source": "Borough 团队维护（镜像知识种子）"
+  },
+  {
+    "source_path": "业务/商品/业务流程/商品业务流程图.md",
+    "category": "GOODS",
+    "title": "商品业务流程图",
+    "content": "# 商品域业务流程\n\n- 负责人：待团队维护\n- 更新时间：2026-07-28\n- 对应业务分类：`GOODS`\n\n> ⚠️ 待团队补充：以下为骨架，业务口径以团队确认为准。\n\n## 主流程\n\n```mermaid\nflowchart LR\n  S0[商家提报商品]\n  S1[资料完整性校验]\n  S2[类目与品牌资质审核]\n  S3[风控审核]\n  S4[通过后上架]\n  S0 --> S1\n  S1 --> S2\n  S2 --> S3\n  S3 --> S4\n```\n\n1. 商家提报商品\n2. 资料完整性校验\n3. 类目与品牌资质审核\n4. 风控审核\n5. 通过后上架\n\n## 关键节点与数据落点\n\n| 流程节点 | 落到哪张表 / 哪个字段 | 说明 |\n| --- | --- | --- |\n|  |  |  |\n\n## 常见异常场景\n\n|  异常 | 排查方向 |\n| --- | --- |\n|  |  |\n",
+    "is_complete": false,
+    "source": "Borough 团队维护（镜像知识种子）"
+  },
+  {
+    "source_path": "业务/商家其他/业务名词解释/商家其他名词.md",
+    "category": "MERCHANT_OTHER",
+    "title": "商家其他名词",
+    "content": "# 商家其他域业务名词解释\n\n- 负责人：待团队维护\n- 更新时间：2026-07-28\n- 对应业务分类：`MERCHANT_OTHER`\n\n> ⚠️ 待团队补充：以下为骨架，业务口径以团队确认为准。\n\n## 常用别名\n\n商家提问时可能使用：保证金、申诉、处罚、merchant。\n\n## 枚举字段取值\n\n以下字段是名称类枚举，取值含义需要团队补充。补齐后模型才能准确解释状态，也能减少「口径由大模型生成」的情况。\n\n### `appeal_status_name`\n\n| 取值 | 含义 |\n| --- | --- |\n|  |  |\n\n### `apply_type_name`\n\n| 取值 | 含义 |\n| --- | --- |\n|  |  |\n\n### `currency`\n\n| 取值 | 含义 |\n| --- | --- |\n|  |  |\n\n## 业务术语\n\n| 术语 | 解释 |\n| --- | --- |\n|  |  |\n",
+    "is_complete": false,
+    "source": "Borough 团队维护（镜像知识种子）"
+  },
+  {
+    "source_path": "业务/商家其他/业务流程/商家其他业务流程图.md",
+    "category": "MERCHANT_OTHER",
+    "title": "商家其他业务流程图",
+    "content": "# 商家其他域业务流程\n\n- 负责人：待团队维护\n- 更新时间：2026-07-28\n- 对应业务分类：`MERCHANT_OTHER`\n\n> ⚠️ 待团队补充：以下为骨架，业务口径以团队确认为准。\n\n## 主流程\n\n```mermaid\nflowchart LR\n  S0[平台判定违规或商家发起申诉]\n  S1[材料提交]\n  S2[平台复核]\n  S3[申诉成立则撤销处罚]\n  S4[保证金扣划或补缴]\n  S0 --> S1\n  S1 --> S2\n  S2 --> S3\n  S3 --> S4\n```\n\n1. 平台判定违规或商家发起申诉\n2. 材料提交\n3. 平台复核\n4. 申诉成立则撤销处罚\n5. 保证金扣划或补缴\n\n## 关键节点与数据落点\n\n| 流程节点 | 落到哪张表 / 哪个字段 | 说明 |\n| --- | --- | --- |\n|  |  |  |\n\n## 常见异常场景\n\n|  异常 | 排查方向 |\n| --- | --- |\n|  |  |\n",
+    "is_complete": false,
+    "source": "Borough 团队维护（镜像知识种子）"
+  },
+  {
+    "source_path": "业务/客服工单/业务名词解释/客服工单名词.md",
+    "category": "CS_TICKET",
+    "title": "客服工单名词",
+    "content": "# 客服工单域业务名词解释\n\n- 负责人：待团队维护\n- 更新时间：2026-07-28\n- 对应业务分类：`CS_TICKET`\n\n> ⚠️ 待团队补充：以下为骨架，业务口径以团队确认为准。\n\n## 常用别名\n\n商家提问时可能使用：客服、工单、咨询、ticket。\n\n## 枚举字段取值\n\n以下字段是名称类枚举，取值含义需要团队补充。补齐后模型才能准确解释状态，也能减少「口径由大模型生成」的情况。\n\n### `ticket_status_name`\n\n| 取值 | 含义 |\n| --- | --- |\n|  |  |\n\n### `priority_name`\n\n| 取值 | 含义 |\n| --- | --- |\n|  |  |\n\n### `is_reopen`\n\n| 取值 | 含义 |\n| --- | --- |\n|  |  |\n\n### `is_reminder`\n\n| 取值 | 含义 |\n| --- | --- |\n|  |  |\n\n## 业务术语\n\n| 术语 | 解释 |\n| --- | --- |\n|  |  |\n",
+    "is_complete": false,
+    "source": "Borough 团队维护（镜像知识种子）"
+  },
+  {
+    "source_path": "业务/客服工单/业务流程/客服工单业务流程图.md",
+    "category": "CS_TICKET",
+    "title": "客服工单业务流程图",
+    "content": "# 客服工单域业务流程\n\n- 负责人：待团队维护\n- 更新时间：2026-07-28\n- 对应业务分类：`CS_TICKET`\n\n> ⚠️ 待团队补充：以下为骨架，业务口径以团队确认为准。\n\n## 主流程\n\n```mermaid\nflowchart LR\n  S0[买家或平台发起咨询]\n  S1[工单分派]\n  S2[商家响应处理]\n  S3[关闭或二次开启]\n  S4[买家评价打分]\n  S0 --> S1\n  S1 --> S2\n  S2 --> S3\n  S3 --> S4\n```\n\n1. 买家或平台发起咨询\n2. 工单分派\n3. 商家响应处理\n4. 关闭或二次开启\n5. 买家评价打分\n\n## 关键节点与数据落点\n\n| 流程节点 | 落到哪张表 / 哪个字段 | 说明 |\n| --- | --- | --- |\n|  |  |  |\n\n## 常见异常场景\n\n|  异常 | 排查方向 |\n| --- | --- |\n|  |  |\n",
+    "is_complete": false,
+    "source": "Borough 团队维护（镜像知识种子）"
+  },
+  {
+    "source_path": "业务/平台规则/业务名词解释/平台规则名词.md",
+    "category": "PLATFORM_RULE",
+    "title": "平台规则名词",
+    "content": "# 平台规则域业务名词解释\n\n- 负责人：待团队维护\n- 更新时间：2026-07-28\n- 对应业务分类：`PLATFORM_RULE`\n\n> ⚠️ 待团队补充：以下为骨架，业务口径以团队确认为准。\n\n## 常用别名\n\n商家提问时可能使用：规则、政策、平台要求、rule。\n\n## 枚举字段取值\n\n以下字段是名称类枚举，取值含义需要团队补充。补齐后模型才能准确解释状态，也能减少「口径由大模型生成」的情况。\n\n本业务域暂无需要解释的枚举字段。\n\n## 业务术语\n\n| 术语 | 解释 |\n| --- | --- |\n|  |  |\n",
+    "is_complete": false,
+    "source": "Borough 团队维护（镜像知识种子）"
+  },
+  {
+    "source_path": "业务/平台规则/业务流程/平台规则业务流程图.md",
+    "category": "PLATFORM_RULE",
+    "title": "平台规则业务流程图",
+    "content": "# 平台规则域业务流程\n\n- 负责人：待团队维护\n- 更新时间：2026-07-28\n- 对应业务分类：`PLATFORM_RULE`\n\n> ⚠️ 待团队补充：以下为骨架，业务口径以团队确认为准。\n\n## 主流程\n\n```mermaid\nflowchart LR\n  S0[规则发布与公示]\n  S1[商家知悉与执行]\n  S2[平台巡检]\n  S3[违规判定与处罚]\n  S4[申诉与复核]\n  S0 --> S1\n  S1 --> S2\n  S2 --> S3\n  S3 --> S4\n```\n\n1. 规则发布与公示\n2. 商家知悉与执行\n3. 平台巡检\n4. 违规判定与处罚\n5. 申诉与复核\n\n## 关键节点与数据落点\n\n| 流程节点 | 落到哪张表 / 哪个字段 | 说明 |\n| --- | --- | --- |\n|  |  |  |\n\n## 常见异常场景\n\n|  异常 | 排查方向 |\n| --- | --- |\n|  |  |\n",
+    "is_complete": false,
+    "source": "Borough 团队维护（镜像知识种子）"
+  },
+  {
+    "source_path": "业务/理赔赔付/业务名词解释/理赔赔付名词.md",
+    "category": "COMPENSATION",
+    "title": "理赔赔付名词",
+    "content": "# 理赔赔付域业务名词解释\n\n- 负责人：待团队维护\n- 更新时间：2026-07-28\n- 对应业务分类：`COMPENSATION`\n\n> ⚠️ 待团队补充：以下为骨架，业务口径以团队确认为准。\n\n## 常用别名\n\n商家提问时可能使用：理赔、赔付、补偿、repay。\n\n## 枚举字段取值\n\n以下字段是名称类枚举，取值含义需要团队补充。补齐后模型才能准确解释状态，也能减少「口径由大模型生成」的情况。\n\n### `repay_status_name`\n\n| 取值 | 含义 |\n| --- | --- |\n|  |  |\n\n### `pay_status_name`\n\n| 取值 | 含义 |\n| --- | --- |\n|  |  |\n\n### `pay_way_name`\n\n| 取值 | 含义 |\n| --- | --- |\n|  |  |\n\n## 业务术语\n\n| 术语 | 解释 |\n| --- | --- |\n|  |  |\n",
+    "is_complete": false,
+    "source": "Borough 团队维护（镜像知识种子）"
+  },
+  {
+    "source_path": "业务/理赔赔付/业务流程/理赔赔付业务流程图.md",
+    "category": "COMPENSATION",
+    "title": "理赔赔付业务流程图",
+    "content": "# 理赔赔付域业务流程\n\n- 负责人：待团队维护\n- 更新时间：2026-07-28\n- 对应业务分类：`COMPENSATION`\n\n> ⚠️ 待团队补充：以下为骨架，业务口径以团队确认为准。\n\n## 主流程\n\n```mermaid\nflowchart LR\n  S0[买家发起理赔申请]\n  S1[平台判责]\n  S2[生成赔付单]\n  S3[扣款或商家支付]\n  S4[赔付完成]\n  S0 --> S1\n  S1 --> S2\n  S2 --> S3\n  S3 --> S4\n```\n\n1. 买家发起理赔申请\n2. 平台判责\n3. 生成赔付单\n4. 扣款或商家支付\n5. 赔付完成\n\n## 关键节点与数据落点\n\n| 流程节点 | 落到哪张表 / 哪个字段 | 说明 |\n| --- | --- | --- |\n|  |  |  |\n\n## 常见异常场景\n\n|  异常 | 排查方向 |\n| --- | --- |\n|  |  |\n",
+    "is_complete": false,
+    "source": "Borough 团队维护（镜像知识种子）"
+  },
+  {
+    "source_path": "业务/身份信息/业务名词解释/身份信息名词.md",
+    "category": "IDENTITY",
+    "title": "身份信息名词",
+    "content": "# 身份信息域业务名词解释\n\n- 负责人：待团队维护\n- 更新时间：2026-07-28\n- 对应业务分类：`IDENTITY`\n\n> ⚠️ 待团队补充：以下为骨架，业务口径以团队确认为准。\n\n## 常用别名\n\n商家提问时可能使用：身份、资料、merchant、dim_merchant。\n\n## 枚举字段取值\n\n以下字段是名称类枚举，取值含义需要团队补充。补齐后模型才能准确解释状态，也能减少「口径由大模型生成」的情况。\n\n### `merchant_type_name`\n\n| 取值 | 含义 |\n| --- | --- |\n|  |  |\n\n### `brand_type_name`\n\n| 取值 | 含义 |\n| --- | --- |\n|  |  |\n\n### `balance_type_name`\n\n| 取值 | 含义 |\n| --- | --- |\n|  |  |\n\n### `account_type_name`\n\n| 取值 | 含义 |\n| --- | --- |\n|  |  |\n\n### `ship_model_name`\n\n| 取值 | 含义 |\n| --- | --- |\n|  |  |\n\n### `is_invoice`\n\n| 取值 | 含义 |\n| --- | --- |\n|  |  |\n\n### `is_unconditional_refund`\n\n| 取值 | 含义 |\n| --- | --- |\n|  |  |\n\n## 可回答的身份字段白名单\n\n模型只能把问题映射到以下 22 个字段，映射不上时不会返回任何身份数据。\n白名单定义在 `LlmIntentAnalysisService.IDENTITY_COLUMNS`，新增字段需同步更新该常量与本文档。\n\n| 字段 | 中文名 | 回答话术要点 |\n| --- | --- | --- |\n| `company_name` | 公司名称 | 直接回答字段值 |\n| `mobile` | 商家手机号 | 直接回答字段值 |\n| `contact_name` | 联系人姓名 | 直接回答字段值 |\n| `license_id` | 营业执照编号 | 直接回答字段值 |\n| `send_address` | 发货地址 | 直接回答字段值 |\n| `refnd_address` | 退货地址 | 直接回答字段值 |\n| `business_address` | 经营地址 | 直接回答字段值 |\n| `bank_name` | 开户行 | 直接回答字段值 |\n| `bank_account` | 银行账号 | 直接回答字段值 |\n| `merchant_type_name` | 商户类型 | 直接回答字段值 |\n| `brand_type_name` | 资质类型 | 直接回答字段值 |\n| `balance_type_name` | 结算类型 | 直接回答字段值 |\n| `ship_model_name` | 发货模式 | 直接回答字段值 |\n| `account_type_name` | 账户类型 | 直接回答字段值 |\n| `is_invoice` | 开具发票 | 布尔字段，回答「支持/不支持开具发票」 |\n| `is_unconditional_refund` | 七天无理由退货 | 布尔字段，回答「支持/不支持七天无理由退货」 |\n| `init_deposit_amt` | 入驻初始保证金 | 金额字段，回答时带「元」 |\n| `deposit_freeze` | 冻结保证金 | 金额字段，回答时带「元」 |\n| `deposit_amt` | 保证金余额 | 金额字段，回答时带「元」 |\n| `min_poundage` | 手续费下限 | 金额字段，回答时带「元」 |\n| `max_poundage` | 手续费上限 | 金额字段，回答时带「元」 |\n| `poundage_discount` | 费率折扣 | 直接回答折扣值，不加单位 |\n\n## 隐私约束\n\n`mobile`、`bank_account`、`license_id`、各类地址属于敏感字段。当前实现只回答商家本人问到的那个字段，\n不会在前端展示表名和原始数据行。**扩展本业务域前请确认调用方身份已被鉴权**，否则存在越权读取风险。\n\n## 业务术语\n\n| 术语 | 解释 |\n| --- | --- |\n|  |  |\n",
+    "is_complete": false,
+    "source": "Borough 团队维护（镜像知识种子）"
+  },
+  {
+    "source_path": "业务/身份信息/业务流程/身份信息业务流程图.md",
+    "category": "IDENTITY",
+    "title": "身份信息业务流程图",
+    "content": "# 身份信息域业务流程\n\n- 负责人：待团队维护\n- 更新时间：2026-07-28\n- 对应业务分类：`IDENTITY`\n\n> ⚠️ 待团队补充：以下为骨架，业务口径以团队确认为准。\n\n## 主流程\n\n```mermaid\nflowchart LR\n  S0[商家入驻提交资料]\n  S1[资质审核]\n  S2[签约与保证金缴纳]\n  S3[开店成功]\n  S4[资料变更需重新审核]\n  S0 --> S1\n  S1 --> S2\n  S2 --> S3\n  S3 --> S4\n```\n\n1. 商家入驻提交资料\n2. 资质审核\n3. 签约与保证金缴纳\n4. 开店成功\n5. 资料变更需重新审核\n\n## 关键节点与数据落点\n\n| 流程节点 | 落到哪张表 / 哪个字段 | 说明 |\n| --- | --- | --- |\n|  |  |  |\n\n## 常见异常场景\n\n|  异常 | 排查方向 |\n| --- | --- |\n|  |  |\n",
+    "is_complete": false,
+    "source": "Borough 团队维护（镜像知识种子）"
+  },
+  {
+    "source_path": "业务/退货/业务名词解释/退货名词.md",
+    "category": "REFUND",
+    "title": "退货名词",
+    "content": "# 退货域业务名词解释\n\n- 负责人：待团队维护\n- 更新时间：2026-07-28\n- 对应业务分类：`REFUND`\n\n> ⚠️ 待团队补充：以下为骨架，业务口径以团队确认为准。\n\n## 常用别名\n\n商家提问时可能使用：退款、售后、refund、return。\n\n## 枚举字段取值\n\n以下字段是名称类枚举，取值含义需要团队补充。补齐后模型才能准确解释状态，也能减少「口径由大模型生成」的情况。\n\n### `refund_status_name`\n\n| 取值 | 含义 |\n| --- | --- |\n|  |  |\n\n### `refund_reason`\n\n| 取值 | 含义 |\n| --- | --- |\n|  |  |\n\n## 业务术语\n\n| 术语 | 解释 |\n| --- | --- |\n|  |  |\n",
+    "is_complete": false,
+    "source": "Borough 团队维护（镜像知识种子）"
+  },
+  {
+    "source_path": "业务/退货/业务流程/退货业务流程图.md",
+    "category": "REFUND",
+    "title": "退货业务流程图",
+    "content": "# 退货域业务流程\n\n- 负责人：待团队维护\n- 更新时间：2026-07-28\n- 对应业务分类：`REFUND`\n\n> ⚠️ 待团队补充：以下为骨架，业务口径以团队确认为准。\n\n## 主流程\n\n```mermaid\nflowchart LR\n  S0[买家发起退货或退款申请]\n  S1[商家审核]\n  S2[买家寄回（若为退货）]\n  S3[商家收货验收]\n  S4[平台打款退回]\n  S0 --> S1\n  S1 --> S2\n  S2 --> S3\n  S3 --> S4\n```\n\n1. 买家发起退货或退款申请\n2. 商家审核\n3. 买家寄回（若为退货）\n4. 商家收货验收\n5. 平台打款退回\n\n## 关键节点与数据落点\n\n| 流程节点 | 落到哪张表 / 哪个字段 | 说明 |\n| --- | --- | --- |\n|  |  |  |\n\n## 常见异常场景\n\n|  异常 | 排查方向 |\n| --- | --- |\n|  |  |\n",
+    "is_complete": false,
+    "source": "Borough 团队维护（镜像知识种子）"
+  }
+]

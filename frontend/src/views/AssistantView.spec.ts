@@ -75,6 +75,13 @@ describe('AssistantView', () => {
     expect(wrapper.findComponent(ConversationColumn).attributes('id')).toBe('main-content')
   })
 
+  it('顶栏知识库入口带文字标签，不是纯图标（新用户可发现性）', async () => {
+    const wrapper = await mountView()
+    const link = wrapper.get('.knowledge-link')
+
+    expect(link.text()).toContain('知识库')
+  })
+
   it('按主布局契约组合工作区、双侧栏、对话列和商家切换器', async () => {
     const wrapper = await mountView()
 

@@ -600,7 +600,7 @@ OpenAPI → api/generated.ts → api/adapters/*.ts → types/*.ts → Store → 
 | `backend/app/api/router.py` | 汇总所有 `/api` 路由 |
 | `backend/app/api/routes/chat.py` | `/api/chat`、会话与反馈接口 |
 | `backend/app/api/routes/attachments.py` | 附件上传、状态和删除 |
-| `backend/app/api/routes/reports.py` | 每日经营报告 |
+| `backend/app/api/routes/reports.py` | 每日经营报告；P1 管理员重算指定演示商家日报（仅 `X-Admin-Token`） |
 | `backend/app/api/routes/exports.py` | CSV 导出 |
 | `backend/app/api/routes/knowledge.py` | P1 已实现：管理员知识库目录树、文档 CRUD、业务域维护和手动记忆压缩；独立 `X-Admin-Token` 鉴权 |
 | `backend/app/api/routes/analytics.py` | P1 Chat BI 管理员总览、分类下钻与汇总重刷；仅 `X-Admin-Token` |
@@ -791,6 +791,7 @@ GET    /api/admin/ops/status
 
 ```text
 GET    /api/reports/daily
+POST   /api/admin/reports/daily/recompute
 GET    /api/admin/analytics/chatbi/overview
 GET    /api/admin/analytics/chatbi/categories
 POST   /api/admin/analytics/chatbi/rollup

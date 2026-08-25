@@ -579,6 +579,7 @@ SQL 口径回答“这个数怎么算出来的”。契约层不得把两者合�
 | 方法 | 接口 | 用途 |
 | --- | --- | --- |
 | `GET` | `/api/reports/daily` | 每日经营报告 |
+| `POST` | `/api/admin/reports/daily/recompute` | 管理员重算指定演示商家、指定日期的日报；不改变商家端日报幂等读取语义 |
 | `GET` | `/api/admin/analytics/chatbi/overview` | Chat BI 窗口总览，需 `X-Admin-Token` |
 | `GET` | `/api/admin/analytics/chatbi/categories` | Chat BI 问题分类下钻，需 `X-Admin-Token` |
 | `POST` | `/api/admin/analytics/chatbi/rollup` | 手动重刷 Chat BI 日汇总，需 `X-Admin-Token` |

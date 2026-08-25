@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.knowledge.wiki_import import parse_wiki_tree
+from app.knowledge.wiki_import import parse_seed_wiki_tree, parse_wiki_tree
 
 
 def _build_tree(root: Path) -> None:
@@ -77,3 +77,21 @@ def test_parse_wiki_tree_normalizes_source_paths_to_forward_slashes(tmp_path: Pa
     _build_tree(tmp_path)
 
     assert all("\\" not in entry.source_path for entry in parse_wiki_tree(tmp_path))
+
+
+def test_parse_seed_wiki_tree_excludes_memory_and_unrelated_roots(tmp_path: Path) -> None:
+    _build_tree(tmp_path)
+    memory = tmp_path / "memory"
+    memory.mkdir()
+    (memory / "README.md").write_text("运行时记忆", encoding="utf-8")
+    other = tmp_path / "exports"
+    other.mkdir()
+    (other / "README.md").write_text("运行时导出", encoding="utf-8")
+
+    entries = parse_seed_wiki_tree(tmp_path)
+
+    assert {entry.source_path for entry in entries} == {
+        "index/README.md",
+        "业务/交易/业务流程/交易业务流程图.md",
+        "业务/优惠券/业务名词解释/优惠券名词.md",
+    }

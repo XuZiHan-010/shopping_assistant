@@ -60,3 +60,33 @@ class KnowledgeRepository:
         existing.is_complete = is_complete
         existing.version += 1
         return existing
+
+    async def insert_if_absent_by_source_path(
+        self,
+        *,
+        source_path: str,
+        category: str,
+        title: str,
+        content: str,
+        source: str,
+        is_complete: bool,
+    ) -> bool:
+        """仅首次导入写入，保护管理员随后对相同路径作出的维护。"""
+
+        existing = await self._session.scalar(
+            select(KnowledgeDocument).where(KnowledgeDocument.source_path == source_path)
+        )
+        if existing is not None:
+            return False
+        self._session.add(
+            KnowledgeDocument(
+                source_path=source_path,
+                category=category,
+                title=title,
+                content=content,
+                source=source,
+                is_complete=is_complete,
+                status="ACTIVE",
+            )
+        )
+        return True

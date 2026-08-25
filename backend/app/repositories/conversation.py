@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+from datetime import date
+from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy import and_, exists, func, select, update
@@ -190,6 +191,46 @@ class ConversationRepository:
             )
         )
         return result
+
+    async def try_acquire_daily_report_recompute_lock(
+        self,
+        merchant_id: UUID,
+        report_date: date,
+    ) -> bool:
+        """获取一次事务级日报重算锁，避免并发删除并重建同一幂等行。"""
+
+        lock_key = f"daily-report-recompute:{merchant_id}:{report_date.isoformat()}"
+        return bool(
+            await self._session.scalar(
+                select(func.pg_try_advisory_xact_lock(func.hashtextextended(lock_key, 0)))
+            )
+        )
+
+    async def get_daily_report_answer_for_update(
+        self,
+        merchant_id: UUID,
+        client_request_id: str,
+    ) -> Answer | None:
+        return cast(
+            Answer | None,
+            await self._session.scalar(
+                select(Answer)
+                .where(
+                    Answer.merchant_id == merchant_id,
+                    Answer.client_request_id == client_request_id,
+                )
+                .with_for_update()
+            ),
+        )
+
+    async def answer_has_feedback(self, answer_id: UUID) -> bool:
+        return bool(
+            await self._session.scalar(select(exists().where(Feedback.answer_id == answer_id)))
+        )
+
+    async def delete_answer(self, answer: Answer) -> None:
+        await self._session.delete(answer)
+        await self._session.flush()
 
     async def create_processing_answer(
         self,

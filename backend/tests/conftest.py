@@ -31,6 +31,7 @@ MERCHANT_ONE_ID = UUID("00000000-0000-0000-0000-0000000001a1")
 MERCHANT_TWO_ID = UUID("00000000-0000-0000-0000-0000000001a2")
 MERCHANT_ONE_TOKEN = "merchant-one-token"
 MERCHANT_TWO_TOKEN = "merchant-two-token"
+ADMIN_TOKEN = "test-only-admin-token-value"
 
 MERCHANT_ONE_AUTH = {"Authorization": f"Bearer {MERCHANT_ONE_TOKEN}"}
 MERCHANT_TWO_AUTH = {"Authorization": f"Bearer {MERCHANT_TWO_TOKEN}"}
@@ -217,6 +218,7 @@ async def postgres_app(migrated_postgres: str) -> AsyncIterator[FastAPI]:
             MERCHANT_ONE_TOKEN: MERCHANT_ONE_ID,
             MERCHANT_TWO_TOKEN: MERCHANT_TWO_ID,
         },
+        admin_token=ADMIN_TOKEN,
         rate_limit_per_minute=1000,
     )
     database = Database(settings)

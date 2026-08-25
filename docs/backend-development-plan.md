@@ -649,6 +649,7 @@ attachments
 | P0 | `GET` | `/api/ready` | — | — | `ReadyResponse` | 503 |
 | P0 | `GET` | `/api/admin/ops/status` | A | — | `OpsStatusResponse` | 401 403 |
 | P1 | `GET` | `/api/reports/daily` | M | 无参数；业务时区昨日由后端固定 | `DailyReportResponse` | 401 422 429 500 503 |
+| P1 | `POST` | `/api/admin/reports/daily/recompute` | A | `merchant_id`、`report_date`、`reason`；仅演示商家、最近 180 天且非未来日期 | `DailyReportResponse` | 401 403 404 409 422 503 |
 | P1 | `GET` | `/api/admin/analytics/chatbi/overview` | A | `ChatBiWindow` 查询参数 | `ChatBiOverviewResponse` | 401 403 422 |
 | P1 | `GET` | `/api/admin/analytics/chatbi/categories` | A | `ChatBiWindow` 查询参数 | `ChatBiCategoriesResponse` | 401 403 422 |
 | P1 | `POST` | `/api/admin/analytics/chatbi/rollup` | A | `ChatBiWindow` | `ChatBiRollupResponse` | 401 403 422 |
@@ -1583,6 +1584,7 @@ PRD 的里程碑是 M0–M4 完成 MVP 并上线，M5 才是 P1。把 Railway �
 - [x] 按固定顺序返回 `gmv` 、`ordering_user_count` 、`order_count` 、`successful_order_count` 、`return_count` 、`refund_amount`；响应的 `metrics` 是含 `metric_code` 的数组；
 - [x] 日报建议固定两条：第一条按退款金额分支，第二条仅按工单占订单量是否超过 20% 分支；无近七日数据或查询失败均显式降级，不伪造零指标；
 - [x] 为每个商家建立唯一 `DAILY_REPORT` 系统会话；`daily-report:{report_date}` 复用既有 `answers` 幂等约束，并发首次请求回读胜出的已物化结果；
+- [ ] `POST /api/admin/reports/daily/recompute`：仅 `X-Admin-Token`；校验演示商家、日期窗口和 1–200 字符 `reason`，在无反馈时锁定、删除并重新物化指定日报；已有反馈返回 `409 DAILY_REPORT_FEEDBACK_CONFLICT`，成功与拒绝范围均写独立管理员审计。该端点没有前端消费者，精确字段见 `docs/specs/2026-08-24-daily-report-recompute-contract.md`。
 - [x] **日报建议复用回答反馈通道**：日报响应返回可反馈的 `answer_id`，前端"采纳"直接调用 `POST /api/answers/{id}/feedback`，不新增反馈接口；
 - [x] 本阶段不引入 Railway Cron、Worker、Redis 或推送；按需在后续业务要求中另行设计。
 
@@ -2001,6 +2003,7 @@ RATE_LIMITED
 LLM_BUDGET_EXCEEDED
 IDEMPOTENCY_KEY_REUSED
 REQUEST_IN_PROGRESS
+DAILY_REPORT_FEEDBACK_CONFLICT
 EXPORT_LINK_EXPIRED
 HTTP_ERROR
 INTERNAL_ERROR

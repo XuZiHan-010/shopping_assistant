@@ -30,6 +30,7 @@ class ErrorCode(StrEnum):
     INVALID_REQUEST = "INVALID_REQUEST"
     IDEMPOTENCY_KEY_REUSED = "IDEMPOTENCY_KEY_REUSED"
     REQUEST_IN_PROGRESS = "REQUEST_IN_PROGRESS"
+    DAILY_REPORT_FEEDBACK_CONFLICT = "DAILY_REPORT_FEEDBACK_CONFLICT"
     DATA_SOURCE_UNAVAILABLE = "DATA_SOURCE_UNAVAILABLE"
     EXPORT_LINK_EXPIRED = "EXPORT_LINK_EXPIRED"
     RATE_LIMITED = "RATE_LIMITED"
@@ -174,6 +175,28 @@ class RequestInProgressError(AppError):
             message="该请求正在处理中，请稍后重试",
             status_code=409,
             retryable=True,
+        )
+
+
+class DailyReportFeedbackConflictError(AppError):
+    """已被商家反馈引用的日报不得被重算替换。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            code=ErrorCode.DAILY_REPORT_FEEDBACK_CONFLICT,
+            message="该日报已有商家反馈，不能重算替换",
+            status_code=409,
+        )
+
+
+class InvalidRequestError(AppError):
+    """请求在语法正确后仍违反受控业务边界。"""
+
+    def __init__(self, message: str = "请求参数不合法") -> None:
+        super().__init__(
+            code=ErrorCode.INVALID_REQUEST,
+            message=message,
+            status_code=422,
         )
 
 

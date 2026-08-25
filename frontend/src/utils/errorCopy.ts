@@ -21,7 +21,7 @@ export interface ErrorCopy {
 }
 
 const COPY: Record<AppErrorCode, ErrorCopy> = {
-  // —— 后端 ErrorCode（14 项） ——
+  // —— 后端 ErrorCode（28 项） ——
   AUTH_REQUIRED: {
     title: '登录状态已失效',
     detail: '请重新选择商家登录后再试。',
@@ -62,6 +62,17 @@ const COPY: Record<AppErrorCode, ErrorCopy> = {
     title: '上一条请求仍在处理',
     detail: '请等待当前回答完成后，再发送新的问题。',
     surface: 'message',
+    action: 'none',
+  },
+  /**
+   * `POST /api/admin/reports/daily/recompute` 专属，该端点没有前端消费者
+   * （`docs/specs/2026-08-24-daily-report-recompute-contract.md`）。这里只是
+   * 为了让 `Record<AppErrorCode, ErrorCopy>` 保持穷尽，不会被任何 UI 路径触发。
+   */
+  DAILY_REPORT_FEEDBACK_CONFLICT: {
+    title: '该日报已有反馈，无法重算',
+    detail: '这是应用自身的问题，已自动记录，请联系管理员处理。',
+    surface: 'silent-report',
     action: 'none',
   },
   DATA_SOURCE_UNAVAILABLE: {

@@ -224,13 +224,9 @@ function startNewConversation(): void {
         @update:model-value="selectMerchant"
       />
       <div class="header-actions">
-        <RouterLink
-          class="header-icon-button"
-          to="/knowledge-base"
-          aria-label="知识库维护"
-          title="知识库维护"
-        >
-          <BookOpen :size="19" aria-hidden="true" />
+        <RouterLink class="knowledge-link" to="/knowledge-base" aria-label="知识库维护" title="知识库维护">
+          <BookOpen :size="18" aria-hidden="true" />
+          <span>知识库</span>
         </RouterLink>
         <button class="new-chat-button" type="button" @click="startNewConversation">
           <MessageSquarePlus :size="18" aria-hidden="true" />
@@ -396,12 +392,32 @@ function startNewConversation(): void {
   white-space: nowrap;
 }
 
-.new-chat-button {
+.new-chat-button,
+.knowledge-link {
   grid-auto-flow: column;
   gap: var(--space-2);
   padding: 0 var(--space-3);
   font-size: var(--font-size-control);
   font-weight: var(--font-weight-control);
+}
+
+.knowledge-link {
+  height: var(--control-height);
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  color: var(--color-text-secondary);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-control);
+  text-decoration: none;
+  transition: var(--transition-interactive);
+}
+
+.knowledge-link:hover {
+  border-color: #cdd7fd;
+  color: var(--color-primary);
+  background: var(--color-primary-soft);
 }
 
 .workspace-grid {
@@ -496,11 +512,13 @@ function startNewConversation(): void {
   }
 
   .brand-title p,
-  .new-chat-button span {
+  .new-chat-button span,
+  .knowledge-link span {
     display: none;
   }
 
-  .new-chat-button {
+  .new-chat-button,
+  .knowledge-link {
     width: 36px;
     padding: 0;
   }

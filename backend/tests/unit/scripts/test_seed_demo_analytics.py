@@ -33,7 +33,17 @@ def _load_seed_module() -> ModuleType:
     return module
 
 
+def _load_root_seed_module() -> ModuleType:
+    path = Path(__file__).resolve().parents[4] / "scripts" / "seed_demo_data.py"
+    spec = importlib.util.spec_from_file_location("borough_seed_demo_data", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 _seed_module = _load_seed_module()
+_root_seed_module = _load_root_seed_module()
 default_end_date = _seed_module.default_end_date
 reject_production = _seed_module.reject_production
 
@@ -76,3 +86,13 @@ def test_full_rebuild_requires_explicit_force_flag(monkeypatch: pytest.MonkeyPat
 
     with pytest.raises(SystemExit):
         _seed_module.main()
+
+
+@pytest.mark.parametrize("module", [_seed_module, _root_seed_module])
+def test_full_seed_refuses_non_local_database_even_in_development(module: ModuleType) -> None:
+    settings = _settings(AppEnvironment.DEVELOPMENT).model_copy(
+        update={"database_url": "postgresql://user:pass@demo.neon.tech:5432/borough"}
+    )
+
+    with pytest.raises(RuntimeError, match="本机数据库"):
+        module.assert_local_database_url(settings.database_url)

@@ -86,14 +86,14 @@ Railway 的 Config File Path 不跟随 Root Directory。即使 Service Root 已�
 
 ## 演示数据的每日滚动
 
-演示库的经营数据有两个写入入口，**互斥**，不得同时生效：
+线上演示库的经营数据唯一写入口是 Cron；全量 Seed 仅用于本机恢复，代码会拒绝任何非本机数据库地址：
 
 | 入口 | 用途 | 触发方式 |
 | --- | --- | --- |
 | `python -m app.jobs.seed_demo_rolling` | 唯一常态入口：补齐所有漏跑业务日、清理 180 天窗口外事实，历史分区一行不改写。 | 独立 Cron Service，每日 `10 16 * * *`（UTC，等于 Asia/Shanghai 00:10） |
-| `backend/scripts/seed_demo_analytics.py --force-full-rebuild` | 一次性整体重置：先 DELETE 六张经营表该商家全部行再重写。 | 仅人工执行，且必须先停用或跳过一次 Cron |
+| `backend/scripts/seed_demo_analytics.py --force-full-rebuild` | 一次性整体重置：先 DELETE 六张经营表该商家全部行再重写。 | 仅本机或本地 Compose；线上禁止执行 |
 
-全量重灌会连同已落库 `answers` 引用的数据依据一起抹掉，因此它已改为必须显式传 `--force-full-rebuild`，缺参数时直接非零退出。
+全量重灌会连同已落库 `answers` 引用的数据依据一起抹掉，因此它已改为必须显式传 `--force-full-rebuild`，缺参数时直接非零退出；它还会按 `DATABASE_URL` 主机白名单拒绝非本机地址，`APP_ENV` 的生产环境拒绝规则仍作为第二道护栏保留。
 
 滚动任务的护栏（任一不满足即在写入前失败）：
 
@@ -106,6 +106,44 @@ Railway 的 Config File Path 不跟随 Root Directory。即使 Service Root 已�
 任务本身不跑 Alembic 迁移：启用前先确认同环境 Backend 已迁移到位并通过 `/api/ready`，缺表时任务必须失败退出而不是自动修库。Railway Cron 按 UTC 调度、不保证精确到秒，上一次未结束时可能跳过本次，因此漏跑追赶是正确性要求而非容错优化。
 
 已新增 `backend/railway.cron.json`（无 `healthcheckPath`、无 `preDeployCommand`、`restartPolicyType: NEVER`），不复用 `backend/railway.json`。**Cron Service 尚未创建。** 创建 Service、配置上述四个变量与手工触发首次执行均为 Railway 控制台操作；完成后必须按本节的验收项核对。
+
+## 演示前数据检查清单
+
+以下命令仅用于本地演示库。执行前必须确认 `DATABASE_URL` 指向本地测试库，并确认不会与滚动 Seed Cron 并发执行。完整 `pytest` 会清空经营数据和知识库数据；如需演示，应在全量测试后重新恢复。
+
+1. 确认 PostgreSQL 容器已启动且为 healthy：
+
+   ```powershell
+   docker ps
+   ```
+
+2. 确认迁移已到唯一的最新 head：
+
+   ```powershell
+   cd backend
+   uv run alembic heads
+   uv run alembic current
+   ```
+
+3. 先恢复三家演示商家。完整 `pytest` 会清空 `merchants`，经营数据表的外键要求此步先于全量经营 Seed：
+
+   ```powershell
+   uv run python ../scripts/seed_demo_data.py --seed
+   ```
+
+4. 恢复 180 天的本地经营演示数据。该命令会删除并重写三家演示商家的经营历史，所以必须显式确认参数：
+
+   ```powershell
+   uv run python -m scripts.seed_demo_analytics --force-full-rebuild
+   ```
+
+5. 恢复镜像知识种子（共 21 篇，且不会覆盖后台已维护的同路径文档）：
+
+   ```powershell
+   uv run python -m scripts.import_wiki --root "../yshopping-merchant-ai 4/yshopping-merchant-ai/runtime/llm-wiki"
+   ```
+
+6. 校验数据量和日期窗口：`orders` 应为数千行，`business_date` 应连续覆盖 180 天并截止于当前业务日；`knowledge_documents` 应为 21 篇种子文档（`index/README.md` 一篇、十个业务分类各两篇）。如确需本机强制覆盖同路径的后台维护内容，才传入 `--overwrite`；该开关会丢失这些后台改动，线上不得使用。
 
 ## 运维验收
 

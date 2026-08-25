@@ -356,6 +356,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/reports/daily/recompute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Recompute Daily Report
+         * @description 管理员显式替换一个演示商家的历史日报缓存。
+         */
+        post: operations["recompute_daily_report_api_admin_reports_daily_recompute_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -714,6 +734,24 @@ export interface components {
             /** Value */
             value: string | number;
         };
+        /**
+         * DailyReportRecomputeRequest
+         * @description 管理员重算指定业务日日报的受控请求。
+         */
+        DailyReportRecomputeRequest: {
+            /**
+             * Merchant Id
+             * Format: uuid
+             */
+            merchant_id: string;
+            /**
+             * Report Date
+             * Format: date
+             */
+            report_date: string;
+            /** Reason */
+            reason: string;
+        };
         /** DailyReportResponse */
         DailyReportResponse: {
             /**
@@ -763,7 +801,7 @@ export interface components {
          *     后续阶段（B3 起的意图、查询、限流、附件等）按需扩充。
          * @enum {string}
          */
-        ErrorCode: "AUTH_REQUIRED" | "MERCHANT_SCOPE_VIOLATION" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "INVALID_REQUEST" | "IDEMPOTENCY_KEY_REUSED" | "REQUEST_IN_PROGRESS" | "DATA_SOURCE_UNAVAILABLE" | "EXPORT_LINK_EXPIRED" | "RATE_LIMITED" | "LLM_BUDGET_EXCEEDED" | "FORBIDDEN" | "HTTP_ERROR" | "INTERNAL_ERROR" | "INVALID_WIKI_PATH" | "WIKI_READ_ONLY" | "INVALID_FILE_TYPE" | "INVALID_WIKI_PARENT" | "WIKI_NODE_EXISTS" | "WIKI_NODE_NOT_FOUND" | "WIKI_DIRECTORY_NOT_EMPTY" | "WIKI_VERSION_REQUIRED" | "WIKI_VERSION_CONFLICT" | "WIKI_DOCUMENT_TOO_LARGE" | "INVALID_WIKI_ENCODING" | "INVALID_WIKI_CONTENT" | "WIKI_IO_ERROR";
+        ErrorCode: "AUTH_REQUIRED" | "MERCHANT_SCOPE_VIOLATION" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "INVALID_REQUEST" | "IDEMPOTENCY_KEY_REUSED" | "REQUEST_IN_PROGRESS" | "DAILY_REPORT_FEEDBACK_CONFLICT" | "DATA_SOURCE_UNAVAILABLE" | "EXPORT_LINK_EXPIRED" | "RATE_LIMITED" | "LLM_BUDGET_EXCEEDED" | "FORBIDDEN" | "HTTP_ERROR" | "INTERNAL_ERROR" | "INVALID_WIKI_PATH" | "WIKI_READ_ONLY" | "INVALID_FILE_TYPE" | "INVALID_WIKI_PARENT" | "WIKI_NODE_EXISTS" | "WIKI_NODE_NOT_FOUND" | "WIKI_DIRECTORY_NOT_EMPTY" | "WIKI_VERSION_REQUIRED" | "WIKI_VERSION_CONFLICT" | "WIKI_DOCUMENT_TOO_LARGE" | "INVALID_WIKI_ENCODING" | "INVALID_WIKI_CONTENT" | "WIKI_IO_ERROR";
         /**
          * ErrorResponse
          * @description 对外稳定错误契约。
@@ -2510,6 +2548,84 @@ export interface operations {
             };
             /** @description 请求参数不合法 */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    recompute_daily_report_api_admin_reports_daily_recompute_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DailyReportRecomputeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DailyReportResponse"];
+                };
+            };
+            /** @description 缺少或提供了无效的商家凭证 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权访问该资源或管理端点 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 幂等键冲突或同一请求正在处理中 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 依赖服务暂时不可用 */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

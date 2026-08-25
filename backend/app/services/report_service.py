@@ -14,7 +14,10 @@ from sqlalchemy.exc import IntegrityError
 
 from app.analytics.contract import METRIC_SPECS
 from app.analytics.dates import business_today
-from app.core.errors import RequestInProgressError
+from app.core.errors import (
+    DailyReportFeedbackConflictError,
+    RequestInProgressError,
+)
 from app.repositories.analytics import DailyReportSignals
 from app.schemas.report import DailyReportMetric, DailyReportResponse
 
@@ -65,6 +68,18 @@ class _ConversationsLike(Protocol):
     async def mark_answer_succeeded(
         self, answer: Any, response_payload: dict[str, Any]
     ) -> None: ...
+
+    async def try_acquire_daily_report_recompute_lock(
+        self, merchant_id: UUID, report_date: date
+    ) -> bool: ...
+
+    async def get_daily_report_answer_for_update(
+        self, merchant_id: UUID, client_request_id: str
+    ) -> _AnswerLike | None: ...
+
+    async def answer_has_feedback(self, answer_id: UUID) -> bool: ...
+
+    async def delete_answer(self, answer: Any) -> None: ...
 
 
 class _AnalyticsLike(Protocol):
@@ -140,6 +155,50 @@ class DailyReportService:
             if raced is not None:
                 raise RequestInProgressError() from error
             raise
+
+    async def recompute(
+        self,
+        merchant_id: UUID,
+        report_date: date,
+    ) -> DailyReportResponse:
+        """受控地替换一个历史日报，普通读取路径不调用本方法。"""
+
+        client_request_id = f"daily-report:{report_date.isoformat()}"
+        if not await self._conversations.try_acquire_daily_report_recompute_lock(
+            merchant_id, report_date
+        ):
+            raise RequestInProgressError()
+
+        existing = await self._conversations.get_daily_report_answer_for_update(
+            merchant_id, client_request_id
+        )
+        if existing is not None:
+            if await self._conversations.answer_has_feedback(existing.id):
+                await self._session.rollback()
+                raise DailyReportFeedbackConflictError()
+            await self._conversations.delete_answer(existing)
+
+        response = await self._build_response(merchant_id, report_date)
+        conversation = await self._conversations.get_or_create_daily_report_conversation(
+            merchant_id
+        )
+        try:
+            answer = await self._conversations.create_processing_answer(
+                merchant_id,
+                conversation.id,
+                None,
+                client_request_id,
+                hashlib.sha256(client_request_id.encode("utf-8")).hexdigest(),
+            )
+            response = response.model_copy(update={"answer_id": answer.id})
+            await self._conversations.mark_answer_succeeded(
+                answer, response.model_dump(mode="json")
+            )
+            await self._session.commit()
+            return response
+        except IntegrityError as error:
+            await self._session.rollback()
+            raise RequestInProgressError() from error
 
     async def _build_response(self, merchant_id: UUID, report_date: date) -> DailyReportResponse:
         try:
