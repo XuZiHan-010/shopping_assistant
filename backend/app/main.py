@@ -18,6 +18,7 @@ from app.core.logging import configure_logging
 from app.core.metrics import OperationalMetrics
 from app.core.rate_limit import SlidingWindowRateLimiter
 from app.db.session import Database
+from app.knowledge.wiki_seed import seed_wiki_documents
 
 _REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 
@@ -54,13 +55,18 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        database_ready = False
         try:
             await resolved_database.connect_with_retry()
+            database_ready = True
         except Exception as exc:
             logger.warning(
                 "database_startup_degraded",
                 exception_type=type(exc).__name__,
             )
+        if database_ready:
+            created = await seed_wiki_documents(resolved_database)
+            logger.info("wiki_seed_imported", created=created)
         yield
         await resolved_database.dispose()
 

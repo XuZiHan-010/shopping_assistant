@@ -11,6 +11,7 @@ from app.api.routes.feedback import router as feedback_router
 from app.api.routes.health import router as health_router
 from app.api.routes.knowledge import router as knowledge_router
 from app.api.routes.metrics import router as metrics_router
+from app.api.routes.reports import admin_router as reports_admin_router
 from app.api.routes.reports import router as reports_router
 
 api_router = APIRouter()
@@ -23,4 +24,4 @@ api_router.include_router(metrics_router)
 api_router.include_router(reports_router)
 
 # 这些路由仅在已配置 ADMIN_TOKEN 时由应用工厂挂载。
-admin_routers = (admin_router, knowledge_router, analytics_router)
+admin_routers = (admin_router, knowledge_router, analytics_router, reports_admin_router)

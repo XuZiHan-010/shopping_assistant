@@ -1907,6 +1907,98 @@
           }
         }
       }
+    },
+    "/api/admin/reports/daily/recompute": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Recompute Daily Report",
+        "description": "管理员显式替换一个演示商家的历史日报缓存。",
+        "operationId": "recompute_daily_report_api_admin_reports_daily_recompute_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DailyReportRecomputeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DailyReportResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "缺少或提供了无效的商家凭证",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权访问该资源或管理端点",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "资源不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等键冲突或同一请求正在处理中",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "请求参数不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "依赖服务暂时不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3047,6 +3139,34 @@
         ],
         "title": "DailyReportMetric"
       },
+      "DailyReportRecomputeRequest": {
+        "properties": {
+          "merchant_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Merchant Id"
+          },
+          "report_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Report Date"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "merchant_id",
+          "report_date",
+          "reason"
+        ],
+        "title": "DailyReportRecomputeRequest",
+        "description": "管理员重算指定业务日日报的受控请求。"
+      },
       "DailyReportResponse": {
         "properties": {
           "answer_id": {
@@ -3150,6 +3270,7 @@
           "INVALID_REQUEST",
           "IDEMPOTENCY_KEY_REUSED",
           "REQUEST_IN_PROGRESS",
+          "DAILY_REPORT_FEEDBACK_CONFLICT",
           "DATA_SOURCE_UNAVAILABLE",
           "EXPORT_LINK_EXPIRED",
           "RATE_LIMITED",

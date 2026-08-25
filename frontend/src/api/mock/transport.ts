@@ -13,6 +13,10 @@ import { buildAuthHeaders } from '../credentials'
 import type { ChatTransport, TransportRequest } from '../transport'
 import { CHAT_FIXTURES } from './fixtures.generated'
 import { MOCK_MERCHANTS, matchScenario } from './scenarios'
+import { BUSINESS_SECTIONS } from '@/utils/knowledgeTree'
+
+type MockKnowledgeDocument = { content: string; read_only: boolean; version: string }
+type MockKnowledgeNode = components['schemas']['KnowledgeTreeNode']
 
 type RawChatResponse = components['schemas']['ChatResponse']
 
@@ -62,6 +66,126 @@ function errorResponse(
     } satisfies components['schemas']['ErrorResponse'],
     status,
   )
+}
+
+function mockDocumentNode(path: string, document: MockKnowledgeDocument): MockKnowledgeNode {
+  return {
+    name: path.split('/').at(-1) ?? path,
+    path,
+    node_type: 'document',
+    read_only: document.read_only,
+    size: document.content.length,
+    version: document.version,
+    children: [],
+  }
+}
+
+/**
+ * 与真实后端 `directory_version`（`backend/app/knowledge/versioning.py`）同样的思路：
+ * 目录版本由子节点路径与版本拼接派生，而不是单独维护一个计数器——这样文档
+ * 增删或重命名后，父目录的 If-Match 版本会自动跟着变，不需要额外的失效逻辑。
+ */
+function mockDirectoryVersion(children: MockKnowledgeNode[]): string {
+  return children.length
+    ? children
+        .map((child) => `${child.path}@${child.version}`)
+        .sort()
+        .join('|')
+    : 'empty'
+}
+
+function mockDirectoryNode(
+  path: string,
+  readOnly: boolean,
+  children: MockKnowledgeNode[],
+): MockKnowledgeNode {
+  return {
+    name: path.split('/').at(-1) ?? path,
+    path,
+    node_type: 'directory',
+    read_only: readOnly,
+    size: children.reduce((sum, child) => sum + child.size, 0),
+    version: mockDirectoryVersion(children),
+    children,
+  }
+}
+
+function mockIndexRoot(knowledgeDocuments: Map<string, MockKnowledgeDocument>): MockKnowledgeNode {
+  const children = [...knowledgeDocuments.entries()]
+    .filter(([path]) => path.startsWith('index/') && path.split('/').length === 2)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([path, document]) => mockDocumentNode(path, document))
+  return mockDirectoryNode('index', false, children)
+}
+
+function mockBusinessRoot(knowledgeDocuments: Map<string, MockKnowledgeDocument>): MockKnowledgeNode {
+  const domainNames = new Set<string>()
+  for (const path of knowledgeDocuments.keys()) {
+    const segments = path.split('/')
+    if (
+      segments.length === 4 &&
+      segments[0] === '业务' &&
+      (BUSINESS_SECTIONS as readonly string[]).includes(segments[2])
+    ) {
+      domainNames.add(segments[1])
+    }
+  }
+
+  const domains = [...domainNames]
+    .sort((a, b) => a.localeCompare(b))
+    .map((domain) => {
+      const sections = BUSINESS_SECTIONS.map((section) => {
+        const prefix = `业务/${domain}/${section}/`
+        const children = [...knowledgeDocuments.entries()]
+          .filter(([path]) => path.startsWith(prefix))
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([path, document]) => mockDocumentNode(path, document))
+        return mockDirectoryNode(`业务/${domain}/${section}`, false, children)
+      })
+      return mockDirectoryNode(`业务/${domain}`, false, sections)
+    })
+  return mockDirectoryNode('业务', false, domains)
+}
+
+function mockMemoryRoot(knowledgeDocuments: Map<string, MockKnowledgeDocument>): MockKnowledgeNode {
+  const byMerchant = new Map<string, Array<[string, MockKnowledgeDocument]>>()
+  for (const [path, document] of knowledgeDocuments) {
+    const segments = path.split('/')
+    if (segments.length === 4 && segments[0] === 'memory' && segments[1] === 'merchants') {
+      const merchantId = segments[2]
+      const entries = byMerchant.get(merchantId) ?? []
+      entries.push([path, document])
+      byMerchant.set(merchantId, entries)
+    }
+  }
+  const merchants = [...byMerchant.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([merchantId, entries]) => {
+      const children = entries
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([path, document]) => mockDocumentNode(path, document))
+      return mockDirectoryNode(`memory/merchants/${merchantId}`, true, children)
+    })
+  return mockDirectoryNode('memory', true, [mockDirectoryNode('memory/merchants', true, merchants)])
+}
+
+function mockKnowledgeTree(
+  knowledgeDocuments: Map<string, MockKnowledgeDocument>,
+): components['schemas']['KnowledgeTreeResponse'] {
+  return {
+    roots: [
+      mockIndexRoot(knowledgeDocuments),
+      mockBusinessRoot(knowledgeDocuments),
+      mockMemoryRoot(knowledgeDocuments),
+    ],
+  }
+}
+
+function findMockDomainNode(
+  knowledgeDocuments: Map<string, MockKnowledgeDocument>,
+  name: string,
+): MockKnowledgeNode | undefined {
+  return (mockBusinessRoot(knowledgeDocuments).children ?? []).find((domain) => domain.name === name)
 }
 
 function encodeSse(fixture: RawChatResponse): Uint8Array {
@@ -345,57 +469,79 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
       if (tenantKeyFor(request) !== MOCK_ADMIN_TOKEN) {
         return errorResponse('AUTH_REQUIRED', '管理员令牌无效', 401)
       }
-      return jsonResponse({
-        roots: [
-          {
-            name: 'index',
-            path: 'index',
-            node_type: 'directory',
+      return jsonResponse(mockKnowledgeTree(knowledgeDocuments))
+    }
+
+    if (request.path === '/api/admin/knowledge/documents' && request.method === 'POST') {
+      if (tenantKeyFor(request) !== MOCK_ADMIN_TOKEN) {
+        return errorResponse('AUTH_REQUIRED', '管理员令牌无效', 401)
+      }
+      const payload = request.body as components['schemas']['KnowledgeDocumentRequest']
+      if (knowledgeDocuments.has(payload.path)) {
+        return errorResponse('WIKI_NODE_EXISTS', '同名文档已存在', 409)
+      }
+      const created: MockKnowledgeDocument = { content: payload.content, read_only: false, version: '1' }
+      knowledgeDocuments.set(payload.path, created)
+      return jsonResponse(
+        { path: payload.path, ...created } satisfies components['schemas']['KnowledgeDocumentResponse'],
+        201,
+      )
+    }
+
+    const businessDomainMatch = request.path.split('?')[0] === '/api/admin/knowledge/business-domains'
+    if (businessDomainMatch) {
+      if (tenantKeyFor(request) !== MOCK_ADMIN_TOKEN) {
+        return errorResponse('AUTH_REQUIRED', '管理员令牌无效', 401)
+      }
+      const query = new URLSearchParams(request.path.split('?')[1] ?? '')
+
+      if (request.method === 'POST') {
+        const payload = request.body as components['schemas']['BusinessDomainRequest']
+        if (findMockDomainNode(knowledgeDocuments, payload.name)) {
+          return errorResponse('WIKI_NODE_EXISTS', '同名业务域已存在', 409)
+        }
+        for (const section of BUSINESS_SECTIONS) {
+          knowledgeDocuments.set(`业务/${payload.name}/${section}/待补充.md`, {
+            content: `# ${payload.name}／${section}\n\n资料尚未完整，请由管理员补充。`,
             read_only: false,
-            size: 1,
-            version: 'index-v1',
-            children: [
-              {
-                name: '运营手册.md',
-                path: 'index/运营手册.md',
-                node_type: 'document',
-                read_only: false,
-                size: 10,
-                version: '1',
-                children: [],
-              },
-            ],
-          },
-          {
-            name: '业务',
-            path: '业务',
-            node_type: 'directory',
-            read_only: false,
-            size: 0,
-            version: 'business-v1',
-            children: [],
-          },
-          {
-            name: 'memory',
-            path: 'memory',
-            node_type: 'directory',
-            read_only: true,
-            size: 1,
-            version: 'memory-v1',
-            children: [
-              {
-                name: 'TRADE.md',
-                path: 'memory/merchants/demo/TRADE.md',
-                node_type: 'document',
-                read_only: true,
-                size: 12,
-                version: '1',
-                children: [],
-              },
-            ],
-          },
-        ],
-      } satisfies components['schemas']['KnowledgeTreeResponse'])
+            version: '1',
+          })
+        }
+        const domain = findMockDomainNode(knowledgeDocuments, payload.name)
+        return jsonResponse(domain, 201)
+      }
+
+      const name = query.get('name') ?? ''
+      const domain = findMockDomainNode(knowledgeDocuments, name)
+      if (!domain) return errorResponse('WIKI_NODE_NOT_FOUND', '业务域不存在', 404)
+      const ifMatch = request.headers?.['If-Match']
+      if (!ifMatch) return errorResponse('WIKI_VERSION_REQUIRED', '缺少 If-Match 版本', 428)
+      if (ifMatch !== `"${domain.version}"`) {
+        return errorResponse('WIKI_VERSION_CONFLICT', '业务域已被其他维护者更新', 412)
+      }
+
+      if (request.method === 'PUT') {
+        const payload = request.body as components['schemas']['BusinessDomainRenameRequest']
+        if (findMockDomainNode(knowledgeDocuments, payload.new_name)) {
+          return errorResponse('WIKI_NODE_EXISTS', '同名业务域已存在', 409)
+        }
+        const prefix = `业务/${name}/`
+        for (const [path, document] of [...knowledgeDocuments.entries()]) {
+          if (path.startsWith(prefix)) {
+            knowledgeDocuments.delete(path)
+            knowledgeDocuments.set(`业务/${payload.new_name}/${path.slice(prefix.length)}`, document)
+          }
+        }
+        return jsonResponse(findMockDomainNode(knowledgeDocuments, payload.new_name))
+      }
+
+      if (request.method === 'DELETE') {
+        const prefix = `业务/${name}/`
+        for (const path of [...knowledgeDocuments.keys()]) {
+          if (path.startsWith(prefix)) knowledgeDocuments.delete(path)
+        }
+        return new Response(null, { status: 204 })
+      }
     }
 
     const knowledgePathMatch = /^\/api\/admin\/knowledge\/documents\/(.+)$/.exec(request.path)
@@ -412,6 +558,16 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
           path,
           ...document,
         } satisfies components['schemas']['KnowledgeDocumentResponse'])
+      }
+
+      if (request.method === 'DELETE') {
+        const ifMatch = request.headers?.['If-Match']
+        if (!ifMatch) return errorResponse('WIKI_VERSION_REQUIRED', '缺少 If-Match 版本', 428)
+        if (ifMatch !== `"${document.version}"`) {
+          return errorResponse('WIKI_VERSION_CONFLICT', '文档已被其他维护者更新', 412)
+        }
+        knowledgeDocuments.delete(path)
+        return new Response(null, { status: 204 })
       }
 
       if (request.method === 'PUT') {

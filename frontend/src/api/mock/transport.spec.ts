@@ -210,4 +210,130 @@ describe('createMockTransport', () => {
     expect(categoriesPayload.items.length).toBeGreaterThan(0)
     expect(rollupPayload.rows_written).toBeGreaterThanOrEqual(0)
   })
+
+  it('Mock 中新建文档后，目录树与详情都能看到它；重复路径返回 409', async () => {
+    const adminTransport = createMockTransport()
+    setCredentialProvider(() => ({ adminToken: 'mock-admin-token' }))
+
+    const created = await adminTransport(
+      {
+        path: '/api/admin/knowledge/documents',
+        method: 'POST',
+        auth: 'admin',
+        body: { path: 'index/新手册.md', content: '# 新手册' },
+      },
+      new AbortController().signal,
+    )
+    expect(created.status).toBe(201)
+
+    const tree = await adminTransport(
+      { path: '/api/admin/knowledge/tree', method: 'GET', auth: 'admin' },
+      new AbortController().signal,
+    )
+    const treePayload = (await tree.json()) as {
+      roots: Array<{ path: string; children: Array<{ path: string }> }>
+    }
+    const indexRoot = treePayload.roots.find((root) => root.path === 'index')
+    expect(indexRoot?.children.map((child) => child.path)).toContain('index/新手册.md')
+
+    const duplicate = await adminTransport(
+      {
+        path: '/api/admin/knowledge/documents',
+        method: 'POST',
+        auth: 'admin',
+        body: { path: 'index/新手册.md', content: '重复' },
+      },
+      new AbortController().signal,
+    )
+    expect(duplicate.status).toBe(409)
+  })
+
+  it('Mock 中删除文档需要匹配的 If-Match，成功后从目录树消失', async () => {
+    const adminTransport = createMockTransport()
+    setCredentialProvider(() => ({ adminToken: 'mock-admin-token' }))
+
+    const staleAttempt = await adminTransport(
+      {
+        path: '/api/admin/knowledge/documents/index/运营手册.md',
+        method: 'DELETE',
+        auth: 'admin',
+        headers: { 'If-Match': '"stale"' },
+      },
+      new AbortController().signal,
+    )
+    expect(staleAttempt.status).toBe(412)
+
+    const deleted = await adminTransport(
+      {
+        path: '/api/admin/knowledge/documents/index/运营手册.md',
+        method: 'DELETE',
+        auth: 'admin',
+        headers: { 'If-Match': '"1"' },
+      },
+      new AbortController().signal,
+    )
+    expect(deleted.status).toBe(204)
+
+    const tree = await adminTransport(
+      { path: '/api/admin/knowledge/tree', method: 'GET', auth: 'admin' },
+      new AbortController().signal,
+    )
+    const treePayload = (await tree.json()) as {
+      roots: Array<{ path: string; children: Array<{ path: string }> }>
+    }
+    expect(treePayload.roots.find((root) => root.path === 'index')?.children).toEqual([])
+  })
+
+  it('Mock 中新建业务域会自动生成四个固定板块，重命名与递归删除都生效', async () => {
+    const adminTransport = createMockTransport()
+    setCredentialProvider(() => ({ adminToken: 'mock-admin-token' }))
+
+    const created = await adminTransport(
+      {
+        path: '/api/admin/knowledge/business-domains',
+        method: 'POST',
+        auth: 'admin',
+        body: { name: '客服' },
+      },
+      new AbortController().signal,
+    )
+    expect(created.status).toBe(201)
+    const domainNode = (await created.json()) as { version: string; children: unknown[] }
+    expect(domainNode.children).toHaveLength(4)
+
+    const renamed = await adminTransport(
+      {
+        path: '/api/admin/knowledge/business-domains?name=客服',
+        method: 'PUT',
+        auth: 'admin',
+        body: { new_name: '售后' },
+        headers: { 'If-Match': `"${domainNode.version}"` },
+      },
+      new AbortController().signal,
+    )
+    expect(renamed.status).toBe(200)
+    const renamedNode = (await renamed.json()) as { path: string; version: string }
+    expect(renamedNode.path).toBe('业务/售后')
+
+    const deleted = await adminTransport(
+      {
+        path: '/api/admin/knowledge/business-domains?name=售后&recursive=true',
+        method: 'DELETE',
+        auth: 'admin',
+        headers: { 'If-Match': `"${renamedNode.version}"` },
+      },
+      new AbortController().signal,
+    )
+    expect(deleted.status).toBe(204)
+
+    const tree = await adminTransport(
+      { path: '/api/admin/knowledge/tree', method: 'GET', auth: 'admin' },
+      new AbortController().signal,
+    )
+    const treePayload = (await tree.json()) as {
+      roots: Array<{ path: string; children: Array<{ name: string }> }>
+    }
+    const businessRoot = treePayload.roots.find((root) => root.path === '业务')
+    expect(businessRoot?.children.map((child) => child.name)).not.toContain('售后')
+  })
 })

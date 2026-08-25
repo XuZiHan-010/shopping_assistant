@@ -33,9 +33,7 @@ class ChatBiRepository:
 
     def _source_select(
         self, start_date: date, end_date: date
-    ) -> Select[
-        tuple[date, UUID, str, int, int, int, int, int, int, int, int, int, int]
-    ]:
+    ) -> Select[tuple[date, UUID, str, int, int, int, int, int, int, int, int, int, int]]:
         payload = Answer.response_payload
         stat_date = self._stat_date().label("stat_date")
         category = func.coalesce(payload["category"].astext, literal("UNKNOWN"))

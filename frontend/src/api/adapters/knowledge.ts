@@ -35,7 +35,7 @@ export function toKnowledgeDocument(raw: RawKnowledgeDocument): KnowledgeDocumen
   }
 }
 
-function toKnowledgeTreeNode(raw: RawKnowledgeTreeNode): KnowledgeTreeNode {
+export function toKnowledgeTreeNode(raw: RawKnowledgeTreeNode): KnowledgeTreeNode {
   return {
     name: raw.name,
     path: raw.path,

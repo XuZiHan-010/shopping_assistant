@@ -55,3 +55,14 @@ def parse_wiki_tree(root: Path) -> list[WikiEntry]:
             )
         )
     return entries
+
+
+def parse_seed_wiki_tree(root: Path) -> list[WikiEntry]:
+    """解析可随镜像分发的团队知识种子，不带入运行时记忆或导出文件。"""
+
+    allowed_roots = {"index", "业务"}
+    return [
+        entry
+        for entry in parse_wiki_tree(root)
+        if entry.source_path.split("/", maxsplit=1)[0] in allowed_roots
+    ]

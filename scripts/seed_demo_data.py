@@ -1,17 +1,32 @@
-"""写入 Borough 演示商家。
+"""写入 Borough 演示商家基础数据。
 
-B1 只写商家基础数据；180 天经营数据将在 B4 扩展此脚本。
+这是仅限本机或本地 Compose 数据库的全量工具；线上经营数据唯一写入口为
+`app.jobs.seed_demo_rolling` Cron。
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+from urllib.parse import urlparse
 
 from app.core.config import AppEnvironment, get_settings
 from app.core.runtime import configure_event_loop_policy
 from app.db.session import Database
 from app.services.seed_service import default_merchants, seed_demo_merchants
+
+_LOCAL_DATABASE_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "postgres"})
+
+
+def assert_local_database_url(database_url: str) -> None:
+    """商家基础数据的全量 Seed 只允许连接本机或本地 Compose PostgreSQL。"""
+
+    try:
+        hostname = urlparse(database_url).hostname
+    except ValueError as error:
+        raise RuntimeError("全量演示 Seed 只能连接本机数据库") from error
+    if hostname is None or hostname.lower() not in _LOCAL_DATABASE_HOSTS:
+        raise RuntimeError("全量演示 Seed 只能连接本机数据库")
 
 
 def parse_args() -> argparse.Namespace:
@@ -37,6 +52,7 @@ async def run(args: argparse.Namespace) -> None:
         return
 
     settings = get_settings()
+    assert_local_database_url(settings.database_url)
     if settings.app_env is AppEnvironment.PRODUCTION:
         raise RuntimeError("生产环境禁止运行演示 Seed")
 

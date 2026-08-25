@@ -1,7 +1,8 @@
 """把 180 天演示经营数据写入数据库。
 
 Seed 不属于 Migration（计划 §7.4）：迁移必须永远可复现，而演示数据会随
-阶段调整。脚本按商家整体重写，可重复执行。
+阶段调整。脚本按商家整体重写，可重复执行，且仅允许连接本机或本地 Compose 数据库；
+线上经营数据唯一写入口为 `app.jobs.seed_demo_rolling` Cron。
 """
 
 from __future__ import annotations
@@ -9,6 +10,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 from datetime import UTC, date, datetime
+from urllib.parse import urlparse
 
 from sqlalchemy import delete
 
@@ -21,6 +23,18 @@ from app.models.analytics import Order, OrderItem, Product, Refund, ReturnRecord
 from app.services.seed_service import default_merchants
 
 _DELETE_ORDER = (SupportTicket, ReturnRecord, Refund, OrderItem, Order, Product)
+_LOCAL_DATABASE_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "postgres"})
+
+
+def assert_local_database_url(database_url: str) -> None:
+    """全量重建只允许连接本机或本地 Compose PostgreSQL。"""
+
+    try:
+        hostname = urlparse(database_url).hostname
+    except ValueError as error:
+        raise RuntimeError("全量演示 Seed 只能连接本机数据库") from error
+    if hostname is None or hostname.lower() not in _LOCAL_DATABASE_HOSTS:
+        raise RuntimeError("全量演示 Seed 只能连接本机数据库")
 
 
 def reject_production(settings: Settings) -> None:
@@ -47,6 +61,7 @@ def default_end_date(now: datetime, *, timezone: str) -> date:
 
 async def _seed(days: int, end_date: date) -> int:
     settings = get_settings()
+    assert_local_database_url(settings.database_url)
     reject_production(settings)
     database = Database(settings)
     written = 0

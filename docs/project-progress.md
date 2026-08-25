@@ -2,7 +2,56 @@
 
 > 本文件只保留当前可继续开发的事实快照，不追加每日流水账。
 
-**最后更新：2026-08-24**
+**最后更新：2026-08-25**
+
+> **2026-08-25 知识库维护后台前端补齐**：核对发现后端 `backend/app/api/routes/knowledge.py`
+> 的九个知识库端点早已实现，但前端 `KnowledgeBaseView.vue` 此前只接了读取与保存两个操作，
+> 新建文档、新建业务域、重命名业务域、删除节点均未接入 UI（对照参考项目
+> `KnowledgeBaseApp.vue` 的 `isDocumentParent`/`isBusinessDomain`/`canDeleteSelected` 三个判定
+> 逐条核实）。本轮用 TDD 补齐：新增 `utils/knowledgeTree.ts`（移植参考项目的节点判定逻辑）、
+> `stores/knowledge.ts` 的 `selectNode`/`createDocument`/`createDomain`/`renameDomain`/
+> `deleteSelected` 五个 action、`PromptDialog.vue`/`ConfirmDeleteDialog.vue` 两个新组件，
+> 并把 `frontend/src/api/mock/transport.ts` 的知识库树从硬编码 fixture 改成基于
+> `knowledgeDocuments` Map 动态派生，让本地 `npm run dev`（默认 Mock 模式）也能完整走通四个
+> 新操作。同时把顶栏知识库入口从纯图标改为图标 + 文字「知识库」（用户明确裁定的对 R9 的有意
+> 偏离，已登记 `docs/yshopping-parity-audit.md` §5.18）。前端全量 vitest **344 passed**，
+> `npm run typecheck` 除一条与本次改动无关的既有缺口（`errorCopy.ts` 缺
+> `DAILY_REPORT_FEEDBACK_CONFLICT`，属于同分支另一项未完成的日报重算工作，非本次引入）外无新增
+> 错误，`eslint` 对改动文件全绿。用 Playwright 起本地 dev server 实测完整走过一遍：新建业务域
+> → 在固定板块下新建文档 → 重命名业务域 → 删除文档，四步均生效且控制台零报错（见对话记录中的
+> 截图）。**未涉及真实 LLM 调用，也未涉及后端改动**，纯前端补齐。
+
+> **2026-08-24 线上现状实测**（只读探测，零写入零费用，替换此前的推断措辞）：
+> 前端 `https://shoppingassistant-production-3439.up.railway.app`（Caddy，`/` 与 `/health.html` 均 200；
+> `/api/*` 按设计返回「此处不提供 API，请检查 VITE_API_BASE_URL 配置」的 404）；后端
+> `https://shoppingassistantbackend-production.up.railway.app`（由入口 bundle 中构建期注入的
+> `VITE_API_BASE_URL` 提取）。实测结果：
+> ① `/api/health` = `{"status":"ok","version":"0.1.0"}`，`/api/ready` = `{"status":"ready"}`，数据库连通；
+> ② `/api/demo/merchants` 返回 3 个商家，ID 为 `…0001/0002/0003`，**与 `default_merchants()` 精确匹配**——
+> 这是 Cron 的 `_require_demo_merchants()` 能通过的前提，已确认满足；
+> ③ **前后端均已部署到含 Chat BI 看板的当前版本**：前端 bundle 含 `ops-dashboard` / `Chat BI` 字样，
+> 后端 `/api/admin/analytics/chatbi/overview` 返回 **401 而非 404**。此前「线上是否已部署到 `ad2c0b1` 未知」
+> 的疑问就此关闭，**无需重新部署**；
+> ④ `ADMIN_TOKEN` 已在 Railway 配置：`/api/admin/ops/status`、`/api/admin/knowledge/tree`、
+> `/api/admin/analytics/chatbi/overview` 三个路由均返回 401（未配置时整个 admin 路由不挂载，应为 404）；
+> ⑤ `/api/metrics/gmv` 返回完整 13 字段双口径（`source=METRIC_CATALOG`、`generated=false`），
+> **`metric_definitions` 线上有数据**；
+> ⑥ `/api/reports/daily` 返回 `report_date=2026-08-23`、六项指标全 0、`degraded=false`，
+> 建议文案走的是**有数据分支**——即当日无数据但 7 日窗（08-17~08-23）有数据，与「经营数据末端停在
+> 2026-08-17」一致。该陈旧缓存的 `answer_id` 为 `79e5e293-2a19-4f23-869f-23b9f9094c4b`，
+> 是收口计划 Task 8 的重算对象；
+> ⑦ `/api/conversations` 最后活动为 2026-08-18，均为当时真实模型验收留下的「最近7天退货量趋势」与 `hello`。
+> **仍未确认**：线上 `knowledge_documents` 行数——需要生产 `ADMIN_TOKEN` 才能读 `/api/admin/knowledge/tree`，
+> 本轮未取得，故「线上知识库从未导入」目前仍是基于部署记录的推断，尚无直接实测证据。
+
+> **2026-08-24 知识库对齐**：核对参考项目 `WikiPathPolicy` / `WikiAdminService` 后确认，四个
+> 固定板块与「空板块照样渲染」的树结构我方已 1:1 一致，差异仅在导入数据集（参考 Wiki 43 篇，
+> 我方导入 23 篇）。用户当日裁定**维持 23 篇**，排除理由（旧 DDL 描述 Doris 宽表、金额单位为分，
+> 旧指标检索描述指标平台表，均与我方六张 PostgreSQL 表和 `metric_definitions` 不符，照搬会产生
+> 不触发降级的静默错答）已登记为 `docs/yshopping-parity-audit.md` §5.17。同时把本机
+> `knowledge_documents` 从 0 恢复为 23 篇（全量 pytest 会清空该表，演示前需重跑
+> `python -m scripts.import_wiki --root "../yshopping-merchant-ai 4/yshopping-merchant-ai/runtime/llm-wiki"`）。
+> **本机经营数据表仍为空**，演示前还需重跑 `seed_demo_analytics.py`。
 
 > **2026-08-24 核对说明**：本次仅核对并回填快照，未新增代码改动。核对时发现主工作副本
 > （`feature/memory-consolidation-agent`，HEAD `84e2e39`）存在大量**尚未提交**的工作树改动

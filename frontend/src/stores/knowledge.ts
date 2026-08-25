@@ -1,16 +1,33 @@
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 
-import { getKnowledgeDocument, getKnowledgeTree, updateKnowledgeDocument } from '@/api/knowledge'
+import {
+  createBusinessDomain as createBusinessDomainRequest,
+  createKnowledgeDocument,
+  deleteBusinessDomain as deleteBusinessDomainRequest,
+  deleteKnowledgeDocument,
+  getKnowledgeDocument,
+  getKnowledgeTree,
+  renameBusinessDomain as renameBusinessDomainRequest,
+  updateKnowledgeDocument,
+} from '@/api/knowledge'
 import type { KnowledgeDocument, KnowledgeTreeNode } from '@/api/adapters/knowledge'
 import { AppError } from '@/api/errors'
+import { findNode, isBusinessDomain } from '@/utils/knowledgeTree'
+
+function quoteVersion(version: string): string {
+  return `"${version}"`
+}
 
 export const useKnowledgeStore = defineStore('knowledge', () => {
   const adminToken = ref('')
   const roots = ref<KnowledgeTreeNode[]>([])
   const selectedDocument = ref<KnowledgeDocument | undefined>(undefined)
+  const selectedPath = ref('')
   const loading = ref(false)
   const errorMessage = ref('')
+
+  const selectedNode = computed(() => findNode(roots.value, selectedPath.value))
 
   function setAdminToken(token: string): void {
     adminToken.value = token.trim()
@@ -41,6 +58,62 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
     selectedDocument.value = await getKnowledgeDocument(path, new AbortController().signal)
   }
 
+  async function selectNode(path: string): Promise<void> {
+    selectedPath.value = path
+    if (path.toLowerCase().endsWith('.md')) {
+      await loadDocument(path)
+    } else {
+      selectedDocument.value = undefined
+    }
+  }
+
+  async function createDocument(path: string, content: string): Promise<void> {
+    const created = await createKnowledgeDocument(path, content, new AbortController().signal)
+    await loadTree()
+    selectedPath.value = created.path
+    selectedDocument.value = created
+  }
+
+  async function createDomain(name: string): Promise<void> {
+    const domain = await createBusinessDomainRequest(name, new AbortController().signal)
+    await loadTree()
+    selectedPath.value = domain.path
+    selectedDocument.value = undefined
+  }
+
+  async function renameDomain(newName: string): Promise<void> {
+    const node = selectedNode.value
+    if (!node) return
+    const renamed = await renameBusinessDomainRequest(
+      node.name,
+      newName,
+      quoteVersion(node.version),
+      new AbortController().signal,
+    )
+    await loadTree()
+    selectedPath.value = renamed.path
+    selectedDocument.value = undefined
+  }
+
+  async function deleteSelected(): Promise<void> {
+    const node = selectedNode.value
+    if (!node) return
+    if (isBusinessDomain(node)) {
+      await deleteBusinessDomainRequest(
+        node.name,
+        quoteVersion(node.version),
+        new AbortController().signal,
+      )
+    } else {
+      const version =
+        selectedDocument.value?.path === node.path ? selectedDocument.value.version : node.version
+      await deleteKnowledgeDocument(node.path, quoteVersion(version), new AbortController().signal)
+    }
+    await loadTree()
+    selectedPath.value = ''
+    selectedDocument.value = undefined
+  }
+
   async function saveDocument(content: string, headers: Record<string, string>): Promise<void> {
     const document = selectedDocument.value
     if (!document) return
@@ -56,6 +129,7 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
     adminToken.value = ''
     roots.value = []
     selectedDocument.value = undefined
+    selectedPath.value = ''
     errorMessage.value = ''
   }
 
@@ -63,12 +137,19 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
     adminToken,
     roots,
     selectedDocument,
+    selectedPath,
+    selectedNode,
     loading,
     errorMessage,
     setAdminToken,
     adminHeaders,
     loadTree,
     loadDocument,
+    selectNode,
+    createDocument,
+    createDomain,
+    renameDomain,
+    deleteSelected,
     saveDocument,
     signOut,
   }

@@ -163,9 +163,10 @@ async def test_categories_return_wrapped_items_with_display_name(
     response = await admin_client.get(CATEGORIES, params=WINDOW, headers=admin_headers)
 
     assert response.status_code == 200
-    assert response.json()["items"][0]["category_display_name"] == CATEGORY_DISPLAY_NAMES[
-        QuestionCategory.TRADE
-    ]
+    assert (
+        response.json()["items"][0]["category_display_name"]
+        == CATEGORY_DISPLAY_NAMES[QuestionCategory.TRADE]
+    )
 
 
 @pytest.mark.asyncio
