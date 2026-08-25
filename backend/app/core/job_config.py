@@ -12,6 +12,7 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.config import AppEnvironment
+from app.core.db_url import normalize_postgres_url
 
 
 class JobSettings(BaseSettings):
@@ -23,6 +24,13 @@ class JobSettings(BaseSettings):
     db_connect_max_attempts: int = Field(default=5, ge=1, le=20)
     db_connect_retry_seconds: float = Field(default=1.0, ge=0, le=60)
     db_statement_timeout_ms: int = Field(default=5_000, ge=100, le=60_000)
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def normalize_database_url(cls, value: object) -> object:
+        # 与 `Settings` 共用一份实现。少了这一步，Railway 注入的 postgresql://
+        # 会让 SQLAlchemy 选中默认的 psycopg2 方言，Cron 启动即 ModuleNotFoundError。
+        return normalize_postgres_url(value)
 
     @field_validator("business_timezone")
     @classmethod

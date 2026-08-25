@@ -49,3 +49,24 @@ def test_job_settings_carries_database_retry_and_timeout_knobs() -> None:
     assert settings.db_connect_max_attempts >= 1
     assert settings.db_connect_retry_seconds >= 0
     assert settings.db_statement_timeout_ms >= 100
+
+
+def test_railway_postgres_url_uses_psycopg_driver() -> None:
+    """与 Settings 同一口径：Railway 注入的 postgresql:// 必须补上 psycopg 驱动。
+
+    不补的话 SQLAlchemy 会按无后缀的 URL 选中默认的 psycopg2 方言，而项目
+    只装了 psycopg 3，Cron 一启动就 ModuleNotFoundError。Web 服务不受影响，
+    因为它走 Settings——这正是这个缺口能漏到线上的原因。
+    """
+
+    settings = _settings(database_url="postgresql://user:pass@localhost/db")
+
+    assert settings.database_url == "postgresql+psycopg://user:pass@localhost/db"
+
+
+def test_already_qualified_database_url_is_left_alone() -> None:
+    """已带驱动后缀的 URL 不得被二次改写。"""
+
+    settings = _settings(database_url="postgresql+psycopg://user:pass@localhost/db")
+
+    assert settings.database_url == "postgresql+psycopg://user:pass@localhost/db"
