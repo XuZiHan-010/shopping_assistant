@@ -107,6 +107,34 @@ Railway 的 Config File Path 不跟随 Root Directory。即使 Service Root 已�
 
 已新增 `backend/railway.cron.json`（无 `healthcheckPath`、无 `preDeployCommand`、`restartPolicyType: NEVER`），不复用 `backend/railway.json`。**Cron Service 尚未创建。** 创建 Service、配置上述四个变量与手工触发首次执行均为 Railway 控制台操作；完成后必须按本节的验收项核对。
 
+## Chat BI 汇总的每日滚动
+
+`/ops-dashboard` 读的是汇总表 `chatbi_qa_daily`，**不是实时查询 `answers`**。新回答落库后不会自动出现在看板上，必须先跑一次 rollup。触发方式：
+
+| 入口 | 覆盖范围 | 触发方式 |
+| --- | --- | --- |
+| `python -m app.jobs.chatbi_rollup` | 默认最近 7 天（业务时区）；可用 `--start-date` / `--end-date` 指定任意区间 | 独立 Cron Service，每日 `30 16 * * *`（UTC，等于 Asia/Shanghai 00:30） |
+| 看板上的「重刷」按钮 | **仅当前选中的窗口**（7 / 30 / 90 天） | 管理员手动，需 `X-Admin-Token` |
+
+**为什么是 7 天滑动窗口而不是只算昨天**：采纳、点赞、点踩可能在回答产生几天后才发生，只补昨天会让既往日期的采纳率和用户侧准确率永久偏低。每天重刷最近 7 天，迟到的反馈会被带进对应的 `stat_date`。汇总表只存可加计数、不存比率（比率在应用层由 `compute_north_star` 现算），因此重刷是幂等的，口径调整后也能安全重算历史。
+
+**排障提示**：看板显示「样本不足」时，先确认所选窗口内**确实有源数据**——`rollup_range` 只扫 `answers.processing_status = 'SUCCEEDED'` 且落在窗口内的行。窗口内无回答时，重刷写入 0 行，读回来仍然是空，再点多少次都一样；此时应切换到更长的窗口（30 / 90 天）再重刷。
+
+任务护栏与最小权限：
+
+- 只读取 `DATABASE_URL`、`APP_ENV`、`BUSINESS_TIMEZONE` 及三个数据库连接参数（`app/core/job_config.py` 的 `JobSettings`，共 6 个字段）。**不注入** `LLM_API_KEY`、`ADMIN_TOKEN`、`EXPORT_SIGNING_SECRET`、`FRONTEND_ORIGIN`——与滚动 Seed 同一原则；
+- 该任务**只读 `answers` / `feedback`、只写 `chatbi_qa_daily`**，不触碰经营数据，因此不需要 `ALLOW_DEMO_DATA_REFRESH`，真实商家数据库也可安全配置；
+- 与滚动 Seed 一样不跑 Alembic 迁移：启用前先确认同环境 Backend 已迁移到位并通过 `/api/ready`；
+- 排在滚动 Seed（`10 16`）之后 20 分钟，避免两个任务同时抢连接。
+
+已新增 `backend/railway.chatbi-cron.json`（无 `healthcheckPath`、无 `preDeployCommand`、`restartPolicyType: NEVER`），不复用 `backend/railway.json`。**Cron Service 尚未创建**——创建 Service、配置变量与手工触发首次执行均为 Railway 控制台操作，步骤如下：
+
+1. Railway 项目内 **New → GitHub Repo**，选同一仓库，Root Directory 设为 `/backend`；
+2. Service **Settings → Config as code** 填 `railway.chatbi-cron.json`（不填会默认读 `railway.json`，那份带健康检查，Cron 会被判失败）；
+3. **Variables** 只加 `DATABASE_URL`（建议用 Railway 的引用变量指向同一个 Postgres）、`APP_ENV=production`、`BUSINESS_TIMEZONE=Asia/Shanghai`，其余一个都不要加；
+4. 首次部署后在 **Deployments** 手工触发一次，确认退出码为 0；
+5. 验收：打开 `/ops-dashboard`，选「最近 7 天」，六张卡应能出数（分母不足的仍显示「样本不足」，属正确行为）。
+
 ## 演示前数据检查清单
 
 以下命令仅用于本地演示库。执行前必须确认 `DATABASE_URL` 指向本地测试库，并确认不会与滚动 Seed Cron 并发执行。完整 `pytest` 会清空经营数据和知识库数据；如需演示，应在全量测试后重新恢复。

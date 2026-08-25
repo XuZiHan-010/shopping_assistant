@@ -6,7 +6,12 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 
-from app.api.dependencies import get_app_settings, get_database, require_admin_token
+from app.api.dependencies import (
+    get_app_settings,
+    get_database,
+    require_admin_or_viewer_token,
+    require_admin_token,
+)
 from app.core.config import Settings
 from app.core.errors import error_responses
 from app.db.session import Database
@@ -38,7 +43,7 @@ async def chatbi_overview(
     window: Annotated[ChatBiWindow, Query()],
     settings: Annotated[Settings, Depends(get_app_settings)],
     database: Annotated[Database, Depends(get_database)],
-    _admin: Annotated[None, Depends(require_admin_token)],
+    _admin: Annotated[None, Depends(require_admin_or_viewer_token)],
 ) -> ChatBiOverviewResponse:
     overview = await _service(settings, database).overview(
         start_date=window.start_date, end_date=window.end_date
@@ -83,7 +88,7 @@ async def chatbi_categories(
     window: Annotated[ChatBiWindow, Query()],
     settings: Annotated[Settings, Depends(get_app_settings)],
     database: Annotated[Database, Depends(get_database)],
-    _admin: Annotated[None, Depends(require_admin_token)],
+    _admin: Annotated[None, Depends(require_admin_or_viewer_token)],
 ) -> ChatBiCategoriesResponse:
     breakdown = await _service(settings, database).categories(
         start_date=window.start_date, end_date=window.end_date

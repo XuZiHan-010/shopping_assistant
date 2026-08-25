@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 from enum import StrEnum
 from functools import lru_cache
 from typing import Any
@@ -92,6 +93,11 @@ class Settings(BaseSettings):
     trusted_proxy_hops: int = Field(default=0, ge=0, le=4)
     trusted_proxy_ips: str = ""
     admin_token: str | None = None
+    # 只读令牌：与 admin_token 共用同一批 `/api/admin/*` 端点，但只放行 GET
+    # （见 `require_admin_or_viewer_token`）。它是可以打包进前端构建产物、公开
+    # 展示的值——与演示商家 Token 同一豁免原则（AGENTS.md R6）；`admin_token`
+    # 仍然绝不进代码或构建产物。
+    viewer_token: str | None = None
     knowledge_max_document_bytes: int = Field(default=262_144, ge=1, le=2_097_152)
     export_signing_secret: str | None = None
     export_url_ttl_minutes: int = Field(default=15, ge=1, le=60)
@@ -133,6 +139,18 @@ class Settings(BaseSettings):
         if value != "Asia/Shanghai":
             raise ValueError("BUSINESS_TIMEZONE 必须固定为 Asia/Shanghai")
         return value
+
+    @model_validator(mode="after")
+    def enforce_viewer_token_is_distinct(self) -> Settings:
+        # 不分环境：两把钥匙撞了，「只读」这条边界就不存在了，必须在配置阶段
+        # 拦下，而不是指望调用方记得不要配错——包括本地开发环境。
+        if (
+            self.admin_token
+            and self.viewer_token
+            and hmac.compare_digest(self.admin_token, self.viewer_token)
+        ):
+            raise ValueError("ADMIN_TOKEN 与 VIEWER_TOKEN 不可相同，否则只读令牌等同管理员令牌")
+        return self
 
     @model_validator(mode="after")
     def enforce_environment_safety(self) -> Settings:

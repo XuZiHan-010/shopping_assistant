@@ -12,6 +12,7 @@ from app.api.dependencies import (
     get_app_settings,
     get_database,
     get_db_session,
+    require_admin_or_viewer_token,
     require_admin_token,
 )
 from app.core.config import Settings
@@ -39,7 +40,7 @@ router = APIRouter(prefix="/admin/knowledge", tags=["admin-knowledge"])
 @router.get("/tree", response_model=KnowledgeTreeResponse, responses=error_responses(401, 403, 422))
 async def get_knowledge_tree(
     session: Annotated[AsyncSession, Depends(get_db_session)],
-    _admin: Annotated[None, Depends(require_admin_token)],
+    _admin: Annotated[None, Depends(require_admin_or_viewer_token)],
 ) -> KnowledgeTreeResponse:
     return await KnowledgeAdminService(session).tree()
 
@@ -62,7 +63,7 @@ async def get_document(
     response: Response,
     session: Annotated[AsyncSession, Depends(get_db_session)],
     settings: Annotated[Settings, Depends(get_app_settings)],
-    _admin: Annotated[None, Depends(require_admin_token)],
+    _admin: Annotated[None, Depends(require_admin_or_viewer_token)],
 ) -> KnowledgeDocumentResponse:
     document = await _service(session, settings).get_document(document_path)
     _set_etag(response, document.version)

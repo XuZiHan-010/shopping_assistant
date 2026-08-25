@@ -2,22 +2,15 @@
 
 from __future__ import annotations
 
-from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import field_validator
 
-from app.core.config import AppEnvironment
+from app.core.job_config import JobSettings
 
 
-class SeedSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=(".env", "../.env"), extra="ignore")
+class SeedSettings(JobSettings):
+    """在通用离线任务配置之上，追加演示数据写权限这一个高风险开关。"""
 
-    database_url: str
-    app_env: AppEnvironment = AppEnvironment.DEVELOPMENT
-    business_timezone: str = "Asia/Shanghai"
     allow_demo_data_refresh: bool = False
-    db_connect_max_attempts: int = Field(default=5, ge=1, le=20)
-    db_connect_retry_seconds: float = Field(default=1.0, ge=0, le=60)
-    db_statement_timeout_ms: int = Field(default=5_000, ge=100, le=60_000)
 
     @field_validator("allow_demo_data_refresh", mode="before")
     @classmethod

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BookOpen, MessageSquarePlus, PanelLeft } from '@lucide/vue'
+import { BarChart3, BookOpen, MessageSquarePlus, PanelLeft } from '@lucide/vue'
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import ConversationColumn from '@/components/chat/ConversationColumn.vue'
@@ -228,6 +228,10 @@ function startNewConversation(): void {
           <BookOpen :size="18" aria-hidden="true" />
           <span>知识库</span>
         </RouterLink>
+        <RouterLink class="ops-link" to="/ops-dashboard" aria-label="Chat BI 运营看板" title="Chat BI 运营看板">
+          <BarChart3 :size="18" aria-hidden="true" />
+          <span>看板</span>
+        </RouterLink>
         <button class="new-chat-button" type="button" @click="startNewConversation">
           <MessageSquarePlus :size="18" aria-hidden="true" />
           <span>新会话</span>
@@ -393,7 +397,8 @@ function startNewConversation(): void {
 }
 
 .new-chat-button,
-.knowledge-link {
+.knowledge-link,
+.ops-link {
   grid-auto-flow: column;
   gap: var(--space-2);
   padding: 0 var(--space-3);
@@ -401,7 +406,8 @@ function startNewConversation(): void {
   font-weight: var(--font-weight-control);
 }
 
-.knowledge-link {
+.knowledge-link,
+.ops-link {
   height: var(--control-height);
   display: inline-grid;
   place-items: center;
@@ -414,7 +420,8 @@ function startNewConversation(): void {
   transition: var(--transition-interactive);
 }
 
-.knowledge-link:hover {
+.knowledge-link:hover,
+.ops-link:hover {
   border-color: #cdd7fd;
   color: var(--color-primary);
   background: var(--color-primary-soft);
@@ -513,12 +520,14 @@ function startNewConversation(): void {
 
   .brand-title p,
   .new-chat-button span,
-  .knowledge-link span {
+  .knowledge-link span,
+  .ops-link span {
     display: none;
   }
 
   .new-chat-button,
-  .knowledge-link {
+  .knowledge-link,
+  .ops-link {
     width: 36px;
     padding: 0;
   }

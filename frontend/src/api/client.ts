@@ -50,3 +50,21 @@ export function resolveApiBaseUrl(
   // 统一去掉结尾斜杠，调用方拼路径时不必再判断。
   return value.replace(/\/+$/, '')
 }
+
+/**
+ * 解析只读管理令牌（VIEWER_TOKEN 的构建期镜像）。
+ *
+ * 与 `resolveApiBaseUrl` 刻意不同：这是可选功能，未配置时返回 `undefined`
+ * 而不是抛错——调用方（`AdminTokenDialog.vue`）据此决定要不要显示"使用只读
+ * 令牌浏览"这个入口，不该让整个页面因为没配这个可选变量而炸掉。
+ *
+ * 这个值本身允许打包进前端构建产物：它只能开只读端点，与不得进代码的
+ * `ADMIN_TOKEN` 是两回事（`backend/app/core/config.py` 的 `viewer_token` 字段
+ * 注释、AGENTS.md R6 演示 Token 豁免同一原则）。
+ */
+export function resolveViewerToken(
+  raw: string | undefined = import.meta.env.VITE_VIEWER_TOKEN,
+): string | undefined {
+  const value = raw?.trim()
+  return value ? value : undefined
+}

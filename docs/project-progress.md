@@ -4,6 +4,31 @@
 
 **最后更新：2026-08-25**
 
+> **2026-08-25 只读令牌 + 顶栏入口**：顶栏新增「看板」入口（图标+文字，与知识库、新会话
+> 同族）。同时新增 `VIEWER_TOKEN`——与 `ADMIN_TOKEN` 共用 `X-Admin-Token` 请求头，但
+> `require_admin_or_viewer_token`（`backend/app/api/dependencies.py`）只放行标注它的 GET
+> 端点（知识库树/文档、Chat BI 总览/分类），写操作、`memories/compress`（真实 LLM 调用）、
+> `ops/status` 一律仍只认 `require_admin_token`。两者取值相同时 `Settings` 启动即拒绝，
+> 避免「只读」边界名存实亡。前端 `AdminTokenDialog.vue` 新增「使用只读令牌浏览」勾选项，
+> 勾选后从 `VITE_VIEWER_TOKEN`（构建期镜像，允许公开，与不得进代码的 `ADMIN_TOKEN` 不同）
+> 明文回填令牌框，免手输即可进知识库/看板后台，用 Playwright 实测验证过交互与自动填充。
+> 后端 pytest **890 passed**、ruff/mypy 全绿；前端 vitest **353 passed**、typecheck/build/
+> secrets-check/codegen-check 全绿（`secrets:check` 特意用真实值跑过一遍 build，确认
+> `VITE_VIEWER_TOKEN` 打包进产物不会被误判成密钥泄露）。
+
+> **2026-08-25 Chat BI 汇总定时任务**：确认 `/ops-dashboard` 读的是汇总表而非实时查询，
+> 而 rollup 此前**只有手动触发**、无任何定时配置，是看板长期空白的根因。已新增
+> `backend/railway.chatbi-cron.json`（每日 UTC `30 16`，即 Asia/Shanghai 00:30，排在滚动
+> Seed 之后 20 分钟）。过程中实测发现 `chatbi_rollup` 原先构造完整 `Settings`，在
+> `APP_ENV=production` 下会因缺 `FRONTEND_ORIGIN` / `EXPORT_SIGNING_SECRET` 启动失败——
+> 而汇总任务根本用不到这两个值。已按滚动 Seed 既有的最小权限原则抽出
+> `app/core/job_config.py` 的 `JobSettings`（仅 6 个字段、零密钥），`SeedSettings` 改为继承它，
+> `chatbi_rollup` 切换过去，并补了会真正失败的回归测试。后端 pytest **866 passed**、
+> ruff 与 mypy 全绿。**Cron Service 尚未在 Railway 控制台创建**（本机无 Railway CLI），
+> 创建步骤已写入 `docs/deployment.md`「Chat BI 汇总的每日滚动」，须由有控制台权限的用户完成。
+> 另已确认：看板「样本不足」在窗口内无源数据时属正确行为——线上真实问答止于 2026-08-18，
+> 默认 7 天窗口（08-19~08-25）扫不到任何行，切到 90 天窗口重刷后已实测有数。
+
 > **2026-08-25 知识库维护后台前端补齐**：核对发现后端 `backend/app/api/routes/knowledge.py`
 > 的九个知识库端点早已实现，但前端 `KnowledgeBaseView.vue` 此前只接了读取与保存两个操作，
 > 新建文档、新建业务域、重命名业务域、删除节点均未接入 UI（对照参考项目

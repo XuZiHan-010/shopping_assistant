@@ -82,6 +82,13 @@ describe('AssistantView', () => {
     expect(link.text()).toContain('知识库')
   })
 
+  it('顶栏提供可发现的 Chat BI 运营看板入口', async () => {
+    const wrapper = await mountView()
+    const link = wrapper.get('.ops-link')
+
+    expect(link.text()).toContain('看板')
+  })
+
   it('按主布局契约组合工作区、双侧栏、对话列和商家切换器', async () => {
     const wrapper = await mountView()
 

@@ -84,6 +84,7 @@ DEMO_DEPLOYMENT_MODE          [P0] 对外演示部署时显式开放生产环境
 ALLOW_DEMO_DATA_REFRESH       [P0] 非密钥但高风险的演示数据写权限；仅独立 Cron 使用，默认 false，绝不暴露给前端
 ADMIN_TOKEN                   [P0] 运维端点；[P1] 兼作知识库后台管理员令牌；请求头 X-Admin-Token
 REDIS_URL                     [P1]
+VIEWER_TOKEN                  [P1，可选] `/api/admin/*` 只读子集（GET）的公开令牌，与 ADMIN_TOKEN 认同一个请求头；不属于本条所指的真实密钥，可下发给前端构建产物，见下方例外
 OBJECT_STORAGE_ACCESS_KEY     [P1]
 OBJECT_STORAGE_SECRET_KEY     [P1]
 JWT_SECRET                    [P2] 引入真实用户体系后才需要
@@ -99,6 +100,8 @@ Chat Completions API 接入。MVP 默认模型为 `deepseek-v4-flash`；
 `https://api.deepseek.com`，`LLM_MODEL` 默认取 `deepseek-v4-flash`。
 
 演示 Token 是例外：它只授予对演示数据的访问权，可以由 `/api/demo/merchants` 下发给演示前端，不属于本条所指的真实密钥。真实密钥仍只保存在 Railway Variables 中。
+
+`VIEWER_TOKEN` 是同一原则下的第二个例外：它与 `ADMIN_TOKEN` 认同一批 `/api/admin/*` 端点，但后端只放行其中的 GET（见 `require_admin_or_viewer_token`），写操作、`memories/compress`（真实 LLM 调用）、`ops/status` 一律拒绝。因为泄露的最坏后果只是"看到本来就想公开的只读内容"，它允许打包进 `VITE_VIEWER_TOKEN` 构建产物；`ADMIN_TOKEN` 本身仍绝不进代码或构建产物。两者配置时不可取值相同，否则"只读"这条边界名存实亡（`Settings` 启动时拒绝）。
 
 ### R7 · 降级必须对用户可见
 
@@ -588,7 +591,8 @@ OpenAPI → api/generated.ts → api/adapters/*.ts → types/*.ts → Store → 
 | --- | --- |
 | `backend/app/main.py` | 创建 FastAPI 应用、注册路由、中间件和生命周期 |
 | `backend/app/core/config.py` | 使用 Pydantic Settings 读取环境变量 |
-| `backend/app/core/seed_config.py` | 演示数据滚动 Cron 的最小配置，仅读取数据库与显式写权限 |
+| `backend/app/core/job_config.py` | 离线 Cron 任务的最小数据库配置基类，不含 Web 服务密钥 |
+| `backend/app/core/seed_config.py` | 演示数据滚动 Cron 的最小配置，在 `JobSettings` 上追加显式写权限 |
 | `backend/app/core/security.py` | 演示 Token 解析与商家身份校验 [P0]；管理员令牌 [P1]；JWT 属于 P2，MVP 不实现 |
 | `backend/app/core/logging.py` | 结构化日志与敏感字段脱敏 |
 | `backend/app/core/errors.py` | 统一业务异常和 API 错误格式 |
@@ -644,7 +648,7 @@ OpenAPI → api/generated.ts → api/adapters/*.ts → types/*.ts → Store → 
 | `backend/app/services/chatbi_service.py` | Chat BI 日汇总上卷、窗口总览与问题分类下钻 |
 | `backend/app/services/memory_service.py` | 商家记忆提取、压缩和召回（已实现） |
 | `backend/app/jobs/seed_demo_rolling.py` | 专用演示数据库的增量滚动 Seed；需显式写权限与商家集合精确匹配 |
-| `backend/app/jobs/chatbi_rollup.py` | Chat BI 日粒度汇总的幂等重刷 CLI |
+| `backend/app/jobs/chatbi_rollup.py` | Chat BI 日粒度汇总的幂等重刷 CLI；由独立 Cron Service 每日滚动，见 `docs/deployment.md` |
 
 ### 8.5 数据库和 Repository
 
@@ -817,7 +821,8 @@ POST   /api/admin/knowledge/memories/compress
 | 凭证 | 请求头 | 用于 | 阶段 |
 | --- | --- | --- | --- |
 | 商家演示 Token | `Authorization: Bearer <token>` | 所有商家接口 | P0 |
-| `ADMIN_TOKEN` | **`X-Admin-Token: <token>`** | `/api/admin/*` | **P0**（运维端点）起，P1 知识后台复用 |
+| `ADMIN_TOKEN` | **`X-Admin-Token: <token>`** | `/api/admin/*` 全部（读+写） | **P0**（运维端点）起，P1 知识后台复用 |
+| `VIEWER_TOKEN`（可选） | **`X-Admin-Token: <token>`**，与管理员令牌共用同一个头 | `/api/admin/*` 中标注 `require_admin_or_viewer_token` 的 GET 端点，其余一律 403 | P1，例外原则见 R6 |
 | 导出签名 | 无头，签名在 query 中 | 仅 `/api/exports/{id}` | P0 |
 
 **管理员令牌不复用 `Authorization`。** 两者语义、生命周期和泄露后果都不同；共用一个头会让后端无法区分"商家在调管理接口"和"管理员在调商家接口"。后端对 `/api/admin/*` 只认 `X-Admin-Token`，前端按接口分组装配请求头，不做"有什么加什么"。
