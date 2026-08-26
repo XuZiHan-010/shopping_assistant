@@ -2,7 +2,61 @@
 
 > 本文件只保留当前可继续开发的事实快照，不追加每日流水账。
 
-**最后更新：2026-08-25**
+**最后更新：2026-08-26**
+
+> **2026-08-26 零 LLM 问题范围前置闸门**：新增 `openspec/changes/add-question-prefilter-gate`
+> 完整规划与实现——对外部署下，此前每个问题（含明显无关提问，如「CNN 和 RNN 的区别」）都会
+> 至少触发一次真实 DeepSeek 调用，没有任何路径能零成本拒绝。现在 `GRAPH_NODES` 由 11 个变为
+> 12 个，新增 `prefilter_question` 节点（`backend/app/agent/prefilter.py`），插入在
+> `retrieve_knowledge_index` 与 `classify_intent` 之间，用零依赖 n-gram 切词对问题与
+> 知识文档标题/路径、`metric_definitions.display_name`/`metric_code`、商家历史记忆首行
+> 做加权打分（复用并扩展了 `KnowledgeRetrieval._relevance_score`），得分低于阈值
+> （`QUESTION_PREFILTER_MIN_SCORE`，默认 3）时零 LLM 直接返回 `INVALID`，经 LangGraph
+> 条件边跳过 `classify_intent`～`quality_loop` 全部会调用 LLM 的节点，直达
+> `suggest_questions`/`persist_answer`。不用黑名单（无关词汇无法穷举），改为白名单打分
+> fail-closed：语料完全不可用（如全新部署或知识库为空，返回 `None` 而非 0 分）、问候语、
+> 同会话已有历史轮次（`ConversationRepository.has_assistant_message`，避免「那上个月呢？」
+> 这类无业务词的合法追问被误拒）三处 fail open。拒答复用既有 `INVALID` 契约
+> （`degraded=false`、`quality_status=NOT_RUN`、`analysis_sources=["NONE"]`），
+> **无 API 契约变更**（`docs/api.md`/`docs/api.json` 重新导出后无差异）。默认开关
+> `QUESTION_PREFILTER_ENABLED=true`；`MerchantQaGraph` 构造函数本身默认关闭，避免裸构造的
+> 既有单测因新增闸门而意外拒答，真实部署由 `api/dependencies.py` 按 Settings 显式打开。
+> 后端 pytest **941 passed / 212 skipped**（Docker 未运行，与既有仓储/API 集成测试同样
+> 受限）/ 0 failed，ruff/mypy 全绿；因改动使 `thinking_steps` 新增一项，已重新导出
+> `docs/fixtures/chat/*.json`（前端 Adapter 契约测试直接消费），前端全量 vitest
+> **353 passed** 确认未受影响。**未涉及任何真实 LLM 调用**（`tasks.md` 第 9 组的真实模型
+> 对照验收需另行取得 R3 费用授权，尚未执行）。
+>
+> **同日真实模型对照验收（用户已授权）**：因本机 Docker 未运行、无法接 Postgres，
+> 验收脚本绕开 API 层，直接用真实 `wiki_seed.json`（21 篇）与 `METRIC_SEED` 正式指标目录
+> 构造内存版 `KnowledgeRetrieval`/`MetricCatalog`，LLM 换成真实 `DeepSeekLlmClient`
+> （`deepseek-v4-flash`），未接 `SafeQueryService`（因此 METRIC/DETAIL 走既有降级摘要，
+> 不产生额外的生成/复核调用）。8 题结果：范围外 3 题（"CNN 和 RNN 的区别"「写一首关于
+> 秋天的诗」「量子力学的基本原理」）**均为 0 次 LLM 调用**，直接返回 `INVALID`——本次改动
+> 的核心结论已用真实模型证实；范围内 3 题（退货量趋势、商品上架规则、退款明细）均正常
+> 放行并调用模型，各 2 次调用（classify + understand）；问候语「你好」放行并得到自然
+> `CHAT` 回复；同会话追问「那上个月呢？」复用第一题会话时未被拒绝（2 次调用），验证了
+> 会话历史绕过设计。**合计 10 次调用、14,705 token**，与之前给出的"上限约 50 次"估算相比
+> 实际消耗更低（因为离线模式下每个业务问题只触发 2 次调用而非最坏情况的 10 次）。
+> 顺带发现一个与本次改动无关的既有模型行为：「商品上架需要满足什么条件」被模型分类到
+> 正确的 `category=PLATFORM_RULE`，但 `answer_mode` 给成 `CHAT` 而非 `RULE`——这是
+> `IntentService`/提示词层面的既有偏差，不是闸门引入的问题。**该问题已于同日单独修复，见下条。**
+
+> **2026-08-26 分类自相矛盾时的重分类修复**：承接上条真实模型验收发现的偏差。先用确定性
+> 对照实验量化了后果：同一个「商品上架需要满足什么条件」，`RULE`+PLATFORM_RULE 时用户拿到
+> 知识库正文（`analysis_sources=[KNOWLEDGE]`），而模型实际给的 `CHAT`+PLATFORM_RULE 会让
+> `_compose_answer` 走 CHAT 分支、把**已经检索到的**知识正文整段丢弃，用户只拿到
+> `"已完成结构化理解。"`，`analysis_sources=[NONE]` 且 `degraded=false`——不是「回答质量差」，
+> 而是有内容却不给且不告知，已踩到 R7 的边。
+> 修复方式沿用 `IntentService.recognize` 既有的一次性重分类机制：把原先只有一条判据的重试
+> 抽成 `_classification_retry_hint`，新增镜像判据 `_is_business_domain_answered_as_chat`
+> （`answer_mode=CHAT` 但 `category != UNKNOWN` 即自相矛盾），并给两类重试各自的纠正话术
+> （话术说反会把模型往错误方向带）。**重试上限仍是一次**，`config.py` 记录的「classify 最多
+> 2 次」最坏调用路径不变。新增 3 条单测覆盖：矛盾输出会重分类、真正的闲聊（CHAT+UNKNOWN）
+> 不被误伤多花一次调用、模型两次都给矛盾结果时收敛不无限重试。后端 pytest
+> **944 passed / 212 skipped / 0 failed**，ruff、mypy 全绿。
+> **重分类逻辑本身已用 fake LLM 证实；但「真实模型收到纠正话术后第二次是否真会改判为 RULE」
+> 属于模型行为，尚未用真实调用验证**，需另行取得 R3 授权。
 
 > **2026-08-25 只读令牌 + 顶栏入口**：顶栏新增「看板」入口（图标+文字，与知识库、新会话
 > 同族）。同时新增 `VIEWER_TOKEN`——与 `ADMIN_TOKEN` 共用 `X-Admin-Token` 请求头，但

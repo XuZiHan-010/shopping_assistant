@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import TypedDict
 from uuid import UUID
 
+from app.agent.prefilter import PrefilterDecision
 from app.intent.models import QueryIntent
 from app.intent.service import InitialIntent
 from app.intent.whitelist import IntentValidation
@@ -31,6 +32,7 @@ class AgentState(TypedDict):
     question: str
     knowledge_index: KnowledgeResult | None
     knowledge_detail: KnowledgeResult | None
+    prefilter_decision: PrefilterDecision | None
     initial_intent: InitialIntent | None
     intent: QueryIntent | None
     intent_validation: IntentValidation | None

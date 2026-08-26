@@ -164,19 +164,6 @@ R8 依然完全有效：参考项目只读，本规则只改变**我们自己**�
 
 全量还原度差异清单见 `docs/yshopping-parity-audit.md`，开工前先查该文件是否已登记相关差异。
 
-### R10 · 技能产出的文档写进项目自己的目录，不建 `superpowers/`
-
-即使本轮工作用了 superpowers、`grill me` 或其他任何技能，它们产出的计划、设计说明和审查记录都一律写进项目自己的目录：
-
-- 实施计划、整改计划 → `plans/`
-- 设计说明、规格 → `docs/specs/`
-
-**不得**新建 `docs/superpowers/`、`superpowers/` 或任何以技能名命名的目录来存放这些文档。技能只是产出文档的工作方式，不是项目结构的一部分——从最终的目录树上不应该看得出用过哪个技能。
-
-例外只有一个：`.superpowers/`（带前导点）是技能自己的临时工作区（SDD 账本等），已被 `.gitignore` 忽略，从不进入仓库，不受本规则约束。
-
-2026-08-10 已按本规则把原 `docs/superpowers/plans/`（10 份）与 `docs/superpowers/specs/`（13 份）迁至上述位置，`docs/superpowers/` 已删除。
-
 ---
 
 ## 三、项目是什么
@@ -621,6 +608,7 @@ OpenAPI → api/generated.ts → api/adapters/*.ts → types/*.ts → Store → 
 | `backend/app/agent/state.py` | 一轮问答共享状态 |
 | `backend/app/agent/intents.py` | 允许模型输出的结构化意图 |
 | `backend/app/agent/nodes/identity.py` | 商家身份和会话节点 |
+| `backend/app/agent/prefilter.py` | 零 LLM 前置闸门：确定性切词、问候语识别与判定入口，`retrieve_knowledge_index` 之后、`classify_intent` 之前拦截范围外提问 |
 | `backend/app/agent/nodes/retrieve.py` | 指标、知识和记忆检索 |
 | `backend/app/agent/nodes/understand.py` | 两阶段意图识别 |
 | `backend/app/agent/nodes/query.py` | 调用安全查询服务 |

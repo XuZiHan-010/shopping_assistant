@@ -1144,7 +1144,7 @@ B3 引入 Fake LLM 之后，**Fake Agent 即退役**，不保留两条并行的�
 - 日期校验顺序固定为**起止方向 → 未来截断 → 180 天截断**：起止颠倒和整段落在未来的区间一律拒绝（属模型输出错误，替它猜方向会把错误结果当成正常回答），结束日在未来则截断到今天并留可见备注。`today` 由调用方注入，便于冻结时钟测试跨零点行为。
 - 指标口径三级检索在 `retrieve_knowledge_detail` 之后执行：第三级要用知识**正文**生成候选口径，索引层只有目录词汇。生成口径的待核验文案必须进入 `quality_notes`。
 - DeepSeek 适配器把「单请求剩余 token」作为 `max_tokens` 随请求发出，并在预算耗尽时于本地拦截、不发起请求；只做事后记账挡不住已经产生费用的那一次调用。
-- `MerchantQaGraph` 使用 LangGraph 的 13 节点骨架。B4/B5 未实现的节点仍产生可见步骤，所有尚未查询数据的 METRIC、DETAIL、IDENTITY 回答均以 `FALLBACK` 和明确降级原因返回。
+- `MerchantQaGraph` 使用 LangGraph 的 12 节点骨架（见 §10）。B4/B5 未实现的节点仍产生可见步骤，所有尚未查询数据的 METRIC、DETAIL、IDENTITY 回答均以 `FALLBACK` 和明确降级原因返回。
 - `FakeAgent` 已退役；测试仅使用 `FakeLlmClient` 或 HTTP Mock。首次真实 DeepSeek 调用尚未发生，仍需用户明确同意模型、调用次数和费用。
 
 ---
@@ -1726,23 +1726,25 @@ B3 建立的是六种 `AnswerMode`，本阶段扩展为七种。仅在 ChatRespo
 START
   → load_context                  # 商家上下文（Token 解析结果）+ 会话历史
   → retrieve_knowledge_index      # 第一层：只加载目录与摘要，业务域未知
-  → classify_intent
+  → prefilter_question            # 零 LLM 前置闸门：范围外提问在此拒绝，见下方说明
+  → classify_intent               # 仅放行分支到达；拒绝分支直接跳到 suggest_questions
   → understand_intent
   → validate_intent
   → retrieve_knowledge_detail     # 第二层：业务域已知，加载对应正文
   → query_data
   → compose_answer
   → quality_loop                  # 生成 → 本地校验 → 独立复核 → 回喂重试
-  → suggest_questions             # 从预置配置取，不调用 LLM
+  → suggest_questions             # 从预置配置取，不调用 LLM；闸门拒绝分支也会经过这里
   → persist_answer
   → END
 ```
 
-三点说明：
+四点说明：
 
 - **知识检索拆成两个节点。** 索引层必须在 `classify_intent` 之前——业务域未知时，索引给模型提供拆词和领域识别所需的词汇；正文层必须在意图确定之后，否则会把全部知识灌进 Prompt。参考实现的顺序与此一致，见 §6.5。
 - **`decide_retry` 的上限写进分支条件**，不只写在文字说明里，避免实现时漏掉而形成无限循环。
 - **`suggest_questions` 是独立节点且不调用 LLM**，位置与参考实现的 `suggestQuestions()` 一致，见 §6.8。
+- **`prefilter_question` 是唯一的条件边节点。** 它对问题与业务知识库/指标目录/商家历史记忆做加权打分（不调用 LLM），命中判为范围外时直接返回 `answer_mode=INVALID`（复用既有 INVALID 契约，不新增字段），并跳过 `classify_intent` 到 `quality_loop` 之间的全部节点，直达 `suggest_questions`；问候语、同会话已有历史轮次，以及语料完全不可用（如全新部署或知识库为空）时一律 fail open 放行。默认阈值与开关见 `QUESTION_PREFILTER_MIN_SCORE` / `QUESTION_PREFILTER_ENABLED`，设计细节见 `openspec/changes/add-question-prefilter-gate/design.md`。
 
 每个节点完成时向 SSE 推送一个 `step` 事件（见 §8.4）。
 

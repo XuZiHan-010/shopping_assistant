@@ -19,6 +19,7 @@ from uuid import UUID, uuid4
 
 from langgraph.graph import END, START, StateGraph
 
+from app.agent import prefilter
 from app.agent.state import AgentState
 from app.core.security import MerchantContext
 from app.intent.models import QueryIntent
@@ -35,6 +36,7 @@ from app.schemas.chat import (
     MetricStatus,
     QualityStatus,
     QueryPlanSummary,
+    QuestionCategory,
     Recommendation,
     ThinkingStep,
     Visualization,
@@ -77,13 +79,25 @@ class HistoryQuestionsLike(Protocol):
     ) -> list[str]: ...
 
 
+class SessionHistoryLike(Protocol):
+    """`_prefilter_question` 判断本会话是否已有历史轮次的最小接口。"""
+
+    async def has_assistant_message(self, merchant_id: UUID, conversation_id: UUID) -> bool: ...
+
+
 #: 只在「查询服务根本没注入」时用（查询被拒时 `degraded_reason` 取
 #: `UnsupportedQueryError.reason`，那条更具体）。不写「将在某阶段接入」——受控查询
 #: 本身已经交付，这么说会让用户以为功能还没上线，而实际是这次请求没能查成。
 _QUERY_SERVICE_UNAVAILABLE: Final[str] = "经营数据查询服务当前不可用，本次未执行查询"
+#: 闸门拒答文案：说明范围而非报错，避免用户把设计内的拒绝当成系统故障（R7、design.md D7）。
+_PREFILTER_REJECTION_MESSAGE: Final[str] = (
+    "我是 Borough 商家 AI 助手，只能回答与您店铺经营相关的问题，"
+    "例如成交额、订单、退款、商品或平台规则。换个和经营相关的问法试试？"
+)
 GRAPH_NODES: Final[tuple[str, ...]] = (
     "load_context",
     "retrieve_knowledge_index",
+    "prefilter_question",
     "classify_intent",
     "understand_intent",
     "validate_intent",
@@ -97,6 +111,7 @@ GRAPH_NODES: Final[tuple[str, ...]] = (
 _STEP_LABELS: Final[dict[str, str]] = {
     "load_context": "识别商家与会话上下文",
     "retrieve_knowledge_index": "读取业务知识索引",
+    "prefilter_question": "判定问题范围",
     "classify_intent": "识别问题类型与业务域",
     "understand_intent": "结构化理解问题",
     "validate_intent": "校验查询意图",
@@ -137,6 +152,9 @@ class MerchantQaGraph:
         visualization_service: VisualizationService | None = None,
         node_timer: NodeTimerLike | None = None,
         history_questions: HistoryQuestionsLike | None = None,
+        prefilter_enabled: bool = False,
+        prefilter_min_score: int = 3,
+        session_history: SessionHistoryLike | None = None,
     ) -> None:
         self._retrieval = retrieval
         self._intent_service = IntentService(intent_service_llm)
@@ -145,6 +163,12 @@ class MerchantQaGraph:
         self._max_tokens = max_llm_tokens
         self._query_service = query_service
         self._merchant_id = merchant_id
+        # 默认关闭：裸构造（大量既有单测的写法）不应该因为新增闸门而意外拒答，
+        # 真实部署由 `api/dependencies.py` 按 `Settings.question_prefilter_enabled`
+        # 显式打开（design.md D5）。
+        self._prefilter_enabled = prefilter_enabled
+        self._prefilter_min_score = prefilter_min_score
+        self._session_history = session_history
         self._answer_llm = answer_llm
         self._reviewer_llm = reviewer_llm
         self._answer_service = answer_service or AnswerService()
@@ -177,9 +201,26 @@ class MerchantQaGraph:
             graph.add_node(name, cast(Any, self._timed_node(name, node_methods[name])))
         graph.add_edge(START, "load_context")
         for source, target in pairwise(GRAPH_NODES):
+            # `prefilter_question` 的出边不是线性的：拒绝时要跳过全部 LLM 驱动的
+            # 节点直达 `suggest_questions`（design.md D1），下面单独用条件边覆盖。
+            if source == "prefilter_question":
+                continue
             graph.add_edge(source, target)
+        graph.add_conditional_edges(
+            "prefilter_question",
+            self._route_after_prefilter,
+            {"classify_intent": "classify_intent", "suggest_questions": "suggest_questions"},
+        )
         graph.add_edge("persist_answer", END)
         return graph.compile()
+
+    @staticmethod
+    def _route_after_prefilter(state: AgentState) -> str:
+        decision = state["prefilter_decision"]
+        # decision 为 None 理论上不会发生（节点总会写入），fail open 仍然放行。
+        if decision is None or decision.allowed:
+            return "classify_intent"
+        return "suggest_questions"
 
     def _timed_node(
         self, name: str, fn: Callable[[AgentState], Awaitable[dict[str, object]]]
@@ -204,6 +245,7 @@ class MerchantQaGraph:
             "question": message,
             "knowledge_index": None,
             "knowledge_detail": None,
+            "prefilter_decision": None,
             "initial_intent": None,
             "intent": None,
             "intent_validation": None,
@@ -238,6 +280,50 @@ class MerchantQaGraph:
             **self._step(state, "retrieve_knowledge_index"),
             "knowledge_index": await self._retrieval.load_index(),
         }
+
+    async def _prefilter_question(self, state: AgentState) -> dict[str, object]:
+        session_has_prior_turn = False
+        if self._session_history is not None and self._merchant_id is not None:
+            try:
+                session_has_prior_turn = await self._session_history.has_assistant_message(
+                    self._merchant_id, state["session_id"]
+                )
+            except Exception:
+                # 会话历史查询失败不该让本轮问答中断；按「无历史」处理，最坏结果
+                # 只是本该跳过的判定又跑了一次，不会误拒。
+                logger.warning("闸门读取会话历史失败，按无历史处理", exc_info=True)
+
+        decision = await prefilter.decide(
+            state["question"],
+            enabled=self._prefilter_enabled,
+            min_score=self._prefilter_min_score,
+            session_has_prior_turn=session_has_prior_turn,
+            score_question=self._retrieval.score_question,
+        )
+        result: dict[str, object] = {
+            **self._step(state, "prefilter_question"),
+            "prefilter_decision": decision,
+        }
+        if not decision.allowed:
+            # 拒答复用既有 INVALID 契约：`_response` 的通用分支只要看到
+            # answer_mode=INVALID 且 degraded=False，产出的字段就已经与 spec 一致
+            # （analysis_sources=[NONE]、quality_status=NOT_RUN、quality_attempts=0），
+            # 不需要为拒答单独写响应构造逻辑（design.md D7）。
+            result["intent"] = QueryIntent(
+                answer_mode=AnswerMode.INVALID, category=QuestionCategory.UNKNOWN
+            )
+            result["candidate_answer"] = _PREFILTER_REJECTION_MESSAGE
+            # 只记分数、阈值与会话标识，不记问题原文或商家标识——运营靠这条日志
+            # 发现误拒该调阈值还是补语料，不需要也不该看到问题内容（R4 日志脱敏约束）。
+            logger.info(
+                "问题范围闸门拒答",
+                extra={
+                    "prefilter_score": decision.score,
+                    "prefilter_threshold": decision.threshold,
+                    "session_id": str(state["session_id"]),
+                },
+            )
+        return result
 
     async def _classify_intent(self, state: AgentState) -> dict[str, object]:
         index = _required(state["knowledge_index"])

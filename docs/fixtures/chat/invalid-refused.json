@@ -55,6 +55,10 @@
       "node": "retrieve_knowledge_index"
     },
     {
+      "label": "判定问题范围",
+      "node": "prefilter_question"
+    },
+    {
       "label": "识别问题类型与业务域",
       "node": "classify_intent"
     },

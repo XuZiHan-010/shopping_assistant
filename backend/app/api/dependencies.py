@@ -199,14 +199,18 @@ async def get_chat_service(
     conversations = ConversationRepository(session)
     merchant_summaries = await MerchantRepository(session).list_demo_by_ids([context.merchant_id])
     merchant_display = merchant_summaries[0].display_name if merchant_summaries else "商家"
+    memory_repository = MerchantMemoryRepository(session)
+    metric_repository = MetricRepository(session)
     graph = MerchantQaGraph(
         retrieval=KnowledgeRetrieval(
             KnowledgeRepository(session),
-            memories=MerchantMemoryRepository(session),
+            memories=memory_repository,
             merchant_id=context.merchant_id,
+            metrics=metric_repository,
+            all_memories=memory_repository,
         ),
         intent_service_llm=llm,
-        catalog=MetricCatalog(MetricRepository(session), llm),
+        catalog=MetricCatalog(metric_repository, llm),
         max_llm_calls=settings.llm_max_calls_per_request,
         max_llm_tokens=settings.llm_max_tokens_per_request,
         query_service=SafeQueryService(
@@ -218,6 +222,9 @@ async def get_chat_service(
         quality_max_attempts=settings.quality_max_attempts,
         node_timer=request.app.state.metrics,
         history_questions=AnswerRepository(session),
+        prefilter_enabled=settings.question_prefilter_enabled,
+        prefilter_min_score=settings.question_prefilter_min_score,
+        session_history=conversations,
     )
     return ChatService(
         session,

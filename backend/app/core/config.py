@@ -91,6 +91,20 @@ class Settings(BaseSettings):
     # 上限 8_000 留出足够推理余量；`remaining = budget.max_tokens - budget.tokens`
     # 仍会在单请求预算耗尽时把它按比例砍下去，不会让单次调用绕开每请求上限。
     llm_max_output_tokens_per_call: int = Field(default=8_000, ge=64, le=8_000)
+    # 零 LLM 前置闸门：问题与业务知识库/指标目录/商家历史记忆的加权匹配分低于
+    # 阈值时直接拒答，不占用任何 LLM 调用。默认阈值 3 = 至少一个候选词命中某篇
+    # 知识文档的标题（见 openspec/changes/add-question-prefilter-gate/design.md D5）。
+    question_prefilter_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("QUESTION_PREFILTER_ENABLED", "question_prefilter_enabled"),
+    )
+    question_prefilter_min_score: int = Field(
+        default=3,
+        ge=0,
+        validation_alias=AliasChoices(
+            "QUESTION_PREFILTER_MIN_SCORE", "question_prefilter_min_score"
+        ),
+    )
     rate_limit_per_minute: int = Field(default=10, ge=1, le=10_000)
     trusted_proxy_hops: int = Field(default=0, ge=0, le=4)
     trusted_proxy_ips: str = ""

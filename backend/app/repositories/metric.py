@@ -30,6 +30,18 @@ class MetricRepository:
         )
         return result.scalar_one_or_none()
 
+    async def list_active(self) -> list[MetricDefinition]:
+        """闸门打分专用（`KnowledgeRetrieval.score_question`）：拿全部非废弃指标目录。
+
+        沿用 `get_by_code` 的过滤口径——闸门判定问题是否与业务相关，用废弃指标
+        的名字放行没有意义。
+        """
+
+        result = await self._session.execute(
+            select(MetricDefinition).where(MetricDefinition.status != "DEPRECATED")
+        )
+        return list(result.scalars())
+
     async def get_by_code_including_deprecated(self, metric_code: str) -> MetricDefinition | None:
         """供指标口径查询端点使用：不过滤状态，原样返回治理元数据。
 

@@ -59,3 +59,46 @@ async def test_repository_deletes_only_owned_conversation(
 
     assert deleted is True
     assert await repository.get_for_merchant(own.id, MERCHANT_ONE_ID) is None
+
+
+@pytest.mark.asyncio
+async def test_has_assistant_message_false_before_first_turn_completes(
+    db_session: AsyncSession,
+) -> None:
+    """闸门首轮判定（`app.agent.prefilter`）依据此方法：新会话只有用户消息、
+    尚无助手消息时必须走打分，不能被误判成「已有历史」而放行。"""
+
+    await insert_merchants(db_session)
+    repository = ConversationRepository(db_session)
+    conversation = await repository.create(MERCHANT_ONE_ID, "闸门判定会话")
+    await repository.create_message(MERCHANT_ONE_ID, conversation.id, "USER", "最近7天退货量")
+    await db_session.commit()
+
+    assert await repository.has_assistant_message(MERCHANT_ONE_ID, conversation.id) is False
+
+
+@pytest.mark.asyncio
+async def test_has_assistant_message_true_after_first_turn_completes(
+    db_session: AsyncSession,
+) -> None:
+    await insert_merchants(db_session)
+    repository = ConversationRepository(db_session)
+    conversation = await repository.create(MERCHANT_ONE_ID, "闸门判定会话")
+    await repository.create_message(MERCHANT_ONE_ID, conversation.id, "USER", "最近7天退货量")
+    await repository.create_message(MERCHANT_ONE_ID, conversation.id, "ASSISTANT", "上一轮回答")
+    await db_session.commit()
+
+    assert await repository.has_assistant_message(MERCHANT_ONE_ID, conversation.id) is True
+
+
+@pytest.mark.asyncio
+async def test_has_assistant_message_never_crosses_merchants(
+    db_session: AsyncSession,
+) -> None:
+    await insert_merchants(db_session)
+    repository = ConversationRepository(db_session)
+    conversation = await repository.create(MERCHANT_TWO_ID, "他人会话")
+    await repository.create_message(MERCHANT_TWO_ID, conversation.id, "ASSISTANT", "他人回答")
+    await db_session.commit()
+
+    assert await repository.has_assistant_message(MERCHANT_ONE_ID, conversation.id) is False
