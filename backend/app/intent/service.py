@@ -84,11 +84,9 @@ class IntentService:
                     tuple(str(x) for x in keywords if str(x).strip()),
                     True,
                 )
-                if attempt == 0 and _needs_business_classification_retry(question, initial):
-                    prompt += (
-                        "\n该问题包含明确业务关键词，不得返回 INVALID/UNKNOWN；"
-                        "请按既定枚举重新分类。\n"
-                    )
+                hint = _classification_retry_hint(question, initial) if attempt == 0 else None
+                if hint is not None:
+                    prompt += hint
                     continue
                 return initial
         except LlmDailyBudgetExceededError:
@@ -168,9 +166,42 @@ def _unavailable_initial(reason: str) -> InitialIntent:
     return InitialIntent(AnswerMode.CHAT, QuestionCategory.UNKNOWN, (), False, reason)
 
 
+def _classification_retry_hint(question: str, initial: InitialIntent) -> str | None:
+    """判断首次分类是否需要重试，返回追加到提示词的纠正说明；不需要重试则返回 None。
+
+    两类重试互斥且各有各的纠正话术：说反了会让模型往错误方向改。重试上限仍是
+    一次（`recognize` 的 `range(2)`），因此 `config.py` 记录的「classify 最多 2 次」
+    最坏调用路径不变。
+    """
+
+    if _needs_business_classification_retry(question, initial):
+        return "\n该问题包含明确业务关键词，不得返回 INVALID/UNKNOWN；请按既定枚举重新分类。\n"
+    if _is_business_domain_answered_as_chat(initial):
+        return (
+            f"\n你已判定该问题属于业务域 {initial.category.value}，"
+            "此时 answer_mode 不得为 CHAT——CHAT 只用于问候和闲聊。"
+            "请在 METRIC/DETAIL/RULE/IDENTITY 中重新选择。\n"
+        )
+    return None
+
+
 def _needs_business_classification_retry(question: str, initial: InitialIntent) -> bool:
     return initial.category is QuestionCategory.UNKNOWN and any(
         marker in question.casefold() for marker in _BUSINESS_MARKERS
+    )
+
+
+def _is_business_domain_answered_as_chat(initial: InitialIntent) -> bool:
+    """业务域已判定却把 answer_mode 退成 CHAT——自相矛盾的输出，必须重分类。
+
+    2026-08-26 真实 `deepseek-v4-flash` 实测：「商品上架需要满足什么条件」返回
+    `category=PLATFORM_RULE` + `answer_mode=CHAT`。后果不是「回答得不够好」，
+    而是 `retrieve_knowledge_detail` 检索到的知识正文被 CHAT 分支整段丢弃，
+    用户只拿到「已完成结构化理解。」，且 `degraded=false` 不给任何提示。
+    """
+
+    return (
+        initial.answer_mode is AnswerMode.CHAT and initial.category is not QuestionCategory.UNKNOWN
     )
 
 

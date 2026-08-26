@@ -142,6 +142,27 @@ def test_production_rejects_weak_placeholder_secrets(secret: str) -> None:
         )
 
 
+def test_question_prefilter_defaults() -> None:
+    settings = make_settings()
+
+    assert settings.question_prefilter_enabled is True
+    assert settings.question_prefilter_min_score == 3
+
+
+def test_question_prefilter_env_keys_bind() -> None:
+    settings = Settings.model_validate(
+        {
+            "database_url": "postgresql+psycopg://user:pass@localhost/db",
+            "frontend_origin": "https://merchant.example.com",
+            "QUESTION_PREFILTER_ENABLED": False,
+            "QUESTION_PREFILTER_MIN_SCORE": 5,
+        }
+    )
+
+    assert settings.question_prefilter_enabled is False
+    assert settings.question_prefilter_min_score == 5
+
+
 def test_trusted_proxy_ips_parses_comma_separated_env_value() -> None:
     settings = make_settings(trusted_proxy_ips=" 203.0.113.7, 198.51.100.9 ,, ")
 

@@ -125,6 +125,25 @@ class ConversationRepository:
         await self._session.flush()
         return message
 
+    async def has_assistant_message(self, merchant_id: UUID, conversation_id: UUID) -> bool:
+        """闸门首轮判定专用（`app.agent.prefilter.decide`）。
+
+        用助手消息而非用户消息作判据：当前轮的用户消息可能已先行落库，用它判断
+        会让首轮把自己误判成「已有历史」，闸门形同虚设（design.md D6）。
+        """
+
+        return bool(
+            await self._session.scalar(
+                select(
+                    exists().where(
+                        Message.merchant_id == merchant_id,
+                        Message.conversation_id == conversation_id,
+                        Message.role == "ASSISTANT",
+                    )
+                )
+            )
+        )
+
     async def touch_conversation(self, merchant_id: UUID, conversation_id: UUID) -> None:
         """推进会话的 updated_at。
 

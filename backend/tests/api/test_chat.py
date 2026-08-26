@@ -14,6 +14,7 @@ from uuid import UUID, uuid4
 import anyio
 import pytest
 import structlog
+from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from app.api.dependencies import get_chat_service
@@ -22,6 +23,7 @@ from app.core.config import Settings
 from app.core.errors import IdempotencyKeyReusedError
 from app.core.security import MerchantContext
 from app.main import create_app
+from app.models.knowledge import KnowledgeDocument
 from app.schemas.chat import ChatRequest
 from app.services.chat_service import ChatExecution
 from tests.conftest import MERCHANT_ONE_AUTH
@@ -475,6 +477,54 @@ async def test_sse_path_completes_while_memory_task_runs_in_background(
     )
 
     assert [name for name, _ in parse_sse(stream.text)][-1] == "done"
+
+
+async def test_end_to_end_prefilter_rejection_persists_and_replays_in_conversation_detail(
+    postgres_app: FastAPI,
+    postgres_client: AsyncClient,
+) -> None:
+    """零 LLM 闸门拒答（tasks.md 6.4）也要走完整的持久化路径：能在
+    `GET /api/conversations/{id}` 里读回，行为与任何其他回答模式一致。
+
+    先插入一篇知识文档，让语料非空——`postgres_app` 每次都会 TRUNCATE 全表，
+    知识库为空时闸门必须 fail open（放行），无法验证拒答分支本身。
+    """
+
+    async with postgres_app.state.database.session() as session:
+        session.add(
+            KnowledgeDocument(
+                category="TRADE",
+                title="交易流程",
+                content="下单、支付与履约的交易流程说明。",
+                source="test-seed",
+                source_path="业务/交易/业务流程/交易流程.md",
+            )
+        )
+        await session.commit()
+
+    headers = {**MERCHANT_ONE_AUTH, "Accept": "application/json"}
+    chat = await postgres_client.post(
+        "/api/chat",
+        headers=headers,
+        json={"message": "CNN 和 RNN 的区别是什么", "client_request_id": "e2e-prefilter-reject"},
+    )
+
+    assert chat.status_code == 200
+    body = chat.json()
+    assert body["answer_mode"] == "INVALID"
+    assert body["degraded"] is False
+    assert body["analysis_sources"] == ["NONE"]
+    conversation_id = body["session_id"]
+
+    detail = await postgres_client.get(
+        f"/api/conversations/{conversation_id}",
+        headers=MERCHANT_ONE_AUTH,
+    )
+
+    assert detail.status_code == 200
+    detail_body = detail.json()
+    assert [message["role"] for message in detail_body["messages"]] == ["USER", "ASSISTANT"]
+    assert detail_body["messages"][0]["content"] == "CNN 和 RNN 的区别是什么"
 
 
 async def test_end_to_end_stream_stays_readable_as_an_async_byte_stream(

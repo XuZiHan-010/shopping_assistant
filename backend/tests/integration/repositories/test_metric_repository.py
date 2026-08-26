@@ -73,3 +73,31 @@ async def test_get_by_code_including_deprecated_still_returns_none_for_unknown_c
     )
 
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_list_active_excludes_deprecated_metrics(db_session: AsyncSession) -> None:
+    """闸门打分（`KnowledgeRetrieval.score_question`）沿用 `get_by_code` 的过滤口径：
+    用废弃指标的名字放行一个问题没有意义。"""
+
+    await _seed_deprecated_metric(db_session)
+    db_session.add(
+        MetricDefinition(
+            metric_code="gmv",
+            display_name="成交额",
+            unit="元",
+            business_definition="统计周期内的成交总额。",
+            sql_definition="SUM(gmv)",
+            source="METRIC_CATALOG",
+            owner="经营分析组",
+            status="ACTIVE",
+            dimensions=["date"],
+            source_database="public",
+            source_table="orders",
+        )
+    )
+    await db_session.flush()
+
+    rows = await MetricRepository(db_session).list_active()
+
+    assert [row.metric_code for row in rows] == ["gmv"]

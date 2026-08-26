@@ -80,3 +80,51 @@ async def test_archived_memory_is_not_returned(
     await db_session.flush()
 
     assert await repository.list_for_merchant(merchant.id, "TRADE") == []
+
+
+@pytest.mark.asyncio
+async def test_list_all_for_merchant_spans_every_category(
+    db_session: AsyncSession,
+    merchant: Merchant,
+) -> None:
+    """闸门打分（`KnowledgeRetrieval.score_question`）运行时业务分类尚未确定，
+    必须一次拿到该商家所有分类的记忆，而不是像 `list_for_merchant` 那样按分类过滤。
+    """
+
+    repository = MerchantMemoryRepository(db_session)
+    await repository.upsert(merchant_id=merchant.id, category="TRADE", content="交易记忆")
+    await repository.upsert(merchant_id=merchant.id, category="REFUND", content="退款记忆")
+    await db_session.flush()
+
+    rows = await repository.list_all_for_merchant(merchant.id)
+
+    assert {row.content for row in rows} == {"交易记忆", "退款记忆"}
+
+
+@pytest.mark.asyncio
+async def test_list_all_for_merchant_never_returns_other_merchants(
+    db_session: AsyncSession,
+    merchant: Merchant,
+    other_merchant: Merchant,
+) -> None:
+    repository = MerchantMemoryRepository(db_session)
+    await repository.upsert(merchant_id=merchant.id, category="TRADE", content="本商家")
+    await repository.upsert(merchant_id=other_merchant.id, category="TRADE", content="他人")
+    await db_session.flush()
+
+    rows = await repository.list_all_for_merchant(merchant.id)
+
+    assert [row.content for row in rows] == ["本商家"]
+
+
+@pytest.mark.asyncio
+async def test_list_all_for_merchant_excludes_archived(
+    db_session: AsyncSession,
+    merchant: Merchant,
+) -> None:
+    repository = MerchantMemoryRepository(db_session)
+    memory = await repository.upsert(merchant_id=merchant.id, category="TRADE", content="旧记忆")
+    memory.status = "ARCHIVED"
+    await db_session.flush()
+
+    assert await repository.list_all_for_merchant(merchant.id) == []

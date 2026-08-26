@@ -26,6 +26,19 @@ class MerchantMemoryRepository:
         result = await self._session.execute(statement)
         return list(result.scalars())
 
+    async def list_all_for_merchant(self, merchant_id: UUID) -> list[MerchantMemory]:
+        """闸门打分专用（`KnowledgeRetrieval.score_question`）：拿该商家全部分类的
+        记忆，而不是 `list_for_merchant` 要求的某一个已知分类——闸门运行时业务
+        分类尚未确定。
+        """
+
+        statement = select(MerchantMemory).where(
+            MerchantMemory.merchant_id == merchant_id,
+            MerchantMemory.status == "ACTIVE",
+        )
+        result = await self._session.execute(statement)
+        return list(result.scalars())
+
     async def upsert(
         self,
         *,

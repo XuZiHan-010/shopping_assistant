@@ -88,6 +88,54 @@ async def test_recognize_retries_chat_unknown_for_business_question() -> None:
 
 
 @pytest.mark.asyncio
+async def test_recognize_retries_business_domain_answered_as_chat() -> None:
+    """业务域已判定却把 answer_mode 退成 CHAT，是自相矛盾的输出，必须重分类。
+
+    2026-08-26 真实 `deepseek-v4-flash` 实测：「商品上架需要满足什么条件」返回
+    `category=PLATFORM_RULE` + `answer_mode=CHAT`。此时知识库正文其实已经检索到，
+    却因为走了 CHAT 分支被整段丢弃，用户只拿到「已完成结构化理解。」，且
+    `degraded=false` 不给任何提示。
+    """
+
+    llm = FakeLlmClient(
+        responses=[_classify("CHAT", "PLATFORM_RULE"), _classify("RULE", "PLATFORM_RULE")]
+    )
+
+    initial = await IntentService(llm).recognize("商品上架需要满足什么条件", "业务索引", _budget())
+
+    assert initial.answer_mode is AnswerMode.RULE
+    assert initial.category is QuestionCategory.PLATFORM_RULE
+    assert len(llm.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_recognize_keeps_chat_when_category_is_unknown_and_not_business() -> None:
+    """真正的闲聊（CHAT + UNKNOWN）不得被这条新规则误伤成多花一次调用。"""
+
+    llm = FakeLlmClient(responses=[_classify("CHAT", "UNKNOWN")])
+
+    initial = await IntentService(llm).recognize("你好", "业务索引", _budget())
+
+    assert initial.answer_mode is AnswerMode.CHAT
+    assert initial.category is QuestionCategory.UNKNOWN
+    assert len(llm.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_recognize_retries_business_domain_chat_only_once() -> None:
+    """模型两次都给自相矛盾结果时必须收敛，不能无限重试。"""
+
+    llm = FakeLlmClient(
+        responses=[_classify("CHAT", "PLATFORM_RULE"), _classify("CHAT", "PLATFORM_RULE")]
+    )
+
+    initial = await IntentService(llm).recognize("商品上架需要满足什么条件", "业务索引", _budget())
+
+    assert len(llm.calls) == 2
+    assert initial.llm_analyzed is True
+
+
+@pytest.mark.asyncio
 async def test_understand_validates_structured_intent() -> None:
     llm = FakeLlmClient(responses=[_classify(), _understand()])
     service = IntentService(llm)

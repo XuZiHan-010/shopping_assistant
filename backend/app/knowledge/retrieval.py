@@ -47,6 +47,21 @@ class KnowledgeSource(StrEnum):
     NONE = "none"
 
 
+def _first_line(text: str) -> str:
+    """取记忆正文的首行摘要参与打分，避免整段压缩记忆当正文使用（design.md D4）。
+
+    记忆内容固定以 `# {category}` 与 `## {MEMORY_MARKER}` 两行 Markdown 标题开头
+    （见 `app.prompts.memory.build_fallback_memory` / `_ensure_marker`），跳过它们
+    才能取到真正的记忆正文首行。
+    """
+
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            return stripped
+    return ""
+
+
 def strip_metric_suffix(keyword: str) -> str:
     """剥掉中文指标问法的词尾，避免“退货量”错过“退货”知识。"""
 
@@ -97,6 +112,37 @@ class _MemoryRepositoryLike(Protocol):
     ) -> Sequence[_MemoryLike]: ...
 
 
+class _AllMemoryRepositoryLike(Protocol):
+    """闸门打分专用：拿该商家全部分类的记忆，而不是某一个已知分类的。"""
+
+    async def list_all_for_merchant(self, merchant_id: UUID) -> Sequence[_MemoryLike]: ...
+
+
+class _MetricRowLike(Protocol):
+    metric_code: str
+    display_name: str
+
+
+class _MetricRepositoryLike(Protocol):
+    """闸门打分专用：拿全部正式指标目录，与查具体某一条口径的仓储接口无关。"""
+
+    async def list_active(self) -> Sequence[_MetricRowLike]: ...
+
+
+@dataclass
+class _ScoringDocument:
+    """把指标目录行 / 商家记忆适配成 `_relevance_score` 能读的标题/路径形状。
+
+    非 frozen：`_DocumentLike` 协议要求字段可写（供真实 ORM 模型满足），
+    frozen dataclass 的只读属性无法满足该协议，见 mypy 报错。
+    """
+
+    title: str
+    source_path: str
+    content: str = ""
+    is_complete: bool = True
+
+
 class KnowledgeRetrieval:
     def __init__(
         self,
@@ -104,10 +150,14 @@ class KnowledgeRetrieval:
         *,
         memories: _MemoryRepositoryLike | None = None,
         merchant_id: UUID | None = None,
+        metrics: _MetricRepositoryLike | None = None,
+        all_memories: _AllMemoryRepositoryLike | None = None,
     ) -> None:
         self._repository = repository
         self._memories = memories
         self._merchant_id = merchant_id
+        self._metrics = metrics
+        self._all_memories = all_memories
 
     async def load_index(self) -> KnowledgeResult:
         """业务域未知时，只加载目录与规则文档。"""
@@ -148,6 +198,38 @@ class KnowledgeRetrieval:
         if not memories:
             return _EMPTY
         return _render_memories(memories, category)
+
+    async def score_question(self, terms: Sequence[str]) -> int | None:
+        """零 LLM 前置闸门专用打分：只累计标题/路径命中，正文不计分（design.md D2）。
+
+        取知识文档、正式指标目录、本商家历史记忆三类语料的最高分。返回 `None`
+        —— 而不是 0 —— 当三类语料合计一条都没有时：0 分意味着「语料存在但没
+        命中，可以拒绝」，`None` 意味着「根本没有语料可判断，必须放行」，两者
+        决定闸门是拒绝还是 fail open（design.md D4；spec「业务语料不可用时必须
+        放行」）。异常不在这里捕获，交给调用方 `app.agent.prefilter.decide`
+        统一 fail open。
+        """
+
+        documents = await self._repository.list_active()
+        metric_rows = await self._metrics.list_active() if self._metrics is not None else ()
+        memories = (
+            await self._all_memories.list_all_for_merchant(self._merchant_id)
+            if self._all_memories is not None and self._merchant_id is not None
+            else ()
+        )
+        if not documents and not metric_rows and not memories:
+            return None
+
+        best = 0
+        for document in documents:
+            best = max(best, _relevance_score(document, terms, include_content=False))
+        for row in metric_rows:
+            scoring_doc = _ScoringDocument(title=row.display_name, source_path=row.metric_code)
+            best = max(best, _relevance_score(scoring_doc, terms, include_content=False))
+        for memory in memories:
+            scoring_doc = _ScoringDocument(title=_first_line(memory.content), source_path="")
+            best = max(best, _relevance_score(scoring_doc, terms, include_content=False))
+        return best
 
 
 def _haystack(document: _DocumentLike) -> str:
@@ -194,7 +276,9 @@ def _decompose(keywords: Sequence[str]) -> tuple[tuple[str, ...], tuple[str, ...
     return business, action_rule
 
 
-def _relevance_score(document: _DocumentLike, terms: Sequence[str]) -> int:
+def _relevance_score(
+    document: _DocumentLike, terms: Sequence[str], *, include_content: bool = True
+) -> int:
     title, path, content = _weighted_fields(document)
     score = 0
     for raw in terms:
@@ -203,7 +287,7 @@ def _relevance_score(document: _DocumentLike, terms: Sequence[str]) -> int:
             score += _TITLE_WEIGHT
         if term in path:
             score += _PATH_WEIGHT
-        if term in content:
+        if include_content and term in content:
             score += _CONTENT_WEIGHT
     return score
 
