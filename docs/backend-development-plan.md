@@ -660,7 +660,7 @@ attachments
 | P1 | `GET` | `/api/admin/knowledge/tree` | A | — | `KnowledgeTreeResponse` | 401 403 |
 | P1 | `GET` | `/api/admin/knowledge/documents/{id}` | A | — | `KnowledgeDocumentResponse` | 401 403 404 |
 | P1 | `POST` | `/api/admin/knowledge/documents` | A | `KnowledgeDocumentCreate` | `KnowledgeDocumentResponse` | 401 403 422 |
-| P1 | `PUT` | `/api/admin/knowledge/documents/{id}` | A | `KnowledgeDocumentUpdate` | `KnowledgeDocumentResponse` | 401 403 404 409 422 |
+| P1 | `PUT` | `/api/admin/knowledge/documents/{id}` | A | `KnowledgeDocumentUpdateRequest` | `KnowledgeDocumentResponse` | 401 403 404 409 422 |
 | P1 | `DELETE` | `/api/admin/knowledge/documents/{id}` | A | — | `204` | 401 403 404 |
 | P1 | `POST` | `/api/admin/knowledge/memories/compress` | A | `MemoryCompressRequest` | `MemoryCompressResponse` | 401 403 404 422 |
 
@@ -988,7 +988,7 @@ FAILED_FINAL      # 不可重试（参数非法、越权、内容被拒）
 
 > **本节是 `Accept-Language` / `Content-Language` 请求响应头，以及 `ChatResponse`、
 > `ConversationListResponse`、`ConversationDetailResponse`、`KnowledgeDocumentResponse`、
-> `KnowledgeDocumentRequest`、`KnowledgeDocumentUpdate`、`ExportSpec` 新增本地化字段的唯一权威定义。**
+> `KnowledgeDocumentRequest`、`KnowledgeDocumentUpdateRequest`、`ExportSpec` 新增本地化字段的唯一权威定义。**
 > 对应产品级语义见 `docs/PRD.md` §7.5 与 §11.5，前端消费方式见 `docs/frontend-development-plan.md`
 > §5.10。设计出处是 `plans/2026-08-31-full-stack-bilingual-localization.md` §1 与 §3.3；
 > 后续实施任务（该计划的 Task 2–13）必须原样使用本节字段名，不得另起名字或改变失败语义。
@@ -1065,7 +1065,7 @@ FAILED_FINAL      # 不可重试（参数非法、越权、内容被拒）
   不翻译；
 - `KnowledgeDocumentRequest`（对应 `POST /api/admin/knowledge/documents`）增加可选
   `source_locale: SourceLanguage`，缺失时后端用 `detect_source_language()` 检测并持久化；
-- `KnowledgeDocumentUpdate`（对应 `PUT /api/admin/knowledge/documents/{id}`）增加
+- `KnowledgeDocumentUpdateRequest`（对应 `PUT /api/admin/knowledge/documents/{id}`）增加
   `is_source_version: boolean` 与 `content_locale: SupportedLocale | null`：
   - `is_source_version=true` 时只更新事实源正文并重新检测语言；
   - 为 `false` 时 `content_locale` 必填，按资源 ID/字段/源版本保存人工译文；
