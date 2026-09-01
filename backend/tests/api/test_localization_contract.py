@@ -2,10 +2,14 @@
 
 覆盖 `docs/backend-development-plan.md` §8.6.1：所有成功和错误响应都
 回显 `Content-Language`，GET 响应带 `Vary: Accept-Language`；业务
-`AppError`、Pydantic validation、404、`AUTH_REQUIRED` 都不得在英语响应里
-夹带中文原句。这里只用 `client`/自建的免数据库 Settings 驱动请求——
-`/api/health`、路径校验失败、鉴权失败都发生在触达数据库之前，不需要真实
-PostgreSQL（本地开发环境当前也没有 Docker Desktop 可用）。
+`AppError`、Pydantic validation、404、`AUTH_REQUIRED`、未预期异常（500）
+都不得在英语响应里夹带中文原句。这里只用 `client`/自建的免数据库 Settings
+驱动请求——`/api/health`、路径校验失败、鉴权失败都发生在触达数据库之前，
+不需要真实 PostgreSQL（本地开发环境当前也没有 Docker Desktop 可用）；
+500 路径通过 `app.dependency_overrides` 让 `get_merchant_context` 同步
+抛出未预期异常来触发，同样不碰数据库——这与
+`tests/api/test_metrics_error_tracking.py` 用同样手法覆盖 429 是同一
+套已有约定。
 """
 
 from __future__ import annotations
@@ -17,6 +21,7 @@ from uuid import UUID
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
+from app.api.dependencies import get_merchant_context
 from app.core.config import AppEnvironment, Settings
 from app.main import create_app
 
@@ -47,6 +52,48 @@ async def authed_client() -> AsyncIterator[AsyncClient]:
         transport=ASGITransport(app=app), base_url="http://testserver"
     ) as test_client:
         yield test_client
+
+
+def _raise_unexpected() -> None:
+    raise RuntimeError("simulated unexpected failure for the 500 / INTERNAL_ERROR path")
+
+
+@pytest_asyncio.fixture
+async def client_with_unexpected_failure() -> AsyncIterator[AsyncClient]:
+    """覆盖 `get_merchant_context` 让它同步抛出未预期异常，端到端跑通
+    `handle_unexpected_error`（500）。
+
+    选 `get_merchant_context`：`GET /api/conversations` 把它列为第一个
+    依赖，FastAPI 按声明顺序解析依赖、遇到异常就不再解析后续依赖（同一
+    请求里排在它后面的 `get_conversation_repository` 需要真实数据库会话，
+    正是靠这个顺序才永远不会被触发，测试因此不需要真实 PostgreSQL、也就
+    不会遇到之前手动探测过的"无库环境下连接挂起"问题）。
+
+    `raise_app_exceptions=False`：Starlette 的 `ServerErrorMiddleware`
+    捕获未预期异常、调用我们注册的 `Exception` 处理器生成 500 响应
+    后，仍然会把原始异常重新抛出（生产环境下这是故意的——响应字节已经
+    发给客户端，重新抛出只是为了让 ASGI 服务器有机会记录/上报；真实
+    Uvicorn 不受影响）。`httpx.ASGITransport` 默认会把这次重新抛出的
+    异常直接冒泡成 Python 异常，而不是把已经生成好的 Response 交回来；
+    这里显式关掉这个行为，才能拿到 500 响应本身来断言。
+    """
+
+    settings = Settings(
+        app_env=AppEnvironment.TEST,
+        app_version="0.1.0",
+        database_url="postgresql+psycopg://user:pass@localhost/test",
+        frontend_origin="http://localhost:5173",
+        demo_merchant_tokens={MERCHANT_TOKEN: MERCHANT_ID},
+        rate_limit_per_minute=1000,
+    )
+    app = create_app(settings)
+    app.dependency_overrides[get_merchant_context] = _raise_unexpected
+    async with AsyncClient(
+        transport=ASGITransport(app=app, raise_app_exceptions=False),
+        base_url="http://testserver",
+    ) as test_client:
+        yield test_client
+    app.dependency_overrides.clear()
 
 
 async def test_health_echoes_content_language(client: AsyncClient) -> None:
@@ -151,3 +198,37 @@ async def test_not_found_route_localizes_message(client: AsyncClient) -> None:
     body = response.json()
     assert body["code"] == "NOT_FOUND"
     assert not contains_han(body["message"])
+
+
+async def test_unexpected_error_localizes_message_in_english(
+    client_with_unexpected_failure: AsyncClient,
+) -> None:
+    response = await client_with_unexpected_failure.get(
+        "/api/conversations",
+        headers={
+            "Authorization": f"Bearer {MERCHANT_TOKEN}",
+            "Accept-Language": "en-US",
+        },
+    )
+
+    assert response.status_code == 500
+    assert response.headers["Content-Language"] == "en-US"
+    assert "Accept-Language" in response.headers["Vary"]
+    body = response.json()
+    assert body["code"] == "INTERNAL_ERROR"
+    assert not contains_han(body["message"])
+
+
+async def test_unexpected_error_defaults_to_chinese_without_header(
+    client_with_unexpected_failure: AsyncClient,
+) -> None:
+    response = await client_with_unexpected_failure.get(
+        "/api/conversations",
+        headers={"Authorization": f"Bearer {MERCHANT_TOKEN}"},
+    )
+
+    assert response.status_code == 500
+    assert response.headers["Content-Language"] == "zh-CN"
+    body = response.json()
+    assert body["code"] == "INTERNAL_ERROR"
+    assert contains_han(body["message"])

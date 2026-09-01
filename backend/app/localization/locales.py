@@ -80,8 +80,22 @@ _NUMBER_PATTERN = re.compile(r"\d+")
 _HAN_PATTERN = re.compile("[一-鿿]")
 _LATIN_WORD_PATTERN = re.compile(r"[A-Za-z]{2,}")
 
-# 常见大写 SQL 关键字。只在整个记号全大写且命中表内取值时剔除，避免误伤
-# "as"、"in"、"on"、"by"、"not" 这类同时也是普通英文单词的小写用法。
+# 完整 `select ... from <表名> [where ...]` 子句：整段按 SQL 处理，而不是
+# 逐词剔除关键字。逐词剔除治不了 `orders`、`id`、`name` 这类不含下划线/
+# 数字的裸表名或列名——它们本身也是常见英文单词的形状，仅凭关键字表拦不
+# 住（这正是本函数最初漏判 `SELECT * FROM orders WHERE merchant_id = 1`
+# 这类真实 SQL 语句的根因）。非贪婪匹配到第一个 `from`，只吞掉紧跟着的
+# 一个表名记号与随后可选的 `where` 子句（到行尾/分号为止），不会把 SQL
+# 片段前后真正的自然语言说明一并吞掉。
+_SQL_SELECT_PATTERN = re.compile(
+    r"(?i)\bselect\b.*?\bfrom\b\s+[A-Za-z_][\w.]*(?:\s+where\b[^\n;]*)?"
+)
+
+# 常见 SQL 关键字，作为逐词剔除的兜底：覆盖上面的整句子句正则漏网的场景
+# （比如关键字单独出现、或出现在 select/from 结构以外的 SQL 片段里）。
+# 大小写不敏感匹配——真实 SQL 里 `select`/`from`/`sum` 等关键字几乎总是
+# 全部大写或全部小写，混合大小写的情况极少；不收录 `in`/`on`/`by`/`not`
+# 这类同时是常见英文单词、且在这里误剔除代价更高的词。
 _SQL_KEYWORDS = {
     "SELECT",
     "FROM",
@@ -102,6 +116,14 @@ _SQL_KEYWORDS = {
     "DISTINCT",
     "HAVING",
     "UNION",
+    "SUM",
+    "COUNT",
+    "AVG",
+    "MAX",
+    "MIN",
+    "AS",
+    "AND",
+    "OR",
 }
 
 
@@ -109,15 +131,21 @@ def _replace_code_token(match: re.Match[str]) -> str:
     token = match.group(0)
     if "_" in token or any(ch.isdigit() for ch in token):
         return " "
-    if token.isupper() and token in _SQL_KEYWORDS:
+    if token.upper() in _SQL_KEYWORDS:
         return " "
     return token
 
 
 def _strip_non_linguistic(text: str) -> str:
-    """剔除 URL、代码/ID 记号、SQL 关键字与数字，只留自然语言片段。"""
+    """剔除 URL、SQL 语句、代码/ID 记号、SQL 关键字与数字，只留自然语言片段。
+
+    顺序很关键：SQL 整句子句必须在逐词的代码/关键字剔除**之前**处理，否则
+    `select`/`from` 一旦被逐词步骤先行剔除，子句正则就再也找不到匹配起点，
+    裸表名/列名（`orders`、`id`、`name`）就会被当成自然语言英文单词漏判。
+    """
 
     stripped = _URL_PATTERN.sub(" ", text)
+    stripped = _SQL_SELECT_PATTERN.sub(" ", stripped)
     stripped = _CODE_TOKEN_PATTERN.sub(_replace_code_token, stripped)
     stripped = _NUMBER_PATTERN.sub(" ", stripped)
     return stripped
@@ -126,8 +154,9 @@ def _strip_non_linguistic(text: str) -> str:
 def detect_source_language(text: str) -> SourceLanguage:
     """判定一段文本本身使用的语言。
 
-    先剔除 URL、下划线或数字构成的代码/ID 记号、常见大写 SQL 关键字，
-    再根据剩余自然语言片段分类：
+    先剔除 URL、完整的 `select ... from ...` 语句、下划线或数字构成的
+    代码/ID 记号、常见 SQL 关键字（大小写不敏感），再根据剩余自然语言
+    片段分类：
 
     - 汉字与至少两个字母的英文单词都出现 → `mixed`；
     - 只出现汉字 → `zh-CN`；只出现英文单词 → `en-US`；

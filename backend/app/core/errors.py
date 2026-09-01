@@ -299,16 +299,33 @@ def _request_locale(request: Request) -> SupportedLocale:
     return parse_accept_language(request.headers.get("Accept-Language"))
 
 
-def _response(error: ErrorResponse, status_code: int) -> JSONResponse:
-    return JSONResponse(status_code=status_code, content=error.model_dump(mode="json"))
+def _response(error: ErrorResponse, status_code: int, locale: SupportedLocale) -> JSONResponse:
+    """构造错误响应，并**自己**打上 `Content-Language`/`Vary`。
+
+    `app.main` 里的中间件也会给"正常经过 `call_next()` 返回"的响应打这两个
+    Header，但 500 这条路径不满足这个前提：未预期异常只被 Starlette 最外层
+    的 `ServerErrorMiddleware` 捕获（比我们自己的 `@app.middleware("http")`
+    还要外一层），它在 `except` 分支里调用这里的处理器拿到响应后**直接**
+    通过底层 `send` 发出去，根本不会流经我们中间件里 `await call_next(...)`
+    之后的收尾代码——那段代码在这条路径上永远不会执行到。所以两个 Header
+    必须在这里（响应真正被创建的地方）就打好，不能只指望中间件兜底；对于
+    确实会流经 `call_next()` 的错误响应（`AppError`/validation/404 等），
+    这里打的值与中间件后续再打一遍完全一致，只是重复赋值，无副作用。
+    """
+
+    response = JSONResponse(status_code=status_code, content=error.model_dump(mode="json"))
+    response.headers["Content-Language"] = locale.value
+    response.headers["Vary"] = "Accept-Language"
+    return response
 
 
 def register_exception_handlers(app: FastAPI, logger: BoundLogger) -> None:
     """注册全局异常处理器，禁止内部异常细节泄露给调用方。
 
     对外展示的 `message` 一律按当前请求的 `Accept-Language` 渲染
-    （`docs/backend-development-plan.md` §8.6.1）；`Content-Language` /
-    `Vary` 响应头由 `app.main` 里的中间件统一注入，这里不重复处理。
+    （`docs/backend-development-plan.md` §8.6.1）。`Content-Language` /
+    `Vary` 响应头由 `_response()` 直接打在每个错误响应上（原因见其
+    docstring），成功响应仍由 `app.main` 里的中间件统一注入。
     """
 
     @app.exception_handler(AppError)
@@ -324,6 +341,7 @@ def register_exception_handlers(app: FastAPI, logger: BoundLogger) -> None:
                 retryable=exc.retryable,
             ),
             exc.status_code,
+            locale,
         )
 
     @app.exception_handler(RequestValidationError)
@@ -347,6 +365,7 @@ def register_exception_handlers(app: FastAPI, logger: BoundLogger) -> None:
                 details=details,
             ),
             422,
+            locale,
         )
 
     @app.exception_handler(StarletteHTTPException)
@@ -365,6 +384,7 @@ def register_exception_handlers(app: FastAPI, logger: BoundLogger) -> None:
                 request_id=_request_id(request),
             ),
             exc.status_code,
+            locale,
         )
 
     @app.exception_handler(Exception)
@@ -383,4 +403,5 @@ def register_exception_handlers(app: FastAPI, logger: BoundLogger) -> None:
                 retryable=True,
             ),
             500,
+            locale,
         )

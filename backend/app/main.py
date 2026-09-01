@@ -97,10 +97,15 @@ def create_app(
     async def request_id_middleware(request: Request, call_next: RequestHandler) -> Response:
         request_id = _resolve_request_id(request.headers.get("X-Request-Id"))
         request.state.request_id = request_id
-        # 同一个中间件顺带回显显示语言：`call_next` 返回的是整条链路
-        # （含全局异常处理器）解析完的最终 Response，成功和错误响应都会
-        # 经过这里，不需要在 `register_exception_handlers` 里重复注入一遍
-        # Header（`docs/backend-development-plan.md` §8.6.1
+        # 同一个中间件顺带回显显示语言：`call_next` 返回的是应用层（含
+        # AppError/校验/404 等已注册异常处理器）解析完的 Response，这些
+        # 路径都会正常流经这里。**但完全没有处理器匹配的未预期异常
+        # （500）不会**——它只被 Starlette 最外层的 `ServerErrorMiddleware`
+        # 捕获，比这个中间件本身还要外一层，`call_next()` 在这种情况下会
+        # 直接向上抛出而不是返回，下面这段收尾代码根本执行不到。所以 500
+        # 这条路径的 `Content-Language`/`Vary` 由
+        # `app.core.errors._response()` 在响应创建时自己打上，不能只靠
+        # 这里兜底（`docs/backend-development-plan.md` §8.6.1
         # 「错误响应也必须经过相同 Header 注入」）。
         locale = parse_accept_language(request.headers.get("Accept-Language"))
         start = monotonic()
