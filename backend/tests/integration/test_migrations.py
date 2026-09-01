@@ -292,11 +292,17 @@ def test_content_locale_migration_backfills_without_defaulting_to_zh_cn(
                 text(
                     "INSERT INTO knowledge_documents "
                     "(id, category, title, content, source, source_path) "
-                    "VALUES (:id, 'GENERAL', '标题', :content, 'legacy', :source_path)"
+                    "VALUES (:id, 'GENERAL', :title, :content, 'legacy', :source_path)"
                 ),
                 [
                     {
                         "id": document_ids[label],
+                        # 分类按 `title + content` 组合判定（见 0016 迁移），标题必须用
+                        # 不含汉字/连续字母的「中性」占位（下划线码状记号会被冻结分类
+                        # 函数整体剔除），否则会污染本用例期望验证的纯 content 分类
+                        # 结果——之前这里误用统一的中文 "标题"，导致 english/und 两个
+                        # 样本被标题的汉字/中性判定悄悄带偏，详见修复记录。
+                        "title": f"doc_{label}_001",
                         "content": content,
                         "source_path": f"/legacy/content-locale-{label}",
                     }

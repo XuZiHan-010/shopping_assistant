@@ -90,14 +90,17 @@ class LocalizationRepository:
         merchant_id: UUID,
         source_hashes: Sequence[str],
         target_locale: SupportedLocale,
+        prompt_version: str,
     ) -> dict[str, MachineTranslationCache]:
-        """只查该商家自己的机器缓存，绝不返回其它商家或 GLOBAL 的行。"""
+        """只查该商家自己、且产自 `prompt_version` 这一版翻译提示词的机器缓存，
+        绝不返回其它商家、GLOBAL 或其它 `prompt_version` 的行。"""
 
         return await self._fetch_machine_many(
             scope_kind="MERCHANT",
             merchant_id=merchant_id,
             source_hashes=source_hashes,
             target_locale=target_locale,
+            prompt_version=prompt_version,
         )
 
     async def get_global_machine_many(
@@ -105,14 +108,17 @@ class LocalizationRepository:
         *,
         source_hashes: Sequence[str],
         target_locale: SupportedLocale,
+        prompt_version: str,
     ) -> dict[str, MachineTranslationCache]:
-        """只查不含商家归属的全局机器缓存（如平台规则类文案）。"""
+        """只查不含商家归属、且产自 `prompt_version` 这一版翻译提示词的全局机器
+        缓存（如平台规则类文案）。"""
 
         return await self._fetch_machine_many(
             scope_kind="GLOBAL",
             merchant_id=None,
             source_hashes=source_hashes,
             target_locale=target_locale,
+            prompt_version=prompt_version,
         )
 
     async def _fetch_machine_many(
@@ -122,10 +128,27 @@ class LocalizationRepository:
         merchant_id: UUID | None,
         source_hashes: Sequence[str],
         target_locale: SupportedLocale,
+        prompt_version: str,
     ) -> dict[str, MachineTranslationCache]:
         """两个公开入口的共用实现；本方法自身不对外暴露，调用方仍必须先经
         `get_merchant_machine_many()`/`get_global_machine_many()` 二选一决定
-        `scope_kind`，不构成可以「忘记选作用域」的便利封装。"""
+        `scope_kind`，不构成可以「忘记选作用域」的便利封装。
+
+        `prompt_version` 精确匹配、不做「取最新」的模糊回退：`upsert_machine()`
+        在 prompt 改版后会为同一源哈希新开一行（写侧唯一键含
+        `prompt_version`），如果读侧不按 `prompt_version` 过滤，旧提示词产出
+        的译文会在提示词改版后依然被当作"缓存命中"返回，写侧靠
+        `prompt_version` 隔离失效译文的设计就形同虚设。调用方必须显式声明
+        自己想要哪一版提示词产出的缓存。
+
+        `source_language` 有意不作为过滤条件：它和 `source_hash` 同属对同一段
+        源文本的确定性派生（`source_hash` 是该文本的哈希，`source_language`
+        是 `detect_source_language()` 对同一文本的分类结果），因此在不发生
+        哈希碰撞的前提下，同一个 `source_hash` 对应的 `source_language` 永远
+        唯一——加这个过滤条件不会改变结果集。更关键的是，一次批量查询的
+        `source_hashes` 通常横跨多段不同语言的源文本，`source_language` 天然
+        是"逐条"属性而不是"整批"属性，不能像 `prompt_version`（整批查询共用
+        同一个提示词版本）一样提升成方法级参数。"""
 
         if not source_hashes:
             return {}
@@ -134,12 +157,19 @@ class LocalizationRepository:
             MachineTranslationCache.scope_kind == scope_kind,
             MachineTranslationCache.source_hash.in_(list(source_hashes)),
             MachineTranslationCache.target_locale == str(target_locale),
+            MachineTranslationCache.prompt_version == prompt_version,
         ]
         if scope_kind == "MERCHANT":
             conditions.append(MachineTranslationCache.merchant_id == merchant_id)
         else:
             conditions.append(MachineTranslationCache.merchant_id.is_(None))
 
+        # 作用域 + 源哈希 + 源语言 + 目标语言 + prompt_version 是写侧的唯一键
+        # （见 0015 迁移的两条按 scope_kind 拆分的表达式唯一索引）；这里已经
+        # 精确匹配了除 source_language 外的全部维度，按上面的说明，同一
+        # source_hash 不会有第二个不同的 source_language，所以命中集合里每个
+        # source_hash 至多一行。`updated_at DESC` 排序 + 「同一 source_hash 只
+        # 取第一条」只是防御性写法，不代表业务上允许「随便挑最新一条」。
         statement = (
             select(MachineTranslationCache)
             .where(*conditions)

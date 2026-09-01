@@ -82,6 +82,7 @@ async def test_translation_cache_is_scoped_by_merchant(
             merchant_id=merchant_b.id,
             source_hashes=["a" * 64],
             target_locale=SupportedLocale.EN_US,
+            prompt_version="v1",
         )
         == {}
     )
@@ -107,6 +108,7 @@ async def test_translation_cache_is_visible_to_owning_merchant(
         merchant_id=merchant_a.id,
         source_hashes=["a" * 64],
         target_locale=SupportedLocale.EN_US,
+        prompt_version="v1",
     )
 
     assert set(hits) == {"a" * 64}
@@ -134,11 +136,12 @@ async def test_global_machine_cache_never_returned_by_merchant_lookup(
             merchant_id=merchant_a.id,
             source_hashes=["b" * 64],
             target_locale=SupportedLocale.EN_US,
+            prompt_version="v1",
         )
         == {}
     )
     global_hits = await repo.get_global_machine_many(
-        source_hashes=["b" * 64], target_locale=SupportedLocale.EN_US
+        source_hashes=["b" * 64], target_locale=SupportedLocale.EN_US, prompt_version="v1"
     )
     assert global_hits["b" * 64].translated_text == "Platform-wide copy"
 
@@ -172,9 +175,65 @@ async def test_upsert_machine_overwrites_same_scope_key(
         merchant_id=merchant_a.id,
         source_hashes=["c" * 64],
         target_locale=SupportedLocale.EN_US,
+        prompt_version="v1",
     )
     assert len(hits) == 1
     assert hits["c" * 64].translated_text == "second"
+
+
+@pytest.mark.asyncio
+async def test_machine_lookup_does_not_leak_across_prompt_versions(
+    db_session: AsyncSession,
+    merchant_a: Merchant,
+) -> None:
+    """`prompt_version` 改版后必须新开一行（写侧唯一键含 `prompt_version`），
+    读侧必须精确匹配调用方声明的版本，不能把旧提示词产出的译文当作新版本
+    的缓存命中返回——否则写侧靠 `prompt_version` 隔离失效译文的设计就形同
+    虚设。同一源哈希在两个 prompt_version 下各查各的，互不可见。"""
+
+    repo = LocalizationRepository(db_session)
+    await repo.upsert_machine(
+        merchant_id=merchant_a.id,
+        source_hash="w" * 64,
+        source_language=SourceLanguage.ZH_CN,
+        target_locale=SupportedLocale.EN_US,
+        translated_text="translated under old prompt",
+        model="fake",
+        prompt_version="v1",
+    )
+    await repo.upsert_machine(
+        merchant_id=merchant_a.id,
+        source_hash="w" * 64,
+        source_language=SourceLanguage.ZH_CN,
+        target_locale=SupportedLocale.EN_US,
+        translated_text="translated under new prompt",
+        model="fake",
+        prompt_version="v2",
+    )
+    await db_session.flush()
+
+    v1_hits = await repo.get_merchant_machine_many(
+        merchant_id=merchant_a.id,
+        source_hashes=["w" * 64],
+        target_locale=SupportedLocale.EN_US,
+        prompt_version="v1",
+    )
+    v2_hits = await repo.get_merchant_machine_many(
+        merchant_id=merchant_a.id,
+        source_hashes=["w" * 64],
+        target_locale=SupportedLocale.EN_US,
+        prompt_version="v2",
+    )
+    v3_hits = await repo.get_merchant_machine_many(
+        merchant_id=merchant_a.id,
+        source_hashes=["w" * 64],
+        target_locale=SupportedLocale.EN_US,
+        prompt_version="v3",
+    )
+
+    assert v1_hits["w" * 64].translated_text == "translated under old prompt"
+    assert v2_hits["w" * 64].translated_text == "translated under new prompt"
+    assert v3_hits == {}
 
 
 @pytest.mark.asyncio
@@ -214,6 +273,7 @@ async def test_delete_machine_by_hashes_only_affects_targeted_scope(
             merchant_id=merchant_a.id,
             source_hashes=["d" * 64],
             target_locale=SupportedLocale.EN_US,
+            prompt_version="v1",
         )
         == {}
     )
@@ -221,6 +281,7 @@ async def test_delete_machine_by_hashes_only_affects_targeted_scope(
         merchant_id=merchant_b.id,
         source_hashes=["d" * 64],
         target_locale=SupportedLocale.EN_US,
+        prompt_version="v1",
     )
     assert remaining["d" * 64].translated_text == "b's cache"
 
@@ -262,6 +323,7 @@ async def test_purge_expired_machine_only_removes_expired_rows(
         merchant_id=merchant_a.id,
         source_hashes=["e" * 64, "f" * 64],
         target_locale=SupportedLocale.EN_US,
+        prompt_version="v1",
     )
     assert set(remaining) == {"e" * 64}
     assert remaining["e" * 64].translated_text == "still valid"
