@@ -10,6 +10,7 @@ from app.models import (
     KnowledgeDocument,
     LlmDailyBudget,
     LlmUsage,
+    MachineTranslationCache,
     Merchant,
     MerchantMemory,
     Message,
@@ -18,6 +19,7 @@ from app.models import (
     OrderItem,
     Product,
     Refund,
+    ResourceLocalization,
     ReturnRecord,
     SupportTicket,
 )
@@ -34,6 +36,7 @@ __all__ = [
     "KnowledgeDocument",
     "LlmDailyBudget",
     "LlmUsage",
+    "MachineTranslationCache",
     "Merchant",
     "MerchantMemory",
     "Message",
@@ -42,6 +45,7 @@ __all__ = [
     "OrderItem",
     "Product",
     "Refund",
+    "ResourceLocalization",
     "ReturnRecord",
     "SupportTicket",
 ]

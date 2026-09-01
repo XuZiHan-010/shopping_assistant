@@ -68,6 +68,10 @@ class KnowledgeDocument(UuidPrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, Bas
             "status IN ('ACTIVE', 'ARCHIVED')",
             name="ck_knowledge_documents_status",
         ),
+        CheckConstraint(
+            "source_locale IN ('zh-CN', 'en-US', 'mixed', 'und')",
+            name="ck_knowledge_documents_source_locale",
+        ),
         Index("ix_knowledge_documents_category_status", "category", "status"),
         Index("uq_knowledge_documents_source_path", "source_path", unique=True),
     )
@@ -94,6 +98,9 @@ class KnowledgeDocument(UuidPrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, Bas
         nullable=False,
         server_default=text("'ACTIVE'"),
     )
+    # 正文（`title` + `content`）本身使用的语言；由迁移按历史内容分类回填，
+    # 不得靠数据库默认值统一标成 `zh-CN`。见 `app/localization/locales.py`。
+    source_locale: Mapped[str] = mapped_column(String(16), nullable=False)
 
 
 class MerchantMemory(UuidPrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, Base):
@@ -116,6 +123,10 @@ class MerchantMemory(UuidPrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, Base):
             "status IN ('ACTIVE', 'ARCHIVED')",
             name="ck_merchant_memories_status",
         ),
+        CheckConstraint(
+            "source_locale IN ('zh-CN', 'en-US', 'mixed', 'und')",
+            name="ck_merchant_memories_source_locale",
+        ),
         Index("ix_merchant_memories_merchant_status", "merchant_id", "status"),
     )
 
@@ -136,3 +147,6 @@ class MerchantMemory(UuidPrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, Base):
         nullable=False,
         server_default=text("'ACTIVE'"),
     )
+    # `content` 本身使用的语言；由迁移按历史内容分类回填，不得靠数据库默认值
+    # 统一标成 `zh-CN`。见 `app/localization/locales.py`。
+    source_locale: Mapped[str] = mapped_column(String(16), nullable=False)

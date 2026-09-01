@@ -12,6 +12,7 @@ from app.models.answer import Answer, Feedback
 from app.models.chatbi import ChatBiQaDaily
 from app.models.conversation import Conversation, Message
 from app.models.knowledge import KnowledgeDocument, MerchantMemory, MetricDefinition
+from app.models.localization import MachineTranslationCache, ResourceLocalization
 from app.models.merchant import Merchant
 from app.models.operations import AuditLog, ExportFile, LlmDailyBudget, LlmUsage
 
@@ -25,6 +26,7 @@ __all__ = [
     "KnowledgeDocument",
     "LlmDailyBudget",
     "LlmUsage",
+    "MachineTranslationCache",
     "Merchant",
     "MerchantMemory",
     "Message",
@@ -33,6 +35,7 @@ __all__ = [
     "OrderItem",
     "Product",
     "Refund",
+    "ResourceLocalization",
     "ReturnRecord",
     "SupportTicket",
 ]
