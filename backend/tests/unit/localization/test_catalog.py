@@ -112,6 +112,28 @@ def test_catalog_beautifies_closed_set_status_codes() -> None:
     assert localize_catalog_value("ONLINE", SupportedLocale.EN_US) == "Online"
 
 
+def test_catalog_covers_all_quality_status_values() -> None:
+    """QualityStatus 有四个值（PASSED/DEGRADED/FAILED/NOT_RUN）；PASSED/
+    DEGRADED/FAILED 是正常与降级响应里实际会出现的值，NOT_RUN 是少数情况——
+    四个都必须有 en-US 词典条目，此前只登记了 NOT_RUN 一个是漏项。"""
+
+    from app.schemas.chat import QualityStatus
+
+    expected_en = {
+        QualityStatus.PASSED: "Passed",
+        QualityStatus.DEGRADED: "Degraded",
+        QualityStatus.FAILED: "Failed",
+        QualityStatus.NOT_RUN: "Not Run",
+    }
+    assert set(expected_en) == set(QualityStatus)
+
+    for status, expected in expected_en.items():
+        assert localize_catalog_value(str(status), SupportedLocale.EN_US) == expected
+        # zh-CN 一律原样返回码本身——与其它状态码条目（如 "PAID"）同一约定，
+        # 代码库里不存在这些码的中文标签映射可抄，不在本任务范围内编造。
+        assert localize_catalog_value(str(status), SupportedLocale.ZH_CN) == str(status)
+
+
 def test_catalog_module_does_not_import_any_llm_client() -> None:
     """确定性词典查找路径不依赖任何 LLM 客户端类型，物理上不可能发起调用。"""
 

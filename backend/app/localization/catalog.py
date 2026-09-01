@@ -288,6 +288,9 @@ _STATUS_CODES: tuple[str, ...] = (
     "ONLINE",
     "AUDITING",
     # schemas/chat.py：QualityStatus
+    "PASSED",
+    "DEGRADED",
+    "FAILED",
     "NOT_RUN",
     # schemas/chat.py：AnalysisSource
     "DATABASE",
