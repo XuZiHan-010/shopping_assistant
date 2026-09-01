@@ -27,6 +27,7 @@ from app.llm.client import LlmClient
 from app.llm.deepseek import DeepSeekLlmClient
 from app.llm.fake import FakeLlmClient
 from app.llm.guard import LlmCostGuard
+from app.localization.locales import SupportedLocale, parse_accept_language
 from app.metrics.catalog import MetricCatalog
 from app.models.conversation import Conversation
 from app.repositories.analytics import AnalyticsRepository
@@ -69,6 +70,17 @@ def get_app_settings(request: Request) -> Settings:
 
 def get_database(request: Request) -> Database:
     return cast(Database, request.app.state.database)
+
+
+def get_request_locale(request: Request) -> SupportedLocale:
+    """按当前请求的 `Accept-Language` 逐请求解析显示语言。
+
+    不做全局缓存或 ContextVar：同一进程里不同请求的显示语言互不影响，
+    每次都从这次请求自己的 Header 重新解析（`docs/backend-development-plan.md`
+    §8.6.1）。
+    """
+
+    return parse_accept_language(request.headers.get("Accept-Language"))
 
 
 async def get_db_session(request: Request) -> AsyncIterator[AsyncSession]:

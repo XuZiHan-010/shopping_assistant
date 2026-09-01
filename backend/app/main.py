@@ -19,6 +19,7 @@ from app.core.metrics import OperationalMetrics
 from app.core.rate_limit import SlidingWindowRateLimiter
 from app.db.session import Database
 from app.knowledge.wiki_seed import seed_wiki_documents
+from app.localization.locales import parse_accept_language
 
 _REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 
@@ -96,6 +97,12 @@ def create_app(
     async def request_id_middleware(request: Request, call_next: RequestHandler) -> Response:
         request_id = _resolve_request_id(request.headers.get("X-Request-Id"))
         request.state.request_id = request_id
+        # 同一个中间件顺带回显显示语言：`call_next` 返回的是整条链路
+        # （含全局异常处理器）解析完的最终 Response，成功和错误响应都会
+        # 经过这里，不需要在 `register_exception_handlers` 里重复注入一遍
+        # Header（`docs/backend-development-plan.md` §8.6.1
+        # 「错误响应也必须经过相同 Header 注入」）。
+        locale = parse_accept_language(request.headers.get("Accept-Language"))
         start = monotonic()
         response = await call_next(request)
         duration_seconds = monotonic() - start
@@ -115,6 +122,12 @@ def create_app(
             duration_ms=round(duration_seconds * 1000, 2),
         )
         response.headers["X-Request-Id"] = request_id
+        response.headers["Content-Language"] = locale.value
+        existing_vary = response.headers.get("Vary")
+        vary_values = [value.strip() for value in existing_vary.split(",")] if existing_vary else []
+        if "Accept-Language" not in vary_values:
+            vary_values.append("Accept-Language")
+        response.headers["Vary"] = ", ".join(vary_values)
         return response
 
     register_exception_handlers(app, logger)

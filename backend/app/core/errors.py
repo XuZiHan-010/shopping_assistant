@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from enum import StrEnum
 from typing import Any
 
@@ -11,6 +12,12 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from structlog.stdlib import BoundLogger
+
+from app.localization.error_messages import (
+    localize_error_message,
+    localize_validation_detail_message,
+)
+from app.localization.locales import SupportedLocale, parse_accept_language
 
 
 class ErrorCode(StrEnum):
@@ -102,7 +109,15 @@ def error_responses(*status_codes: int) -> dict[int | str, dict[str, Any]]:
 
 
 class AppError(Exception):
-    """可安全映射为 API 响应的应用异常。"""
+    """可安全映射为 API 响应的应用异常。
+
+    `message` 只是内部默认文案与日志上下文——各调用点历史上传入的中文
+    句子仍然保留在这里，但**不会**被异常处理器直接放进响应体。对外展示
+    的 `message` 一律由 `message_params` 经 `localize_error_message()`
+    按当前请求 `Accept-Language` 渲染，因为同一个 `code` 可能被多处不同
+    业务复用（例如 `ResourceNotFoundError` 的 `resource_name` 因调用点而
+    异），无法只靠 `code` 反推正确的双语文案。
+    """
 
     def __init__(
         self,
@@ -112,6 +127,7 @@ class AppError(Exception):
         status_code: int,
         details: list[dict[str, Any]] | None = None,
         retryable: bool = False,
+        message_params: Mapping[str, Any] | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
@@ -119,6 +135,7 @@ class AppError(Exception):
         self.status_code = status_code
         self.details = details or []
         self.retryable = retryable
+        self.message_params: dict[str, Any] = dict(message_params) if message_params else {}
 
 
 class DatabaseUnavailableError(AppError):
@@ -141,6 +158,7 @@ class AuthRequiredError(AppError):
             code=ErrorCode.AUTH_REQUIRED,
             message="请提供有效的商家访问凭证",
             status_code=401,
+            message_params={"audience": "merchant"},
         )
 
 
@@ -208,6 +226,7 @@ class ResourceNotFoundError(AppError):
             code=ErrorCode.NOT_FOUND,
             message=f"{resource_name}不存在",
             status_code=404,
+            message_params={"resource_name": resource_name},
         )
 
 
@@ -248,6 +267,7 @@ class AdminTokenRequiredError(AppError):
             code=ErrorCode.AUTH_REQUIRED,
             message="请提供有效的管理员凭证",
             status_code=401,
+            message_params={"audience": "admin"},
         )
 
 
@@ -267,20 +287,38 @@ def _request_id(request: Request) -> str:
     return str(getattr(request.state, "request_id", "unknown"))
 
 
+def _request_locale(request: Request) -> SupportedLocale:
+    """独立于 `get_request_locale` 依赖重新解析一遍。
+
+    异常处理器不经过 FastAPI 的依赖注入流水线，只拿得到 `Request`；这里
+    直接复用同一个纯函数 `parse_accept_language`，与
+    `app.api.dependencies.get_request_locale` 对同一个 Header 的解析结果
+    保持一致，不引入第二套判定逻辑。
+    """
+
+    return parse_accept_language(request.headers.get("Accept-Language"))
+
+
 def _response(error: ErrorResponse, status_code: int) -> JSONResponse:
     return JSONResponse(status_code=status_code, content=error.model_dump(mode="json"))
 
 
 def register_exception_handlers(app: FastAPI, logger: BoundLogger) -> None:
-    """注册全局异常处理器，禁止内部异常细节泄露给调用方。"""
+    """注册全局异常处理器，禁止内部异常细节泄露给调用方。
+
+    对外展示的 `message` 一律按当前请求的 `Accept-Language` 渲染
+    （`docs/backend-development-plan.md` §8.6.1）；`Content-Language` /
+    `Vary` 响应头由 `app.main` 里的中间件统一注入，这里不重复处理。
+    """
 
     @app.exception_handler(AppError)
     async def handle_app_error(request: Request, exc: AppError) -> JSONResponse:
         request.app.state.metrics.record_error_code(str(exc.code))
+        locale = _request_locale(request)
         return _response(
             ErrorResponse(
                 code=exc.code,
-                message=exc.message,
+                message=localize_error_message(exc.code, exc.message_params, locale),
                 request_id=_request_id(request),
                 details=exc.details,
                 retryable=exc.retryable,
@@ -292,10 +330,11 @@ def register_exception_handlers(app: FastAPI, logger: BoundLogger) -> None:
     async def handle_validation_error(
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
+        locale = _request_locale(request)
         details = [
             {
                 "location": [str(part) for part in error["loc"]],
-                "message": str(error["msg"]),
+                "message": localize_validation_detail_message(str(error["type"]), locale),
                 "type": str(error["type"]),
             }
             for error in exc.errors()
@@ -303,7 +342,7 @@ def register_exception_handlers(app: FastAPI, logger: BoundLogger) -> None:
         return _response(
             ErrorResponse(
                 code=ErrorCode.INVALID_REQUEST,
-                message="请求参数不合法",
+                message=localize_error_message(ErrorCode.INVALID_REQUEST, None, locale),
                 request_id=_request_id(request),
                 details=details,
             ),
@@ -312,16 +351,17 @@ def register_exception_handlers(app: FastAPI, logger: BoundLogger) -> None:
 
     @app.exception_handler(StarletteHTTPException)
     async def handle_http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+        locale = _request_locale(request)
         if exc.status_code == 404:
-            code, message = ErrorCode.NOT_FOUND, "请求的资源不存在"
+            code = ErrorCode.NOT_FOUND
         elif exc.status_code == 405:
-            code, message = ErrorCode.METHOD_NOT_ALLOWED, "请求方法不被允许"
+            code = ErrorCode.METHOD_NOT_ALLOWED
         else:
-            code, message = ErrorCode.HTTP_ERROR, "请求处理失败"
+            code = ErrorCode.HTTP_ERROR
         return _response(
             ErrorResponse(
                 code=code,
-                message=message,
+                message=localize_error_message(code, None, locale),
                 request_id=_request_id(request),
             ),
             exc.status_code,
@@ -334,10 +374,11 @@ def register_exception_handlers(app: FastAPI, logger: BoundLogger) -> None:
             request_id=_request_id(request),
             exception_type=type(exc).__name__,
         )
+        locale = _request_locale(request)
         return _response(
             ErrorResponse(
                 code=ErrorCode.INTERNAL_ERROR,
-                message="服务暂时不可用，请稍后重试",
+                message=localize_error_message(ErrorCode.INTERNAL_ERROR, None, locale),
                 request_id=_request_id(request),
                 retryable=True,
             ),
