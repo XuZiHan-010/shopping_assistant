@@ -366,6 +366,38 @@ type ChatStreamEvent =
 
 这些手写领域类型通过 Adapter 从 OpenAPI 生成类型转换而来，不得与后端协议产生重复且不一致的定义。
 
+### 5.10 Locale 与本地化数据流
+
+界面语言与 §5.0 的字段转换链平行，同样是**单向数据流**：组件不得绕过 Locale Store 直接读写
+`localStorage` 或 `document.documentElement.lang`，也不得自行拼装 `Accept-Language`。设计出处
+是 `plans/2026-08-31-full-stack-bilingual-localization.md` §1，精确的响应字段定义见
+`docs/backend-development-plan.md` §8.6：
+
+```text
+localStorage (`borough.locale`) -> Locale Store -> Vue I18n + document.lang
+                                 -> transport Accept-Language
+                                 -> Adapter -> Store -> Component
+```
+
+- `localStorage` 键固定为 `borough.locale`，只存 `zh-CN | en-US`；首次访问缺失时默认
+  `zh-CN`，与后端 `parse_accept_language()` 缺失时的默认值一致（§8.6.1）。这不与 §11 的
+  "不把 Token 写入 `localStorage`" 冲突——语言偏好不是凭证，属于非敏感的本地便利状态；
+- `frontend/src/stores/locale.ts`（Locale Store）是**唯一**读写该键的地方，并在切换时驱动
+  Vue I18n 的当前 locale 与根元素 `document.documentElement.lang`；组件通过 Store 感知当前
+  语言，不直接读 `localStorage`；
+- Locale Store 同时是 `frontend/src/api/transport.ts` 的 `Accept-Language` 值来源：每个请求
+  在离开 transport 前都附带当前 Store 的 locale；SSE 请求（`src/api/sse.ts`）单独接一次，因为
+  它不复用普通 `fetch` 请求头组装路径（见下方 §6.1 "SSE 传输实现"）；
+- 响应侧新增的本地化字段（`displayed_user_message`、`localization_degraded`、
+  `localization_degraded_reason`、`source_locale`/`content_locale` 等，精确定义见后端 §8.6）
+  仍必须先过 Adapter 转换成领域模型再进 Store 和组件——与 §5.0 的单向数据流规则完全一致，本节
+  只是把"语言从哪来"接上同一条链路，不建立第二套转换路径；
+- 切换语言是原子操作：Store 先进入目标语言的加载态，再触发受影响数据重新拉取，不得先渲染原
+  语言内容再"闪一下"替换成目标语言；
+- 切换语言时取消当前页面所有 locale-sensitive 请求，**但正在进行的聊天 SSE 不重放**——客户端
+  `abort()` 只断开浏览器连接，服务端那一轮仍在跑（见后端 §8.6.4 的 `PROCESSING` 语义）；前端
+  改为在目标语言下从会话详情读取该轮的本地化显示副本，期间该条消息显示目标语言的"生成中"占位。
+
 ---
 
 ## 6. Pinia 状态设计

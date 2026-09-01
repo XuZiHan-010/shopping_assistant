@@ -615,8 +615,9 @@ attachments
 
 ## 8. API Schema
 
-> **本章是 ChatRequest / ChatResponse / ErrorResponse / SSE 的唯一权威定义。**
-> `docs/PRD.md` §11.3 只描述产品级语义，`AGENTS.md` 只做索引，前端从本章生成的 OpenAPI 取类型。
+> **本章是 ChatRequest / ChatResponse / ErrorResponse / SSE 的唯一权威定义，§8.6 起同时是
+> 本地化 Header 与 Schema 变更的唯一权威定义。**
+> `docs/PRD.md` §11.3、§11.5 只描述产品级语义，`AGENTS.md` 只做索引，前端从本章生成的 OpenAPI 取类型。
 > 任何字段变化必须先改本章，再改 Pydantic Schema、OpenAPI、`docs/api.md`、前端 Adapter 和契约测试。
 > 全部字段使用 **snake_case 扁平结构**，不引入 `reviewer.*`、`metric.*` 之类的嵌套对象。
 
@@ -982,6 +983,103 @@ FAILED_FINAL      # 不可重试（参数非法、越权、内容被拒）
 - 同一 `client_request_id` 的五种状态分支各一条用例；
 - 同一 `client_request_id` 并发提交两次，只产生一次 LLM 调用；
 - 降级场景下仍然正常收尾。
+
+## 8.6 本地化 Header 与 Schema 契约
+
+> **本节是 `Accept-Language` / `Content-Language` 请求响应头，以及 `ChatResponse`、
+> `ConversationListResponse`、`ConversationDetailResponse`、`KnowledgeDocumentResponse`、
+> `KnowledgeDocumentRequest`、`KnowledgeDocumentUpdate`、`ExportSpec` 新增本地化字段的唯一权威定义。**
+> 对应产品级语义见 `docs/PRD.md` §7.5 与 §11.5，前端消费方式见 `docs/frontend-development-plan.md`
+> §5.10。设计出处是 `plans/2026-08-31-full-stack-bilingual-localization.md` §1 与 §3.3；
+> 后续实施任务（该计划的 Task 2–13）必须原样使用本节字段名，不得另起名字或改变失败语义。
+> `SupportedLocale` 只允许 `zh-CN | en-US`；`SourceLanguage` 允许 `zh-CN | en-US | mixed | und`，
+> 用于标注消息、回答、知识正文等内容本身使用的语言，与表达"界面显示语言"的 `SupportedLocale`
+> 是两个不同的类型，不得混用。
+
+### 8.6.1 请求与响应 Header
+
+- 所有前端请求发送 `Accept-Language: zh-CN | en-US`；解析函数 `parse_accept_language()` 在
+  Header 缺失时返回 `zh-CN`，只接受 `zh-CN`/`en-US` 及各自通用前缀（如 `en`、`en;q=0.9`）；
+- 所有成功和错误响应都发送 `Content-Language`，值与本次请求解析出的 `SupportedLocale` 一致；
+  可能因语言变化而不同的 GET 响应额外发送 `Vary: Accept-Language`；
+- 错误响应仍使用稳定 `code`（见 §8.3、§14），展示 `message` 由统一异常处理器根据请求 locale 和
+  受控 `message_params` 生成。业务异常、Pydantic validation、404、限流和 500 都不得把已有中文
+  异常字符串直接放入英语响应；幂等失败只持久化 `code + message_params`，重放时按当前请求 locale
+  重新渲染 `message`（与 §8.6.4 一致）；
+- `ChatRequest` **不新增** `locale` 字段，避免请求体与 Header 出现两个事实源；显示语言只经
+  `Accept-Language` 传递，路由层解析后显式向下传递，不在节点间读取原始 Request。
+
+### 8.6.2 ChatResponse 新增字段
+
+`ChatResponse` 的"始终必填"字段组（见 §8.2）新增：
+
+| 字段 | 类型 | 可为 null | 说明 |
+| --- | --- | --- | --- |
+| `displayed_user_message` | `str` | 否 | 当前这一轮用户消息在目标语言下的显示副本 |
+
+原始问题仍只存入 `messages.content`，不因翻译被覆盖；`ConversationDetailResponse.messages[].content`
+（用户消息）与既有 `answer_payload` 承载的助手可读字段（正文、建议、思考步骤、质量说明、降级原因）
+均始终是**请求语言下的显示内容**——API 不在英语响应中附带中文原文，反之亦然。
+
+不新增与 R7 冲突的 Chat 降级字段：聊天翻译失败继续复用现有 `degraded`、`degraded_reason`、
+`quality_status`、`quality_notes`，不引入第二套降级语义。
+
+### 8.6.3 会话列表与详情：分页与按条目降级
+
+会话历史条目量大——一个 40 条消息的会话还要拆出正文、建议、思考步骤、质量说明和图表标签，
+几百个待翻译条目是常态；因此按可见页翻译，超限按条目降级，不整页失败：
+
+- `GET /api/conversations/{conversation_id}` 增加消息游标分页：`message_limit` 默认 `20`、
+  范围 `1–50`，`message_before` 为不透明游标；响应增加 `next_message_cursor: string | null`
+  与 `has_more_messages: boolean`。第一页返回最新 20 条并在页内按时间正序排列，继续加载只获取
+  更早一页；游标必须绑定可信 `merchant_id + conversation_id`，跨商家或跨会话复用返回稳定错误码；
+- 会话列表与详情响应新增扁平字段 `localization_degraded: boolean` 与
+  `localization_degraded_reason: string | null`（未降级时为 `false` / `null`），表达"本页有条目
+  未能翻译"。未翻译条目返回目标语言占位文案（例如 `Translation unavailable — retry`），
+  **不返回源语言正文**；对降级页使用同一游标重新 GET 即为重试，已缓存条目不重复调用模型；
+- `LOCALIZATION_UNAVAILABLE`（见 §14）只用于知识库人工翻译保存这类**写路径**的硬失败，不用于
+  会话列表/详情这类**读路径**——读路径永远用 `localization_degraded` + 占位文案表达部分失败，
+  绝不整页失败。
+
+### 8.6.4 `client_request_id` 幂等契约与 locale 的交互
+
+在 §8.5 既有状态机基础上追加，三个分支语义**不因语言切换而改变**：
+
+- `_request_digest()` 继续只散列 `message` 与 `attachment_ids`，**locale 不进入摘要**。相同
+  `client_request_id` 在另一语言重放时复用同一份 Answer 事实，不重复查询经营数据、不重复生成答案；
+- `SUCCEEDED` 才按**当前请求的 `Accept-Language`** 重新渲染 `displayed_user_message` 与 `answer`
+  等显示字段返回；`FAILED_FINAL` 从持久化的稳定 `code + message_params` 按当前 locale 重建同一
+  业务错误并渲染 `message`，**不持久化并重放旧语言整句**；
+- `PROCESSING` 仍返回 `409 REQUEST_IN_PROGRESS`，**不重放**。正在处理中的那一轮，正确做法是让
+  旧流在服务端跑完并落库，前端改为在目标语言下从 `GET /api/conversations/{id}` 读取该轮的本地化
+  显示副本（见 §8.6.3），期间该条消息在目标语言下显示"生成中"占位，不渲染源语言正文。**不得为了
+  支持切换语言而放宽 `PROCESSING` 分支**——那等于允许同一轮问答并发执行两次。
+
+测试要求：使用同一失败 `client_request_id` 先中文、后英语重放，断言 `code` 相同、`message`
+语言不同、业务执行次数仍为 1；`PROCESSING` 状态下换 `Accept-Language` 重放仍返回 `409`。
+
+### 8.6.5 KnowledgeDocument 契约新增字段
+
+- `KnowledgeDocumentResponse` 增加 `source_locale: SourceLanguage`、
+  `content_locale: SupportedLocale` 和 `is_source_version: boolean`；`path` 仍是稳定 API 标识符，
+  不翻译；
+- `KnowledgeDocumentRequest`（对应 `POST /api/admin/knowledge/documents`）增加可选
+  `source_locale: SourceLanguage`，缺失时后端用 `detect_source_language()` 检测并持久化；
+- `KnowledgeDocumentUpdate`（对应 `PUT /api/admin/knowledge/documents/{id}`）增加
+  `is_source_version: boolean` 与 `content_locale: SupportedLocale | null`：
+  - `is_source_version=true` 时只更新事实源正文并重新检测语言；
+  - 为 `false` 时 `content_locale` 必填，按资源 ID/字段/源版本保存人工译文；
+  - **不允许靠"`content_locale` 是否等于 `source_locale`"猜测写入目标**，因为源内容可能是
+    `mixed`/`und`。
+
+### 8.6.6 导出与签名
+
+- `/api/exports/{id}` 是签名 URL、浏览器直接下载，**没有 `Accept-Language`**（沿用 §8.0
+  "导出下载为什么不带 Bearer"的同一约束）。导出语言因此必须在创建导出、生成签名时固化：内部
+  `ExportSpec` 增加 `locale: SupportedLocale` 字段并纳入签名，下载时按 spec 的 `locale` 渲染
+  列名与自由文本，并回 `Content-Language`；
+- 同一份数据的中英文导出是**两个独立签名**，互不复用；旧签名不带 `locale` 时按 `zh-CN` 解释，
+  保持既有链接可用（向后兼容，不使已发出的旧签名失效）。
 
 ---
 
@@ -2007,6 +2105,7 @@ IDEMPOTENCY_KEY_REUSED
 REQUEST_IN_PROGRESS
 DAILY_REPORT_FEEDBACK_CONFLICT
 EXPORT_LINK_EXPIRED
+LOCALIZATION_UNAVAILABLE
 HTTP_ERROR
 INTERNAL_ERROR
 INVALID_WIKI_PATH
@@ -2041,6 +2140,10 @@ WIKI_IO_ERROR
 幂等相关的三个错误码见 §8.5，`EXPORT_LINK_EXPIRED` 对应 `GET /api/exports/{id}` 的 `410`。
 
 `RATE_LIMITED` 和 `LLM_BUDGET_EXCEEDED` 在 **B7** 落地，见该阶段的「LLM 费用与限流」。
+
+`LOCALIZATION_UNAVAILABLE` 只用于本地化**写路径**的硬失败（例如知识库人工翻译保存时批量翻译
+超限或模型不可用），精确契约见 §8.6.3；会话列表/详情这类**读路径**不使用该码，一律用
+`localization_degraded` 字段按条目降级。
 
 前端根据错误码展示，不解析后端内部异常字符串。
 
