@@ -131,6 +131,7 @@ class MemoryAgent:
                     self._settings,
                     request_id=f"{self._request_id}:memory:{category}",
                     merchant_id=self._merchant_id,
+                    purpose="AGENT",
                 )
             else:
                 llm = FakeLlmClient(configured=False)

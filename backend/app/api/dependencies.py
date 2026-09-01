@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hmac
 from collections.abc import AsyncIterator
-from typing import Annotated, cast
+from typing import Annotated, Literal, cast
 from uuid import UUID
 
 from fastapi import BackgroundTasks, Depends, Request
@@ -166,12 +166,16 @@ def build_guarded_llm(
     database: Database,
     *,
     request_id: str,
-    merchant_id: UUID,
+    merchant_id: UUID | None,
+    purpose: Literal["AGENT", "LOCALIZATION"] = "AGENT",
 ) -> LlmCostGuard:
     """构造带费用守卫的模型客户端。
 
-    merchant_id 必须是已确认存在的商家：它决定 token 用量与每日预算的归属，
-    不能直接采信请求体（R5）。
+    `merchant_id` 非空时必须是已确认存在的商家：它决定 token 用量与每日预算
+    的归属，不能直接采信请求体（R5）。放宽为可空是为了给 `build_global_guarded_llm()`
+    复用同一份构造逻辑——`llm_usage.merchant_id` 本身早已可空
+    （`ForeignKey(..., ondelete="SET NULL")`），无商家上下文的调用写入 `NULL`
+    并不破坏费用审计。
     """
 
     raw: LlmClient = (
@@ -183,6 +187,26 @@ def build_guarded_llm(
         settings,
         request_id=request_id,
         merchant_id=merchant_id,
+        purpose=purpose,
+    )
+
+
+def build_global_guarded_llm(
+    settings: Settings,
+    database: Database,
+    *,
+    request_id: str,
+) -> LlmCostGuard:
+    """给无商家上下文的 `/api/admin/*` 全局调用（如 GLOBAL 作用域的本地化
+    翻译）构造费用守卫；`merchant_id` 固定为 `None`，`purpose` 固定为
+    `LOCALIZATION`——全局调用目前只有本地化通道会发生。"""
+
+    return build_guarded_llm(
+        settings,
+        database,
+        request_id=request_id,
+        merchant_id=None,
+        purpose="LOCALIZATION",
     )
 
 

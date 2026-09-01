@@ -65,6 +65,7 @@ class _RecordUsageCall:
     failure_kind: str | None
     status: str
     merchant_id: UUID | None
+    purpose: str = "AGENT"
 
 
 class FakeLlmBudgetRepository:
@@ -100,6 +101,7 @@ class FakeLlmBudgetRepository:
         failure_kind: str | None,
         status: str,
         merchant_id: UUID | None,
+        purpose: str = "AGENT",
     ) -> None:
         self.record_usage_calls.append(
             _RecordUsageCall(
@@ -114,6 +116,7 @@ class FakeLlmBudgetRepository:
                 failure_kind,
                 status,
                 merchant_id,
+                purpose,
             )
         )
 
@@ -362,6 +365,49 @@ async def test_success_payload_without_usage_never_releases_reservation() -> Non
     assert repository.reconcile_calls == []
     assert repository.record_usage_calls[-1].reserved_tokens == repository.reserve_calls[0].tokens
     assert repository.record_usage_calls[-1].usage_known is False
+
+
+@pytest.mark.asyncio
+async def test_purpose_defaults_to_agent_and_is_recorded_on_every_usage_row() -> None:
+    """未显式传 purpose 时必须落成 AGENT，不能悄悄变成 NULL 或其它值。"""
+
+    repository = FakeLlmBudgetRepository(reserve_returns=[50])
+    inner = StubInnerClient(
+        result=LlmResult(text="ok", tokens=30, degraded=False, usage_known=True)
+    )
+    guard = _guard(repository, inner)
+
+    await guard.complete(
+        system="s", user="u", fallback="fallback", budget=LlmBudget(max_calls=4, max_tokens=8_000)
+    )
+
+    assert repository.record_usage_calls[-1].purpose == "AGENT"
+
+
+@pytest.mark.asyncio
+async def test_localization_purpose_is_recorded_and_merchant_id_may_be_none() -> None:
+    """本地化通道显式传 purpose="LOCALIZATION"，且允许无商家上下文（GLOBAL 调用）。"""
+
+    repository = FakeLlmBudgetRepository(reserve_returns=[50])
+    inner = StubInnerClient(
+        result=LlmResult(text="ok", tokens=30, degraded=False, usage_known=True)
+    )
+    guard = LlmCostGuard(
+        inner,
+        repository,  # type: ignore[arg-type]
+        _settings(),
+        request_id="req-localization",
+        merchant_id=None,
+        purpose="LOCALIZATION",
+    )
+
+    await guard.complete(
+        system="s", user="u", fallback="fallback", budget=LlmBudget(max_calls=4, max_tokens=8_000)
+    )
+
+    row = repository.record_usage_calls[-1]
+    assert row.purpose == "LOCALIZATION"
+    assert row.merchant_id is None
 
 
 @pytest.mark.asyncio

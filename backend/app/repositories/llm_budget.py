@@ -79,6 +79,7 @@ class LlmBudgetRepository:
         failure_kind: str | None,
         status: str,
         merchant_id: UUID | None,
+        purpose: str = "AGENT",
     ) -> None:
         async with self._database.session() as session:
             session.add(
@@ -94,6 +95,7 @@ class LlmBudgetRepository:
                     usage_known=usage_known,
                     failure_kind=failure_kind,
                     status=status,
+                    purpose=purpose,
                 )
             )
             await session.commit()
