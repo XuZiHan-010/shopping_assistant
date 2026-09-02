@@ -301,6 +301,8 @@ async def get_conversation(
         messages=page.messages,
         answers_by_user_message=answers_by_user_message,
         target_locale=locale,
+        boundary_user_message_id=page.boundary_user_message_id,
+        boundary_pairing_unresolved=page.boundary_pairing_unresolved,
     )
     return ConversationDetailResponse(
         id=conversation.id,

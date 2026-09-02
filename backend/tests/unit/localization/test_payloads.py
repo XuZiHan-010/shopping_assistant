@@ -19,6 +19,7 @@ import pytest
 from app.llm.client import LlmBudget
 from app.localization.locales import SupportedLocale
 from app.localization.payloads import (
+    _PAIRING_UNRESOLVED_REASON,
     localize_conversation_detail,
     localize_conversation_summary,
 )
@@ -368,3 +369,101 @@ async def test_detail_only_processes_the_page_it_is_given_not_the_full_history()
         f"message:{page[0].id}:content",
         f"message:{page[1].id}:content",
     }
+
+
+# ---------------------------------------------------------------------------
+# 分页边界拆开 USER/ASSISTANT 配对的修复（协调者复核发现的缺陷）
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_detail_reattaches_answer_payload_across_a_page_boundary_split() -> None:
+    """`message_limit` 为奇数时，某一页最早一条可能是 ASSISTANT，配对的
+    USER 消息落在更早、不在这次 `messages` 里的那一页。`Conversation
+    Repository.list_messages_page()` 会额外查出这条边界 USER 消息的 id 并
+    通过 `boundary_user_message_id` 传进来——这条测试直接证明传了之后配对
+    被正确续接，`answer_payload` 不会因为分页而丢失。"""
+
+    boundary_user_message_id = uuid4()
+    answer = _answer(_passed_payload(quality_notes=["较早那一轮的说明"]))
+    assistant_message = _message("ASSISTANT", "较早那一轮的回答")
+
+    fake = FakeLocalizationService(
+        {
+            f"message:{assistant_message.id}:content": "An older reply",
+            f"message:{assistant_message.id}:note:0": "Note from an earlier turn",
+        }
+    )
+
+    _, messages, degraded, reason = await localize_conversation_detail(
+        service=fake,
+        budget=_budget(),
+        merchant_id=MERCHANT_ID,
+        title=None,
+        messages=[assistant_message],
+        answers_by_user_message={boundary_user_message_id: (answer, None)},
+        target_locale=EN_US,
+        boundary_user_message_id=boundary_user_message_id,
+        boundary_pairing_unresolved=False,
+    )
+
+    assert messages[0].content == "An older reply"
+    payload = messages[0].answer_payload
+    assert payload is not None
+    assert payload.answer_id == answer.id
+    assert payload.quality_notes[0] == "Note from an earlier turn"
+    # 成功续接不是降级——这一页本身翻译齐全，只是恢复了正确的配对。
+    assert degraded is False
+    assert reason is None
+
+
+@pytest.mark.asyncio
+async def test_detail_without_the_boundary_fix_would_have_lost_the_payload() -> None:
+    """反证：不传 `boundary_user_message_id`（等价于修复前的行为——每页
+    `last_user_message_id` 都从 `None` 起算）时，同一条 ASSISTANT 消息确实
+    会丢失 `answer_payload`。这条测试钉住"修复前的行为"，证明上一条测试
+    验证的是真实差异，不是碰巧都为 None。"""
+
+    boundary_user_message_id = uuid4()
+    answer = _answer(_passed_payload(quality_notes=["较早那一轮的说明"]))
+    assistant_message = _message("ASSISTANT", "较早那一轮的回答")
+    fake = FakeLocalizationService({})
+
+    _, messages, _, _ = await localize_conversation_detail(
+        service=fake,
+        budget=_budget(),
+        merchant_id=MERCHANT_ID,
+        title=None,
+        messages=[assistant_message],
+        answers_by_user_message={boundary_user_message_id: (answer, None)},
+        target_locale=EN_US,
+        # boundary_user_message_id 未提供 -> 修复前的行为。
+    )
+
+    assert messages[0].answer_payload is None
+
+
+@pytest.mark.asyncio
+async def test_detail_flags_degraded_when_boundary_pairing_is_unresolved() -> None:
+    """跨页续接也没能确认配对时（`boundary_pairing_unresolved=True`，数据
+    异常，正常写路径下不会出现），响应必须显式标记降级并给出专门的原因，
+    绝不能让这条消息悄悄地既没有 `answer_payload` 又不报告任何异常。"""
+
+    assistant_message = _message("ASSISTANT", "孤立的回答")
+    fake = FakeLocalizationService({f"message:{assistant_message.id}:content": "Orphan reply"})
+
+    _, messages, degraded, reason = await localize_conversation_detail(
+        service=fake,
+        budget=_budget(),
+        merchant_id=MERCHANT_ID,
+        title=None,
+        messages=[assistant_message],
+        answers_by_user_message={},
+        target_locale=EN_US,
+        boundary_user_message_id=None,
+        boundary_pairing_unresolved=True,
+    )
+
+    assert messages[0].answer_payload is None
+    assert degraded is True
+    assert reason == _PAIRING_UNRESOLVED_REASON[EN_US]

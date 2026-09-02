@@ -656,3 +656,57 @@ async def test_deleting_a_conversation_purges_its_translation_cache_without_affe
 
     assert merchant_one_hits == {}
     assert merchant_two_hits[source_hash].translated_text == "Merchant two keeps its own cache"
+
+
+async def test_answer_payload_survives_a_page_boundary_split_of_its_pair(
+    postgres_client: AsyncClient,
+) -> None:
+    """协调者复核发现的缺陷回归：消息严格按 USER/ASSISTANT 交替写入，
+    `message_limit` 为奇数时分页边界必然把某一轮拆到两页。这条测试构造
+    两轮真实问答（4 条消息）后用 `message_limit=3` 请求详情——第一页会是
+    [ASSISTANT(轮1), USER(轮2), ASSISTANT(轮2)]，轮1 的 ASSISTANT 消息正好
+    落在边界上，必须仍然带着完整的 `answer_payload`（不能因为它配对的
+    USER 消息落在更早、未加载的那一页而丢失思考步骤/质量说明等字段）。
+    """
+
+    conversation_id = await start_conversation(
+        postgres_client,
+        MERCHANT_ONE_AUTH,
+        message="昨天总 GMV 是多少？",
+        key="boundary-split-1",
+    )
+    first_turn_detail = await postgres_client.get(
+        f"/api/conversations/{conversation_id}",
+        headers=MERCHANT_ONE_AUTH,
+    )
+    first_turn_answer_id = first_turn_detail.json()["messages"][1]["answer_payload"]["answer_id"]
+
+    follow_up = await postgres_client.post(
+        "/api/chat",
+        headers={**MERCHANT_ONE_AUTH, "Accept": "application/json"},
+        json={
+            "message": "最近7天退货量趋势",
+            "session_id": conversation_id,
+            "client_request_id": "boundary-split-2",
+        },
+    )
+    assert follow_up.status_code == 200
+
+    response = await postgres_client.get(
+        f"/api/conversations/{conversation_id}",
+        headers=MERCHANT_ONE_AUTH,
+        params={"message_limit": 3},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [message["role"] for message in body["messages"]] == [
+        "ASSISTANT",
+        "USER",
+        "ASSISTANT",
+    ]
+    boundary_message = body["messages"][0]
+    assert boundary_message["answer_payload"] is not None
+    assert boundary_message["answer_payload"]["answer_id"] == first_turn_answer_id
+    # 拆分被成功续接，本身不构成降级。
+    assert body["localization_degraded"] is False

@@ -58,6 +58,19 @@ _DEGRADED_REASON: dict[SupportedLocale, str] = {
     ),
 }
 
+#: `MessagePage.boundary_pairing_unresolved=True` 时使用——分页边界正好把
+#: 一轮 USER/ASSISTANT 拆到两页，且跨页续接查询也没能确认配对（数据异常，
+#: 正常写路径下不会出现）。与 `_DEGRADED_REASON` 分开一条文案，是因为这不是
+#: "翻译没跟上"，而是这页最早一条回答的思考步骤/质量说明等结构化内容确实
+#: 缺失——比翻译占位符更严重，因此在两者都发生时优先展示这一条。
+_PAIRING_UNRESOLVED_REASON: dict[SupportedLocale, str] = {
+    _ZH: "本页最早一条回答未能关联到对应的提问，其思考步骤等详情可能缺失",
+    _EN: (
+        "The oldest reply on this page could not be linked to its original "
+        "question; some of its detail (such as reasoning steps) may be missing."
+    ),
+}
+
 
 class LocalizationServiceLike(Protocol):
     """只声明本模块用到的 `LocalizationService.localize_many()` 形状,方便
@@ -195,8 +208,22 @@ def _history_answer_payload(
 def _assemble_detail_messages(
     messages: Sequence[Message],
     answers_by_user_message: Mapping[UUID, tuple[Answer, Feedback | None]],
+    *,
+    carried_last_user_message_id: UUID | None = None,
 ) -> list[ConversationMessage]:
-    last_user_message_id: UUID | None = None
+    """按 USER→ASSISTANT 配对装配历史消息。
+
+    `carried_last_user_message_id` 是跨页续接的起点（Task 7 分页缺陷修复）：
+    `message_limit` 为奇数时，某一页最早一条可能是 ASSISTANT，而它配对的
+    USER 消息落在更早的一页、不在这次传入的 `messages` 里。调用方
+    （`localize_conversation_detail()`）从
+    `ConversationRepository.list_messages_page()` 额外查到这个 id 后传进来，
+    这里就不再把 `last_user_message_id` 无条件初始化成 `None`——否则这一页
+    最早的 ASSISTANT 消息会因为"本页内找不到同页的配对 USER"而整段丢失
+    `answer_payload`（思考步骤、质量说明等），而不是真的没有配对。
+    """
+
+    last_user_message_id: UUID | None = carried_last_user_message_id
     detail_messages: list[ConversationMessage] = []
     for message in messages:
         if message.role == "USER":
@@ -283,12 +310,21 @@ async def localize_conversation_detail(
     messages: Sequence[Message],
     answers_by_user_message: Mapping[UUID, tuple[Answer, Feedback | None]],
     target_locale: SupportedLocale,
+    boundary_user_message_id: UUID | None = None,
+    boundary_pairing_unresolved: bool = False,
 ) -> tuple[str | None, list[ConversationMessage], bool, str | None]:
     """装配并翻译**当前这一页**的会话详情。
 
     `messages` 必须已经是 Repository 分页之后的结果（`ConversationRepository
     .list_messages_page()` 返回的那一页,时间正序）——本函数不会、也没有能力
     再去多查一条历史之外的消息,预算范围与"当前页"严格重合。
+
+    `boundary_user_message_id` / `boundary_pairing_unresolved` 原样转发自
+    `MessagePage`（分页边界拆开 USER/ASSISTANT 配对的修复，见其字段文档）：
+    前者让这一页最早的 ASSISTANT 消息仍能正确挂上 `answer_payload`；后者为
+    `True` 时说明续接也没能确认配对，装配结果会把该消息的 `answer_payload`
+    留空——此时函数强制把返回的 `degraded` 置为 `True` 并给出专门的
+    `reason`，绝不让这种数据缺失在响应里悄无声息。
 
     翻译顺序按可见优先级（§8.6.3 Step 4 原文）：
     最新一轮（该页最后一条消息的正文 + 结构化附属字段）→ 会话标题 →
@@ -298,7 +334,11 @@ async def localize_conversation_detail(
     消息的思考步骤/质量说明）先降级,而不是随机哪条先丢。
     """
 
-    assembled = _assemble_detail_messages(messages, answers_by_user_message)
+    assembled = _assemble_detail_messages(
+        messages,
+        answers_by_user_message,
+        carried_last_user_message_id=boundary_user_message_id,
+    )
 
     items: list[LocalizeItem] = []
     if assembled:
@@ -341,8 +381,15 @@ async def localize_conversation_detail(
             message.model_copy(update={"content": content, "answer_payload": payload})
         )
 
-    reason = _DEGRADED_REASON[target_locale] if resolver.degraded else None
-    return translated_title, translated_messages, resolver.degraded, reason
+    degraded = resolver.degraded or boundary_pairing_unresolved
+    if boundary_pairing_unresolved:
+        # 数据缺失比翻译占位符更严重，两者都发生时优先展示这一条原因。
+        reason = _PAIRING_UNRESOLVED_REASON[target_locale]
+    elif resolver.degraded:
+        reason = _DEGRADED_REASON[target_locale]
+    else:
+        reason = None
+    return translated_title, translated_messages, degraded, reason
 
 
 # ---------------------------------------------------------------------------

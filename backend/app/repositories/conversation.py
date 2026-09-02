@@ -93,11 +93,24 @@ class MessagePage:
 
     `messages` 始终按创建时间正序排列（页内时间正序，见 §8.6.3）；
     `next_cursor` 非空时代表"还有更早一页"，为空代表已经翻到最早一条。
+
+    `boundary_user_message_id` / `boundary_pairing_unresolved` 只在
+    `messages[0].role == "ASSISTANT"` 时有意义——消息严格按 USER/ASSISTANT
+    交替写入，`message_limit` 为奇数时分页边界必然会把某一轮拆到相邻两页，
+    使这条 ASSISTANT 在它自己所在的页里找不到同页的配对 USER 消息。
+    `boundary_user_message_id` 携带紧邻它之前那条消息的 id（正常情况下就是
+    它的配对 USER 消息），供调用方在装配 `answer_payload` 时当作"跨页续接"
+    的起点，而不是把这条 ASSISTANT 的结构化回答整个丢掉。`
+    boundary_pairing_unresolved=True` 表示确实尝试过续接但没能确认——消息
+    序列不满足预期的严格交替不变量（数据异常，正常写路径下不会出现）——
+    调用方必须把这种情况当作真正的降级显式对用户可见，不能悄悄吞掉。
     """
 
     messages: list[Message]
     next_cursor: str | None
     has_more: bool
+    boundary_user_message_id: UUID | None = None
+    boundary_pairing_unresolved: bool = False
 
 
 class ConversationRepository:
@@ -328,7 +341,56 @@ class ConversationRepository:
                 created_at=oldest.created_at,
                 message_id=oldest.id,
             )
-        return MessagePage(messages=page, next_cursor=next_cursor, has_more=has_more)
+
+        boundary_user_message_id: UUID | None = None
+        boundary_pairing_unresolved = False
+        if page and page[0].role == "ASSISTANT":
+            boundary_user_message_id = await self._find_preceding_user_message_id(
+                merchant_id, conversation_id, before=page[0]
+            )
+            boundary_pairing_unresolved = boundary_user_message_id is None
+
+        return MessagePage(
+            messages=page,
+            next_cursor=next_cursor,
+            has_more=has_more,
+            boundary_user_message_id=boundary_user_message_id,
+            boundary_pairing_unresolved=boundary_pairing_unresolved,
+        )
+
+    async def _find_preceding_user_message_id(
+        self,
+        merchant_id: UUID,
+        conversation_id: UUID,
+        *,
+        before: Message,
+    ) -> UUID | None:
+        """`list_messages_page()` 跨页续接专用：查紧邻 `before`（某页最早一条
+        ASSISTANT 消息）之前的那一条消息。只在真的需要时才多发这一次
+        `LIMIT 1` 查询，不影响其它调用路径的成本。
+
+        找到且角色是 `USER` 才返回其 id——这是严格交替写入下唯一合法的配对；
+        找不到（`before` 已经是整个会话第一条消息）或角色不是 `USER`（写入
+        路径出现过异常）都返回 `None`，由调用方通过
+        `MessagePage.boundary_pairing_unresolved` 感知并显式对用户可见，
+        不能把这种情况和"正常查到了"混为一谈。
+        """
+
+        result = await self._session.execute(
+            select(Message.id, Message.role)
+            .where(
+                Message.merchant_id == merchant_id,
+                Message.conversation_id == conversation_id,
+                tuple_(Message.created_at, Message.id)
+                < tuple_(literal(before.created_at), literal(before.id)),
+            )
+            .order_by(Message.created_at.desc(), Message.id.desc())
+            .limit(1)
+        )
+        row = result.first()
+        if row is not None and row.role == "USER":
+            return cast(UUID, row.id)
+        return None
 
     async def list_succeeded_answers_for_conversation(
         self,

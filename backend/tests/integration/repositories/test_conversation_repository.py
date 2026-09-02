@@ -168,6 +168,69 @@ async def test_list_messages_page_returns_pages_in_chronological_order_with_corr
 
 
 @pytest.mark.asyncio
+async def test_list_messages_page_resolves_pairing_split_across_a_page_boundary(
+    db_session: AsyncSession,
+) -> None:
+    """回归测试：消息严格按 USER/ASSISTANT 交替写入，`limit` 为奇数时分页
+    边界必然把某一轮拆到两页。4 条消息（2 轮）、`limit=3`：第一页是
+    [ASSISTANT(轮1), USER(轮2), ASSISTANT(轮2)]，最早一条 ASSISTANT 的配对
+    USER 落在更早、不在本页的那一条消息里。`list_messages_page()` 必须查到
+    并带回这条边界 USER 消息的 id，且不应把它标记为"未解析"。
+    """
+
+    await insert_merchants(db_session)
+    repository = ConversationRepository(db_session)
+    conversation = await repository.create(MERCHANT_ONE_ID, "拆分会话")
+    await db_session.commit()
+
+    message_ids: list[UUID] = []
+    for index in range(4):
+        role = "USER" if index % 2 == 0 else "ASSISTANT"
+        message = await repository.create_message(
+            MERCHANT_ONE_ID, conversation.id, role, f"消息 {index}"
+        )
+        message_ids.append(message.id)
+        await db_session.commit()
+
+    page = await repository.list_messages_page(MERCHANT_ONE_ID, conversation.id, limit=3)
+
+    assert [m.role for m in page.messages] == ["ASSISTANT", "USER", "ASSISTANT"]
+    assert page.messages[0].id == message_ids[1]
+    assert page.boundary_user_message_id == message_ids[0]
+    assert page.boundary_pairing_unresolved is False
+
+    # 续接边界之后的下一页只剩最早那条 USER 消息。
+    second_page = await repository.list_messages_page(
+        MERCHANT_ONE_ID, conversation.id, limit=3, before=page.next_cursor
+    )
+    assert [m.id for m in second_page.messages] == [message_ids[0]]
+    assert second_page.has_more is False
+
+
+@pytest.mark.asyncio
+async def test_list_messages_page_flags_unresolved_pairing_when_no_preceding_message_exists(
+    db_session: AsyncSession,
+) -> None:
+    """防御性用例：正常写路径（`ChatService`）永远先写 USER 再写 ASSISTANT，
+    因此某会话的第一条消息是 ASSISTANT 属于数据异常，理论上不会发生。但
+    Repository 遇到这种情况时必须显式标记为「未解析」，而不是假装配对成功
+    或者悄悄返回一个空的 `answer_payload`（协调者要求：绝不允许静默丢数据）。
+    """
+
+    await insert_merchants(db_session)
+    repository = ConversationRepository(db_session)
+    conversation = await repository.create(MERCHANT_ONE_ID, "异常会话")
+    await db_session.commit()
+    await repository.create_message(MERCHANT_ONE_ID, conversation.id, "ASSISTANT", "孤立回答")
+    await db_session.commit()
+
+    page = await repository.list_messages_page(MERCHANT_ONE_ID, conversation.id, limit=10)
+
+    assert page.boundary_user_message_id is None
+    assert page.boundary_pairing_unresolved is True
+
+
+@pytest.mark.asyncio
 async def test_list_messages_page_with_forty_messages_only_returns_the_requested_page_size(
     db_session: AsyncSession,
 ) -> None:

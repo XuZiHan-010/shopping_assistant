@@ -349,5 +349,9 @@ class ConversationDetailResponse(BaseModel):
     # 本页任意条目（消息正文、思考步骤标签、质量说明、降级原因、会话标题）
     # 未能在预算内翻译完成时为 true，改用目标语言占位文案；对同一游标重新
     # GET 即为重试，已成功条目命中缓存不重复调用模型。绝不回落源语言原文。
+    # 同一字段也用于另一种"本页不完整"信号：`message_limit` 为奇数时分页
+    # 边界可能把一轮 USER/ASSISTANT 拆到两页，正常情况下会被跨页续接自动
+    # 修复且不置位；仅当续接也未能确认配对（数据异常）时才置为 true，
+    # `localization_degraded_reason` 会说明是这一种情况而不是翻译预算耗尽。
     localization_degraded: bool = False
     localization_degraded_reason: str | None = None
