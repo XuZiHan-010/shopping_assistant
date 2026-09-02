@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from uuid import uuid4
 
 import pytest
@@ -8,8 +9,26 @@ import pytest
 from app.agent.graph import GRAPH_NODES, MerchantQaGraph
 from app.knowledge.retrieval import KnowledgeRetrieval
 from app.llm.fake import FakeLlmClient
+from app.localization.locales import SupportedLocale
 from app.metrics.catalog import MetricCatalog
 from app.schemas.chat import AnalysisSource, AnswerMode, QualityStatus
+
+_HAN = re.compile("[一-鿿]")
+
+
+def _collect_visible_strings(value: object) -> list[str]:
+    """递归收集 ChatResponse 里所有字符串叶子节点，供中文残留断言使用。"""
+
+    found: list[str] = []
+    if isinstance(value, str):
+        found.append(value)
+    elif isinstance(value, dict):
+        for item in value.values():
+            found.extend(_collect_visible_strings(item))
+    elif isinstance(value, list | tuple):
+        for item in value:
+            found.extend(_collect_visible_strings(item))
+    return found
 
 
 class D:
@@ -358,3 +377,101 @@ async def test_backend_date_clamp_is_reported_to_the_user() -> None:
     result = await graph.run("2020 年 GMV", uuid4())
 
     assert any("日期" in note for note in result.response.quality_notes)
+
+
+# --- Task 6：locale 贯穿问答图 ----------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_english_locale_produces_a_response_with_no_han_characters() -> None:
+    """Task 6 Step 1 的图层等价验证：`locale=en-US` 时整份 `ChatResponse`
+    （技术字段除外）不应含任何汉字——不需要真实数据库或真实 LLM，直接对
+    `MerchantQaGraph.run(..., locale=...)` 的产出做递归扫描。
+
+    HTTP 层的端到端等价测试（brief Step 1 原文示例）见
+    `tests/api/test_chat.py::test_english_chat_localizes_every_visible_field`，
+    因为需要真实 PostgreSQL 落库整轮会话/回答，在本地无 Docker 环境下只能
+    跳过；这里在图这一层直接验证同一件事，不依赖数据库。
+    """
+
+    llm = FakeLlmClient(
+        responses=[
+            json.dumps({"answer_mode": "CHAT", "category": "UNKNOWN", "intent_keywords": []}),
+            json.dumps(
+                {
+                    "answer_mode": "CHAT",
+                    "category": "UNKNOWN",
+                    "metric": None,
+                    "dimensions": [],
+                    "filters": {},
+                    "date_range": None,
+                    "sort": None,
+                    "limit": None,
+                    "followup_reference": False,
+                    "needs_attachment": False,
+                }
+            ),
+        ]
+    )
+    graph = MerchantQaGraph(
+        retrieval=KnowledgeRetrieval(K()), intent_service_llm=llm, catalog=MetricCatalog(M(), llm)
+    )
+
+    result = await graph.run("Hello there", uuid4(), locale=SupportedLocale.EN_US)
+
+    assert result.response.answer_mode is AnswerMode.CHAT
+    assert result.response.answer == "Structured understanding complete."
+    assert [step.label for step in result.steps] == [
+        "Identifying merchant and conversation context",
+        "Loading the business knowledge index",
+        "Determining question scope",
+        "Classifying question type and business domain",
+        "Structuring the question intent",
+        "Validating the query intent",
+        "Loading business knowledge details",
+        "Querying business data",
+        "Composing the answer",
+        "Validating and reviewing answer quality",
+        "Generating suggested questions",
+        "Saving this answer",
+    ]
+    payload = result.response.model_dump(mode="json")
+    # 技术字段（id、UUID、协议枚举值、node 内部标识）不受本条断言约束；
+    # 白名单只保留真正会出现汉字的人类可读字段范围一致地扫描整份 payload。
+    visible = _collect_visible_strings(payload)
+    offending = [text for text in visible if _HAN.search(text)]
+    assert offending == [], f"英文响应混入了汉字：{offending!r}"
+
+
+@pytest.mark.asyncio
+async def test_default_locale_is_chinese_and_unaffected_by_task_6() -> None:
+    """默认（未显式传 locale）行为必须还是中文——不能因为新增了 locale 参数
+    就意外改变了所有既有零参数调用点的既有语言。"""
+
+    llm = FakeLlmClient(
+        responses=[
+            json.dumps({"answer_mode": "CHAT", "category": "UNKNOWN", "intent_keywords": []}),
+            json.dumps(
+                {
+                    "answer_mode": "CHAT",
+                    "category": "UNKNOWN",
+                    "metric": None,
+                    "dimensions": [],
+                    "filters": {},
+                    "date_range": None,
+                    "sort": None,
+                    "limit": None,
+                    "followup_reference": False,
+                    "needs_attachment": False,
+                }
+            ),
+        ]
+    )
+    graph = MerchantQaGraph(
+        retrieval=KnowledgeRetrieval(K()), intent_service_llm=llm, catalog=MetricCatalog(M(), llm)
+    )
+
+    result = await graph.run("你好", uuid4())
+
+    assert result.response.answer == "已完成结构化理解。"
+    assert result.steps[0].label == "识别商家与会话上下文"

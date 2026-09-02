@@ -23,7 +23,7 @@ from app.core.errors import (
 from app.core.security import MerchantContext, resolve_demo_token
 from app.db.session import Database
 from app.knowledge.retrieval import KnowledgeRetrieval
-from app.llm.client import LlmClient
+from app.llm.client import LlmBudget, LlmClient
 from app.llm.deepseek import DeepSeekLlmClient
 from app.llm.fake import FakeLlmClient
 from app.llm.guard import LlmCostGuard
@@ -37,11 +37,13 @@ from app.repositories.conversation import ConversationRepository
 from app.repositories.export import ExportRepository
 from app.repositories.knowledge import KnowledgeRepository
 from app.repositories.llm_budget import LlmBudgetRepository
+from app.repositories.localization import LocalizationRepository
 from app.repositories.memory import MerchantMemoryRepository
 from app.repositories.merchant import MerchantRepository
 from app.repositories.metric import MetricRepository
 from app.services.chat_service import ChatService
 from app.services.export_service import ExportService
+from app.services.localization_service import LocalizationService
 from app.services.memory_agent import MemoryAgent
 from app.services.merchant_scope import MerchantScopeService
 from app.services.report_service import DailyReportService
@@ -237,6 +239,13 @@ async def get_chat_service(
     merchant_display = merchant_summaries[0].display_name if merchant_summaries else "商家"
     memory_repository = MerchantMemoryRepository(session)
     metric_repository = MetricRepository(session)
+    localization_service, localization_budget = _build_chat_localization_runtime(
+        session,
+        database,
+        settings,
+        request_id=str(request.state.request_id),
+        merchant_id=context.merchant_id,
+    )
     graph = MerchantQaGraph(
         retrieval=KnowledgeRetrieval(
             KnowledgeRepository(session),
@@ -244,6 +253,7 @@ async def get_chat_service(
             merchant_id=context.merchant_id,
             metrics=metric_repository,
             all_memories=memory_repository,
+            localizer=localization_service,
         ),
         intent_service_llm=llm,
         catalog=MetricCatalog(metric_repository, llm),
@@ -261,6 +271,7 @@ async def get_chat_service(
         prefilter_enabled=settings.question_prefilter_enabled,
         prefilter_min_score=settings.question_prefilter_min_score,
         session_history=conversations,
+        localization_budget=localization_budget,
     )
     return ChatService(
         session,
@@ -279,7 +290,48 @@ async def get_chat_service(
             merchant_display=merchant_display,
             request_id=str(request.state.request_id),
         ),
+        localization_service=localization_service,
+        localization_budget=localization_budget,
     )
+
+
+def _build_chat_localization_runtime(
+    session: AsyncSession,
+    database: Database,
+    settings: Settings,
+    *,
+    request_id: str,
+    merchant_id: UUID,
+) -> tuple[LocalizationService, LlmBudget]:
+    """构造一轮聊天专用的本地化服务与共享预算。
+
+    `purpose="LOCALIZATION"` 让 `llm_usage` 与 `purpose="AGENT"` 的主问答链路
+    分开记账（Task 6 复用 Task 4 已定的 `Settings.localization_max_calls_per_request`
+    / `localization_max_tokens_per_request`）。返回的 `LlmBudget` 由
+    `ChatService`（`displayed_user_message`）与 `MerchantQaGraph`
+    （跨语言知识检索查询规范化）在同一请求内共享——两处合计也不能超过这个
+    per-request 上限，不是各自独立再有一份预算。
+    """
+
+    guard = build_guarded_llm(
+        settings,
+        database,
+        request_id=request_id,
+        merchant_id=merchant_id,
+        purpose="LOCALIZATION",
+    )
+    service = LocalizationService(
+        LocalizationRepository(session),
+        guard,
+        max_batch_items=settings.localization_max_batch_items,
+        max_batch_chars=settings.localization_max_batch_chars,
+        model=settings.llm_model,
+    )
+    budget = LlmBudget(
+        settings.localization_max_calls_per_request,
+        settings.localization_max_tokens_per_request,
+    )
+    return service, budget
 
 
 def get_export_service(

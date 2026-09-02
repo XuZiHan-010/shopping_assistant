@@ -27,7 +27,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 from uuid import UUID
@@ -163,6 +163,16 @@ def _only_protected_tokens(text: str) -> bool:
 
 
 class _LocalizationRepositoryLike(Protocol):
+    """Task 6：这两个方法的返回类型用 `Mapping`（协变）而不是 `dict`（值类型
+    不变式）——真实的 `LocalizationRepository` 返回
+    `dict[str, MachineTranslationCache]`，具体的 ORM 行类型；调用方
+    （`_fetch_machine_cache()`）只读取 `.translated_text` 属性，用
+    `Mapping[str, object]` 声明既能匹配真实仓储的返回类型，也保留了协议
+    只声明"用到的最小接口"这条约束。改成 `dict[str, object]` 在 mypy 下会
+    因为 `dict` 值类型不变式而拒绝真实仓储（`app.api.dependencies` 首次把
+    两者接起来时才会触发，之前从未有调用点真正传入过真实仓储）。
+    """
+
     async def get_merchant_machine_many(
         self,
         *,
@@ -170,7 +180,7 @@ class _LocalizationRepositoryLike(Protocol):
         source_hashes: Sequence[str],
         target_locale: SupportedLocale,
         prompt_version: str,
-    ) -> dict[str, object]: ...
+    ) -> Mapping[str, object]: ...
 
     async def get_global_machine_many(
         self,
@@ -178,7 +188,7 @@ class _LocalizationRepositoryLike(Protocol):
         source_hashes: Sequence[str],
         target_locale: SupportedLocale,
         prompt_version: str,
-    ) -> dict[str, object]: ...
+    ) -> Mapping[str, object]: ...
 
     async def upsert_machine(
         self,

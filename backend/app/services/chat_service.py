@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from time import monotonic
 from typing import Any, Protocol
@@ -24,15 +26,23 @@ from app.core.errors import (
 )
 from app.core.metrics import OperationalMetrics
 from app.core.security import MerchantContext
+from app.llm.client import LlmBudget
 from app.llm.guard import CostGuardProtocol
+from app.localization.catalog import localize_catalog_value
+from app.localization.error_messages import localize_error_message
+from app.localization.locales import SupportedLocale
 from app.metrics.report_url import upgrade_payload
 from app.models.answer import Answer
 from app.models.conversation import Conversation
 from app.repositories.conversation import ConversationRepository
+from app.repositories.localization import LocalizationScope
 from app.schemas.chat import AnswerMode, ChatRequest, ChatResponse, ThinkingStep
+from app.schemas.localization import LocalizeItem
 from app.services.export_service import ExportService
 from app.services.merchant_scope import MerchantScopeService
 from app.services.safe_query import QueryResult
+
+logger = logging.getLogger(__name__)
 
 # §8.5：请求本身有问题时重试没有意义，落 FAILED_FINAL；其余按瞬时故障处理，
 # 允许同一 client_request_id 重跑。限流和预算耗尽也属于可重试，不在此列。
@@ -40,7 +50,13 @@ _FINAL_STATUS_CODES = frozenset({400, 403, 404, 413, 415, 422})
 
 
 class ChatAgentProtocol(Protocol):
-    async def run(self, message: str, session_id: UUID) -> AgentRunResult: ...
+    async def run(
+        self,
+        message: str,
+        session_id: UUID,
+        *,
+        locale: SupportedLocale = SupportedLocale.ZH_CN,
+    ) -> AgentRunResult: ...
 
 
 class MemoryAgentProtocol(Protocol):
@@ -54,7 +70,22 @@ class MemoryAgentProtocol(Protocol):
         quality_notes: list[str],
         suggestions: list[str],
         export_id: str | None,
+        locale: SupportedLocale = SupportedLocale.ZH_CN,
     ) -> None: ...
+
+
+class LocalizationServiceLike(Protocol):
+    """`displayed_user_message` 本地化专用：只声明用到的
+    `LocalizationService.localize_many()` 形状，测试可以用内存假实现替身。"""
+
+    async def localize_many(
+        self,
+        *,
+        scope: LocalizationScope,
+        items: Sequence[LocalizeItem],
+        target_locale: SupportedLocale,
+        budget: LlmBudget,
+    ) -> dict[str, str]: ...
 
 
 @dataclass(frozen=True)
@@ -78,6 +109,8 @@ class ChatService:
         budget_gate: CostGuardProtocol | None = None,
         metrics: OperationalMetrics | None = None,
         memory_agent: MemoryAgentProtocol | None = None,
+        localization_service: LocalizationServiceLike | None = None,
+        localization_budget: LlmBudget | None = None,
     ) -> None:
         self._session = session
         self._conversations = conversations
@@ -88,6 +121,11 @@ class ChatService:
         self._budget_gate = budget_gate
         self._metrics = metrics
         self._memory_agent = memory_agent
+        self._localization_service = localization_service
+        #: 与 `MerchantQaGraph` 内部跨语言检索用的预算是两个独立对象——各自
+        #: 最多花掉 `Settings.localization_max_calls_per_request` 的一部分，
+        #: 互不挤占；两者都在 `api/dependencies.py` 按同一请求构造一次。
+        self._localization_budget = localization_budget or LlmBudget(0, 0)
 
     async def submit(
         self,
@@ -95,6 +133,7 @@ class ChatService:
         request: ChatRequest,
         *,
         request_id: str,
+        locale: SupportedLocale = SupportedLocale.ZH_CN,
     ) -> ChatExecution:
         digest = _request_digest(request)
         existing = await self._conversations.get_answer_by_client_request(
@@ -102,14 +141,16 @@ class ChatService:
             request.client_request_id,
         )
         if existing is not None:
-            replay = _dispatch_existing(existing, digest)
+            replay = _dispatch_existing(existing, digest, locale)
             if replay is not None:
-                return replay
+                return await self._with_displayed_message(context, request, replay, locale)
             await self._require_daily_budget()
             # FAILED_RETRYABLE：复用同一行并置回 PROCESSING 后重跑。
             await self._conversations.reset_answer_processing(existing)
             await self._session.commit()
-            return await self._run_agent(context, request, existing.conversation_id, existing)
+            return await self._run_agent(
+                context, request, existing.conversation_id, existing, locale
+            )
 
         try:
             await self._require_daily_budget()
@@ -133,15 +174,60 @@ class ChatService:
             # 由 uq_answers_merchant_client_request 裁决，输的一方按已有状态答复，
             # 绝不重跑 Agent（§8.5「并发提交两次只产生一次调用」）。
             await self._session.rollback()
-            return await self._resolve_race(context, request, digest)
+            return await self._resolve_race(context, request, digest, locale)
 
-        return await self._run_agent(context, request, conversation_id, answer)
+        return await self._run_agent(context, request, conversation_id, answer, locale)
+
+    async def _with_displayed_message(
+        self,
+        context: MerchantContext,
+        request: ChatRequest,
+        replay: ChatExecution,
+        locale: SupportedLocale,
+    ) -> ChatExecution:
+        """幂等重放（§8.5 `SUCCEEDED` 分支）：业务事实完全复用存量 Answer，
+        只把用户本轮问题的展示副本按**这次重放请求**的 locale 重新渲染。
+
+        不重新本地化整份历史回答正文——那是"翻看历史会话"的场景（Task 7/8：
+        `GET /api/conversations/{id}`），与"同一个 `client_request_id` 被重放"
+        是两件事：`POST /api/chat` 幂等重放本身是罕见的客户端重试路径，
+        `displayed_user_message` 是这条路径上唯一必须"当场"随 locale 变化的
+        字段（Step 9 原文「本地化显示副本」——单数、指用户消息，不是整份回答）。
+        """
+
+        displayed = await self._localize_display_message(context, request.message, locale)
+        response = replay.response.model_copy(update={"displayed_user_message": displayed})
+        return ChatExecution(response=response, steps=replay.steps, replayed=True)
+
+    async def _localize_display_message(
+        self,
+        context: MerchantContext,
+        message: str,
+        locale: SupportedLocale,
+    ) -> str:
+        if self._localization_service is None:
+            return message
+        try:
+            resolved = await self._localization_service.localize_many(
+                scope=LocalizationScope(kind="MERCHANT", merchant_id=context.merchant_id),
+                items=[LocalizeItem(key="displayed_user_message", text=message)],
+                target_locale=locale,
+                budget=self._localization_budget,
+            )
+        except Exception:
+            # 本地化失败不该让整轮聊天失败——这只是用户自己问题的展示副本，
+            # 原样回显源文本仍然可读，比让整个请求 500 更好（R7 的降级精神，
+            # 但这个字段本身不参与 ChatResponse.degraded，因为它不是业务分析）。
+            logger.warning("本地化用户消息展示副本失败，回退为原文", exc_info=True)
+            return message
+        return resolved.get("displayed_user_message", message)
 
     async def _resolve_race(
         self,
         context: MerchantContext,
         request: ChatRequest,
         digest: str,
+        locale: SupportedLocale,
     ) -> ChatExecution:
         raced = await self._conversations.get_answer_by_client_request(
             context.merchant_id,
@@ -151,13 +237,13 @@ class ChatService:
             # 唯一键之外的完整性冲突，不属于幂等竞态，交给全局处理器。
             raise AppError(
                 code=ErrorCode.INTERNAL_ERROR,
-                message="服务暂时不可用，请稍后重试",
+                message=localize_error_message(ErrorCode.INTERNAL_ERROR, None, locale),
                 status_code=500,
                 retryable=True,
             )
-        replay = _dispatch_existing(raced, digest)
+        replay = _dispatch_existing(raced, digest, locale)
         if replay is not None:
-            return replay
+            return await self._with_displayed_message(context, request, replay, locale)
         # 对方刚落 FAILED_RETRYABLE：让调用方按 409 重试，避免两边同时重跑。
         raise RequestInProgressError
 
@@ -167,15 +253,18 @@ class ChatService:
         request: ChatRequest,
         conversation_id: UUID,
         answer: Answer,
+        locale: SupportedLocale,
     ) -> ChatExecution:
         try:
             started_at = monotonic()
-            result = await self._agent.run(request.message, conversation_id)
+            result = await self._agent.run(request.message, conversation_id, locale=locale)
+            displayed = await self._localize_display_message(context, request.message, locale)
             response = result.response.model_copy(
                 update={
                     "id": answer.id,
                     "session_id": conversation_id,
                     "thinking_steps": result.steps,
+                    "displayed_user_message": displayed,
                 }
             )
             if (
@@ -190,7 +279,9 @@ class ChatService:
                 if self._export_service is None:
                     raise AppError(
                         code=ErrorCode.DATA_SOURCE_UNAVAILABLE,
-                        message="导出服务暂时不可用，请稍后重试",
+                        message=localize_error_message(
+                            ErrorCode.DATA_SOURCE_UNAVAILABLE, None, locale
+                        ),
                         status_code=503,
                         retryable=True,
                     )
@@ -203,11 +294,17 @@ class ChatService:
             if self._cost_guard is not None and self._cost_guard.daily_cap_hit:
                 if result.query_result is None:
                     raise DailyBudgetExhaustedError
+                fallback_reason = "今日模型用量已达上限，本次只提供受控数据摘要"
                 response = response.model_copy(
                     update={
                         "degraded": True,
                         "degraded_reason": response.degraded_reason
-                        or "今日模型用量已达上限，本次只提供受控数据摘要",
+                        or (
+                            fallback_reason
+                            if locale is SupportedLocale.ZH_CN
+                            else localize_catalog_value(fallback_reason, locale)
+                            or fallback_reason
+                        ),
                     }
                 )
             if self._metrics is not None and response.degraded:
@@ -231,12 +328,14 @@ class ChatService:
                     quality_notes=list(response.quality_notes),
                     suggestions=list(response.suggestions),
                     export_id=str(response.export.id) if response.export is not None else None,
+                    locale=locale,
                 )
             await self._conversations.touch_conversation(context.merchant_id, conversation_id)
             await self._conversations.mark_answer_succeeded(
                 answer,
                 response.model_dump(mode="json"),
                 elapsed_ms=int((monotonic() - started_at) * 1000),
+                response_locale=locale.value,
             )
             await self._session.commit()
             return ChatExecution(response=response, steps=result.steps, replayed=False)
@@ -301,8 +400,19 @@ class ChatService:
             raise DailyBudgetExhaustedError
 
 
-def _dispatch_existing(existing: Answer, digest: str) -> ChatExecution | None:
-    """按 §8.5 处理已有幂等记录；返回 None 表示需要复用该行重跑。"""
+def _dispatch_existing(
+    existing: Answer, digest: str, locale: SupportedLocale
+) -> ChatExecution | None:
+    """按 §8.5 处理已有幂等记录；返回 None 表示需要复用该行重跑。
+
+    Task 6 Step 9：三个分支语义不因 `locale` 改变——`PROCESSING` 无论重放
+    请求用什么语言都必须抛 409（绝不放宽成"每种语言各允许一次在飞请求"，
+    否则同一轮问答会被允许并发跑两次）；`FAILED_FINAL` 从持久化的稳定
+    `code + message_params` 按**当前**请求 locale 重新渲染 message，不持久化、
+    不重放旧语言整句；`SUCCEEDED` 只在这里判定"可以复用"，`displayed_user_message`
+    按当前 locale 的重新赋值交给调用方 `ChatService._with_displayed_message()`
+    做，本函数保持纯粹的"读存量记录、按状态机分发"，不接触本地化服务。
+    """
 
     if existing.request_digest != digest:
         raise IdempotencyKeyReusedError
@@ -312,7 +422,7 @@ def _dispatch_existing(existing: Answer, digest: str) -> ChatExecution | None:
         response = _stored_response(existing.response_payload)
         return ChatExecution(response=response, steps=response.thinking_steps, replayed=True)
     if existing.processing_status == "FAILED_FINAL":
-        raise _stored_error(existing.error_payload)
+        raise _stored_error(existing.error_payload, locale)
     return None
 
 
@@ -340,25 +450,30 @@ def _is_retryable(exc: BaseException) -> bool:
 
 
 def _failure_payload(exc: BaseException) -> dict[str, Any]:
-    """只保存可安全回放给调用方的字段，绝不写入异常文本或堆栈。"""
+    """只保存可安全回放给调用方的字段，绝不写入异常文本或堆栈。
+
+    Task 6：只持久化稳定的 `code` + 受控 `message_params`，不再持久化某个
+    请求当时渲染出来的整句 `message`——那句话的语言只属于当时那次请求，
+    `FAILED_FINAL` 重放时必须按**重放请求自己的** locale 重新渲染
+    （`_stored_error()` 消费这里的 `message_params`，见其 docstring）。
+    """
 
     if isinstance(exc, AppError):
         return {
             "code": exc.code.value,
-            "message": exc.message,
+            "message_params": exc.message_params,
             "status_code": exc.status_code,
             "retryable": exc.retryable,
         }
-    if isinstance(exc, asyncio.CancelledError):
-        return {
-            "code": ErrorCode.INTERNAL_ERROR.value,
-            "message": "回答已中断，请用同一请求标识重试",
-            "status_code": 500,
-            "retryable": True,
-        }
+    # 非 AppError（`CancelledError` 或其它未预期异常）统一归为
+    # `INTERNAL_ERROR`，不持久化任何异常文本或堆栈（R4/R7）。措辞交给
+    # `localize_error_message()` 按重放请求的 locale 渲染通用双语文案——
+    # 这两种情形过去各自硬编码一句只有中文的定制说明，改成「稳定 code +
+    # message_params」机制后统一折叠进同一条通用 `INTERNAL_ERROR` 文案，
+    # 是这次改动有意为之的简化，换来的是消息语言与重放请求 locale 一致。
     return {
         "code": ErrorCode.INTERNAL_ERROR.value,
-        "message": "演示回答暂时不可用，请稍后重试",
+        "message_params": {},
         "status_code": 500,
         "retryable": True,
     }
@@ -375,16 +490,33 @@ def _stored_response(payload: dict[str, Any] | None) -> ChatResponse:
     return ChatResponse.model_validate(upgrade_payload(payload))
 
 
-def _stored_error(payload: dict[str, Any] | None) -> AppError:
+def _stored_error(payload: dict[str, Any] | None, locale: SupportedLocale) -> AppError:
+    """从持久化的稳定 `code` + `message_params` 重建同一业务错误。
+
+    `message` 按**这次调用传入的** `locale` 渲染——同一条 `FAILED_FINAL` 记录
+    先用中文重放、再用英文重放，`code`/`message_params` 逐字不变（同一份业务
+    事实），只有这里选取的语言不同（Task 6 Step 9）。全局异常处理器
+    （`app.core.errors.handle_app_error`）和修复后的 SSE `error` 事件都只认
+    `exc.code`/`exc.message_params` 重新渲染 `message`，这里传入的值仅用于
+    未经过这两条渠道、直接读取 `exc.message` 的极少数调用点（防御性兜底）。
+    """
+
     if payload is None:
         return AppError(
             code=ErrorCode.INTERNAL_ERROR,
-            message="请求处理失败",
+            message=localize_error_message(ErrorCode.INTERNAL_ERROR, None, locale),
             status_code=500,
         )
+    code = ErrorCode(str(payload.get("code", ErrorCode.INTERNAL_ERROR)))
+    # 兼容一种过渡态：本任务落地前写入的 `FAILED_FINAL` 行仍是旧形状
+    # （只有整句 `message`，没有 `message_params`）——这类演示环境的存量数据
+    # 极少见，缺失时按空参数处理，退回该 code 的通用双语文案，而不是抛异常
+    # 或原样透出旧语言整句。
+    message_params = payload.get("message_params") or {}
     return AppError(
-        code=ErrorCode(str(payload.get("code", ErrorCode.INTERNAL_ERROR))),
-        message=str(payload.get("message", "请求处理失败")),
+        code=code,
+        message=localize_error_message(code, message_params, locale),
         status_code=int(payload.get("status_code", 500)),
         retryable=bool(payload.get("retryable", False)),
+        message_params=message_params,
     )

@@ -10,6 +10,7 @@ from uuid import UUID
 from app.core.config import Settings
 from app.db.session import Database
 from app.llm.client import LlmBudget
+from app.localization.locales import SupportedLocale
 from app.prompts.memory import MEMORY_MARKER
 
 logger = logging.getLogger(__name__)
@@ -92,6 +93,7 @@ class MemoryAgent:
         quality_notes: list[str],
         suggestions: list[str],
         export_id: str | None,
+        locale: SupportedLocale = SupportedLocale.ZH_CN,
     ) -> None:
         if category in _SKIPPED_CATEGORIES:
             return
@@ -104,9 +106,11 @@ class MemoryAgent:
             export_id=export_id,
             answer=answer,
         )
-        self._background.add_task(self._consolidate, category, manual)
+        self._background.add_task(self._consolidate, category, manual, locale)
 
-    async def _consolidate(self, category: str, manual: str) -> None:
+    async def _consolidate(
+        self, category: str, manual: str, locale: SupportedLocale = SupportedLocale.ZH_CN
+    ) -> None:
         try:
             if self._database is None:
                 return
@@ -151,6 +155,7 @@ class MemoryAgent:
                     manual_markdown=manual,
                     history=history,
                     budget=LlmBudget(max_calls=1, max_tokens=_MEMORY_TASK_MAX_TOKENS),
+                    locale=locale,
                 )
                 if consolidation.degraded:
                     logger.info(

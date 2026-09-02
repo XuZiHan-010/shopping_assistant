@@ -13,7 +13,7 @@ from app.llm.client import STRUCTURED_CALL_OPTIONS, LlmBudget, LlmClient
 from app.localization.catalog import localize_catalog_value
 from app.localization.locales import SupportedLocale
 from app.metrics.catalog import MetricPayload
-from app.prompts.answer import ANSWER_SYSTEM_PROMPT
+from app.prompts.answer import build_answer_system_prompt
 from app.schemas.answer import AnswerDraft
 from app.schemas.chat import Recommendation
 from app.services.quality_types import AttemptFailureKind, DraftAttempt
@@ -177,13 +177,14 @@ class AnswerService:
         *,
         previous: str = "",
         issues: tuple[str, ...] | list[str] = (),
+        locale: SupportedLocale = SupportedLocale.ZH_CN,
     ) -> DraftAttempt:
         user = _facts_json(facts)
         if previous and issues:
             user += "\n\n上一版输出：\n" + previous + "\n校验失败原因：" + "；".join(issues)
             user += "\n请修复所有问题，并重新只输出完整 JSON。"
         result = await llm.complete(
-            system=ANSWER_SYSTEM_PROMPT,
+            system=build_answer_system_prompt(locale),
             user=user,
             fallback=self._fallback(facts).model_dump_json(),
             budget=budget,

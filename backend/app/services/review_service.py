@@ -11,7 +11,8 @@ from app.llm.client import (
     LlmClient,
     LlmUnavailableError,
 )
-from app.prompts.reviewer import REVIEWER_SYSTEM_PROMPT
+from app.localization.locales import SupportedLocale
+from app.prompts.reviewer import build_reviewer_system_prompt
 from app.schemas.answer import AnswerDraft, ReviewVerdict
 from app.services.answer_service import extract_json_object
 from app.services.quality_types import AttemptFailureKind, ReviewAttempt
@@ -31,10 +32,12 @@ class ReviewService:
         facts_json: str,
         llm: LlmClient,
         budget: LlmBudget,
+        *,
+        locale: SupportedLocale = SupportedLocale.ZH_CN,
     ) -> ReviewAttempt:
         try:
             result = await llm.complete(
-                system=REVIEWER_SYSTEM_PROMPT,
+                system=build_reviewer_system_prompt(locale),
                 user=('{"facts":' + facts_json + ',"candidate":' + draft.model_dump_json() + "}"),
                 fallback=f'{{"passed":false,"issues":["{_MSG_REVIEWER_UNAVAILABLE}"]}}',
                 budget=budget,

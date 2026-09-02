@@ -158,6 +158,13 @@ class ChatResponse(BaseModel):
 
     id: UUID
     session_id: UUID
+    # 用户本轮问题按当前请求 `Accept-Language` 渲染的显示副本；原文仍完整保存在
+    # `messages.content`，这里只是展示层的本地化镜像（Task 6）。由 `ChatService`
+    # 在持久化之外每次请求都重新计算，幂等重放时也按当前请求的 locale 重新赋值，
+    # 不随存量 `response_payload` 一起被旧语言锁死。默认空串只是历史构造点（测试
+    # 替身、Agent 内部构造的中间响应）的形状占位；`ChatService` 返回给调用方之前
+    # 总会用真实值覆盖。
+    displayed_user_message: str = Field(default="", max_length=4_000)
     # 纯 DETAIL 以精确空串表示「只出表格」。其它回答模式仍由模型校验强制非空。
     answer: str
     answer_mode: AnswerMode

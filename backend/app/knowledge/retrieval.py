@@ -20,7 +20,15 @@ from app.knowledge.domains import (
     INDEX_PATH_MARKERS,
     MAX_KNOWLEDGE_CHARS,
 )
+from app.llm.client import LlmBudget
+from app.localization.locales import SourceLanguage, SupportedLocale, detect_source_language
+from app.repositories.localization import LocalizationScope
 from app.schemas.chat import QuestionCategory
+from app.schemas.localization import LocalizeItem
+
+#: 跨语言召回专用查询规范化 key；`LocalizeItem.key` 只在这一次批量调用内有
+#: 意义，固定字面量即可，不需要每次生成唯一值。
+_CROSS_LANGUAGE_QUERY_KEY = "retrieval_query"
 
 _METRIC_SUFFIX = re.compile(r"(指标|明细|数据|情况|趋势|数量|金额|次数|量|数)$")
 _MIN_STEM_LENGTH = 2
@@ -129,6 +137,21 @@ class _MetricRepositoryLike(Protocol):
     async def list_active(self) -> Sequence[_MetricRowLike]: ...
 
 
+class _LocalizerLike(Protocol):
+    """跨语言召回查询规范化专用：只声明本模块实际用到的
+    `LocalizationService.localize_many()` 形状，不强制依赖具体实现，方便测试
+    用内存假实现替身。"""
+
+    async def localize_many(
+        self,
+        *,
+        scope: LocalizationScope,
+        items: Sequence[LocalizeItem],
+        target_locale: SupportedLocale,
+        budget: LlmBudget,
+    ) -> dict[str, str]: ...
+
+
 @dataclass
 class _ScoringDocument:
     """把指标目录行 / 商家记忆适配成 `_relevance_score` 能读的标题/路径形状。
@@ -152,12 +175,14 @@ class KnowledgeRetrieval:
         merchant_id: UUID | None = None,
         metrics: _MetricRepositoryLike | None = None,
         all_memories: _AllMemoryRepositoryLike | None = None,
+        localizer: _LocalizerLike | None = None,
     ) -> None:
         self._repository = repository
         self._memories = memories
         self._merchant_id = merchant_id
         self._metrics = metrics
         self._all_memories = all_memories
+        self._localizer = localizer
 
     async def load_index(self) -> KnowledgeResult:
         """业务域未知时，只加载目录与规则文档。"""
@@ -190,6 +215,56 @@ class KnowledgeRetrieval:
         if hits:
             return _render(hits, KnowledgeSource.MAINTAINED)
         return await self._load_memory_fallback(category)
+
+    async def load_domain_with_cross_language_retrieval(
+        self,
+        category: QuestionCategory,
+        keywords: Sequence[str],
+        *,
+        question: str,
+        locale: SupportedLocale,
+        budget: LlmBudget,
+        corpus_locale: SupportedLocale = SupportedLocale.ZH_CN,
+    ) -> tuple[KnowledgeResult, list[str]]:
+        """先按问题原文（含已识别关键词）检索；未命中、且问题本身确实是目标展示
+        语言写的、而语料默认语言（`corpus_locale`）又与之不同时，额外发起一次
+        查询规范化调用把问题翻译成语料语言，用译文重试一次。
+
+        只在这一种组合下才多花一次 LLM 调用（Task 6 Step 6 的「最多增加 1 次」
+        约束）：
+        - 原始检索未命中——已经命中就没有必要多此一举；
+        - 没有注入 `localizer`（多数既有构造点/单测）时原样跳过，不引入新依赖；
+        - 问题语言与 `locale` 不一致时不触发——这种情况下语料未命中的原因不是
+          「跨语言」，强行按 `locale` 翻译反而文不对题；
+        - `locale == corpus_locale` 时不触发——同语言检索未命中就是真的未命中。
+
+        返回 `(最终检索结果, 实际尝试过的查询词列表)`；后者只用于观测
+        （`AgentState.retrieval_queries`），从不替换 `question` 本身的存储和展示，
+        也从不写回知识库内容——规范化译文只用于这一次检索匹配。
+        """
+
+        result = await self.load_domain(category, keywords)
+        queries_used = [question]
+        if result.matched or self._localizer is None or self._merchant_id is None:
+            return result, queries_used
+        if locale == corpus_locale:
+            return result, queries_used
+        if detect_source_language(question) != SourceLanguage(str(locale)):
+            return result, queries_used
+
+        translated = await self._localizer.localize_many(
+            scope=LocalizationScope(kind="MERCHANT", merchant_id=self._merchant_id),
+            items=[LocalizeItem(key=_CROSS_LANGUAGE_QUERY_KEY, text=question)],
+            target_locale=corpus_locale,
+            budget=budget,
+        )
+        normalized = translated.get(_CROSS_LANGUAGE_QUERY_KEY)
+        if not normalized:
+            return result, queries_used
+        queries_used.append(normalized)
+
+        retried = await self.load_domain(category, (*keywords, normalized))
+        return (retried, queries_used) if retried.matched else (result, queries_used)
 
     async def _load_memory_fallback(self, category: QuestionCategory) -> KnowledgeResult:
         if self._memories is None or self._merchant_id is None:

@@ -22,9 +22,12 @@ from app.api.dependencies import (
     get_conversation_scope_service,
     get_db_session,
     get_merchant_context,
+    get_request_locale,
 )
 from app.core.errors import AppError, ErrorCode, ErrorResponse, error_responses
 from app.core.security import MerchantContext
+from app.localization.error_messages import localize_error_message
+from app.localization.locales import SupportedLocale
 from app.repositories.conversation import ConversationRepository
 from app.schemas.chat import (
     ChatRequest,
@@ -110,15 +113,25 @@ async def _sse_body(
     payload: ChatRequest,
     request_id: str,
     logger: BoundLogger,
+    locale: SupportedLocale = SupportedLocale.ZH_CN,
 ) -> AsyncIterator[bytes]:
     """SSE 主体。
 
     响应头在第一个字节之前就已发出，所以进入这里之后的任何失败都只能走
     `event: error`（§8.4）。认证和请求体校验发生在依赖与 FastAPI 校验阶段，
     仍由全局处理器返回普通 JSON 错误，不会进到这里。
+
+    Task 6 Step 8：流内 `error.message` 必须按 `locale` 渲染，不能像过去
+    那样直接透出 `exc.message`（那是异常构造时——往往是别的请求、别的
+    locale——写入的整句，语言可能与这次请求的 `Accept-Language` 不符）。
+    统一改成 `localize_error_message(exc.code, exc.message_params, locale)`，
+    与普通 JSON 路径的全局异常处理器完全同一套渲染逻辑，只是这里没有
+    Starlette 的异常处理管线可以复用，必须自己调用一次。
     """
 
-    task = asyncio.create_task(service.submit(context, payload, request_id=request_id))
+    task = asyncio.create_task(
+        service.submit(context, payload, request_id=request_id, locale=locale)
+    )
     try:
         while True:
             done, _ = await asyncio.wait({task}, timeout=HEARTBEAT_SECONDS)
@@ -133,7 +146,7 @@ async def _sse_body(
                 "error",
                 ErrorResponse(
                     code=exc.code,
-                    message=exc.message,
+                    message=localize_error_message(exc.code, exc.message_params, locale),
                     request_id=request_id,
                     details=exc.details,
                     retryable=exc.retryable,
@@ -150,7 +163,7 @@ async def _sse_body(
                 "error",
                 ErrorResponse(
                     code=ErrorCode.INTERNAL_ERROR,
-                    message="服务暂时不可用，请稍后重试",
+                    message=localize_error_message(ErrorCode.INTERNAL_ERROR, None, locale),
                     request_id=request_id,
                     retryable=True,
                 ),
@@ -216,15 +229,23 @@ async def post_chat(
     context: Annotated[MerchantContext, Depends(get_merchant_context)],
     _: Annotated[None, Depends(enforce_rate_limit)],
     service: Annotated[ChatService, Depends(get_chat_service)],
+    locale: Annotated[SupportedLocale, Depends(get_request_locale)],
 ) -> JSONResponse | StreamingResponse:
-    """默认返回 SSE；明确请求 JSON 时返回与 done 同构的响应。"""
+    """默认返回 SSE；明确请求 JSON 时返回与 done 同构的响应。
+
+    `locale` 从 `Accept-Language` 解析而来（Task 2 的 `get_request_locale`）；
+    `ChatRequest` 本身不带 locale 字段，显式传给 `ChatService.submit()`，图内
+    节点只从强类型 `AgentState.locale` 读取（Task 6 Step 5）。
+    """
 
     request_id = str(request.state.request_id)
     if _wants_json(request):
-        execution = await service.submit(context, payload, request_id=request_id)
+        execution = await service.submit(
+            context, payload, request_id=request_id, locale=locale
+        )
         return JSONResponse(content=execution.response.model_dump(mode="json"))
     return StreamingResponse(
-        _sse_body(service, context, payload, request_id, request.app.state.logger),
+        _sse_body(service, context, payload, request_id, request.app.state.logger, locale),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

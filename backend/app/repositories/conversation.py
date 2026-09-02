@@ -10,6 +10,7 @@ from sqlalchemy import and_, exists, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.localization.locales import detect_source_language
 from app.models.answer import Answer, Feedback
 from app.models.conversation import Conversation, Message
 
@@ -114,12 +115,23 @@ class ConversationRepository:
         conversation_id: UUID,
         role: str,
         content: str,
+        *,
+        source_locale: str | None = None,
     ) -> Message:
+        """Task 6：`messages.source_locale` 是 NOT NULL 且无 DB 默认值的列
+        （Task 3）。`source_locale` 默认按 `detect_source_language(content)`
+        自动推断——多数调用点（包括未升级到显式传参的既有调用点，如
+        `report_service.py` 的日报消息落库）都不需要关心这一列，行为与
+        Task 6 之前完全一致；`ChatService` 等已知源语言的调用点可以显式覆盖，
+        避免对已知内容再做一次不必要的推断。
+        """
+
         message = Message(
             merchant_id=merchant_id,
             conversation_id=conversation_id,
             role=role,
             content=content,
+            source_locale=source_locale or str(detect_source_language(content)),
         )
         self._session.add(message)
         await self._session.flush()
@@ -277,11 +289,21 @@ class ConversationRepository:
         response_payload: dict[str, Any],
         *,
         elapsed_ms: int | None = None,
+        response_locale: str | None = None,
     ) -> None:
+        """Task 6：`answers.response_locale` 同样是 NOT NULL 无默认值列
+        （Task 3）。`ChatService` 知道本轮实际生成 locale，会显式传入；
+        不知道的调用点（如 `report_service.py` 的日报固定中文模板）退回按
+        `response_payload["answer"]` 推断，保持既有零参数调用行为不变。
+        """
+
         answer.processing_status = "SUCCEEDED"
         answer.response_payload = response_payload
         answer.error_payload = None
         answer.elapsed_ms = elapsed_ms
+        answer.response_locale = response_locale or str(
+            detect_source_language(str(response_payload.get("answer", "")))
+        )
         await self._session.flush()
 
     async def mark_answer_failed(

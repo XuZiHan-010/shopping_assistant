@@ -20,6 +20,8 @@ from app.core.errors import (
     RequestInProgressError,
 )
 from app.core.security import MerchantContext
+from app.llm.client import LlmBudget
+from app.localization.locales import SupportedLocale
 from app.repositories.analytics import ResultColumn
 from app.schemas.chat import (
     AnalysisSource,
@@ -99,8 +101,15 @@ class FakeConversationRepository:
         return conversation
 
     async def create_message(
-        self, merchant_id: UUID, conversation_id: UUID, role: str, content: str
+        self,
+        merchant_id: UUID,
+        conversation_id: UUID,
+        role: str,
+        content: str,
+        *,
+        source_locale: str | None = None,
     ) -> FakeMessage:
+        del source_locale
         message = FakeMessage(role, content)
         self.messages.append(message)
         return message
@@ -133,10 +142,12 @@ class FakeConversationRepository:
         response_payload: dict[str, Any],
         *,
         elapsed_ms: int | None = None,
+        response_locale: str | None = None,
     ) -> None:
         answer.processing_status = "SUCCEEDED"
         answer.response_payload = response_payload
         answer.error_payload = None
+        answer.response_locale = response_locale
         self.last_elapsed_ms = elapsed_ms
 
     async def mark_answer_failed(
@@ -160,7 +171,14 @@ class ExplodingAgent:
         self.error = error
         self.calls = 0
 
-    async def run(self, message: str, session_id: UUID) -> AgentRunResult:
+    async def run(
+        self,
+        message: str,
+        session_id: UUID,
+        *,
+        locale: SupportedLocale = SupportedLocale.ZH_CN,
+    ) -> AgentRunResult:
+        del locale
         self.calls += 1
         raise self.error
 
@@ -168,8 +186,14 @@ class ExplodingAgent:
 class TableOnlyAgent:
     """返回已由 ChatResponse 契约验证过的纯明细，用于测试持久化层。"""
 
-    async def run(self, message: str, session_id: UUID) -> AgentRunResult:
-        result = await DeterministicAgent().run(message, session_id)
+    async def run(
+        self,
+        message: str,
+        session_id: UUID,
+        *,
+        locale: SupportedLocale = SupportedLocale.ZH_CN,
+    ) -> AgentRunResult:
+        result = await DeterministicAgent().run(message, session_id, locale=locale)
         base = result.response.model_dump(mode="json")
         base.update(
             {
@@ -188,8 +212,14 @@ class TableOnlyAgent:
 
 
 class GeneratedMetricAgent:
-    async def run(self, message: str, session_id: UUID) -> AgentRunResult:
-        result = await DeterministicAgent().run(message, session_id)
+    async def run(
+        self,
+        message: str,
+        session_id: UUID,
+        *,
+        locale: SupportedLocale = SupportedLocale.ZH_CN,
+    ) -> AgentRunResult:
+        result = await DeterministicAgent().run(message, session_id, locale=locale)
         response_data = result.response.model_dump(mode="json")
         response_data.update(
             {
@@ -247,6 +277,39 @@ class _RecordingMemoryAgent:
     def submit(self, **kwargs: object) -> None:
         assert self._repository.messages[-1].role == "ASSISTANT"
         self.calls.append(kwargs)
+
+
+class _FakeDisplayLocalizer:
+    """Task 6：`displayed_user_message` 本地化专用测试替身。
+
+    不模拟 `LocalizationService.localize_many()` 内部的恒等/词典/缓存级联，
+    只按显式给定的映射表返回译文——`target_locale` 为 en-US 才查表，其余
+    locale（如 zh-CN）原样返回源文本，粗粒度地还原真实服务"目标语言与源
+    语言相同时不翻译"的行为，够用来验证 `ChatService` 这一层的调用与
+    覆写逻辑，不重复测试 `LocalizationService` 自己的级联（那部分已经在
+    `tests/unit/services/test_localization_service.py` 覆盖）。
+    """
+
+    def __init__(self, translations: dict[str, str]) -> None:
+        self.calls = 0
+        self._translations = translations
+
+    async def localize_many(
+        self,
+        *,
+        scope: object,
+        items: object,
+        target_locale: SupportedLocale,
+        budget: object,
+    ) -> dict[str, str]:
+        self.calls += 1
+        resolved: dict[str, str] = {}
+        for item in items:  # type: ignore[attr-defined]
+            if target_locale is SupportedLocale.EN_US:
+                resolved[item.key] = self._translations.get(item.text, item.text)
+            else:
+                resolved[item.key] = item.text
+        return resolved
 
 
 def build_service(
@@ -378,9 +441,12 @@ async def test_retryable_failure_reuses_the_same_row_and_runs_again() -> None:
 
     stored = repository.answers[request.client_request_id]
     assert stored.processing_status == "FAILED_RETRYABLE"
+    # Task 6：只持久化稳定的 code + message_params，不再持久化某次请求当时
+    # 渲染出来的整句 message——`FAILED_FINAL` 重放时必须能按重放请求自己的
+    # locale 重新渲染（见 `_stored_error()`），持久化整句会锁死第一次的语言。
     assert stored.error_payload == {
         "code": "INTERNAL_ERROR",
-        "message": "演示回答暂时不可用，请稍后重试",
+        "message_params": {},
         "status_code": 500,
         "retryable": True,
     }
@@ -511,3 +577,118 @@ async def test_successful_turn_records_elapsed_ms() -> None:
 
     assert repository.last_elapsed_ms is not None
     assert repository.last_elapsed_ms >= 0
+
+
+# --- Task 6：locale 贯穿与幂等语义 ------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_failed_final_replay_renders_a_localized_message_but_runs_the_agent_once() -> None:
+    """Step 9 核心断言：同一失败 `client_request_id` 先中文、后英语重放，
+    `code` 相同、`message` 语言不同，业务执行次数仍为 1。
+
+    `FAILED_FINAL` 只持久化稳定的 `code` + `message_params`（Task 6 之前会
+    连整句中文 `message` 一起存死）；重放时 `_stored_error()` 按**这次重放
+    请求自己的** `locale` 现场渲染 `message`，绝不重放旧语言整句。
+    """
+
+    scope_error = MerchantScopeViolationError()
+    service, repository, _, agent = build_service(ExplodingAgent(scope_error))
+    request = chat_request()
+
+    with pytest.raises(MerchantScopeViolationError):
+        await service.submit(CONTEXT, request, request_id="r1", locale=SupportedLocale.ZH_CN)
+
+    stored = repository.answers[request.client_request_id]
+    assert stored.processing_status == "FAILED_FINAL"
+
+    with pytest.raises(AppError) as zh_excinfo:
+        await service.submit(CONTEXT, request, request_id="r2", locale=SupportedLocale.ZH_CN)
+    with pytest.raises(AppError) as en_excinfo:
+        await service.submit(CONTEXT, request, request_id="r3", locale=SupportedLocale.EN_US)
+
+    assert zh_excinfo.value.code is ErrorCode.MERCHANT_SCOPE_VIOLATION
+    assert en_excinfo.value.code is ErrorCode.MERCHANT_SCOPE_VIOLATION
+    assert zh_excinfo.value.status_code == en_excinfo.value.status_code == 403
+    assert zh_excinfo.value.message == "无权访问该商家资源"
+    assert (
+        en_excinfo.value.message
+        == "You do not have permission to access this merchant's resources."
+    )
+    assert zh_excinfo.value.message != en_excinfo.value.message
+    # 只有第一次真正触发过 Agent（并让它抛出异常）；两次重放都是纯读取分发，
+    # 一次都没有再调用 Agent。
+    assert agent.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_processing_request_is_still_rejected_when_replayed_in_a_different_locale() -> None:
+    """不得为了支持切换语言而放宽 `PROCESSING` 分支——那等于允许同一轮问答
+    并发跑两次。无论重放请求用哪种语言，`PROCESSING` 都必须是 409。"""
+
+    service, repository, _, agent = build_service()
+    request = chat_request()
+
+    await service.submit(CONTEXT, request, request_id="r1", locale=SupportedLocale.ZH_CN)
+    repository.answers[request.client_request_id].processing_status = "PROCESSING"
+
+    with pytest.raises(RequestInProgressError) as excinfo:
+        await service.submit(CONTEXT, request, request_id="r2", locale=SupportedLocale.EN_US)
+
+    assert excinfo.value.status_code == 409
+    assert excinfo.value.retryable is True
+    assert agent.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_succeeded_replay_relocalizes_only_the_displayed_user_message() -> None:
+    """`SUCCEEDED` 重放复用同一份业务事实（Agent 只跑一次），但
+    `displayed_user_message` 必须按**这次重放请求自己的** locale 重新渲染，
+    不能沿用第一次生成时的语言。"""
+
+    localizer = _FakeDisplayLocalizer({"昨天总 GMV 是多少？": "What was total GMV yesterday?"})
+    session = FakeSession()
+    repository = FakeConversationRepository()
+    agent = CountingAgent()
+    service = ChatService(
+        session,  # type: ignore[arg-type]
+        repository,
+        agent,
+        localization_service=localizer,  # type: ignore[arg-type]
+        localization_budget=LlmBudget(4, 4_000),
+    )
+    request = chat_request()
+
+    zh = await service.submit(CONTEXT, request, request_id="r1", locale=SupportedLocale.ZH_CN)
+    en = await service.submit(CONTEXT, request, request_id="r2", locale=SupportedLocale.EN_US)
+
+    assert zh.replayed is False
+    assert en.replayed is True
+    assert zh.response.displayed_user_message == "昨天总 GMV 是多少？"
+    assert en.response.displayed_user_message == "What was total GMV yesterday?"
+    # 除了 displayed_user_message，其余业务事实必须逐字相同——同一份 Answer。
+    assert zh.response.model_dump(mode="json", exclude={"displayed_user_message"}) == (
+        en.response.model_dump(mode="json", exclude={"displayed_user_message"})
+    )
+    assert agent.calls == 1
+    assert localizer.calls >= 1
+
+
+def test_request_digest_is_a_pure_function_of_message_and_attachments_only() -> None:
+    """`_request_digest()` 继续只散列消息和附件，不接受也不读取 locale——
+    `ChatRequest` 本身也不带 locale 字段（Task 6 明确不引入第二个真源）。
+    同一问题在两种语言的请求下必须落到同一个摘要，幂等判定才不会因为
+    `Accept-Language` 不同就把同一个 `client_request_id` 误判成"内容变了"。
+    """
+
+    same_message_different_key_a = chat_request(message="昨天总 GMV 是多少？", key="digest-a")
+    same_message_different_key_b = chat_request(message="昨天总 GMV 是多少？", key="digest-b")
+    different_message = chat_request(message="最近7天退货量趋势", key="digest-a")
+
+    # client_request_id 不参与摘要：同一问题不同请求标识落到同一个摘要。
+    assert _request_digest(same_message_different_key_a) == _request_digest(
+        same_message_different_key_b
+    )
+    # 消息本身变化时摘要必须不同，否则幂等键复用检测（IDEMPOTENCY_KEY_REUSED）
+    # 会形同虚设。
+    assert _request_digest(different_message) != _request_digest(same_message_different_key_a)

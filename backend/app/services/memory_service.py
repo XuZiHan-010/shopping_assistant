@@ -8,11 +8,12 @@ from typing import Protocol
 from uuid import UUID
 
 from app.llm.client import LlmBudget, LlmClient
+from app.localization.locales import SupportedLocale
 from app.prompts.memory import (
     MEMORY_MARKER,
-    MEMORY_SYSTEM_PROMPT,
     build_fallback_memory,
     build_memory_prompt,
+    build_memory_system_prompt,
 )
 
 logger = logging.getLogger(__name__)
@@ -46,8 +47,11 @@ class MemoryService:
         history: list[dict[str, object]],
         budget: LlmBudget,
         use_llm: bool = True,
+        locale: SupportedLocale = SupportedLocale.ZH_CN,
     ) -> MemoryConsolidation:
-        fallback = build_fallback_memory(category=category, manual_markdown=manual_markdown)
+        fallback = build_fallback_memory(
+            category=category, manual_markdown=manual_markdown, locale=locale
+        )
         content = fallback
         degraded = True
         degraded_reason: str | None = "未启用模型压缩，本次写入确定性兜底文本"
@@ -57,10 +61,11 @@ class MemoryService:
                 category=category,
                 manual_markdown=manual_markdown,
                 history=history,
+                locale=locale,
             )
             try:
                 result = await self._llm.complete(
-                    system=MEMORY_SYSTEM_PROMPT,
+                    system=build_memory_system_prompt(locale),
                     user=prompt,
                     fallback=fallback,
                     budget=budget,
