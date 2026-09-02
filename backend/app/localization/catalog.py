@@ -279,6 +279,37 @@ _GRAPH_DEGRADE_REASON_MESSAGES: dict[str, str] = {
 }
 
 # ---------------------------------------------------------------------------
+# 来源：backend/app/services/answer_service.py（AnswerService._validate()）——
+# 本地校验产出的 issue 文案，最终经 quality_loop.py 的 `_REJECT_NOTE_TEMPLATES`
+# 拼进 `quality_notes`。Task 6 补充登记（Task 5 交付语言无关校验逻辑时，
+# 校验 issue 文案本身尚未接入 locale 渲染，属于 Task 6 的接线范围，见
+# `_validate()` 的 `locale` 参数）。
+#
+# 「以下数字不在查询结果或事实摘要里，不得出现在回答中：」后面跟的是动态
+# 拼接的数字列表，不是固定整句，这里只登记**前缀**——`_validate()` 里按
+# locale 选取前缀后自行拼接数字列表，不通过本表做整句精确匹配。
+# ---------------------------------------------------------------------------
+
+_ANSWER_VALIDATION_MESSAGES: dict[str, str] = {
+    "回答含有内部标识符，不得出现在对商家的回答里": (
+        "The answer contains an internal identifier, which must not appear "
+        "in a merchant-facing answer."
+    ),
+    "非加和指标不能被回答草稿合计或汇总": (
+        "This non-additive metric must not be totalled or summed in the "
+        "answer draft."
+    ),
+    "回答陈述的日期区间超出了本次查询的实际范围": (
+        "The date range stated in the answer exceeds the actual range of "
+        "this query."
+    ),
+    "以下数字不在查询结果或事实摘要里，不得出现在回答中：": (
+        "The following numbers are not in the query result or fact summary "
+        "and must not appear in the answer: "
+    ),
+}
+
+# ---------------------------------------------------------------------------
 # 来源：backend/app/analytics/demo_data.py —— 闭集分类/原因/城市中文值
 # ---------------------------------------------------------------------------
 
@@ -418,6 +449,7 @@ _TRANSLATIONS: dict[str, str] = _merge_translations(
     _ADDITIVE_CLAIM_TRANSLATIONS,
     _REVIEW_SERVICE_MESSAGES,
     _GRAPH_DEGRADE_REASON_MESSAGES,
+    _ANSWER_VALIDATION_MESSAGES,
     _DEMO_DATA_VALUES,
     _STATUS_LABELS,
 )

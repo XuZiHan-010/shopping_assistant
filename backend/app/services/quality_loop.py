@@ -119,10 +119,13 @@ class QualityLoop:
             reviewed = ReviewAttempt(None, "", (), None)
             if drafted.draft is None:
                 issues = [
-                    _MSG_EMPTY_MODEL_OUTPUT if not drafted.raw_text else _MSG_UNPARSEABLE_JSON
+                    _localized(
+                        _MSG_EMPTY_MODEL_OUTPUT if not drafted.raw_text else _MSG_UNPARSEABLE_JSON,
+                        locale,
+                    )
                 ]
             else:
-                issues = self._answers.validate_issues(drafted.draft, facts)
+                issues = self._answers.validate_issues(drafted.draft, facts, locale=locale)
                 if not issues:
                     if reviewer_llm is None:
                         notes.append(_localized(_MSG_NO_INDEPENDENT_REVIEW, locale))

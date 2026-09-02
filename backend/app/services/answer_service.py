@@ -147,6 +147,22 @@ _CN_DURATION_CAPTURE = re.compile(r"(?:最近|过去)\s*(\d+)\s*天")
 _DATE_RANGE_ISSUE = "回答陈述的日期区间超出了本次查询的实际范围"
 
 
+def _localized_validation_message(message: str, locale: SupportedLocale) -> str:
+    """把 `_validate()` 产出的固定中文 issue 文案渲染成目标语言。
+
+    Task 6：这些 issue 最终经 `quality_loop.py` 的
+    `_REJECT_NOTE_TEMPLATES[locale].format(..., issues=...)` 拼进
+    `quality_notes`——不本地化就会在英文响应里混入中文（登记在
+    `app.localization.catalog._ANSWER_VALIDATION_MESSAGES`）。`zh-CN` 原样
+    返回；`en-US` 查不到时兜底原句而不是抛异常，宁可让极端情况下混入一句
+    未翻译的中文，也不能让本地校验本身变成新的故障源。
+    """
+
+    if locale is SupportedLocale.ZH_CN:
+        return message
+    return localize_catalog_value(message, locale) or message
+
+
 @dataclass(frozen=True)
 class AnswerFacts:
     question: str
@@ -200,8 +216,14 @@ class AnswerService:
             return DraftAttempt(None, result.text, None)
         return DraftAttempt(draft, result.text, None)
 
-    def validate_issues(self, draft: AnswerDraft, facts: AnswerFacts) -> list[str]:
-        return self._validate(draft, facts)
+    def validate_issues(
+        self,
+        draft: AnswerDraft,
+        facts: AnswerFacts,
+        *,
+        locale: SupportedLocale = SupportedLocale.ZH_CN,
+    ) -> list[str]:
+        return self._validate(draft, facts, locale=locale)
 
     def fallback_draft(self, facts: AnswerFacts) -> AnswerDraft:
         return self._fallback(facts)
@@ -257,13 +279,23 @@ class AnswerService:
             ],
         )
 
-    def _validate(self, draft: AnswerDraft, facts: AnswerFacts) -> list[str]:
+    def _validate(
+        self,
+        draft: AnswerDraft,
+        facts: AnswerFacts,
+        *,
+        locale: SupportedLocale = SupportedLocale.ZH_CN,
+    ) -> list[str]:
         summary = self._derive_summary(facts)
         allowed_numbers = _allowed_numbers(facts.query_result, summary)
         raw_text = _draft_text(draft)
         issues: list[str] = []
         if _UUID.search(raw_text):
-            issues.append("回答含有内部标识符，不得出现在对商家的回答里")
+            issues.append(
+                _localized_validation_message(
+                    "回答含有内部标识符，不得出现在对商家的回答里", locale
+                )
+            )
         result = facts.query_result
         if (
             result.non_additive
@@ -276,10 +308,12 @@ class AnswerService:
                 )
             )
         ):
-            issues.append("非加和指标不能被回答草稿合计或汇总")
+            issues.append(
+                _localized_validation_message("非加和指标不能被回答草稿合计或汇总", locale)
+            )
         range_issue = _date_range_issue(raw_text, facts) or _duration_range_issue(raw_text, facts)
         if range_issue is not None:
-            issues.append(range_issue)
+            issues.append(_localized_validation_message(range_issue, locale))
         # 日期是维度值，不是要与聚合结果逐项比对的业务数字；否则 2026-08-05
         # 会被拆成三个数字并把一份完全基于事实的草稿误判为幻觉。中文写法同理。
         text = _DURATION.sub("", _SLASH_DATE.sub("", _CN_DATE.sub("", _ISO_DATE.sub("", raw_text))))
@@ -287,9 +321,11 @@ class AnswerService:
             {number for number in _NUMBER.findall(text) if number not in allowed_numbers}
         )
         if unexpected:
-            issues.append(
-                "以下数字不在查询结果或事实摘要里，不得出现在回答中：" + "、".join(unexpected)
+            prefix = _localized_validation_message(
+                "以下数字不在查询结果或事实摘要里，不得出现在回答中：", locale
             )
+            joiner = "、" if locale is SupportedLocale.ZH_CN else ", "
+            issues.append(prefix + joiner.join(unexpected))
         return issues
 
     def _derive_summary(self, facts: AnswerFacts) -> FactSummary:

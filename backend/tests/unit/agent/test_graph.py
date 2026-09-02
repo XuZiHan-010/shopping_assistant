@@ -11,7 +11,9 @@ from app.knowledge.retrieval import KnowledgeRetrieval
 from app.llm.fake import FakeLlmClient
 from app.localization.locales import SupportedLocale
 from app.metrics.catalog import MetricCatalog
+from app.repositories.analytics import ResultColumn
 from app.schemas.chat import AnalysisSource, AnswerMode, QualityStatus
+from app.services.safe_query import QueryResult
 
 _HAN = re.compile("[一-鿿]")
 
@@ -475,3 +477,110 @@ async def test_default_locale_is_chinese_and_unaffected_by_task_6() -> None:
 
     assert result.response.answer == "已完成结构化理解。"
     assert result.steps[0].label == "识别商家与会话上下文"
+
+
+class _FakeQueryService:
+    """让 METRIC 分支真正 `queried=True`，从而真正跑到 `_quality_loop` 节点
+    （而不是 CHAT 短路：`facts is None` 时 `_quality_loop` 直接跳过）。"""
+
+    async def execute(self, context: object, intent: object, *, now: object, keywords=()):
+        del context, intent, now, keywords
+        return QueryResult(
+            columns=(ResultColumn("refund_amount", "退款金额", "METRIC"),),
+            rows=[{"refund_amount": 500}],
+            total_rows=1,
+            truncated=False,
+            source_tables=("refunds",),
+            plan_steps=("scan refunds",),
+            export_spec=None,
+            notes=(),
+            non_additive=False,
+        )
+
+
+@pytest.mark.asyncio
+async def test_english_locale_localizes_a_real_answer_validation_failure() -> None:
+    """回归测试（code review 发现的 Important 缺口）：`quality_loop.py` 里
+    `_MSG_EMPTY_MODEL_OUTPUT`/`_MSG_UNPARSEABLE_JSON` 曾经漏接
+    `_localized()`，`answer_service.py::_validate()` 曾经完全不接受
+    `locale` 参数——都不会被"零 Han 残留"测试捕获，因为那些测试走的是
+    CHAT/degraded 快速路径（`facts is None` 时 `_quality_loop` 直接
+    `return self._step(state, "quality_loop")`，根本不会调用
+    `QualityLoop.run()`）。
+
+    这里真正让 METRIC 分支查询成功（`_FakeQueryService`），逼真实的
+    `_quality_loop` → `AnswerService._validate()` 跑起来：模型第一次起草的
+    回答里混入一个内部 UUID，`_validate()` 会产出一条真实校验失败
+    （不是 JSON 解析失败），必须能在 `en-US` 请求下正确本地化，不能在
+    `quality_notes` 里混入中文。
+    """
+
+    llm = FakeLlmClient(
+        responses=[
+            json.dumps(
+                {"answer_mode": "METRIC", "category": "REFUND", "intent_keywords": ["refund"]}
+            ),
+            json.dumps(
+                {
+                    "answer_mode": "METRIC",
+                    "category": "REFUND",
+                    "metric": "refund_amount",
+                    "dimensions": [],
+                    "filters": {},
+                    "date_range": None,
+                    "sort": None,
+                    "limit": None,
+                    "followup_reference": False,
+                    "needs_attachment": False,
+                }
+            ),
+            # 起草：混入一个内部 UUID——`AnswerService._validate()` 的
+            # `_UUID` 检查会真实触发，产出一条本地校验 issue（不是模型输出
+            # 为空/无法解析这种上游失败）。
+            json.dumps(
+                {
+                    "answer": (
+                        "Refund order 123e4567-e89b-12d3-a456-426614174000 "
+                        "totalled 500 CNY."
+                    ),
+                    "recommendations": [
+                        {
+                            "title": "Verify query scope",
+                            "evidence": "This query returned 1 row.",
+                            "action": "Confirm the date range covers what you need.",
+                        },
+                        {
+                            "title": "Verify metric definition",
+                            "evidence": "Identified metric code: refund_amount.",
+                            "action": "Adjust the question if the definition is unexpected.",
+                        },
+                    ],
+                }
+            ),
+        ]
+    )
+    graph = MerchantQaGraph(
+        retrieval=KnowledgeRetrieval(K()),
+        intent_service_llm=llm,
+        catalog=MetricCatalog(M(), llm),
+        query_service=_FakeQueryService(),
+        merchant_id=uuid4(),
+        answer_llm=llm,
+        reviewer_llm=llm,
+        # 只给一轮机会：起草失败校验后直接落 DEGRADED，不需要为重试再排更多
+        # FakeLlmClient 响应——`_MSG_MAX_RETRIES_REACHED` 本身已经是既有测试
+        # 覆盖过的路径，这里只关心"这一轮的校验 issue 有没有被正确本地化"。
+        quality_max_attempts=1,
+    )
+
+    result = await graph.run(
+        "Refund amount in the last 7 days", uuid4(), locale=SupportedLocale.EN_US
+    )
+
+    assert result.response.answer_mode is AnswerMode.METRIC
+    assert result.response.quality_status is QualityStatus.DEGRADED
+    # 真正命中了本地校验 issue（不是走空转/无关分支）：英文译文必须出现。
+    notes_text = " ".join(result.response.quality_notes)
+    assert "internal identifier" in notes_text
+    offending = [note for note in result.response.quality_notes if _HAN.search(note)]
+    assert offending == [], f"quality_notes 混入了汉字：{offending!r}"
