@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from itertools import pairwise
 
@@ -55,28 +55,63 @@ _UUID = re.compile(
 # "combined"……）完全绕过检查——不是文案缺陷，是校验本身对英文回答失效。
 # 中英文关键词统一从 `app.localization.catalog` 取（词表 > 正则），不再各写
 # 一套：中文短语走 `_ADDITIVE_CLAIM_PHRASES_ZH`，英文形式通过
-# `localize_catalog_value` 反查得到，两者合并成一份大小写不敏感的匹配列表。
+# `localize_catalog_value` 反查得到。
+#
+# 中文短语沿用原有的子串匹配（CJK 文本没有"词边界"这个概念，子串匹配本来
+# 就是正确做法，不改）；英文形式改用**词边界正则**而不是子串匹配——子串
+# 匹配曾经把 "totally"（"total" 的无关前缀）也判成合计断言，"summary"/
+# "consumer" 同理会误伤 "sum" 这种短词。词边界正则从根上关掉这一整类误判，
+# 而不是逐词挑"安全"的译文防守。
 _ADDITIVE_CLAIM_PHRASES_ZH = ("合计", "总计", "累计", "总和", "加总", "汇总")
-_ADDITIVE_CLAIM_PHRASES: tuple[str, ...] = tuple(
+_ADDITIVE_CLAIM_PHRASES_EN: tuple[str, ...] = tuple(
     dict.fromkeys(
-        phrase.lower()
+        phrase
         for phrase in (
-            *_ADDITIVE_CLAIM_PHRASES_ZH,
-            *(
-                localize_catalog_value(zh_phrase, SupportedLocale.EN_US)
-                for zh_phrase in _ADDITIVE_CLAIM_PHRASES_ZH
-            ),
+            localize_catalog_value(zh_phrase, SupportedLocale.EN_US)
+            for zh_phrase in _ADDITIVE_CLAIM_PHRASES_ZH
         )
         if phrase
     )
 )
 
+
+def _en_inflection_alternative(word: str) -> str:
+    """把英文词根展开成保守的屈折形式匹配组：只覆盖名词复数（-s）、动词过去式/
+    现在分词（-ed/-ing，含英式双写 -led/-ling）这几种规则变化，不追求覆盖全部
+    不规则英语语法——够用的目标是让 "totalled" 这类自然写法仍能触发，同时因为
+    要求整词匹配到词边界，"totally" 的 "-ly" 后缀不在允许的屈折形式里，不会
+    被误伤。
+    """
+
+    if word.endswith("e"):
+        stem = re.escape(word[:-1])
+        return rf"{re.escape(word)}s?|{stem}(?:ed|ing)"
+    return rf"{re.escape(word)}(?:s|ed|ing|led|ling)?"
+
+
+_ADDITIVE_CLAIM_EN_PATTERN: re.Pattern[str] | None = (
+    re.compile(
+        r"\b(?:"
+        + "|".join(_en_inflection_alternative(word) for word in _ADDITIVE_CLAIM_PHRASES_EN)
+        + r")\b",
+        re.IGNORECASE,
+    )
+    if _ADDITIVE_CLAIM_PHRASES_EN
+    else None
+)
+
 # Task 5：日期区间一致性校验。过去的日期/时长正则只负责「剥掉看起来像日期的
 # 数字，避免被数字校验误判成幻觉」，从不核对模型陈述的日期区间是否真的落在
-# 本次查询范围内——中英文都有这个缺口。这里新增一道独立检查：从回答文本里
-# 抽取「起始日期 至/到/~/-/through/to 结束日期」这类显式区间表述（ISO、
-# 中文纪年、斜杠、英文月份写法都认），解析成 `date` 对象后与事实包里能确定
-# 的实际查询区间比对，区间以外即判定为编造范围。
+# 本次查询范围内——中英文都有这个缺口。这里新增两道独立检查：
+#
+# 1. 显式区间：从回答文本里抽取「起始日期 至/到/~/-/through/to 结束日期」
+#    这类表述（ISO、中文纪年、斜杠、英文月份写法都认），解析成 `date` 对象后
+#    与事实包里能确定的实际查询区间比对，区间以外即判定为编造范围；
+# 2. 相对时长：抽取「最近 N 天」/「last N days」这类表述，以事实包里最近的
+#    实际日期为锚点向前推 N 天，超出实际覆盖范围同样判定为编造窗口——这是
+#    计划 §Task 5 明确点名的目标（"日期/时长校验改为先抽取归一化时间区间
+#    （ISO 日期、`last N days`、`最近 N 天`）再与查询区间比对"），过去完全
+#    没有任何代码路径处理这类相对时长断言。
 _ISO_DATE_CAPTURE = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
 _CN_DATE_CAPTURE = re.compile(r"(?:(\d{4})\s*年\s*)?(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]")
 _SLASH_DATE_CAPTURE = re.compile(r"(?:(\d{4})\s*/\s*)?(\d{1,2})\s*/\s*(\d{1,2})\b")
@@ -101,7 +136,13 @@ _EN_MONTH_NUMBERS: dict[str, int] = {
 # 只在两个已识别的日期 token 之间、且中间**只有**这个连接词（允许两侧空白）时，
 # 才认定为一个显式区间；避免把文本里恰好相邻但语义无关的两个日期误判成区间。
 _RANGE_JOINER = re.compile(r"^\s*(?:至|到|~|-|through|to)\s*$", re.IGNORECASE)
-# 两种语言共用同一条 issue 文案（同一个 issue 码的唯一渲染），不按草稿语言分叉。
+# 相对时长表述：只认「最近/过去 N 天」「last/past N days」这两种计划里点名的
+# 写法，不追求覆盖「周」「月」等更多单位——够用即可，不做成通用日期解析器。
+_EN_DURATION_CAPTURE = re.compile(r"\b(?:last|past)\s+(\d+)\s*days?\b", re.IGNORECASE)
+_CN_DURATION_CAPTURE = re.compile(r"(?:最近|过去)\s*(\d+)\s*天")
+# 两种语言共用同一条 issue 文案（同一个 issue 码的唯一渲染），不按草稿语言分叉；
+# 显式区间与相对时长两道检查也共用同一条文案——对用户来说都是「陈述的时间范围
+# 与实际查询不一致」，不需要按触发路径拆成两句话。
 _DATE_RANGE_ISSUE = "回答陈述的日期区间超出了本次查询的实际范围"
 
 
@@ -225,10 +266,16 @@ class AnswerService:
         if (
             result.non_additive
             and len(result.rows) > 1
-            and any(phrase in raw_text.lower() for phrase in _ADDITIVE_CLAIM_PHRASES)
+            and (
+                any(phrase in raw_text for phrase in _ADDITIVE_CLAIM_PHRASES_ZH)
+                or (
+                    _ADDITIVE_CLAIM_EN_PATTERN is not None
+                    and _ADDITIVE_CLAIM_EN_PATTERN.search(raw_text) is not None
+                )
+            )
         ):
             issues.append("非加和指标不能被回答草稿合计或汇总")
-        range_issue = _date_range_issue(raw_text, facts)
+        range_issue = _date_range_issue(raw_text, facts) or _duration_range_issue(raw_text, facts)
         if range_issue is not None:
             issues.append(range_issue)
         # 日期是维度值，不是要与聚合结果逐项比对的业务数字；否则 2026-08-05
@@ -533,6 +580,34 @@ def _date_range_issue(raw_text: str, facts: AnswerFacts) -> str | None:
         if start > end:
             start, end = end, start
         if start < ref_start or end > ref_end:
+            return _DATE_RANGE_ISSUE
+    return None
+
+
+def _extract_stated_durations(text: str) -> list[int]:
+    """抽取「最近/过去 N 天」「last/past N days」这类相对时长表述，返回天数。"""
+
+    days: list[int] = [int(match[1]) for match in _EN_DURATION_CAPTURE.finditer(text)]
+    days.extend(int(match[1]) for match in _CN_DURATION_CAPTURE.finditer(text))
+    return days
+
+
+def _duration_range_issue(raw_text: str, facts: AnswerFacts) -> str | None:
+    """相对时长断言必须与实际查询覆盖的天数一致：以事实包里最近的实际日期为
+    锚点向前推 N 天，超出实际范围即判定为编造窗口——与 `_date_range_issue`
+    共用同一套「无法判断就放行」的 fail open 原则和同一条 issue 文案，只是
+    抽取的表述形态不同（相对时长而不是显式起止日期）。
+    """
+
+    reference = _reference_range(facts)
+    if reference is None:
+        return None
+    ref_start, ref_end = reference
+    for days in _extract_stated_durations(raw_text):
+        if days <= 0:
+            continue
+        claimed_start = ref_end - timedelta(days=days - 1)
+        if claimed_start < ref_start:
             return _DATE_RANGE_ISSUE
     return None
 

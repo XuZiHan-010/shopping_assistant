@@ -891,3 +891,128 @@ def test_date_consistency_check_still_works_for_chinese_ranges(service) -> None:
     )
 
     assert issues, "中文显式区间超出实际范围同样应当被拦下"
+
+
+# ---------------------------------------------------------------------------
+# 复核 Finding 1：聚合断言的英文匹配改成词边界正则，不能再用子串 `in` 判断——
+# 子串匹配曾经把 "totally"（"total" 的无关前缀）也判成合计断言。
+# ---------------------------------------------------------------------------
+
+
+def test_additive_claim_check_does_not_misfire_on_an_unrelated_word_sharing_a_prefix(
+    service,
+) -> None:
+    """"totally" 与 "total" 共享前缀但语义无关，词边界匹配不能把它误判成合计
+    断言——这正是子串匹配版本会产生的假阳性（reviewer Finding 1）。
+    """
+
+    issues = service.validate_issues(
+        draft=_draft_with_answer("Refund amounts look totally normal, nothing to report."),
+        facts=_facts_without_total(),
+    )
+
+    assert issues == []
+
+
+def test_additive_claim_check_still_treats_combined_as_a_signal_word(service) -> None:
+    """"combined" 作为独立触发词，即使出现在 "combined with" 这类连接短语里
+    也会命中——这是已知的、有意接受的残余误判风险（reviewer 标记为 Minor）：
+    区分"回答把多天数值合并成一个结论"和"combined with 式无关连接词"需要
+    语义理解，超出词边界正则能覆盖的范围，不在本任务治理目标内，这里只是
+    把当前行为显式锁定成一条可读的回归测试。
+    """
+
+    issues = service.validate_issues(
+        draft=_draft_with_answer(
+            "Combined with strong marketing, refund rates for each day stayed low"
+        ),
+        facts=_facts_without_total(),
+    )
+
+    assert any("非加和" in issue for issue in issues)
+
+
+# ---------------------------------------------------------------------------
+# 复核 Finding 2：相对时长断言（"last N days"/"最近 N 天"）过去完全没有任何
+# 代码路径与实际查询区间比对，是与"两个显式日期 token 需要紧邻"这条已知局限
+# 完全不同的、未披露的缺口。
+# ---------------------------------------------------------------------------
+
+
+def _facts_for_a_3_day_window_with_a_thirty_value():
+    """与 `_facts_for_last_3_days` 同样的 3 天真实窗口（2026-08-05~07），但
+    第三天的指标值恰好是 30——这样草稿里出现的 "30" 本身就能在事实包里找到
+    "看似合法"的出处，通用的"数字未出现在事实包"校验不会意外把
+    "最近 30 天"这类越界时长断言的测试用例救回来，确保测试只在相对时长
+    一致性逻辑本身生效时才会通过。
+    """
+
+    from app.services.answer_service import AnswerFacts
+
+    return AnswerFacts(
+        question="What is the refund amount for the last 3 days?",
+        metric=MetricPayload(
+            metric_code="refund_amount",
+            display_name="Refund amount",
+            unit="CNY",
+            definition="The refund amount of refund records.",
+            source="Borough Metric Catalog",
+            owner="Business Analytics",
+            status="ACTIVE",
+            generated=False,
+            notice=None,
+        ),
+        query_result=QueryResult(
+            columns=(
+                ResultColumn("date", "Date", "DIMENSION"),
+                ResultColumn("refund_amount", "Refund amount", "METRIC"),
+            ),
+            rows=[
+                {"date": "2026-08-05", "refund_amount": Decimal("1")},
+                {"date": "2026-08-06", "refund_amount": Decimal("2")},
+                {"date": "2026-08-07", "refund_amount": Decimal("30")},
+            ],
+            total_rows=3,
+            truncated=False,
+            source_tables=("refunds",),
+            plan_steps=("Aggregate refund amount by day",),
+            export_spec=None,
+            notes=(),
+            non_additive=False,
+        ),
+    )
+
+
+def test_date_consistency_check_flags_a_mismatched_relative_duration_in_english(service) -> None:
+    """"over the last 30 days" 远超实际只查到的 3 天范围，必须被拦下。"""
+
+    issues = service.validate_issues(
+        draft=_draft_with_answer("Over the last 30 days, the refund amount rose"),
+        facts=_facts_for_a_3_day_window_with_a_thirty_value(),
+    )
+
+    assert issues, "宣称的 30 天窗口远超实际查询到的 3 天范围，应当被拦下"
+
+
+def test_date_consistency_check_flags_a_mismatched_relative_duration_in_chinese(service) -> None:
+    """中文『最近30天』式相对时长同样要与实际范围比对——校验逻辑双语共用。"""
+
+    issues = service.validate_issues(
+        draft=_draft_with_answer("最近30天退款金额呈上升趋势"),
+        facts=_facts_for_a_3_day_window_with_a_thirty_value(),
+    )
+
+    assert issues, "宣称的 30 天窗口远超实际查询到的 3 天范围，应当被拦下"
+
+
+def test_date_consistency_check_allows_a_relative_duration_that_matches_the_facts(
+    service,
+) -> None:
+    """陈述的时长与实际查询覆盖的天数一致时不该被误判。"""
+
+    issues = service.validate_issues(
+        draft=_draft_with_answer("Over the last 3 days, the refund amount rose"),
+        facts=_facts_for_last_3_days(),
+    )
+
+    assert issues == []
