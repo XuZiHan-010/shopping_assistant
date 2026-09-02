@@ -26,6 +26,8 @@
 
 from __future__ import annotations
 
+import re
+
 from app.localization.locales import SupportedLocale
 
 # ---------------------------------------------------------------------------
@@ -220,6 +222,63 @@ _PREFILTER_REJECTION_MESSAGES: dict[str, str] = {
 }
 
 # ---------------------------------------------------------------------------
+# 来源：backend/app/services/answer_service.py（_ADDITIVE_CLAIM_PHRASES）
+#
+# Task 5：聚合断言校验（"非加和指标不能被合计"）过去只认中文关键词，英文回答
+# 说 "totalled"/"combined" 之类的话完全绕过检查。中英文关键词都从这里统一取，
+# 不再各写一套正则——`answer_service.py` 在导入时通过 `localize_catalog_value`
+# 反查出英文形式，拼进同一份大小写不敏感的匹配列表。
+# ---------------------------------------------------------------------------
+
+#: 英文译文刻意避开裸词 "sum"——它是 "summary"/"consumer" 等常见词的前缀子串，
+#: 用作子串匹配关键词会大量误伤；"summed" 覆盖模型最可能出现的措辞
+#: （"the values summed to 18"），同时不与那些常见词冲突。
+_ADDITIVE_CLAIM_TRANSLATIONS: dict[str, str] = {
+    "合计": "total",
+    "总计": "total",
+    "累计": "cumulative",
+    "总和": "summed",
+    "加总": "combined",
+    "汇总": "aggregate",
+}
+
+# ---------------------------------------------------------------------------
+# 来源：backend/app/services/review_service.py —— Reviewer 调用失败/输出异常
+# 的固定提示语。Task 4 只登记了 quality_loop.py 的整句提示，漏了本文件。
+# ---------------------------------------------------------------------------
+
+_REVIEW_SERVICE_MESSAGES: dict[str, str] = {
+    "Reviewer 暂不可用": "Independent review is currently unavailable.",
+    "Reviewer 输出为空，请只输出完整 JSON": (
+        "The reviewer output was empty; please output the complete JSON only."
+    ),
+    "Reviewer 输出无法解析为约定 JSON": (
+        "The reviewer output could not be parsed as the agreed JSON."
+    ),
+}
+
+# ---------------------------------------------------------------------------
+# 来源：backend/app/agent/graph.py（_quality_degrade_reason）—— 写入
+# `degraded_reason` 单值字段的整句说明；与 quality_loop.py 写入 `quality_notes`
+# 列表的提示语是不同的两句话，即使指向同一个 DegradeReason，也要分别登记。
+# ---------------------------------------------------------------------------
+
+_GRAPH_DEGRADE_REASON_MESSAGES: dict[str, str] = {
+    "回答生成或独立复核暂不可用，已返回受控数据摘要。": (
+        "Answer generation or independent review is temporarily unavailable; "
+        "a controlled data summary has been returned."
+    ),
+    "模型预算已达上限，已返回受控数据摘要。": (
+        "The model budget has been reached; a controlled data summary has "
+        "been returned."
+    ),
+    "回答未通过质量校验，已返回受控数据摘要。": (
+        "The answer did not pass quality validation; a controlled data "
+        "summary has been returned."
+    ),
+}
+
+# ---------------------------------------------------------------------------
 # 来源：backend/app/analytics/demo_data.py —— 闭集分类/原因/城市中文值
 # ---------------------------------------------------------------------------
 
@@ -356,6 +415,9 @@ _TRANSLATIONS: dict[str, str] = _merge_translations(
     _QUALITY_LOOP_MESSAGES,
     _RATE_LIMIT_MESSAGES,
     _PREFILTER_REJECTION_MESSAGES,
+    _ADDITIVE_CLAIM_TRANSLATIONS,
+    _REVIEW_SERVICE_MESSAGES,
+    _GRAPH_DEGRADE_REASON_MESSAGES,
     _DEMO_DATA_VALUES,
     _STATUS_LABELS,
 )
@@ -375,3 +437,156 @@ def localize_catalog_value(value: str, target_locale: SupportedLocale) -> str | 
     if target_locale is SupportedLocale.ZH_CN:
         return value
     return _TRANSLATIONS[value]
+
+
+# ---------------------------------------------------------------------------
+# Task 5：问题范围前置闸门（`app/agent/prefilter.py`）专用的双语数据表。
+#
+# 停用词表与上面的 `_TRANSLATIONS` 是两类不同的东西：`_TRANSLATIONS` 把固定
+# 词汇翻译成另一种语言的**展示文本**；这里的停用词表和下面的业务词反查表都是
+# 对**用户原始提问**做匹配用的关键词表，不产出任何展示给用户的文本——与文件
+# 顶部说明里 `DOMAIN_KEYWORDS`/`ACTION_RULE_TERMS` 不进 `_TRANSLATIONS` 是同一
+# 条边界。之所以仍放在本模块，是因为闸门需要的英文业务词表本身就是从
+# `_TRANSLATIONS` 已登记的中文名词反查出来的，与翻译表同源、不宜拆到别处。
+# ---------------------------------------------------------------------------
+
+#: 现代汉语功能词封闭集合，从 `app/agent/prefilter.py` 迁移到此处集中维护。
+ZH_STOPWORDS: frozenset[str] = frozenset(
+    {
+        "请问",
+        "什么",
+        "怎么",
+        "为什么",
+        "一下",
+        "可以",
+        "是否",
+        "的话",
+        "如何",
+        "哪些",
+        "哪个",
+        "多少",
+        "这个",
+        "那个",
+    }
+)
+
+#: 英文功能词封闭集合，与 `ZH_STOPWORDS` 并列。只收录不带业务含义、会在打分时
+#: 制造噪音的通用词（疑问词、系动词、冠词、介词……）；刻意不收录 "and"/"or"
+#: 这类可能出现在正当业务问法里的连词（如「CNN and RNN 的区别」式合并问法）。
+EN_STOPWORDS: frozenset[str] = frozenset(
+    {
+        "what",
+        "which",
+        "who",
+        "whom",
+        "when",
+        "where",
+        "why",
+        "how",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "the",
+        "a",
+        "an",
+        "of",
+        "to",
+        "for",
+        "in",
+        "on",
+        "at",
+        "by",
+        "with",
+        "do",
+        "does",
+        "did",
+        "please",
+        "can",
+        "could",
+        "would",
+        "will",
+        "i",
+        "you",
+        "your",
+        "my",
+        "me",
+        "we",
+        "us",
+        "our",
+        "this",
+        "that",
+        "it",
+    }
+)
+
+#: 参与闸门双语同义词反查的业务词表分组——只取指标/维度/明细列/问题分类的
+#: 固定展示名，不取整句提示、状态码或演示数据：那些不是知识语料标题/路径里
+#: 会出现的检索关键词，混进来只会制造无意义的反查命中。
+_BUSINESS_TERM_GROUPS: tuple[dict[str, str], ...] = (
+    _CONTRACT_METRIC_LABELS,
+    _CONTRACT_DIMENSION_LABELS,
+    _CONTRACT_DETAIL_LABELS,
+    _CATEGORY_DISPLAY_NAMES,
+)
+
+
+def _build_business_terms_en_to_zh() -> dict[str, tuple[str, ...]]:
+    index: dict[str, list[str]] = {}
+    for group in _BUSINESS_TERM_GROUPS:
+        for zh_term, en_label in group.items():
+            for word in re.findall(r"[A-Za-z]+", en_label.lower()):
+                bucket = index.setdefault(word, [])
+                if zh_term not in bucket:
+                    bucket.append(zh_term)
+    return {word: tuple(zh_terms) for word, zh_terms in index.items()}
+
+
+#: 英文单词（小写、已去除标点）-> 对应的中文业务词表 key 列表。例如
+#: "refund" 命中 "退款金额"/"退款量"/"退款明细"/"退款原因"/"退款状态"。
+_BUSINESS_TERMS_EN_TO_ZH: dict[str, tuple[str, ...]] = _build_business_terms_en_to_zh()
+
+
+def zh_business_terms_for_english_word(word: str) -> tuple[str, ...]:
+    """反查一个英文词命中的中文业务词表 key（指标/维度/明细列/分类展示名）。
+
+    闸门打分语料（知识文档标题、正式指标目录、商家记忆）几乎全是中文，英文
+    问题里的业务词直接拿去打分只会全部落空。这张表让英文词能"翻译"回中文
+    候选词，再用**现成的、未经修改的**打分逻辑评分——不引入 LLM，也不修改
+    语料本身，只是在提问侧补上等价的中文检索词（design.md 与 Task 5 brief
+    Step 5 的"语料侧建立确定性双语词项映射"）。
+
+    未命中返回空元组，调用方据此判断该英文词没有可反查的中文业务词——这不
+    代表问题一定范围外，闸门仍会继续走既有的打分/`ALLOW_CORPUS_UNAVAILABLE`
+    兜底路径。
+    """
+
+    return _BUSINESS_TERMS_EN_TO_ZH.get(word.lower(), ())
+
+
+# ---------------------------------------------------------------------------
+# Task 5：`app/services/visualization_service.py` 生成指标的数值列选择——
+# 过去按 `metric.display_name` 里的中文子串（"金额"/"用户"/"销量"……）猜测，
+# 模型说英文时这套子串匹配全部落空。改为只认 `metric.unit`，并通过下面的
+# 单位登记表反查回统一的中文单位 key，使中英文推断结果必然一致；
+# `display_name` 只负责渲染，不再参与推断。
+# ---------------------------------------------------------------------------
+
+_UNIT_EN_TO_ZH: dict[str, str] = {en.lower(): zh for zh, en in _UNIT_LABELS.items()}
+
+
+def normalize_unit_to_zh(unit: str) -> str | None:
+    """把任意语言书写的单位字符串归一化为 `_UNIT_LABELS` 登记的中文单位 key。
+
+    命中中文 key 本身（如 "元"）或其登记的英文译文（如 "yuan"，大小写不敏感）
+    都返回同一个中文 key；两者都未命中返回 `None`——调用方按未识别单位处理，
+    不得凭空猜一个默认值。
+    """
+
+    candidate = unit.strip()
+    if candidate in _UNIT_LABELS:
+        return candidate
+    return _UNIT_EN_TO_ZH.get(candidate.lower())

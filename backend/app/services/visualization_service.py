@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from decimal import Decimal
 
+from app.localization.catalog import normalize_unit_to_zh
 from app.metrics.catalog import MetricPayload
 from app.schemas.chat import ChartType, Visualization
 from app.services.safe_query import QueryResult
@@ -46,13 +47,19 @@ class VisualizationService:
         )
 
 
-# 生成指标的数值列只能出自两套固定模板；模型给的展示名称与单位只用于**挑选**
-# 其中一列，不能凭空造列。口径与参考项目 VisualizationService#generatedMetricValueField
-# 一致：先按单位判定，单位不明确时按展示名称关键词判定，仍不明确时按订单/退款笔数兜底。
-_GENERATED_METRIC_PREFERENCES: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = (
-    ("元", ("gmv", "金额", "销售额", "成交额", "实付", "收入"), ("paid_amount", "refund_amount")),
-    ("人", ("用户", "买家", "人数"), ("order_user_count", "refund_user_count")),
-    ("件", ("销量", "销售量", "商品件数", "sku"), ("quantity",)),
+# 生成指标的数值列只能出自两套固定模板；模型给的单位只用于**挑选**其中一列，
+# 不能凭空造列。
+#
+# Task 5（双语化）：这里过去按 `metric.display_name` 里的中文子串（"金额"/
+# "用户"/"销量"……）猜测，模型改说英文后展示名不再含这些中文词，猜测全部落空。
+# 展示名只负责渲染，不再参与推断——改成只认 `metric.unit`，经
+# `app.localization.catalog.normalize_unit_to_zh` 把中英文单位都归一化成同一个
+# 中文单位 key 再比对，中英文推断结果必然一致；单位缺失或未登记时落到下面
+# 固定顺序的兜底列表，与语言无关。
+_GENERATED_METRIC_PREFERENCES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("元", ("paid_amount", "refund_amount")),
+    ("人", ("order_user_count", "refund_user_count")),
+    ("件", ("quantity",)),
 )
 # 关键词与单位都没命中时的稳定顺序，保证任何模板都能挑出一列可画的数值。
 _GENERATED_METRIC_FALLBACK: tuple[str, ...] = (
@@ -73,12 +80,13 @@ def _metric_key(metric: MetricPayload, columns: set[str]) -> str | None:
 
 
 def _generated_metric_key(metric: MetricPayload, columns: set[str]) -> str | None:
-    name = metric.display_name.lower()
-    for unit, keywords, candidates in _GENERATED_METRIC_PREFERENCES:
-        if metric.unit == unit or any(keyword in name for keyword in keywords):
-            for key in candidates:
-                if key in columns:
-                    return key
+    normalized_unit = normalize_unit_to_zh(metric.unit)
+    if normalized_unit is not None:
+        for unit, candidates in _GENERATED_METRIC_PREFERENCES:
+            if normalized_unit == unit:
+                for key in candidates:
+                    if key in columns:
+                        return key
     for key in _GENERATED_METRIC_FALLBACK:
         if key in columns:
             return key

@@ -90,6 +90,10 @@ class SessionHistoryLike(Protocol):
 #: 本身已经交付，这么说会让用户以为功能还没上线，而实际是这次请求没能查成。
 _QUERY_SERVICE_UNAVAILABLE: Final[str] = "经营数据查询服务当前不可用，本次未执行查询"
 #: 闸门拒答文案：说明范围而非报错，避免用户把设计内的拒绝当成系统故障（R7、design.md D7）。
+#: Task 5：这句字面量必须与 `app.localization.catalog` 里
+#: `_PREFILTER_REJECTION_MESSAGES` 的词典 key 逐字一致——它已经是「词表键」，
+#: 按当前请求 locale 渲染成对应语言由 Task 6 接入，本任务只负责保证这里产出
+#: 的还是这个可查表的中文原句，不提前拼接任何语言判断逻辑。
 _PREFILTER_REJECTION_MESSAGE: Final[str] = (
     "我是 Borough 商家 AI 助手，只能回答与您店铺经营相关的问题，"
     "例如成交额、订单、退款、商品或平台规则。换个和经营相关的问法试试？"
@@ -712,12 +716,19 @@ def _is_table_only_detail(intent: QueryIntent) -> bool:
     return intent.answer_mode is AnswerMode.DETAIL and not intent.analysis_requested
 
 
+#: Task 5：写入 `degraded_reason` 单值字段的整句说明，与
+#: `app.localization.catalog._GRAPH_DEGRADE_REASON_MESSAGES` 的词典 key 逐字
+#: 一致——`DegradeReason -> 词表键` 这层映射本身已经是这个字典表达的结构，
+#: 值改成通过 catalog 反查即可验证已登记，不需要另建一层间接。
+_DEGRADE_REASON_MESSAGES: Final[dict[DegradeReason, str]] = {
+    DegradeReason.UPSTREAM: "回答生成或独立复核暂不可用，已返回受控数据摘要。",
+    DegradeReason.BUDGET: "模型预算已达上限，已返回受控数据摘要。",
+    DegradeReason.VALIDATION: "回答未通过质量校验，已返回受控数据摘要。",
+}
+
+
 def _quality_degrade_reason(reason: DegradeReason) -> str:
-    return {
-        DegradeReason.UPSTREAM: "回答生成或独立复核暂不可用，已返回受控数据摘要。",
-        DegradeReason.BUDGET: "模型预算已达上限，已返回受控数据摘要。",
-        DegradeReason.VALIDATION: "回答未通过质量校验，已返回受控数据摘要。",
-    }[reason]
+    return _DEGRADE_REASON_MESSAGES[reason]
 
 
 def _response_quality(state: AgentState, outcome: _QueryOutcome) -> QualityStatus:

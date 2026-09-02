@@ -6,8 +6,11 @@ import re
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
+from itertools import pairwise
 
 from app.llm.client import STRUCTURED_CALL_OPTIONS, LlmBudget, LlmClient
+from app.localization.catalog import localize_catalog_value
+from app.localization.locales import SupportedLocale
 from app.metrics.catalog import MetricPayload
 from app.prompts.answer import ANSWER_SYSTEM_PROMPT
 from app.schemas.answer import AnswerDraft
@@ -47,7 +50,59 @@ _UUID = re.compile(
 # 里（如果是新算出的数字会被数字校验拦住），也可能只是复述某一行却贴上「合计」
 # 类字眼，看起来像是对全部区间下了结论。见 docs/backend-development-plan.md 的
 # B5 本地校验清单第 6 条。
-_ADDITIVE_CLAIM_PHRASES = ("合计", "总计", "累计", "总和", "加总", "汇总")
+#
+# Task 5（双语化）：这份关键词过去只有中文，模型改说英文后（"totalled"/
+# "combined"……）完全绕过检查——不是文案缺陷，是校验本身对英文回答失效。
+# 中英文关键词统一从 `app.localization.catalog` 取（词表 > 正则），不再各写
+# 一套：中文短语走 `_ADDITIVE_CLAIM_PHRASES_ZH`，英文形式通过
+# `localize_catalog_value` 反查得到，两者合并成一份大小写不敏感的匹配列表。
+_ADDITIVE_CLAIM_PHRASES_ZH = ("合计", "总计", "累计", "总和", "加总", "汇总")
+_ADDITIVE_CLAIM_PHRASES: tuple[str, ...] = tuple(
+    dict.fromkeys(
+        phrase.lower()
+        for phrase in (
+            *_ADDITIVE_CLAIM_PHRASES_ZH,
+            *(
+                localize_catalog_value(zh_phrase, SupportedLocale.EN_US)
+                for zh_phrase in _ADDITIVE_CLAIM_PHRASES_ZH
+            ),
+        )
+        if phrase
+    )
+)
+
+# Task 5：日期区间一致性校验。过去的日期/时长正则只负责「剥掉看起来像日期的
+# 数字，避免被数字校验误判成幻觉」，从不核对模型陈述的日期区间是否真的落在
+# 本次查询范围内——中英文都有这个缺口。这里新增一道独立检查：从回答文本里
+# 抽取「起始日期 至/到/~/-/through/to 结束日期」这类显式区间表述（ISO、
+# 中文纪年、斜杠、英文月份写法都认），解析成 `date` 对象后与事实包里能确定
+# 的实际查询区间比对，区间以外即判定为编造范围。
+_ISO_DATE_CAPTURE = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
+_CN_DATE_CAPTURE = re.compile(r"(?:(\d{4})\s*年\s*)?(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]")
+_SLASH_DATE_CAPTURE = re.compile(r"(?:(\d{4})\s*/\s*)?(\d{1,2})\s*/\s*(\d{1,2})\b")
+_EN_MONTH_DATE_CAPTURE = re.compile(
+    r"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b",
+    re.IGNORECASE,
+)
+_EN_MONTH_NUMBERS: dict[str, int] = {
+    "jan": 1,
+    "feb": 2,
+    "mar": 3,
+    "apr": 4,
+    "may": 5,
+    "jun": 6,
+    "jul": 7,
+    "aug": 8,
+    "sep": 9,
+    "oct": 10,
+    "nov": 11,
+    "dec": 12,
+}
+# 只在两个已识别的日期 token 之间、且中间**只有**这个连接词（允许两侧空白）时，
+# 才认定为一个显式区间；避免把文本里恰好相邻但语义无关的两个日期误判成区间。
+_RANGE_JOINER = re.compile(r"^\s*(?:至|到|~|-|through|to)\s*$", re.IGNORECASE)
+# 两种语言共用同一条 issue 文案（同一个 issue 码的唯一渲染），不按草稿语言分叉。
+_DATE_RANGE_ISSUE = "回答陈述的日期区间超出了本次查询的实际范围"
 
 
 @dataclass(frozen=True)
@@ -170,9 +225,12 @@ class AnswerService:
         if (
             result.non_additive
             and len(result.rows) > 1
-            and any(phrase in raw_text for phrase in _ADDITIVE_CLAIM_PHRASES)
+            and any(phrase in raw_text.lower() for phrase in _ADDITIVE_CLAIM_PHRASES)
         ):
             issues.append("非加和指标不能被回答草稿合计或汇总")
+        range_issue = _date_range_issue(raw_text, facts)
+        if range_issue is not None:
+            issues.append(range_issue)
         # 日期是维度值，不是要与聚合结果逐项比对的业务数字；否则 2026-08-05
         # 会被拆成三个数字并把一份完全基于事实的草稿误判为幻觉。中文写法同理。
         text = _DURATION.sub("", _SLASH_DATE.sub("", _CN_DATE.sub("", _ISO_DATE.sub("", raw_text))))
@@ -375,6 +433,108 @@ def _date_parts(value: object) -> set[str]:
         # 模型写「8月」而不是「08月」，两种形态都要放行。
         parts.add(chunk.lstrip("0") or "0")
     return parts
+
+
+@dataclass(frozen=True)
+class _DateToken:
+    """回答文本里一个已识别日期片段的位置与拆解成分（年可能缺失）。"""
+
+    start: int
+    end: int
+    year: int | None
+    month: int
+    day: int
+
+
+def _find_date_tokens(text: str) -> list[_DateToken]:
+    """扫描文本里全部可识别的日期片段（ISO / 中文 / 斜杠 / 英文月份），按出现
+    位置排序——语言无关，四种写法用同一套逻辑并列扫描，不偏向任何一种。
+    """
+
+    tokens: list[_DateToken] = []
+    for match in _ISO_DATE_CAPTURE.finditer(text):
+        tokens.append(
+            _DateToken(match.start(), match.end(), int(match[1]), int(match[2]), int(match[3]))
+        )
+    for match in _EN_MONTH_DATE_CAPTURE.finditer(text):
+        month = _EN_MONTH_NUMBERS.get(match[1].lower())
+        if month is None:
+            continue
+        tokens.append(_DateToken(match.start(), match.end(), None, month, int(match[2])))
+    for match in _CN_DATE_CAPTURE.finditer(text):
+        year = int(match[1]) if match[1] else None
+        tokens.append(_DateToken(match.start(), match.end(), year, int(match[2]), int(match[3])))
+    for match in _SLASH_DATE_CAPTURE.finditer(text):
+        year = int(match[1]) if match[1] else None
+        tokens.append(_DateToken(match.start(), match.end(), year, int(match[2]), int(match[3])))
+    return sorted(tokens, key=lambda token: token.start)
+
+
+def _extract_stated_ranges(text: str) -> list[tuple[_DateToken, _DateToken]]:
+    """只把「两个日期 token 之间除了一个区间连接词外没有别的内容」视为显式区间。
+
+    要求两个 token 紧邻（中间只隔着 `_RANGE_JOINER` 认识的连接词）是刻意收紧的
+    条件：草稿里散落提到的两个不相关日期（如「8月11日为 3 件，8月17日为
+    15 件」）绝不能被当成「模型宣称的区间」，那只是在分别引用两个真实数据点。
+    """
+
+    tokens = _find_date_tokens(text)
+    ranges: list[tuple[_DateToken, _DateToken]] = []
+    for first, second in pairwise(tokens):
+        gap = text[first.end : second.start]
+        if _RANGE_JOINER.match(gap):
+            ranges.append((first, second))
+    return ranges
+
+
+def _resolve_date(token: _DateToken, fallback_year: int) -> date | None:
+    year = token.year if token.year is not None else fallback_year
+    try:
+        return date(year, token.month, token.day)
+    except ValueError:
+        return None
+
+
+def _reference_range(facts: AnswerFacts) -> tuple[date, date] | None:
+    """事实包里能确定的实际查询区间；确定不了（没有对比期、也没有日期维度列，
+    比如按类目分组的结果）时返回 `None`，调用方按「无法判断」直接放行（fail
+    open）——这道校验只在能拿到明确参照区间时才生效，不臆造一个默认范围。
+    """
+
+    comparison = facts.query_result.comparison
+    if comparison is not None:
+        return comparison.current_range.start, comparison.current_range.end
+    found: list[date] = []
+    for row in facts.query_result.rows:
+        for value in row.values():
+            parsed = _parse_business_date(value)
+            if parsed is not None:
+                found.append(parsed)
+    if not found:
+        return None
+    return min(found), max(found)
+
+
+def _date_range_issue(raw_text: str, facts: AnswerFacts) -> str | None:
+    """回答里显式陈述的日期区间必须落在本次查询的实际范围内，否则判定为编造
+    范围——语言无关：中英文、ISO、斜杠写法走同一套抽取与比对逻辑，产出同一条
+    issue 文案（两种语言共用同一个 issue 码，`quality_notes` 只是渲染差异）。
+    """
+
+    reference = _reference_range(facts)
+    if reference is None:
+        return None
+    ref_start, ref_end = reference
+    for first, second in _extract_stated_ranges(raw_text):
+        start = _resolve_date(first, ref_start.year)
+        end = _resolve_date(second, ref_start.year)
+        if start is None or end is None:
+            continue
+        if start > end:
+            start, end = end, start
+        if start < ref_start or end > ref_end:
+            return _DATE_RANGE_ISSUE
+    return None
 
 
 def _display_value(value: object) -> str:

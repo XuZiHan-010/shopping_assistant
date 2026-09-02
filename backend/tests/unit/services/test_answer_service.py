@@ -737,3 +737,157 @@ def test_fallback_explains_when_the_baseline_makes_the_ratio_uncomputable() -> N
 
     assert "无法计算变化率" in draft.answer
     assert "%" not in draft.answer
+
+
+# ---------------------------------------------------------------------------
+# Task 5：语言无关的本地校验——聚合断言与日期区间一致性对英文回答同样生效。
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def service():
+    from app.services.answer_service import AnswerService
+
+    return AnswerService()
+
+
+def _draft_with_answer(answer: str):
+    from app.schemas.answer import AnswerDraft
+    from app.schemas.chat import Recommendation
+
+    return AnswerDraft(
+        answer=answer,
+        recommendations=[
+            Recommendation(title="Note", evidence=answer, action="Review the range."),
+            Recommendation(title="Check", evidence=answer, action="Confirm the date range."),
+        ],
+    )
+
+
+def _facts_without_total():
+    """非加和指标、多行结果——聚合断言检查的结构前提，与语言无关。"""
+
+    from app.services.answer_service import AnswerFacts
+
+    return AnswerFacts(
+        question="What are the refund amounts for the last 7 days?",
+        metric=MetricPayload(
+            metric_code="refund_amount",
+            display_name="Refund amount",
+            unit="CNY",
+            definition="The refund amount of refund records, not summable across the period.",
+            source="Borough Metric Catalog",
+            owner="Business Analytics",
+            status="ACTIVE",
+            generated=False,
+            notice=None,
+        ),
+        query_result=QueryResult(
+            columns=(
+                ResultColumn("date", "Date", "DIMENSION"),
+                ResultColumn("refund_amount", "Refund amount", "METRIC"),
+            ),
+            rows=[
+                {"date": "2026-08-05", "refund_amount": Decimal("4000.00")},
+                {"date": "2026-08-06", "refund_amount": Decimal("4500.00")},
+                {"date": "2026-08-07", "refund_amount": Decimal("3500.00")},
+            ],
+            total_rows=3,
+            truncated=False,
+            source_tables=("refunds",),
+            plan_steps=("Aggregate refund amount by day",),
+            export_spec=None,
+            notes=(),
+            non_additive=True,
+        ),
+    )
+
+
+def test_additive_claim_check_catches_english_total_claim(service) -> None:
+    """英文 total/combined 之类的合计断言必须与中文『合计』受同等校验。"""
+
+    issues = service.validate_issues(
+        draft=_draft_with_answer("Refunds totalled 12,000 CNY over the last 7 days"),
+        facts=_facts_without_total(),
+    )
+
+    assert issues, "英文合计断言必须触发非加和指标校验"
+    assert any("非加和" in issue for issue in issues)
+
+
+def _facts_for_last_3_days():
+    """真实查询区间只有 2026-08-05 至 2026-08-07 这 3 天。
+
+    刻意让草稿会用到的数字（1、7）都能在事实包里找到"看似合法"的出处
+    （行内数值 1、日期成分 7），这样如果日期区间一致性校验没有真正生效，
+    通用的"数字未出现在事实包"校验也不会意外把这条用例救回来——确保这条
+    测试只在日期区间比对本身工作时才会通过。
+    """
+
+    from app.services.answer_service import AnswerFacts
+
+    return AnswerFacts(
+        question="What is the refund amount for the last 3 days?",
+        metric=MetricPayload(
+            metric_code="refund_amount",
+            display_name="Refund amount",
+            unit="CNY",
+            definition="The refund amount of refund records.",
+            source="Borough Metric Catalog",
+            owner="Business Analytics",
+            status="ACTIVE",
+            generated=False,
+            notice=None,
+        ),
+        query_result=QueryResult(
+            columns=(
+                ResultColumn("date", "Date", "DIMENSION"),
+                ResultColumn("refund_amount", "Refund amount", "METRIC"),
+            ),
+            rows=[
+                {"date": "2026-08-05", "refund_amount": Decimal("1")},
+                {"date": "2026-08-06", "refund_amount": Decimal("2")},
+                {"date": "2026-08-07", "refund_amount": Decimal("7")},
+            ],
+            total_rows=3,
+            truncated=False,
+            source_tables=("refunds",),
+            plan_steps=("Aggregate refund amount by day",),
+            export_spec=None,
+            notes=(),
+            non_additive=False,
+        ),
+    )
+
+
+def test_date_consistency_check_understands_english_ranges(service) -> None:
+    """英文 "from X to Y" 日期区间必须与实际查询范围比对，而不是被直接放行。"""
+
+    issues = service.validate_issues(
+        draft=_draft_with_answer("From Aug 1 to Aug 7 the refund amount rose"),
+        facts=_facts_for_last_3_days(),
+    )
+
+    assert issues, "陈述的日期区间超出实际查询范围（2026-08-05~07）应当被拦下"
+
+
+def test_date_consistency_check_allows_a_range_contained_in_the_facts(service) -> None:
+    """区间落在事实包范围内时不该被误判——中英文校验必须一样宽松，不只是一样严格。"""
+
+    issues = service.validate_issues(
+        draft=_draft_with_answer("From Aug 5 to Aug 7 the refund amount rose"),
+        facts=_facts_for_last_3_days(),
+    )
+
+    assert issues == []
+
+
+def test_date_consistency_check_still_works_for_chinese_ranges(service) -> None:
+    """中文『8月1日至8月7日』式显式区间同样要与实际范围比对——校验逻辑双语共用。"""
+
+    issues = service.validate_issues(
+        draft=_draft_with_answer("8月1日至8月7日退款金额有所上升"),
+        facts=_facts_for_last_3_days(),
+    )
+
+    assert issues, "中文显式区间超出实际范围同样应当被拦下"

@@ -171,6 +171,56 @@ def test_generated_metric_plots_the_quantity_column_when_the_plan_declares_piece
     assert chart.metric_key == "quantity"
 
 
+def test_generated_metric_plots_the_paid_amount_column_for_an_english_unit() -> None:
+    """Task 5：单位归一化对英文单位同样生效——"yuan" 必须与中文"元"推断出同一列。
+
+    展示名故意用全英文，且不含任何过去依赖的中文关键词（"金额"/"gmv" 等）：
+    只有当推断完全脱离 `display_name`、只认 `metric.unit` 时这条用例才会通过。
+    """
+
+    from app.services.visualization_service import VisualizationService
+
+    chart = VisualizationService().build(
+        _result(columns=_trade_columns(), rows=[_trade_row()]),
+        _generated(display_name="Transaction performance by city", unit="yuan"),
+    )
+
+    assert chart.metric_key == "paid_amount"
+
+
+def test_generated_metric_plots_the_user_column_for_an_english_unit() -> None:
+    from app.services.visualization_service import VisualizationService
+
+    chart = VisualizationService().build(
+        _result(columns=_trade_columns(), rows=[_trade_row()]),
+        _generated(display_name="Ordering users by city", unit="users"),
+    )
+
+    assert chart.metric_key == "order_user_count"
+
+
+def test_generated_metric_plots_the_quantity_column_for_an_english_unit() -> None:
+    from app.services.visualization_service import VisualizationService
+
+    chart = VisualizationService().build(
+        _result(columns=_trade_columns(), rows=[_trade_row()]),
+        _generated(display_name="Items sold by city", unit="items"),
+    )
+
+    assert chart.metric_key == "quantity"
+
+
+def test_generated_metric_unit_inference_is_case_insensitive() -> None:
+    from app.services.visualization_service import VisualizationService
+
+    chart = VisualizationService().build(
+        _result(columns=_trade_columns(), rows=[_trade_row()]),
+        _generated(display_name="Ordering users by city", unit="Users"),
+    )
+
+    assert chart.metric_key == "order_user_count"
+
+
 def test_generated_refund_metric_plots_the_refund_count_column() -> None:
     from app.services.visualization_service import VisualizationService
 
