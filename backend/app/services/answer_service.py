@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from itertools import pairwise
+from typing import Final
 
 from app.llm.client import STRUCTURED_CALL_OPTIONS, LlmBudget, LlmClient
 from app.localization.catalog import localize_catalog_value
@@ -584,12 +585,26 @@ def _date_range_issue(raw_text: str, facts: AnswerFacts) -> str | None:
     return None
 
 
+#: 正则对捕获的数字位数没有上限，模型幻觉出「最近 1000000 天」这类离谱数字时，
+#: `date - timedelta(days=days)` 一旦超出 `date` 能表示的公元 1~9999 年范围就会
+#: 抛出未捕获的 `OverflowError`，把质量循环直接崩掉（该异常不在 `compose_once`
+#: 的 try/except 覆盖范围内）。任何业务问答场景都不会真的问「最近一万天」，
+#: 超过这个上限直接当作「不是真实时长声明」跳过，而不是尝试解析后再崩溃——
+#: 与本函数一贯的 fail open 原则一致：宁可少校验一条，也不能让校验本身变成
+#: 新的故障源。10 年（3650 天）已经远超商家日常查询窗口，留足安全余量。
+_MAX_PLAUSIBLE_DURATION_DAYS: Final = 3650
+
+
 def _extract_stated_durations(text: str) -> list[int]:
-    """抽取「最近/过去 N 天」「last/past N days」这类相对时长表述，返回天数。"""
+    """抽取「最近/过去 N 天」「last/past N days」这类相对时长表述，返回天数。
+
+    过滤掉超过 `_MAX_PLAUSIBLE_DURATION_DAYS` 的离谱数字——那不是真实的时长
+    声明，继续拿去做日期运算只会有 `OverflowError` 风险，见上方常量注释。
+    """
 
     days: list[int] = [int(match[1]) for match in _EN_DURATION_CAPTURE.finditer(text)]
     days.extend(int(match[1]) for match in _CN_DURATION_CAPTURE.finditer(text))
-    return days
+    return [value for value in days if value <= _MAX_PLAUSIBLE_DURATION_DAYS]
 
 
 def _duration_range_issue(raw_text: str, facts: AnswerFacts) -> str | None:

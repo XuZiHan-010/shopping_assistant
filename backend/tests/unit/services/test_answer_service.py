@@ -1016,3 +1016,21 @@ def test_date_consistency_check_allows_a_relative_duration_that_matches_the_fact
     )
 
     assert issues == []
+
+
+def test_date_consistency_check_does_not_crash_on_an_absurdly_large_hallucinated_duration(
+    service,
+) -> None:
+    """模型幻觉出「最近 1000 万天」这类离谱数字时，`date - timedelta(...)` 一旦
+    超出 `date` 能表示的公元 1~9999 年范围就会抛出未捕获的 `OverflowError`
+    （复核 Finding：这个异常不在 `compose_once` 的 try/except 覆盖范围内，
+    会直接崩掉质量循环）。这条离谱声明本身不是真实时长表述，校验应当稳妥地
+    跳过它（不产出这条 issue，也绝不能抛异常），而不是尝试解析后再崩溃。
+    """
+
+    issues = service.validate_issues(
+        draft=_draft_with_answer("Over the last 10000000 days, the refund amount rose"),
+        facts=_facts_for_last_3_days(),
+    )
+
+    assert isinstance(issues, list)
