@@ -102,7 +102,7 @@
           "chat"
         ],
         "summary": "Post Chat",
-        "description": "默认返回 SSE；明确请求 JSON 时返回与 done 同构的响应。",
+        "description": "默认返回 SSE；明确请求 JSON 时返回与 done 同构的响应。\n\n`locale` 从 `Accept-Language` 解析而来（Task 2 的 `get_request_locale`）；\n`ChatRequest` 本身不带 locale 字段，显式传给 `ChatService.submit()`，图内\n节点只从强类型 `AgentState.locale` 读取（Task 6 Step 5）。",
         "operationId": "post_chat_api_chat_post",
         "requestBody": {
           "content": {
@@ -276,6 +276,7 @@
           "chat"
         ],
         "summary": "Get Conversation",
+        "description": "会话详情：消息按 `message_before` 游标分页（Task 7，§8.6.3），只翻译\n当前这一页——第一页固定取最新 `message_limit` 条,历史更早的内容要靠\n`next_message_cursor` 继续翻页才会被处理,不会因为打开一次会话就把整份\n历史一次性送进翻译预算。",
         "operationId": "get_conversation_api_conversations__conversation_id__get",
         "security": [
           {
@@ -291,6 +292,34 @@
               "type": "string",
               "format": "uuid",
               "title": "Conversation Id"
+            }
+          },
+          {
+            "name": "message_limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "default": 20,
+              "title": "Message Limit"
+            }
+          },
+          {
+            "name": "message_before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Message Before"
             }
           }
         ],
@@ -352,6 +381,7 @@
           "chat"
         ],
         "summary": "Delete Conversation",
+        "description": "删除会话时把派生的机器翻译缓存清理放进同一事务（Task 7 Step 6）：\n删除前先按会话全部历史（标题、消息正文、已保存 Answer payload 的思考\n步骤/质量说明/降级原因）计算商家作用域的源哈希集合，删除会话（级联删\nmessages/answers）后按这批哈希清理缓存，最后一次性提交。哈希若同时被\n该商家其它内容复用，删除缓存只会导致那部分内容之后重新翻译一次，不影\n响任何原始数据（`docs/backend-development-plan.md` §8.6.3 与 brief Step 6）。",
         "operationId": "delete_conversation_api_conversations__conversation_id__delete",
         "security": [
           {
@@ -2504,6 +2534,12 @@
             "format": "uuid",
             "title": "Session Id"
           },
+          "displayed_user_message": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Displayed User Message",
+            "default": ""
+          },
           "answer": {
             "type": "string",
             "title": "Answer"
@@ -2984,6 +3020,38 @@
             "type": "string",
             "format": "date-time",
             "title": "Updated At"
+          },
+          "next_message_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Message Cursor"
+          },
+          "has_more_messages": {
+            "type": "boolean",
+            "title": "Has More Messages",
+            "default": false
+          },
+          "localization_degraded": {
+            "type": "boolean",
+            "title": "Localization Degraded",
+            "default": false
+          },
+          "localization_degraded_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Localization Degraded Reason"
           }
         },
         "type": "object",
@@ -3015,6 +3083,22 @@
             "type": "integer",
             "minimum": 0.0,
             "title": "Offset"
+          },
+          "localization_degraded": {
+            "type": "boolean",
+            "title": "Localization Degraded",
+            "default": false
+          },
+          "localization_degraded_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Localization Degraded Reason"
           }
         },
         "type": "object",

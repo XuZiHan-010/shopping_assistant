@@ -239,7 +239,7 @@ async def get_chat_service(
     merchant_display = merchant_summaries[0].display_name if merchant_summaries else "商家"
     memory_repository = MerchantMemoryRepository(session)
     metric_repository = MetricRepository(session)
-    localization_service, localization_budget = _build_chat_localization_runtime(
+    localization_service, localization_budget = _build_localization_runtime(
         session,
         database,
         settings,
@@ -295,7 +295,7 @@ async def get_chat_service(
     )
 
 
-def _build_chat_localization_runtime(
+def _build_localization_runtime(
     session: AsyncSession,
     database: Database,
     settings: Settings,
@@ -303,14 +303,20 @@ def _build_chat_localization_runtime(
     request_id: str,
     merchant_id: UUID,
 ) -> tuple[LocalizationService, LlmBudget]:
-    """构造一轮聊天专用的本地化服务与共享预算。
+    """构造一次请求专用的本地化服务与共享预算。
 
     `purpose="LOCALIZATION"` 让 `llm_usage` 与 `purpose="AGENT"` 的主问答链路
-    分开记账（Task 6 复用 Task 4 已定的 `Settings.localization_max_calls_per_request`
-    / `localization_max_tokens_per_request`）。返回的 `LlmBudget` 由
-    `ChatService`（`displayed_user_message`）与 `MerchantQaGraph`
-    （跨语言知识检索查询规范化）在同一请求内共享——两处合计也不能超过这个
-    per-request 上限，不是各自独立再有一份预算。
+    分开记账（复用 Task 4 已定的 `Settings.localization_max_calls_per_request`
+    / `localization_max_tokens_per_request`）。返回的 `LlmBudget` 是
+    per-request 对象，同一次调用内的多个消费点共享同一份预算，不同请求
+    （包括 `POST /api/chat` 与 `GET /api/conversations*`）各自独立构造，互不
+    挤占：
+
+    - `POST /api/chat`：`ChatService`（`displayed_user_message`）与
+      `MerchantQaGraph`（跨语言知识检索查询规范化）共享（Task 6）；
+    - `GET /api/conversations` / `GET /api/conversations/{id}`：
+      `app.localization.payloads.localize_conversation_summary()` /
+      `localize_conversation_detail()` 各自在自己的请求内使用一份（Task 7）。
     """
 
     guard = build_guarded_llm(
@@ -332,6 +338,27 @@ def _build_chat_localization_runtime(
         settings.localization_max_tokens_per_request,
     )
     return service, budget
+
+
+async def get_conversation_localization(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    database: Annotated[Database, Depends(get_database)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+    context: Annotated[MerchantContext, Depends(get_merchant_context)],
+) -> tuple[LocalizationService, LlmBudget]:
+    """`GET /api/conversations` / `GET /api/conversations/{id}` 专用的请求级
+    本地化服务与预算（Task 7）。构造逻辑与 `get_chat_service()` 内部使用的
+    完全一致（见 `_build_localization_runtime()`），只是这里是独立的 FastAPI
+    依赖，供两个只读会话历史路由直接 `Depends()`。"""
+
+    return _build_localization_runtime(
+        session,
+        database,
+        settings,
+        request_id=str(request.state.request_id),
+        merchant_id=context.merchant_id,
+    )
 
 
 def get_export_service(

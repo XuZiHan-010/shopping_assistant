@@ -18,6 +18,7 @@ from structlog.stdlib import BoundLogger
 from app.api.dependencies import (
     enforce_rate_limit,
     get_chat_service,
+    get_conversation_localization,
     get_conversation_repository,
     get_conversation_scope_service,
     get_db_session,
@@ -26,20 +27,25 @@ from app.api.dependencies import (
 )
 from app.core.errors import AppError, ErrorCode, ErrorResponse, error_responses
 from app.core.security import MerchantContext
+from app.llm.client import LlmBudget
 from app.localization.error_messages import localize_error_message
 from app.localization.locales import SupportedLocale
+from app.localization.payloads import (
+    collect_conversation_source_hashes,
+    localize_conversation_detail,
+    localize_conversation_summary,
+)
 from app.repositories.conversation import ConversationRepository
+from app.repositories.localization import LocalizationRepository, LocalizationScope
 from app.schemas.chat import (
     ChatRequest,
     ChatResponse,
-    ConversationAnswerPayload,
     ConversationDetailResponse,
     ConversationListResponse,
-    ConversationMessage,
-    ConversationSummary,
     ThinkingStep,
 )
 from app.services.chat_service import ChatExecution, ChatService
+from app.services.localization_service import LocalizationService
 from app.services.merchant_scope import MerchantScopeService
 
 router = APIRouter(tags=["chat"])
@@ -47,51 +53,6 @@ router = APIRouter(tags=["chat"])
 # §8.4：每 15 秒发一次注释心跳，避免反向代理按空闲超时切断长连接。
 HEARTBEAT_SECONDS = 15.0
 _HEARTBEAT_FRAME = b": keep-alive\n\n"
-
-
-def _history_columns(payload: dict[str, Any]) -> list[str]:
-    """从保存的结果提取列名，不把任何明细值回传给历史会话。"""
-
-    rows = payload.get("data_rows")
-    if not isinstance(rows, list):
-        return []
-
-    columns: list[str] = []
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        for column in row:
-            if isinstance(column, str) and column not in columns:
-                columns.append(column)
-    return columns
-
-
-def _history_answer_payload(
-    answer_id: UUID,
-    payload: dict[str, Any] | None,
-    *,
-    is_adopted: bool,
-    reaction: str | None,
-) -> ConversationAnswerPayload | None:
-    """把已保存 ChatResponse 装配为可回放且不含敏感行的历史摘要。"""
-
-    if payload is None:
-        return None
-    return ConversationAnswerPayload(
-        answer_id=answer_id,
-        answer_mode=payload["answer_mode"],
-        thinking_steps=payload.get("thinking_steps", []),
-        quality_status=payload["quality_status"],
-        quality_attempts=payload["quality_attempts"],
-        quality_notes=payload.get("quality_notes", []),
-        degraded=payload["degraded"],
-        degraded_reason=payload.get("degraded_reason"),
-        is_adopted=is_adopted,
-        reaction=reaction,
-        columns=_history_columns(payload),
-        total_rows=payload.get("total_rows"),
-        truncated=payload.get("truncated"),
-    )
 
 
 def _wants_json(request: Request) -> bool:
@@ -263,22 +224,28 @@ async def post_chat(
 async def list_conversations(
     context: Annotated[MerchantContext, Depends(get_merchant_context)],
     conversations: Annotated[ConversationRepository, Depends(get_conversation_repository)],
+    locale: Annotated[SupportedLocale, Depends(get_request_locale)],
+    localization: Annotated[
+        tuple[LocalizationService, LlmBudget], Depends(get_conversation_localization)
+    ],
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> ConversationListResponse:
     rows = await conversations.list_for_merchant(context.merchant_id, limit=limit, offset=offset)
+    service, budget = localization
+    items, degraded, degraded_reason = await localize_conversation_summary(
+        service=service,
+        budget=budget,
+        merchant_id=context.merchant_id,
+        conversations=rows,
+        target_locale=locale,
+    )
     return ConversationListResponse(
-        items=[
-            ConversationSummary(
-                id=row.id,
-                title=row.title,
-                created_at=row.created_at,
-                updated_at=row.updated_at,
-            )
-            for row in rows
-        ],
+        items=items,
         limit=limit,
         offset=offset,
+        localization_degraded=degraded,
+        localization_degraded_reason=degraded_reason,
     )
 
 
@@ -293,15 +260,29 @@ async def get_conversation(
     context: Annotated[MerchantContext, Depends(get_merchant_context)],
     conversations: Annotated[ConversationRepository, Depends(get_conversation_repository)],
     scope: Annotated[MerchantScopeService[Any], Depends(get_conversation_scope_service)],
+    locale: Annotated[SupportedLocale, Depends(get_request_locale)],
+    localization: Annotated[
+        tuple[LocalizationService, LlmBudget], Depends(get_conversation_localization)
+    ],
+    message_limit: Annotated[int, Query(ge=1, le=50)] = 20,
+    message_before: Annotated[str | None, Query()] = None,
 ) -> ConversationDetailResponse:
+    """会话详情：消息按 `message_before` 游标分页（Task 7，§8.6.3），只翻译
+    当前这一页——第一页固定取最新 `message_limit` 条,历史更早的内容要靠
+    `next_message_cursor` 继续翻页才会被处理,不会因为打开一次会话就把整份
+    历史一次性送进翻译预算。
+    """
+
     conversation = await scope.require_conversation(
         context,
         conversation_id,
         request_id=str(request.state.request_id),
     )
-    messages = await conversations.list_messages_for_conversation(
+    page = await conversations.list_messages_page(
         context.merchant_id,
         conversation.id,
+        limit=message_limit,
+        before=message_before,
     )
     answers_by_user_message = {
         answer.user_message_id: (answer, feedback)
@@ -311,37 +292,26 @@ async def get_conversation(
         )
         if answer.user_message_id is not None
     }
-    last_user_message_id: UUID | None = None
-    detail_messages: list[ConversationMessage] = []
-    for message in messages:
-        if message.role == "USER":
-            last_user_message_id = message.id
-        history_payload = None
-        if message.role == "ASSISTANT" and last_user_message_id is not None:
-            matched = answers_by_user_message.get(last_user_message_id)
-            if matched is not None:
-                answer, feedback = matched
-                history_payload = _history_answer_payload(
-                    answer.id,
-                    answer.response_payload,
-                    is_adopted=feedback.is_adopted if feedback is not None else False,
-                    reaction=feedback.reaction if feedback is not None else None,
-                )
-        detail_messages.append(
-            ConversationMessage(
-                id=message.id,
-                role=message.role,
-                content=message.content,
-                created_at=message.created_at,
-                answer_payload=history_payload,
-            )
-        )
+    service, budget = localization
+    title, detail_messages, degraded, degraded_reason = await localize_conversation_detail(
+        service=service,
+        budget=budget,
+        merchant_id=context.merchant_id,
+        title=conversation.title,
+        messages=page.messages,
+        answers_by_user_message=answers_by_user_message,
+        target_locale=locale,
+    )
     return ConversationDetailResponse(
         id=conversation.id,
-        title=conversation.title,
+        title=title,
         messages=detail_messages,
         created_at=conversation.created_at,
         updated_at=conversation.updated_at,
+        next_message_cursor=page.next_cursor,
+        has_more_messages=page.has_more,
+        localization_degraded=degraded,
+        localization_degraded_reason=degraded_reason,
     )
 
 
@@ -358,11 +328,40 @@ async def delete_conversation(
     scope: Annotated[MerchantScopeService[Any], Depends(get_conversation_scope_service)],
     session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> Response:
-    await scope.require_conversation(
+    """删除会话时把派生的机器翻译缓存清理放进同一事务（Task 7 Step 6）：
+    删除前先按会话全部历史（标题、消息正文、已保存 Answer payload 的思考
+    步骤/质量说明/降级原因）计算商家作用域的源哈希集合，删除会话（级联删
+    messages/answers）后按这批哈希清理缓存，最后一次性提交。哈希若同时被
+    该商家其它内容复用，删除缓存只会导致那部分内容之后重新翻译一次，不影
+    响任何原始数据（`docs/backend-development-plan.md` §8.6.3 与 brief Step 6）。
+    """
+
+    conversation = await scope.require_conversation(
         context,
         conversation_id,
         request_id=str(request.state.request_id),
     )
+    messages = await conversations.list_messages_for_conversation(
+        context.merchant_id,
+        conversation.id,
+    )
+    answers = [
+        answer
+        for answer, _ in await conversations.list_succeeded_answers_for_conversation(
+            context.merchant_id,
+            conversation.id,
+        )
+    ]
+    source_hashes = collect_conversation_source_hashes(
+        title=conversation.title,
+        messages=messages,
+        answers=answers,
+    )
     await conversations.delete_for_merchant(conversation_id, context.merchant_id)
+    if source_hashes:
+        await LocalizationRepository(session).delete_machine_by_hashes(
+            scope=LocalizationScope(kind="MERCHANT", merchant_id=context.merchant_id),
+            source_hashes=list(source_hashes),
+        )
     await session.commit()
     return Response(status_code=204)

@@ -24,7 +24,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 from collections.abc import Mapping, Sequence
@@ -42,7 +41,12 @@ from app.llm.client import (
     LlmUnavailableError,
 )
 from app.localization.catalog import localize_catalog_value
-from app.localization.locales import SourceLanguage, SupportedLocale, detect_source_language
+from app.localization.locales import (
+    SourceLanguage,
+    SupportedLocale,
+    detect_source_language,
+    hash_source_text,
+)
 from app.prompts.localization import (
     LOCALIZATION_PROMPT_VERSION,
     LOCALIZATION_SYSTEM_PROMPT,
@@ -144,8 +148,9 @@ def _restore(text: str, tokens: dict[str, str]) -> str | None:
     return restored
 
 
-def _hash_text(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+#: Task 7 把哈希算法提升为 `app.localization.locales.hash_source_text()`
+#: 公共函数，这里只保留一个本地别名，不重复实现（见其 docstring）。
+_hash_text = hash_source_text
 
 
 def _only_protected_tokens(text: str) -> bool:

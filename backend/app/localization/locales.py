@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from enum import StrEnum
 
@@ -178,3 +179,15 @@ def detect_source_language(text: str) -> SourceLanguage:
     if has_english_word:
         return SourceLanguage.EN_US
     return SourceLanguage.UND
+
+
+def hash_source_text(text: str) -> str:
+    """源文本的确定性哈希，是机器译文缓存键（`source_hash`）的唯一算法。
+
+    从 `app.services.localization_service._hash_text` 提升为公共函数
+    （Task 7）：会话删除时清理派生缓存（`delete_machine_by_hashes()`）必须
+    用与写入时**完全相同**的算法重新计算源哈希，否则删不中任何行——两处
+    各写一份 `sha256` 调用只会让今后改算法时悄悄产生不一致。
+    """
+
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()

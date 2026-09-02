@@ -302,6 +302,11 @@ class ConversationListResponse(BaseModel):
     items: list[ConversationSummary]
     limit: int = Field(ge=1, le=100)
     offset: int = Field(ge=0)
+    # Task 7（§8.6.3）：本页任意一条会话标题未能在预算内翻译完成时为 true，
+    # 该条目改用目标语言占位文案而不是回落源语言原文；未降级时固定
+    # false/null，与 R7 的显式降级要求一致。
+    localization_degraded: bool = False
+    localization_degraded_reason: str | None = None
 
 
 class ConversationMessage(BaseModel):
@@ -336,3 +341,13 @@ class ConversationDetailResponse(BaseModel):
     messages: list[ConversationMessage]
     created_at: datetime
     updated_at: datetime
+    # Task 7（§8.6.3）：消息游标分页。`messages` 只是当前这一页（第一页为最新
+    # `message_limit` 条，页内按时间正序排列）；`next_message_cursor` 非空时
+    # 指向更早一页，为空代表已经翻到最早一条。
+    next_message_cursor: str | None = None
+    has_more_messages: bool = False
+    # 本页任意条目（消息正文、思考步骤标签、质量说明、降级原因、会话标题）
+    # 未能在预算内翻译完成时为 true，改用目标语言占位文案；对同一游标重新
+    # GET 即为重试，已成功条目命中缓存不重复调用模型。绝不回落源语言原文。
+    localization_degraded: bool = False
+    localization_degraded_reason: str | None = None

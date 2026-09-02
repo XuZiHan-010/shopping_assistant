@@ -2,17 +2,102 @@
 
 from __future__ import annotations
 
-from datetime import date
+import base64
+import hmac
+import json
+from dataclasses import dataclass
+from datetime import date, datetime
+from hashlib import sha256
 from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import and_, exists, func, select, update
+from sqlalchemy import and_, exists, func, literal, select, tuple_, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.errors import InvalidRequestError
 from app.localization.locales import detect_source_language
 from app.models.answer import Answer, Feedback
 from app.models.conversation import Conversation, Message
+
+# 会话详情消息游标签名密钥（Task 7，§8.6.3）。这不是 R6 意义上的机密——
+# 消息查询本身始终按已认证的可信 `merchant_id` + 已由 `MerchantScopeService`
+# 校验过的 `conversation_id` 过滤，伪造或重放游标不可能读到别的商家/会话
+# 的任何一行数据；签名只用于把"游标属于哪个会话"这条不变量做成可检测的，
+# 使跨会话/跨商家复用产生**稳定错误码**而不是悄悄按错误的时间边界分页。
+# 因此固定为进程内常量即可，不走 Settings/环境变量。
+_MESSAGE_CURSOR_SECRET = b"borough-conversation-message-cursor-v1"
+
+
+def _encode_message_cursor(
+    *,
+    merchant_id: UUID,
+    conversation_id: UUID,
+    created_at: datetime,
+    message_id: UUID,
+) -> str:
+    payload = {
+        "merchant_id": str(merchant_id),
+        "conversation_id": str(conversation_id),
+        "created_at": created_at.isoformat(),
+        "message_id": str(message_id),
+    }
+    raw = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+    signature = hmac.new(_MESSAGE_CURSOR_SECRET, raw.encode("utf-8"), sha256).hexdigest()
+    token = json.dumps({"p": payload, "s": signature}, separators=(",", ":"), sort_keys=True)
+    return base64.urlsafe_b64encode(token.encode("utf-8")).decode("ascii")
+
+
+def _decode_message_cursor(
+    cursor: str,
+    *,
+    merchant_id: UUID,
+    conversation_id: UUID,
+) -> tuple[datetime, UUID]:
+    """解出游标携带的分页边界，并校验签名与所属 `merchant_id`/`conversation_id`。
+
+    任何一步失败——base64/JSON 格式错误、签名不匹配、或签名有效但绑定的
+    `merchant_id`/`conversation_id` 与本次可信上下文不一致——都统一归为
+    `InvalidRequestError`（422 `INVALID_REQUEST`），不区分"格式错"还是
+    "跨会话复用"：两者对调用方来说都是"这个游标在这次请求里不适用"，稳定
+    错误码不需要再分子类型。
+    """
+
+    try:
+        token_raw = base64.urlsafe_b64decode(cursor.encode("ascii")).decode("utf-8")
+        token = json.loads(token_raw)
+        payload = token["p"]
+        signature = str(token["s"])
+        raw = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+        expected_signature = hmac.new(
+            _MESSAGE_CURSOR_SECRET, raw.encode("utf-8"), sha256
+        ).hexdigest()
+        if not hmac.compare_digest(signature, expected_signature):
+            raise InvalidRequestError("消息分页游标签名不合法")
+        if payload["merchant_id"] != str(merchant_id) or payload["conversation_id"] != str(
+            conversation_id
+        ):
+            raise InvalidRequestError("消息分页游标不属于当前会话")
+        created_at = datetime.fromisoformat(payload["created_at"])
+        message_id = UUID(payload["message_id"])
+    except InvalidRequestError:
+        raise
+    except Exception as exc:
+        raise InvalidRequestError("消息分页游标不合法") from exc
+    return created_at, message_id
+
+
+@dataclass(frozen=True)
+class MessagePage:
+    """`ConversationRepository.list_messages_page()` 的返回形状。
+
+    `messages` 始终按创建时间正序排列（页内时间正序，见 §8.6.3）；
+    `next_cursor` 非空时代表"还有更早一页"，为空代表已经翻到最早一条。
+    """
+
+    messages: list[Message]
+    next_cursor: str | None
+    has_more: bool
 
 
 class ConversationRepository:
@@ -186,6 +271,64 @@ class ConversationRepository:
             .order_by(Message.created_at.asc(), Message.id.asc())
         )
         return list(result)
+
+    async def list_messages_page(
+        self,
+        merchant_id: UUID,
+        conversation_id: UUID,
+        *,
+        limit: int,
+        before: str | None = None,
+    ) -> MessagePage:
+        """按 `message_before` 游标分页返回会话消息（Task 7，§8.6.3）。
+
+        第一页（`before=None`）取最新 `limit` 条；`before` 非空时先解出并校验
+        游标（`_decode_message_cursor()`：签名不合法或不属于 `merchant_id` +
+        `conversation_id` 都会抛 `InvalidRequestError`），再取比游标边界更早
+        的 `limit` 条。无论哪一页,返回前都会把结果反转成时间正序（`messages`
+        字段），只有取数时的排序方向是"倒序 + LIMIT"，这是唯一能用一次索引
+        扫描同时拿到"最新 N 条"和"是否还有更早一页"的写法。
+
+        `(created_at, id)` 组合边界（而不是只用 `created_at`）用于兼容同一
+        时刻创建的多条消息——`tuple_()` 生成的行值比较在这种并列情形下仍能
+        给出稳定、不重复、不漏行的分页顺序。
+        """
+
+        conditions = [
+            Message.merchant_id == merchant_id,
+            Message.conversation_id == conversation_id,
+        ]
+        if before is not None:
+            cursor_created_at, cursor_message_id = _decode_message_cursor(
+                before, merchant_id=merchant_id, conversation_id=conversation_id
+            )
+            conditions.append(
+                tuple_(Message.created_at, Message.id)
+                < tuple_(literal(cursor_created_at), literal(cursor_message_id))
+            )
+
+        rows = list(
+            await self._session.scalars(
+                select(Message)
+                .where(*conditions)
+                .order_by(Message.created_at.desc(), Message.id.desc())
+                .limit(limit + 1)
+            )
+        )
+        has_more = len(rows) > limit
+        page = rows[:limit]
+        page.reverse()
+
+        next_cursor: str | None = None
+        if has_more and page:
+            oldest = page[0]
+            next_cursor = _encode_message_cursor(
+                merchant_id=merchant_id,
+                conversation_id=conversation_id,
+                created_at=oldest.created_at,
+                message_id=oldest.id,
+            )
+        return MessagePage(messages=page, next_cursor=next_cursor, has_more=has_more)
 
     async def list_succeeded_answers_for_conversation(
         self,
