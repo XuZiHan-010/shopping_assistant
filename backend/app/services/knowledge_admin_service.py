@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Callable
 from uuid import UUID
 
 from sqlalchemy import select
@@ -53,14 +54,25 @@ def _source_language_of(value: str) -> SourceLanguage:
     return SourceLanguage(value)
 
 
+#: 只读记忆节点机器翻译兜底用的构造函数：调用方（`app.api.routes.knowledge`）
+#: 只有拿到真正要翻译的这份记忆的 `merchant_id` 后才应该构造带费用防护的
+#: 模型客户端——这样 `llm_usage` 才能按触发翻译的商家记账，而不是像
+#: `build_global_guarded_llm()` 那样落在 `merchant_id=NULL` 的全局桶里
+#: （复审 Finding 1：LLM 成本/审计归属应按商家，不是路由层能否提前知道
+#: 商家的技术限制）。回调延迟到 `_get_memory_document()` 内部才真正调用，
+#: 请求语言与记忆 `source_locale` 一致时（零翻译）根本不会触发。
+MemoryLocalizerFactory = Callable[[UUID], tuple[LocalizationServiceLike, LlmBudget]]
+
+
 class KnowledgeAdminService:
     """由数据库文档和只读商家记忆推导维护后台目录树。
 
     `localization`（资源级人工译文的增删查，零 LLM）在生产环境总会传入；
-    `memory_localizer`/`memory_budget` 只在读取只读记忆节点、且请求语言与
-    该记忆的 `source_locale` 不同时才会被用到（机器翻译，有真实 LLM 成本），
-    两者缺一即视为"本次请求无法机器翻译"，安全降级为原样返回源正文而不是
-    报错——知识文档本身的人工译文读写完全不依赖这两个参数。
+    `memory_localizer_factory` 只在读取只读记忆节点、且请求语言与该记忆的
+    `source_locale` 不同时才会被调用（机器翻译，有真实 LLM 成本，且按这份
+    记忆真实的 `merchant_id` 计费），缺省即视为"本次请求无法机器翻译"，
+    安全降级为原样返回源正文而不是报错——知识文档本身的人工译文读写完全
+    不依赖这个参数。
     """
 
     def __init__(
@@ -69,15 +81,13 @@ class KnowledgeAdminService:
         *,
         max_document_bytes: int = 262_144,
         localization: LocalizationRepository | None = None,
-        memory_localizer: LocalizationServiceLike | None = None,
-        memory_budget: LlmBudget | None = None,
+        memory_localizer_factory: MemoryLocalizerFactory | None = None,
     ) -> None:
         self._session = session
         self._documents = KnowledgeAdminRepository(session)
         self._max_document_bytes = max_document_bytes
         self._localization = localization or LocalizationRepository(session)
-        self._memory_localizer = memory_localizer
-        self._memory_budget = memory_budget
+        self._memory_localizer_factory = memory_localizer_factory
 
     async def tree(
         self, *, content_locale: SupportedLocale | None = None
@@ -295,11 +305,13 @@ class KnowledgeAdminService:
         self, path: str, content_locale: SupportedLocale | None
     ) -> KnowledgeDocumentResponse:
         """商家记忆没有人工编辑入口（Step 4）：命中且请求语言与
-        `memory.source_locale` 一致时零翻译调用原样返回；不一致时按
-        MERCHANT 作用域调用一次机器翻译（若本服务未装配
-        `memory_localizer`/`memory_budget`，或翻译未能在预算内完成，安全
-        降级为原样返回源正文并标记 `MISSING`，绝不报错、也绝不把源语言
-        原文冒充成目标语言译文）。"""
+        `memory.source_locale` 一致时零翻译调用原样返回；不一致时才调用
+        `self._memory_localizer_factory(memory.merchant_id)`——延迟到这里、
+        用这份记忆真实的 `merchant_id` 才构造带费用防护的模型客户端，使
+        `llm_usage` 按触发翻译的商家记账（复审 Finding 1）；再按 MERCHANT
+        作用域调用一次机器翻译。若本服务未装配 `memory_localizer_factory`，
+        或翻译未能在预算内完成，安全降级为原样返回源正文并标记
+        `MISSING`，绝不报错、也绝不把源语言原文冒充成目标语言译文。"""
 
         segments = path.split("/")
         if len(segments) != 4 or segments[:2] != ["memory", "merchants"]:
@@ -334,12 +346,13 @@ class KnowledgeAdminService:
                 translation_status="SOURCE",
             )
 
-        if self._memory_localizer is not None and self._memory_budget is not None:
-            resolved_texts = await self._memory_localizer.localize_many(
+        if self._memory_localizer_factory is not None:
+            localizer, budget = self._memory_localizer_factory(memory.merchant_id)
+            resolved_texts = await localizer.localize_many(
                 scope=LocalizationScope(kind="MERCHANT", merchant_id=memory.merchant_id),
                 items=[LocalizeItem(key="content", text=memory.content)],
                 target_locale=content_locale,
-                budget=self._memory_budget,
+                budget=budget,
             )
             translated = resolved_texts.get("content")
             if translated is not None:
