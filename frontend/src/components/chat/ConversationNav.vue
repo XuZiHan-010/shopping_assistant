@@ -1,10 +1,14 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
+
 export interface RoundEntry {
   /** 助手消息的 localId——选中轮次用的就是它（chatStore.selectRound）。 */
   localId: string
   /** 本轮的用户提问，用作目录条目的可读标题。 */
   question: string
 }
+
+const { t } = useI18n()
 
 defineProps<{
   rounds: readonly RoundEntry[]
@@ -17,7 +21,7 @@ defineEmits<{
 </script>
 
 <template>
-  <nav class="conversation-nav" aria-label="本次会话的轮次目录">
+  <nav class="conversation-nav" :aria-label="t('conversationNav.navAria')">
     <ol class="conversation-nav__list">
       <li v-for="(round, index) in rounds" :key="round.localId">
         <button

@@ -10,6 +10,7 @@ import {
   ThumbsUp,
 } from '@lucide/vue'
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import DetailTable from '@/components/insights/DetailTable.vue'
 import type {
@@ -19,6 +20,8 @@ import type {
   QualityStatus,
 } from '@/types/chat'
 import { describeError } from '@/utils/errorCopy'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   message: ChatMessageModel
@@ -32,7 +35,7 @@ const emit = defineEmits<{
   feedback: [localId: string, intent: FeedbackIntent]
 }>()
 
-const latestStage = computed(() => props.message.steps.at(-1)?.label ?? '正在准备')
+const latestStage = computed(() => props.message.steps.at(-1)?.label ?? t('chatMessage.preparing'))
 const completedSteps = computed(() =>
   props.message.answer?.thinkingSteps?.length
     ? props.message.answer.thinkingSteps
@@ -63,29 +66,29 @@ const feedbackErrorCopy = computed(() =>
  */
 const canRetryError = computed(() => props.message.error?.retryable ?? false)
 
-const QUALITY_LABELS: Record<QualityStatus, string> = {
-  PASSED: '前后比对通过',
-  DEGRADED: '校验未通过，已使用稳定兜底',
-  FAILED: '前后比对未通过',
-  NOT_RUN: '未执行校验',
-}
+const QUALITY_LABELS = computed<Record<QualityStatus, string>>(() => ({
+  PASSED: t('chatMessage.quality.passed'),
+  DEGRADED: t('chatMessage.quality.degraded'),
+  FAILED: t('chatMessage.quality.failed'),
+  NOT_RUN: t('chatMessage.quality.notRun'),
+}))
 
-const SOURCE_LABELS: Record<AnalysisSource, string> = {
-  DATABASE: '经营数据',
-  KNOWLEDGE: '知识库',
-  ATTACHMENT: '附件',
-  MEMORY: '商家记忆',
-  FALLBACK: '兜底回答',
-  NONE: '无外部来源',
-}
+const SOURCE_LABELS = computed<Record<AnalysisSource, string>>(() => ({
+  DATABASE: t('chatMessage.source.database'),
+  KNOWLEDGE: t('chatMessage.source.knowledge'),
+  ATTACHMENT: t('chatMessage.source.attachment'),
+  MEMORY: t('chatMessage.source.memory'),
+  FALLBACK: t('chatMessage.source.fallback'),
+  NONE: t('chatMessage.source.none'),
+}))
 
 const qualityTrace = computed(() => {
   const quality = props.message.answer?.quality
   if (!quality) return undefined
   return {
     ...quality,
-    label: QUALITY_LABELS[quality.status],
-    sourceLabels: quality.sources.map((source) => SOURCE_LABELS[source]),
+    label: QUALITY_LABELS.value[quality.status],
+    sourceLabels: quality.sources.map((source) => SOURCE_LABELS.value[source]),
   }
 })
 
@@ -101,10 +104,12 @@ const degradeNotice = computed(() => {
   if (!quality?.degraded) return undefined
 
   return {
-    reason: quality.degradedReason ?? '本次回答未接入真实数据源，仅供演示参考。',
+    reason: quality.degradedReason ?? t('chatMessage.degradedFallbackReason'),
     sources:
       quality.sources.length > 0
-        ? quality.sources.map((source) => SOURCE_LABELS[source]).join('、')
+        ? quality.sources
+            .map((source) => SOURCE_LABELS.value[source])
+            .join(t('chatMessage.sourcesSeparator'))
         : undefined,
   }
 })
@@ -156,11 +161,11 @@ const showHistoricalDataNotice = computed(
       <button
         type="button"
         data-testid="cancel-button"
-        aria-label="停止本次回答"
+        :aria-label="t('chatMessage.cancelAria')"
         @click.stop="emit('cancel', message.localId)"
       >
         <Square :size="12" aria-hidden="true" />
-        <span>停止</span>
+        <span>{{ t('chatMessage.cancelLabel') }}</span>
       </button>
     </div>
 
@@ -171,11 +176,11 @@ const showHistoricalDataNotice = computed(
       <button
         type="button"
         data-testid="retry-button"
-        aria-label="重新回答本轮问题"
+        :aria-label="t('chatMessage.retryAfterCancelAria')"
         @click.stop="emit('retry', message.localId)"
       >
         <RotateCcw :size="12" aria-hidden="true" />
-        <span>重新回答</span>
+        <span>{{ t('chatMessage.retryAfterCancelLabel') }}</span>
       </button>
     </p>
 
@@ -189,11 +194,11 @@ const showHistoricalDataNotice = computed(
         v-if="canRetryError"
         type="button"
         data-testid="retry-button"
-        aria-label="重试本轮问题"
+        :aria-label="t('chatMessage.retryAria')"
         @click.stop="emit('retry', message.localId)"
       >
         <RotateCcw :size="12" aria-hidden="true" />
-        <span>重试</span>
+        <span>{{ t('chatMessage.retryLabel') }}</span>
       </button>
     </p>
 
@@ -203,7 +208,7 @@ const showHistoricalDataNotice = computed(
         class="chat-message__quality"
         :class="`chat-message__quality--${qualityTrace.status.toLowerCase()}`"
         role="group"
-        aria-label="质量校验轨迹"
+        :aria-label="t('chatMessage.qualityGroupAria')"
       >
         <div class="chat-message__quality-heading">
           <ShieldCheck :size="15" aria-hidden="true" />
@@ -213,7 +218,7 @@ const showHistoricalDataNotice = computed(
             class="chat-message__quality-attempts"
             data-testid="quality-attempts"
           >
-            经过 {{ qualityTrace.attempts }} 次校验
+            {{ t('chatMessage.qualityAttempts', { attempts: qualityTrace.attempts }) }}
           </span>
         </div>
         <details
@@ -221,12 +226,15 @@ const showHistoricalDataNotice = computed(
           class="chat-message__quality-notes"
           data-testid="quality-notes"
         >
-          <summary>查看校验记录</summary>
+          <summary>{{ t('chatMessage.qualityNotesSummary') }}</summary>
           <ul>
             <li v-for="note in qualityTrace.notes" :key="note">{{ note }}</li>
           </ul>
         </details>
-        <div class="chat-message__quality-sources" aria-label="分析来源">
+        <div
+          class="chat-message__quality-sources"
+          :aria-label="t('chatMessage.qualitySourcesAria')"
+        >
           <span
             v-for="(source, index) in qualityTrace.sourceLabels"
             :key="`${source}-${index}`"
@@ -240,17 +248,21 @@ const showHistoricalDataNotice = computed(
       <p v-if="degradeNotice" class="chat-message__degraded" data-testid="degraded-notice">
         <AlertTriangle :size="13" aria-hidden="true" />
         <span>
-          <strong>演示数据</strong>
+          <strong>{{ t('chatMessage.degradedBadge') }}</strong>
           {{ degradeNotice.reason }}
           <span v-if="degradeNotice.sources" class="chat-message__degraded-sources">
-            分析来源：{{ degradeNotice.sources }}
+            {{ t('chatMessage.degradedSourcesPrefix') }}{{ degradeNotice.sources }}
           </span>
         </span>
       </p>
 
       <template v-if="isSelectableRound">
-        <section v-if="completedSteps.length" class="chat-message__thinking" aria-label="执行步骤">
-          <strong>执行完成</strong>
+        <section
+          v-if="completedSteps.length"
+          class="chat-message__thinking"
+          :aria-label="t('chatMessage.thinkingAria')"
+        >
+          <strong>{{ t('chatMessage.thinkingHeading') }}</strong>
           <div
             v-for="(step, index) in completedSteps"
             :key="`${step.node}-${index}`"
@@ -265,7 +277,7 @@ const showHistoricalDataNotice = computed(
           type="button"
           data-testid="select-round"
           :aria-current="selected ? 'true' : undefined"
-          :aria-label="`查看本轮分析：${message.text.slice(0, 30)}`"
+          :aria-label="`${t('chatMessage.selectRoundAriaPrefix')}${message.text.slice(0, 30)}`"
           @click="emit('select', message.localId)"
         >
           {{ message.text }}
@@ -280,10 +292,12 @@ const showHistoricalDataNotice = computed(
           class="chat-message__history-notice"
           data-testid="history-detail-notice"
         >
-          历史明细仅保留{{ message.answer?.data?.columns?.length ?? 0 }}列、
           {{
-            message.answer?.data?.totalRows ?? 0
-          }}行的元数据；重新提问可查看最新的数据表格与下载链接。
+            t('chatMessage.historyDetailNotice', {
+              columns: message.answer?.data?.columns?.length ?? 0,
+              rows: message.answer?.data?.totalRows ?? 0,
+            })
+          }}
         </p>
       </template>
       <p v-else-if="hasAnswerText" class="chat-message__text">{{ message.text }}</p>
@@ -292,7 +306,7 @@ const showHistoricalDataNotice = computed(
         v-if="canSendFeedback"
         class="chat-message__feedback"
         role="group"
-        aria-label="回答反馈"
+        :aria-label="t('chatMessage.feedbackGroupAria')"
       >
         <div class="chat-message__feedback-row">
           <span
@@ -301,37 +315,45 @@ const showHistoricalDataNotice = computed(
             data-testid="feedback-status"
             aria-live="polite"
           >
-            {{ message.feedbackPending ? '保存中' : '已记录' }}
+            {{
+              message.feedbackPending
+                ? t('chatMessage.feedbackPending')
+                : t('chatMessage.feedbackPersisted')
+            }}
           </span>
           <button
             type="button"
-            aria-label="采纳本轮回答"
+            :aria-label="t('chatMessage.adoptAria')"
             :aria-pressed="message.feedback?.isAdopted === true"
             :disabled="message.feedbackPending"
             @click="emit('feedback', message.localId, { type: 'ADOPT' })"
           >
             <Check :size="14" aria-hidden="true" />
-            <span>{{ message.feedback?.isAdopted ? '已采纳' : '采纳' }}</span>
+            <span>{{
+              message.feedback?.isAdopted
+                ? t('chatMessage.adoptLabelDone')
+                : t('chatMessage.adoptLabelDefault')
+            }}</span>
           </button>
           <button
             type="button"
-            aria-label="给本轮回答点赞"
+            :aria-label="t('chatMessage.likeAria')"
             :aria-pressed="message.feedback?.reaction === 'LIKE'"
             :disabled="message.feedbackPending"
             @click="emit('feedback', message.localId, { type: 'REACT', reaction: 'LIKE' })"
           >
             <ThumbsUp :size="14" aria-hidden="true" />
-            <span>点赞</span>
+            <span>{{ t('chatMessage.likeLabel') }}</span>
           </button>
           <button
             type="button"
-            aria-label="给本轮回答点踩"
+            :aria-label="t('chatMessage.dislikeAria')"
             :aria-pressed="message.feedback?.reaction === 'DISLIKE'"
             :disabled="message.feedbackPending"
             @click="emit('feedback', message.localId, { type: 'REACT', reaction: 'DISLIKE' })"
           >
             <ThumbsDown :size="14" aria-hidden="true" />
-            <span>点踩</span>
+            <span>{{ t('chatMessage.dislikeLabel') }}</span>
           </button>
         </div>
         <p

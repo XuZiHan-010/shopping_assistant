@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { BarChart3, BookOpen, MessageSquarePlus, PanelLeft } from '@lucide/vue'
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import ConversationColumn from '@/components/chat/ConversationColumn.vue'
 import DailyReportCard from '@/components/chat/DailyReportCard.vue'
 import MetricDefinitionPanel from '@/components/insights/MetricDefinitionPanel.vue'
 import RecommendationPanel from '@/components/insights/RecommendationPanel.vue'
 import ConversationDrawer from '@/components/layout/ConversationDrawer.vue'
+import LanguageSwitcher from '@/components/layout/LanguageSwitcher.vue'
 import MerchantSwitcher from '@/components/layout/MerchantSwitcher.vue'
 import { useAppError } from '@/composables/useAppError'
 import { useAuthStore } from '@/stores/auth'
@@ -15,6 +17,7 @@ import { getDailyReport } from '@/api/report'
 import { submitFeedback } from '@/api/chat'
 import type { DailyReport } from '@/types/report'
 
+const { t } = useI18n()
 const authStore = useAuthStore()
 const chatStore = useChatStore()
 const { showError } = useAppError()
@@ -32,7 +35,7 @@ async function loadDailyReport(): Promise<void> {
   try {
     dailyReport.value = await getDailyReport(controller.signal)
   } catch {
-    if (!controller.signal.aborted) showError('每日经营日报加载失败，请稍后重试。')
+    if (!controller.signal.aborted) showError(t('assistantView.dailyReportLoadFailed'))
   }
 }
 
@@ -47,7 +50,7 @@ async function adoptDailyReport(): Promise<void> {
     )
     dailyReportAdopted.value = true
   } catch {
-    showError('采纳日报建议失败，请稍后重试。')
+    showError(t('assistantView.dailyReportAdoptFailed'))
   } finally {
     dailyReportPending.value = false
   }
@@ -108,7 +111,9 @@ watch(
 )
 
 // 列表到达前没有可显示的商家名；给切换器一个占位文案，避免触发按钮空着。
-const merchantLabel = computed(() => authStore.selected?.displayName ?? '加载中')
+const merchantLabel = computed(
+  () => authStore.selected?.displayName ?? t('assistantView.merchantLoading'),
+)
 
 // 恢复商家失败或回退到默认商家都是用户需要知道的事，交给 F0 建立的全局提示区
 // 呈现——Store 只负责产出文案，不自己找地方渲染。
@@ -149,7 +154,7 @@ watch(lastAssistantError, (error) => {
 // loadConversations 本身仍然如实抛出，await 它的调用方需要那个异常。
 function refreshConversations(): void {
   chatStore.loadConversations().catch(() => {
-    showError('历史会话加载失败，请稍后重试。')
+    showError(t('assistantView.conversationsLoadFailed'))
   })
 }
 
@@ -199,13 +204,13 @@ function startNewConversation(): void {
 
 <template>
   <div class="assistant-shell">
-    <a class="skip-link" href="#main-content">跳到对话主内容</a>
+    <a class="skip-link" href="#main-content">{{ t('assistantView.skipLink') }}</a>
     <header class="assistant-header" data-testid="assistant-header">
       <button
         ref="drawerTrigger"
         class="header-icon-button header-nav-button"
         type="button"
-        aria-label="打开对话目录"
+        :aria-label="t('assistantView.navAria')"
         :aria-expanded="isDrawerOpen"
         @click="openDrawer"
       >
@@ -213,8 +218,8 @@ function startNewConversation(): void {
       </button>
       <img class="brand-logo" src="/borough-logo.svg" alt="Borough" width="50" height="40" />
       <div class="brand-title">
-        <h1>Borough 商家 AI 助手</h1>
-        <p>经营数据、分析与行动建议</p>
+        <h1>{{ t('appMeta.title') }}</h1>
+        <p>{{ t('assistantView.tagline') }}</p>
       </div>
       <MerchantSwitcher
         ref="merchantSwitcherRef"
@@ -224,18 +229,29 @@ function startNewConversation(): void {
         @update:model-value="selectMerchant"
       />
       <div class="header-actions">
-        <RouterLink class="knowledge-link" to="/knowledge-base" aria-label="知识库维护" title="知识库维护">
+        <RouterLink
+          class="knowledge-link"
+          to="/knowledge-base"
+          :aria-label="t('assistantView.knowledgeLinkAria')"
+          :title="t('assistantView.knowledgeLinkAria')"
+        >
           <BookOpen :size="18" aria-hidden="true" />
-          <span>知识库</span>
+          <span>{{ t('assistantView.knowledgeLinkLabel') }}</span>
         </RouterLink>
-        <RouterLink class="ops-link" to="/ops-dashboard" aria-label="Chat BI 运营看板" title="Chat BI 运营看板">
+        <RouterLink
+          class="ops-link"
+          to="/ops-dashboard"
+          :aria-label="t('assistantView.opsLinkAria')"
+          :title="t('assistantView.opsLinkAria')"
+        >
           <BarChart3 :size="18" aria-hidden="true" />
-          <span>看板</span>
+          <span>{{ t('assistantView.opsLinkLabel') }}</span>
         </RouterLink>
         <button class="new-chat-button" type="button" @click="startNewConversation">
           <MessageSquarePlus :size="18" aria-hidden="true" />
-          <span>新会话</span>
+          <span>{{ t('assistantView.newChatLabel') }}</span>
         </button>
+        <LanguageSwitcher />
       </div>
     </header>
 
@@ -243,7 +259,7 @@ function startNewConversation(): void {
       <aside
         class="workspace-side workspace-side-left"
         data-testid="workspace-column"
-        aria-label="指标与洞察"
+        :aria-label="t('assistantView.insightsAside')"
       >
         <DailyReportCard
           :report="dailyReport"
@@ -256,11 +272,11 @@ function startNewConversation(): void {
         <section
           v-else
           class="chart-panel"
-          aria-label="指标图表"
+          :aria-label="t('metricChartPanel.sectionAria')"
           aria-busy="false"
           data-testid="chart-placeholder"
         >
-          <p>发起可视化类问题后，这里会显示图表。</p>
+          <p>{{ t('metricChartPanel.emptyBody') }}</p>
         </section>
       </aside>
 
@@ -269,7 +285,7 @@ function startNewConversation(): void {
       <aside
         class="workspace-side workspace-side-right"
         data-testid="workspace-column"
-        aria-label="行动建议"
+        :aria-label="t('assistantView.actionsAside')"
       >
         <RecommendationPanel :answer="chatStore.currentAnswer" @ask="chatStore.submitMessage" />
       </aside>

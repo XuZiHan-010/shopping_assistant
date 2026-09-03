@@ -8,9 +8,11 @@ import { setChatTransport, type TransportRequest } from '@/api/transport'
 import ConversationColumn from '@/components/chat/ConversationColumn.vue'
 import MerchantSwitcher from '@/components/layout/MerchantSwitcher.vue'
 import { useAppError } from '@/composables/useAppError'
+import { i18n, type SupportedLocale } from '@/i18n'
 import router from '@/router'
 import { MERCHANT_STORAGE_KEY, useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
+import { useLocaleStore } from '@/stores/locale'
 import type { ChatMessage } from '@/types/chat'
 import AssistantView from './AssistantView.vue'
 
@@ -39,14 +41,22 @@ describe('AssistantView', () => {
   /**
    * 商家名不再是硬编码常量，而是挂载后由 Auth Store 异步取回的（F2 Task 9）。
    * 断言商家菜单之前必须把这次加载 flush 掉，否则菜单里一个选项都还没有。
+   *
+   * `locale` 默认 zh-CN，保持既有中文断言不受影响；`i18n.global.locale` 是
+   * 跨用例共享的模块级单例（LanguageSwitcher 等组件同一套用法），每次挂载显式
+   * 通过 `useLocaleStore().setLocale()` 校准，不依赖上一个用例残留的语言状态。
    */
-  async function mountView() {
+  async function mountView(locale: SupportedLocale = 'zh-CN') {
     const pinia = createPinia()
     setActivePinia(pinia)
+    useLocaleStore().setLocale(locale)
     const wrapper = mount(AssistantView, {
       // 焦点断言只有在真的挂进文档里才成立——游离节点上 focus() 是空操作。
       attachTo: document.body,
-      global: { plugins: [pinia], stubs: { RouterLink: { template: '<a><slot /></a>' } } },
+      global: {
+        plugins: [pinia, i18n],
+        stubs: { RouterLink: { template: '<a><slot /></a>' } },
+      },
     })
     mountedWrappers.push(wrapper)
     await flushPromises()
@@ -264,8 +274,9 @@ describe('AssistantView', () => {
   it('首屏只渲染图表占位，不挂载图表面板', () => {
     const pinia = createPinia()
     setActivePinia(pinia)
+    useLocaleStore().setLocale('zh-CN')
     const wrapper = mount(AssistantView, {
-      global: { plugins: [pinia], stubs: { RouterLink: { template: '<a><slot /></a>' } } },
+      global: { plugins: [pinia, i18n], stubs: { RouterLink: { template: '<a><slot /></a>' } } },
     })
     mountedWrappers.push(wrapper)
 
@@ -284,9 +295,10 @@ describe('AssistantView', () => {
 
     const pinia = createPinia()
     setActivePinia(pinia)
+    useLocaleStore().setLocale('zh-CN')
     const wrapper = mount(AssistantView, {
       global: {
-        plugins: [pinia],
+        plugins: [pinia, i18n],
         stubs: {
           MetricChartPanel: { template: '<section data-testid="chart-mounted" />' },
           RouterLink: { template: '<a><slot /></a>' },
@@ -311,8 +323,9 @@ describe('AssistantView', () => {
 
     const pinia = createPinia()
     setActivePinia(pinia)
+    useLocaleStore().setLocale('zh-CN')
     const wrapper = mount(AssistantView, {
-      global: { plugins: [pinia], stubs: { RouterLink: { template: '<a><slot /></a>' } } },
+      global: { plugins: [pinia, i18n], stubs: { RouterLink: { template: '<a><slot /></a>' } } },
     })
 
     expect(setTimeoutSpy).toHaveBeenCalled()
@@ -386,5 +399,79 @@ describe('AssistantView', () => {
     expect(useAppError().message.value).toContain('每日经营日报加载失败')
     expect(wrapper.find('.daily-report').exists()).toBe(false)
     expect(wrapper.find('textarea[aria-label="输入问题"]').exists()).toBe(true)
+  })
+
+  /**
+   * Task 10B Step 1/5：英语失败测试→迁移确定性文案→回归通过。断言范围覆盖
+   * 标题、推荐问题、输入提示、发送/停止按钮、历史空态、每日经营报告、质量
+   * 轨迹、反馈、明细表、建议；技术字段（SQL 口径、URL、ID、数值、
+   * `metric_code`）保持原值，不被翻译。
+   *
+   * 提交给 Mock 后端的问题原文仍用中文关键词（`api/mock/scenarios.ts` 目前
+   * 只认中文关键词，双语 Mock 匹配是 Task 11 的职责范围），这里验证的是
+   * UI chrome 本身在英语模式下的渲染，不依赖 Mock 层已完成双语改造。
+   */
+  it('en-US 下助手页确定性文案全部为英文，技术字段和后端已本地化内容保持原值', async () => {
+    const wrapper = await mountView('en-US')
+
+    // 页头：标题、Tagline、知识库/看板入口、新会话按钮、语言切换器。
+    expect(wrapper.text()).toContain('Borough Merchant AI Assistant')
+    expect(wrapper.text()).toContain('Business data, analysis, and action recommendations')
+    expect(wrapper.get('.knowledge-link').text()).toContain('Knowledge base')
+    expect(wrapper.get('.ops-link').text()).toContain('Dashboard')
+    expect(wrapper.get('.new-chat-button').text()).toContain('New chat')
+    expect(wrapper.find('[data-testid="language-switcher"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="language-switcher"]').attributes('aria-label')).toBe(
+      'Switch to Chinese',
+    )
+
+    // 输入区：placeholder、aria-label、发送按钮、脚注提示。
+    expect(wrapper.get('textarea').attributes('aria-label')).toBe('Ask a question')
+    expect(wrapper.get('textarea').attributes('placeholder')).toBe('Ask a business question…')
+    expect(wrapper.text()).toContain('Enter to send')
+
+    // 推荐问题（欢迎卡片的快速体验区）。
+    expect(wrapper.text()).toContain("Hi, I'm your business assistant")
+    expect(wrapper.text()).toContain('Quick start')
+    const quickQuestionButtons = wrapper.findAll('[data-testid="quick-question"]')
+    expect(quickQuestionButtons.length).toBeGreaterThan(0)
+    expect(quickQuestionButtons[0].text()).not.toMatch(/[一-龥]/)
+
+    // 图表占位（首屏，图表面板尚未挂载）。
+    expect(wrapper.get('[data-testid="chart-placeholder"]').text()).toContain(
+      'Ask a visualization-friendly question',
+    )
+
+    // 每日经营报告卡片：标题、日期、采纳按钮。
+    expect(wrapper.text()).toContain('Daily business report')
+    expect(wrapper.get('.daily-report__adopt').text()).toContain('Adopt this report')
+
+    // 历史空态：打开对话目录，断言英文空态文案（复用 Task 10A 已完成的
+    // ConversationDrawer 本地化成果）。
+    await wrapper.get('button[aria-label="Open conversation history"]').trigger('click')
+    expect(wrapper.text()).toContain('No conversation history yet')
+    await wrapper.get('button[aria-label="Close conversation history"]').trigger('click')
+
+    // 发起一轮真实问答（提交文本本身仍是中文关键词，命中 Mock 的
+    // metricGmv fixture；这里只验证 UI chrome，不依赖 Mock 双语匹配）。
+    const chatStore = useChatStore()
+    await chatStore.submitMessage('昨天总 GMV 是多少？')
+    await flushPromises()
+
+    // 质量轨迹、反馈按钮、建议面板、指标口径面板均为英文 chrome。
+    expect(wrapper.get('[aria-label="Quality review trace"]').text()).toMatch(
+      /Reviewed|passed|fallback/i,
+    )
+    expect(wrapper.get('[aria-label="Adopt this answer"]').text()).toContain('Adopt')
+    expect(wrapper.get('[aria-label="Like this answer"]').text()).toContain('Like')
+    expect(wrapper.get('[aria-label="Dislike this answer"]').text()).toContain('Dislike')
+    expect(wrapper.text()).toContain('Metric definition')
+    expect(wrapper.text()).toContain('Action recommendations')
+    expect(wrapper.text()).toContain('You might also ask')
+
+    // 技术字段原样保留：metric_code、SQL 口径关键字、数值本身不被翻译。
+    const answer = chatStore.currentAnswer
+    expect(answer?.metric?.code).toBe('gmv')
+    expect(wrapper.text()).toMatch(/SELECT|FROM|SUM/i)
   })
 })

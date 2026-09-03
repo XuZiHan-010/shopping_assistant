@@ -9,6 +9,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { createMockTransport } from '@/api/mock/transport'
 import { setChatTransport } from '@/api/transport'
 import App from '@/App.vue'
+import { i18n } from '@/i18n'
 
 import { routes } from './index'
 
@@ -37,7 +38,11 @@ describe('路由表', () => {
   // 抖动留余量，不是掩盖真实变慢——单独跑这个文件通常 <300ms。
   it('两条路由都能渲染', async () => {
     const router = buildRouter()
-    const wrapper = mount(App, { global: { plugins: [createPinia(), router] } })
+    // AssistantView（Task 10B）改用 `useI18n()` 而不是全局 `i18n` 单例，挂载
+    // 它就要求 i18n 插件已经 `app.use`——App.vue/ConversationDrawer.vue/
+    // MerchantSwitcher.vue 仍是直接读 `i18n.global` 的旧用法，唯独这条路由
+    // 测试会挂载到 AssistantView，所以这里要单独补上插件。
+    const wrapper = mount(App, { global: { plugins: [createPinia(), router, i18n] } })
 
     await router.push('/')
     await router.isReady()

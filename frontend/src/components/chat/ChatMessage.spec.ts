@@ -1,8 +1,11 @@
 import { mount } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AppError } from '@/api/errors'
 import { toChatAnswer } from '@/api/adapters/chat'
+import { i18n } from '@/i18n'
+import { useLocaleStore } from '@/stores/locale'
 import detailOrder from '@fixtures/chat/detail-order.json'
 import metricGmv from '@fixtures/chat/metric-gmv.json'
 import type { components } from '@/api/generated'
@@ -24,6 +27,10 @@ function makeMessage(overrides: Partial<ChatMessageModel> = {}): ChatMessageMode
   }
 }
 
+function mountMessage(props: { message: ChatMessageModel; selected?: boolean }) {
+  return mount(ChatMessage, { props, global: { plugins: [i18n] } })
+}
+
 describe('ChatMessage', () => {
   // DetailTable 在未收到 apiBaseUrl prop 时会读取 VITE_API_BASE_URL 拼下载链接
   // （ChatMessage.vue 不转发这个 prop，走的就是这条默认路径）。Vitest 以
@@ -31,6 +38,8 @@ describe('ChatMessage', () => {
   // 带明细数据的实时消息就会因 ApiConfigError 而渲染失败。
   beforeEach(() => {
     vi.stubEnv('VITE_API_BASE_URL', 'https://api.example.test')
+    setActivePinia(createPinia())
+    useLocaleStore().setLocale('zh-CN')
   })
 
   afterEach(() => {
@@ -38,34 +47,30 @@ describe('ChatMessage', () => {
   })
 
   it('streaming 时展示最新阶段标签', () => {
-    const wrapper = mount(ChatMessage, {
-      props: {
-        message: makeMessage({
-          status: 'streaming',
-          steps: [
-            { label: '识别商家与业务意图', node: 'classify' },
-            { label: '读取业务口径并整理演示数据', node: 'compose' },
-          ],
-        }),
-      },
+    const wrapper = mountMessage({
+      message: makeMessage({
+        status: 'streaming',
+        steps: [
+          { label: '识别商家与业务意图', node: 'classify' },
+          { label: '读取业务口径并整理演示数据', node: 'compose' },
+        ],
+      }),
     })
 
     expect(wrapper.get('[data-testid="stage-label"]').text()).toBe('读取业务口径并整理演示数据')
   })
 
   it('完成态实时消息按原顺序展示全部执行步骤', () => {
-    const wrapper = mount(ChatMessage, {
-      props: {
-        message: makeMessage({
-          status: 'complete',
-          text: '分析完成',
-          steps: [
-            { label: '识别商家与会话上下文', node: 'load_context' },
-            { label: '查询经营数据', node: 'query_data' },
-            { label: '保存回答', node: 'persist_answer' },
-          ],
-        }),
-      },
+    const wrapper = mountMessage({
+      message: makeMessage({
+        status: 'complete',
+        text: '分析完成',
+        steps: [
+          { label: '识别商家与会话上下文', node: 'load_context' },
+          { label: '查询经营数据', node: 'query_data' },
+          { label: '保存回答', node: 'persist_answer' },
+        ],
+      }),
     })
 
     expect(wrapper.findAll('[data-testid="thinking-step"]').map((item) => item.text())).toEqual([
@@ -82,16 +87,14 @@ describe('ChatMessage', () => {
       { label: '查询经营数据', node: 'query_data' },
       { label: '保存回答', node: 'persist_answer' },
     ]
-    const wrapper = mount(ChatMessage, {
-      props: {
-        message: makeMessage({
-          origin: 'history',
-          status: 'complete',
-          text: '历史分析完成',
-          steps: [],
-          answer,
-        }),
-      },
+    const wrapper = mountMessage({
+      message: makeMessage({
+        origin: 'history',
+        status: 'complete',
+        text: '历史分析完成',
+        steps: [],
+        answer,
+      }),
     })
 
     expect(wrapper.findAll('[data-testid="thinking-step"]').map((item) => item.text())).toEqual([
@@ -102,15 +105,13 @@ describe('ChatMessage', () => {
   })
 
   it('error 时提供重试入口（retryable 错误）', async () => {
-    const wrapper = mount(ChatMessage, {
-      props: {
-        message: makeMessage({
-          status: 'error',
-          error: new AppError('STREAM_INTERRUPTED', '回答流意外中断，请重试。', {
-            retryable: true,
-          }),
+    const wrapper = mountMessage({
+      message: makeMessage({
+        status: 'error',
+        error: new AppError('STREAM_INTERRUPTED', '回答流意外中断，请重试。', {
+          retryable: true,
         }),
-      },
+      }),
     })
 
     await wrapper.get('[data-testid="retry-button"]').trigger('click')
@@ -122,13 +123,11 @@ describe('ChatMessage', () => {
   it('不可重试的错误（如 REQUEST_IN_PROGRESS）不展示重试按钮', () => {
     // 后端说这条请求正在处理，再点重试会打成循环——UI 只展示提示文案，
     // 等待而非重发。
-    const wrapper = mount(ChatMessage, {
-      props: {
-        message: makeMessage({
-          status: 'error',
-          error: new AppError('REQUEST_IN_PROGRESS', '上一条请求仍在处理', { retryable: false }),
-        }),
-      },
+    const wrapper = mountMessage({
+      message: makeMessage({
+        status: 'error',
+        error: new AppError('REQUEST_IN_PROGRESS', '上一条请求仍在处理', { retryable: false }),
+      }),
     })
 
     expect(wrapper.find('[data-testid="retry-button"]').exists()).toBe(false)
@@ -136,13 +135,11 @@ describe('ChatMessage', () => {
   })
 
   it('cancelled 的文案与 error 不同，且不说「出错」', () => {
-    const wrapper = mount(ChatMessage, {
-      props: {
-        message: makeMessage({
-          status: 'cancelled',
-          error: new AppError('CANCELLED', '请求已取消', { retryable: true }),
-        }),
-      },
+    const wrapper = mountMessage({
+      message: makeMessage({
+        status: 'cancelled',
+        error: new AppError('CANCELLED', '请求已取消', { retryable: true }),
+      }),
     })
 
     expect(wrapper.text()).toContain('已取消')
@@ -150,13 +147,11 @@ describe('ChatMessage', () => {
   })
 
   it('cancelled 消息始终提供重试入口，不受 error.retryable 影响', async () => {
-    const wrapper = mount(ChatMessage, {
-      props: {
-        message: makeMessage({
-          status: 'cancelled',
-          error: new AppError('CANCELLED', '请求已取消', { retryable: false }),
-        }),
-      },
+    const wrapper = mountMessage({
+      message: makeMessage({
+        status: 'cancelled',
+        error: new AppError('CANCELLED', '请求已取消', { retryable: false }),
+      }),
     })
 
     expect(wrapper.find('[data-testid="retry-button"]').exists()).toBe(true)
@@ -165,10 +160,8 @@ describe('ChatMessage', () => {
   })
 
   it('streaming 时提供取消入口', async () => {
-    const wrapper = mount(ChatMessage, {
-      props: {
-        message: makeMessage({ status: 'streaming', steps: [{ label: '识别', node: 'c' }] }),
-      },
+    const wrapper = mountMessage({
+      message: makeMessage({ status: 'streaming', steps: [{ label: '识别', node: 'c' }] }),
     })
 
     await wrapper.get('[data-testid="cancel-button"]').trigger('click')
@@ -177,14 +170,12 @@ describe('ChatMessage', () => {
   })
 
   it('实时明细回答在消息内渲染表格，而不是挤进侧栏', () => {
-    const wrapper = mount(ChatMessage, {
-      props: {
-        message: makeMessage({
-          status: 'complete',
-          text: '订单明细已查询完成',
-          answer: toChatAnswer(detailOrder as components['schemas']['ChatResponse']),
-        }),
-      },
+    const wrapper = mountMessage({
+      message: makeMessage({
+        status: 'complete',
+        text: '订单明细已查询完成',
+        answer: toChatAnswer(detailOrder as components['schemas']['ChatResponse']),
+      }),
     })
 
     expect(wrapper.find('[data-testid="detail-table"]').exists()).toBe(true)
@@ -200,10 +191,8 @@ describe('ChatMessage', () => {
         expires_at: '2026-08-30T00:00:00Z',
       },
     })
-    const wrapper = mount(ChatMessage, {
-      props: {
-        message: makeMessage({ status: 'complete', text: '', answer: tableOnly }),
-      },
+    const wrapper = mountMessage({
+      message: makeMessage({ status: 'complete', text: '', answer: tableOnly }),
     })
 
     expect(wrapper.get('[data-testid="detail-table"]').text()).toContain('共 2 行')
@@ -233,14 +222,12 @@ describe('ChatMessage', () => {
         expires_at: '2026-08-30T00:00:00Z',
       },
     })
-    const wrapper = mount(ChatMessage, {
-      props: {
-        message: makeMessage({
-          status: 'complete',
-          text: '临时指标已查询完成',
-          answer: generatedMetric,
-        }),
-      },
+    const wrapper = mountMessage({
+      message: makeMessage({
+        status: 'complete',
+        text: '临时指标已查询完成',
+        answer: generatedMetric,
+      }),
     })
 
     expect(wrapper.get('[data-testid="detail-table"]').text()).toContain('已展示前 1 行')
@@ -250,15 +237,13 @@ describe('ChatMessage', () => {
   })
 
   it('历史明细回答不重新渲染表格，改为提示重新提问', () => {
-    const wrapper = mount(ChatMessage, {
-      props: {
-        message: makeMessage({
-          origin: 'history',
-          status: 'complete',
-          text: '订单明细已查询完成',
-          answer: toChatAnswer(detailOrder as components['schemas']['ChatResponse']),
-        }),
-      },
+    const wrapper = mountMessage({
+      message: makeMessage({
+        origin: 'history',
+        status: 'complete',
+        text: '订单明细已查询完成',
+        answer: toChatAnswer(detailOrder as components['schemas']['ChatResponse']),
+      }),
     })
 
     expect(wrapper.find('[data-testid="detail-table"]').exists()).toBe(false)
@@ -273,8 +258,8 @@ describe('ChatMessage', () => {
   ] as const)('%s 质量状态如实显示为中文', (status, label) => {
     const answer = toChatAnswer(detailOrder as components['schemas']['ChatResponse'])
     answer.quality = { ...answer.quality, status }
-    const wrapper = mount(ChatMessage, {
-      props: { message: makeMessage({ status: 'complete', text: '回答', answer }) },
+    const wrapper = mountMessage({
+      message: makeMessage({ status: 'complete', text: '回答', answer }),
     })
 
     const trace = wrapper.get('[aria-label="质量校验轨迹"]')
@@ -288,8 +273,8 @@ describe('ChatMessage', () => {
   ] as const)('校验次数为 %i 时按约定显示', (attempts, visible, label) => {
     const answer = toChatAnswer(detailOrder as components['schemas']['ChatResponse'])
     answer.quality = { ...answer.quality, status: 'PASSED', attempts }
-    const wrapper = mount(ChatMessage, {
-      props: { message: makeMessage({ status: 'complete', text: '回答', answer }) },
+    const wrapper = mountMessage({
+      message: makeMessage({ status: 'complete', text: '回答', answer }),
     })
 
     expect(wrapper.find('[data-testid="quality-attempts"]').exists()).toBe(visible)
@@ -307,8 +292,8 @@ describe('ChatMessage', () => {
       degraded: true,
       degradedReason: '部分分析能力暂不可用。',
     }
-    const wrapper = mount(ChatMessage, {
-      props: { message: makeMessage({ status: 'complete', text: '回答', answer }) },
+    const wrapper = mountMessage({
+      message: makeMessage({ status: 'complete', text: '回答', answer }),
     })
 
     const sources = wrapper.findAll('[data-testid="quality-source"]').map((item) => item.text())
@@ -323,8 +308,8 @@ describe('ChatMessage', () => {
       status: 'FAILED' as QualityStatus,
       notes: ['金额字段与查询结果不一致', '已停止生成经营建议'],
     }
-    const wrapper = mount(ChatMessage, {
-      props: { message: makeMessage({ status: 'complete', text: '回答', answer: withNotes }) },
+    const wrapper = mountMessage({
+      message: makeMessage({ status: 'complete', text: '回答', answer: withNotes }),
     })
 
     const details = wrapper.get('[data-testid="quality-notes"]')
@@ -334,8 +319,8 @@ describe('ChatMessage', () => {
 
     const withoutNotes = { ...withNotes, quality: { ...withNotes.quality, notes: [] } }
     expect(
-      mount(ChatMessage, {
-        props: { message: makeMessage({ status: 'complete', text: '回答', answer: withoutNotes }) },
+      mountMessage({
+        message: makeMessage({ status: 'complete', text: '回答', answer: withoutNotes }),
       })
         .find('[data-testid="quality-notes"]')
         .exists(),
@@ -343,10 +328,8 @@ describe('ChatMessage', () => {
   })
 
   it('没有 answer.id 的历史消息不渲染反馈按钮组', () => {
-    const wrapper = mount(ChatMessage, {
-      props: {
-        message: makeMessage({ origin: 'history', status: 'complete', text: '历史回答' }),
-      },
+    const wrapper = mountMessage({
+      message: makeMessage({ origin: 'history', status: 'complete', text: '历史回答' }),
     })
 
     expect(wrapper.find('[aria-label="回答反馈"]').exists()).toBe(false)
@@ -354,10 +337,8 @@ describe('ChatMessage', () => {
 
   it('历史回答缺少服务端反馈状态时不开放反馈操作', () => {
     const answer = toChatAnswer(detailOrder as components['schemas']['ChatResponse'])
-    const wrapper = mount(ChatMessage, {
-      props: {
-        message: makeMessage({ origin: 'history', status: 'complete', text: '历史回答', answer }),
-      },
+    const wrapper = mountMessage({
+      message: makeMessage({ origin: 'history', status: 'complete', text: '历史回答', answer }),
     })
 
     expect(wrapper.find('[aria-label="回答反馈"]').exists()).toBe(false)
@@ -365,8 +346,8 @@ describe('ChatMessage', () => {
 
   it('三个反馈按钮发出明确意图并暴露可访问名称', async () => {
     const answer = toChatAnswer(detailOrder as components['schemas']['ChatResponse'])
-    const wrapper = mount(ChatMessage, {
-      props: { message: makeMessage({ status: 'complete', text: '回答', answer }) },
+    const wrapper = mountMessage({
+      message: makeMessage({ status: 'complete', text: '回答', answer }),
     })
 
     await wrapper.get('[aria-label="采纳本轮回答"]').trigger('click')
@@ -382,15 +363,13 @@ describe('ChatMessage', () => {
 
   it('选中状态用 aria-pressed 表达', () => {
     const answer = toChatAnswer(detailOrder as components['schemas']['ChatResponse'])
-    const wrapper = mount(ChatMessage, {
-      props: {
-        message: makeMessage({
-          status: 'complete',
-          text: '回答',
-          answer,
-          feedback: { isAdopted: true, reaction: 'LIKE' },
-        }),
-      },
+    const wrapper = mountMessage({
+      message: makeMessage({
+        status: 'complete',
+        text: '回答',
+        answer,
+        feedback: { isAdopted: true, reaction: 'LIKE' },
+      }),
     })
 
     expect(wrapper.get('[aria-label="采纳本轮回答"]').attributes('aria-pressed')).toBe('true')
@@ -400,16 +379,14 @@ describe('ChatMessage', () => {
 
   it('保存中禁用全部按钮并显示保存中，不提前声称已记录', () => {
     const answer = toChatAnswer(detailOrder as components['schemas']['ChatResponse'])
-    const wrapper = mount(ChatMessage, {
-      props: {
-        message: makeMessage({
-          status: 'complete',
-          text: '回答',
-          answer,
-          feedback: { isAdopted: true, reaction: null },
-          feedbackPending: true,
-        }),
-      },
+    const wrapper = mountMessage({
+      message: makeMessage({
+        status: 'complete',
+        text: '回答',
+        answer,
+        feedback: { isAdopted: true, reaction: null },
+        feedbackPending: true,
+      }),
     })
 
     expect(wrapper.get('[data-testid="feedback-status"]').text()).toBe('保存中')
@@ -427,7 +404,7 @@ describe('ChatMessage', () => {
       answer,
       feedback: { isAdopted: true, reaction: null },
     })
-    const wrapper = mount(ChatMessage, { props: { message } })
+    const wrapper = mountMessage({ message })
 
     expect(wrapper.find('[data-testid="feedback-status"]').exists()).toBe(false)
 
@@ -437,21 +414,58 @@ describe('ChatMessage', () => {
 
   it('反馈失败提示可感知，且保留按钮选中态供重试', () => {
     const answer = toChatAnswer(detailOrder as components['schemas']['ChatResponse'])
-    const wrapper = mount(ChatMessage, {
-      props: {
-        message: makeMessage({
-          status: 'complete',
-          text: '回答',
-          answer,
-          feedback: { isAdopted: true, reaction: null },
-          feedbackError: new AppError('NETWORK', '网络不可用', { retryable: true }),
-        }),
-      },
+    const wrapper = mountMessage({
+      message: makeMessage({
+        status: 'complete',
+        text: '回答',
+        answer,
+        feedback: { isAdopted: true, reaction: null },
+        feedbackError: new AppError('NETWORK', '网络不可用', { retryable: true }),
+      }),
     })
 
     expect(wrapper.get('[data-testid="feedback-error"]').attributes('aria-live')).toBe('polite')
     expect(wrapper.get('[data-testid="feedback-error"]').text()).toContain('网络')
     expect(wrapper.get('[aria-label="采纳本轮回答"]').attributes('aria-pressed')).toBe('true')
     expect(wrapper.get('[aria-label="采纳本轮回答"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('en-US 下质量轨迹、反馈按钮和降级提示均为英文，正文和技术字段保持原样', () => {
+    useLocaleStore().setLocale('en-US')
+    const answer = toChatAnswer(detailOrder as components['schemas']['ChatResponse'])
+    answer.quality = {
+      status: 'DEGRADED',
+      attempts: 2,
+      notes: ['note kept as-is from backend'],
+      sources: ['DATABASE', 'FALLBACK'],
+      degraded: true,
+      degradedReason: undefined,
+    }
+    const wrapper = mountMessage({
+      message: makeMessage({
+        status: 'complete',
+        // 用户/助手正文是后端已本地化的字段（`displayed_user_message` /
+        // 回答正文），组件绝不客户端翻译——这里刻意保留一段中文正文，
+        // 断言它原样出现在英文界面里，不会被误翻。
+        text: '这是后端已经本地化好的正文，前端不应再翻译它',
+        answer,
+      }),
+    })
+
+    expect(wrapper.get('[aria-label="Quality review trace"]').text()).toContain(
+      'Validation failed; a stable fallback was used',
+    )
+    expect(wrapper.get('[data-testid="quality-attempts"]').text()).toBe('Reviewed 2 times')
+    const sources = wrapper.findAll('[data-testid="quality-source"]').map((item) => item.text())
+    expect(sources).toEqual(['Business data', 'Fallback answer'])
+    expect(wrapper.get('[data-testid="degraded-notice"]').text()).toContain('Demo data')
+    expect(wrapper.get('[data-testid="degraded-notice"]').text()).toContain(
+      'This answer is not connected to a real data source and is for demo purposes only.',
+    )
+    expect(wrapper.get('[aria-label="Adopt this answer"]').text()).toContain('Adopt')
+    expect(wrapper.get('[aria-label="Like this answer"]').text()).toContain('Like')
+    expect(wrapper.get('[aria-label="Dislike this answer"]').text()).toContain('Dislike')
+    // 后端已本地化正文原样透传，不受英文界面影响。
+    expect(wrapper.text()).toContain('这是后端已经本地化好的正文，前端不应再翻译它')
   })
 })
