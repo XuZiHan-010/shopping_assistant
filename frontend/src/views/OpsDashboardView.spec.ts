@@ -10,6 +10,8 @@ vi.mock('@/api/analytics', () => ({
 
 import { getChatBiCategories, getChatBiOverview } from '@/api/analytics'
 import { i18n } from '@/i18n'
+import { useLocaleStore } from '@/stores/locale'
+
 import OpsDashboardView from './OpsDashboardView.vue'
 
 function mountView() {
@@ -37,6 +39,7 @@ const overview = {
 describe('OpsDashboardView', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    useLocaleStore().setLocale('zh-CN')
     vi.clearAllMocks()
   })
 
@@ -70,5 +73,79 @@ describe('OpsDashboardView', () => {
 
     expect(wrapper.text()).toContain('后端不可用')
     expect(wrapper.findAll('[data-testid="north-star-card"]')).toHaveLength(0)
+  })
+})
+
+describe('OpsDashboardView en-US 下确定性文案为英文', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    useLocaleStore().setLocale('en-US')
+    vi.clearAllMocks()
+  })
+
+  it('令牌对话框标题、窗口选择、刷新按钮均为英文，并插入统一语言切换器', () => {
+    const wrapper = mountView()
+
+    expect(wrapper.get('h1').text()).toBe('Chat BI operations dashboard')
+    expect(wrapper.find('[data-testid="language-switcher"]').exists()).toBe(false)
+  })
+
+  it('验证令牌后顶栏、窗口选择、刷新按钮、指标卡与分类表均为英文', async () => {
+    vi.mocked(getChatBiOverview).mockResolvedValue(overview)
+    vi.mocked(getChatBiCategories).mockResolvedValue([
+      {
+        category: 'TRADE',
+        displayName: 'Trade analysis',
+        answerTotal: 5,
+        metrics: {
+          adoptionRate: 0.5,
+          userAccuracyRate: null,
+          systemAccuracyRate: 0.6,
+          avgThinkingMs: 1500,
+          hitRate: 0.7,
+          failureRate: 0.05,
+        },
+      },
+    ])
+    const wrapper = mountView()
+
+    await wrapper.get('#admin-token').setValue('demo-admin-token')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.get('h1').text()).toBe('Chat BI operations dashboard')
+    expect(wrapper.find('[data-testid="language-switcher"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('Sign out')
+    expect(wrapper.text()).toContain('Last 7 days')
+    expect(wrapper.text()).toContain('Last 30 days')
+    expect(wrapper.text()).toContain('Last 90 days')
+    expect(wrapper.text()).toContain('Refresh rollup')
+    expect(wrapper.text()).toContain('Adoption rate')
+    expect(wrapper.text()).toContain('Trade analysis')
+    expect(wrapper.text()).toContain('Category drill-down')
+    // metric_code / 数值均不改写
+    expect(wrapper.text()).toContain('40.0%')
+  })
+
+  it('加载失败时显示英文错误提示', async () => {
+    vi.mocked(getChatBiOverview).mockRejectedValue(new Error('Backend unavailable'))
+    const wrapper = mountView()
+
+    await wrapper.get('#admin-token').setValue('demo-admin-token')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Backend unavailable')
+  })
+
+  it('加载态提示为英文', async () => {
+    vi.mocked(getChatBiOverview).mockImplementation(() => new Promise(() => undefined))
+    const wrapper = mountView()
+
+    await wrapper.get('#admin-token').setValue('demo-admin-token')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Loading Chat BI data…')
   })
 })

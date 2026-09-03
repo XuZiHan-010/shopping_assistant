@@ -13,10 +13,15 @@ export interface ChartValidation {
 
 export interface ChartOption {
   animation: boolean
+  /** ECharts 原生 title 组件，可选——目前仅 `TrendChart.vue`（Chat BI 运营看板）
+   * 使用，需要在画布内展示随 locale 重建的标题。 */
+  title?: Record<string, unknown>
   tooltip: Record<string, unknown>
   legend?: Record<string, unknown>
   xAxis?: Record<string, unknown>
   yAxis?: Record<string, unknown>
+  /** 同上，仅 `TrendChart.vue` 用它给标题让出画布顶部空间。 */
+  grid?: Record<string, unknown>
   series: Array<Record<string, unknown>>
   /** 屏幕阅读器的图表口述摘要——`useEChart` 挂载的画布本身带 `aria-hidden`
    * （可访问入口是旁边的 `<details>` 数据表），这里额外把 ECharts 原生的
