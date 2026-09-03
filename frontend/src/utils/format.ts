@@ -1,3 +1,5 @@
+import { DEFAULT_LOCALE } from '@/i18n'
+
 const EMPTY_CELL = '—'
 const MAX_CELL_LENGTH = 160
 
@@ -25,7 +27,13 @@ export function formatCell(value: unknown, unit?: string): string {
 
   const numeric = toNumber(value)
   if (numeric !== null) {
-    const formatted = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 }).format(numeric)
+    // `formatCell` 本身还没有显式接收 locale 的调用方（DetailTable.vue /
+    // MetricChartPanel.vue 属于 Task 10B 的改造范围），这里先把硬编码字面量
+    // 换成消息目录的默认语言常量，不再有裸的 'zh-CN' 字符串；真正按当前
+    // locale 显式格式化数字/日期/货币，见同目录下的 `localizedFormat.ts`。
+    const formatted = new Intl.NumberFormat(DEFAULT_LOCALE, { maximumFractionDigits: 2 }).format(
+      numeric,
+    )
     return unit ? `${formatted} ${unit}` : formatted
   }
 

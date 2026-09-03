@@ -1,8 +1,36 @@
 <script setup lang="ts">
 import { Trash2, X } from '@lucide/vue'
-import { nextTick, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 
+import { i18n } from '@/i18n'
 import { useChatStore } from '@/stores/chat'
+import { formatDate } from '@/utils/localizedFormat'
+
+/**
+ * 直接读全局 `i18n` 单例而不是 `useI18n()`：本组件在 `AssistantView.vue`
+ * （Task 10B）里被挂载，那边不少既有测试目前还没有安装 i18n 插件；`t()`
+ * 调用的 key 仍是编译期硬编码的字面量，不会丢失 `MessageSchema` 的类型
+ * 校验，只是不依赖组件树注入，跟 `stores/locale.ts` 保持同一种用法。
+ */
+const dialogLabel = computed(() => i18n.global.t('conversationDrawer.dialogLabel'))
+const drawerTitle = computed(() => i18n.global.t('conversationDrawer.title'))
+const closeAria = computed(() => i18n.global.t('conversationDrawer.closeAria'))
+const emptyText = computed(() => i18n.global.t('conversationDrawer.empty'))
+const confirmDeleteLabel = computed(() => i18n.global.t('conversationDrawer.confirmDelete'))
+const cancelDeleteAria = computed(() => i18n.global.t('conversationDrawer.cancelDeleteAria'))
+const cancelDeleteLabel = computed(() => i18n.global.t('conversationDrawer.cancelDelete'))
+
+function confirmDeleteAria(conversationTitle: string): string {
+  return i18n.global.t('conversationDrawer.confirmDeleteAria', { title: conversationTitle })
+}
+
+function deleteAria(conversationTitle: string): string {
+  return i18n.global.t('conversationDrawer.deleteAria', { title: conversationTitle })
+}
+
+function formatUpdatedAt(updatedAt: string): string {
+  return formatDate(updatedAt, i18n.global.locale.value)
+}
 
 const props = defineProps<{
   open: boolean
@@ -38,7 +66,7 @@ async function confirmDelete(id: string): Promise<void> {
   } catch {
     // 之前这里是模板里的游离 Promise：删除失败只在控制台留一条未处理拒绝，
     // 抽屉里那条会话还在，用户会以为自己没点中。
-    deleteError.value = '删除失败，请稍后重试。'
+    deleteError.value = i18n.global.t('conversationDrawer.deleteFailed')
   }
 }
 
@@ -68,14 +96,14 @@ async function openConversation(id: string): Promise<void> {
       ref="panelElement"
       class="conversation-drawer__panel"
       role="dialog"
-      aria-label="历史会话"
+      :aria-label="dialogLabel"
       data-testid="drawer-panel"
       tabindex="-1"
       @keydown.esc="emit('close')"
     >
       <header class="conversation-drawer__header">
-        <h2>历史会话</h2>
-        <button type="button" aria-label="关闭历史会话" @click="emit('close')">
+        <h2>{{ drawerTitle }}</h2>
+        <button type="button" :aria-label="closeAria" @click="emit('close')">
           <X :size="16" aria-hidden="true" />
         </button>
       </header>
@@ -83,7 +111,7 @@ async function openConversation(id: string): Promise<void> {
       <p v-if="deleteError" class="conversation-drawer__error" role="alert">{{ deleteError }}</p>
 
       <p v-if="chatStore.conversations.length === 0" class="conversation-drawer__empty">
-        暂无历史会话。提问之后，这里会列出可以回看的会话。
+        {{ emptyText }}
       </p>
 
       <ul v-else class="conversation-drawer__list">
@@ -100,7 +128,7 @@ async function openConversation(id: string): Promise<void> {
           >
             <span class="conversation-drawer__title">{{ conversation.title }}</span>
             <span class="conversation-drawer__time">{{
-              new Date(conversation.updatedAt).toLocaleString('zh-CN')
+              formatUpdatedAt(conversation.updatedAt)
             }}</span>
           </button>
           <!-- .stop 是必须的：删除按钮在会话条目内部，不拦住冒泡就会在删除的同时
@@ -110,19 +138,19 @@ async function openConversation(id: string): Promise<void> {
               class="conversation-drawer__delete conversation-drawer__delete--confirm"
               type="button"
               data-testid="conversation-delete-confirm"
-              :aria-label="`确认删除会话 ${conversation.title}`"
+              :aria-label="confirmDeleteAria(conversation.title)"
               @click.stop="confirmDelete(conversation.id)"
             >
-              确认删除
+              {{ confirmDeleteLabel }}
             </button>
             <button
               class="conversation-drawer__delete"
               type="button"
               data-testid="conversation-delete-cancel"
-              aria-label="取消删除"
+              :aria-label="cancelDeleteAria"
               @click.stop="cancelDelete"
             >
-              取消
+              {{ cancelDeleteLabel }}
             </button>
           </template>
           <button
@@ -130,7 +158,7 @@ async function openConversation(id: string): Promise<void> {
             class="conversation-drawer__delete"
             type="button"
             data-testid="conversation-delete"
-            :aria-label="`删除会话 ${conversation.title}`"
+            :aria-label="deleteAria(conversation.title)"
             @click.stop="requestDelete(conversation.id)"
           >
             <Trash2 :size="15" aria-hidden="true" />

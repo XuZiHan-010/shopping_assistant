@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import { createMockTransport } from '@/api/mock/transport'
 import { setChatTransport } from '@/api/transport'
+import { i18n } from '@/i18n'
 import { useChatStore } from '@/stores/chat'
 
 import ConversationDrawer from './ConversationDrawer.vue'
@@ -11,6 +12,8 @@ import ConversationDrawer from './ConversationDrawer.vue'
 beforeEach(() => {
   setActivePinia(createPinia())
   setChatTransport(createMockTransport({ chunkSizes: [16], stepDelayMs: 0 }))
+  // 每个用例都从中文默认语言出发，避免上一条用例切到英文后残留。
+  i18n.global.locale.value = 'zh-CN'
 })
 
 describe('ConversationDrawer', () => {
@@ -93,5 +96,80 @@ describe('ConversationDrawer', () => {
     await wrapper.get('[data-testid="drawer-panel"]').trigger('keydown', { key: 'Escape' })
 
     expect(wrapper.emitted('close')).toBeTruthy()
+  })
+
+  it('英文模式下标题、空态、关闭按钮 aria-label 均为英文，且不残留中文', () => {
+    i18n.global.locale.value = 'en-US'
+
+    const wrapper = mount(ConversationDrawer, { props: { open: true } })
+
+    expect(wrapper.get('h2').text()).toBe('Conversation history')
+    expect(wrapper.get('[data-testid="drawer-panel"]').attributes('aria-label')).toBe(
+      'Conversation history',
+    )
+    expect(wrapper.find('.conversation-drawer__empty').text()).toBe(
+      'No conversation history yet. Once you ask a question, it will show up here for you to revisit.',
+    )
+    expect(wrapper.get('header button').attributes('aria-label')).toBe(
+      'Close conversation history',
+    )
+    expect(wrapper.text()).not.toMatch(/[一-鿿]/)
+  })
+
+  it('英文模式下删除相关按钮文案和 aria-label 均为英文', async () => {
+    i18n.global.locale.value = 'en-US'
+    const store = useChatStore()
+    await store.submitMessage('hello')
+    await store.loadConversations()
+
+    const wrapper = mount(ConversationDrawer, { props: { open: true } })
+    const conversationTitle = store.conversations[0].title
+
+    expect(
+      wrapper.get('[data-testid="conversation-delete"]').attributes('aria-label'),
+    ).toBe(`Delete conversation ${conversationTitle}`)
+
+    await wrapper.get('[data-testid="conversation-delete"]').trigger('click')
+
+    expect(wrapper.get('[data-testid="conversation-delete-confirm"]').text()).toBe(
+      'Confirm delete',
+    )
+    expect(
+      wrapper.get('[data-testid="conversation-delete-confirm"]').attributes('aria-label'),
+    ).toBe(`Confirm deleting conversation ${conversationTitle}`)
+    expect(wrapper.get('[data-testid="conversation-delete-cancel"]').text()).toBe('Cancel')
+    expect(
+      wrapper.get('[data-testid="conversation-delete-cancel"]').attributes('aria-label'),
+    ).toBe('Cancel delete')
+  })
+
+  it('英文模式下删除失败提示为英文', async () => {
+    i18n.global.locale.value = 'en-US'
+    const store = useChatStore()
+    await store.submitMessage('hello')
+    await store.loadConversations()
+
+    const wrapper = mount(ConversationDrawer, { props: { open: true } })
+    setChatTransport(async () => {
+      throw new Error('network down')
+    })
+
+    await wrapper.get('[data-testid="conversation-delete"]').trigger('click')
+    await wrapper.get('[data-testid="conversation-delete-confirm"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[role="alert"]').text()).toBe('Delete failed. Please try again later.')
+  })
+
+  it('会话时间戳按当前 locale 本地化，而不是固定 zh-CN', async () => {
+    const store = useChatStore()
+    await store.submitMessage('你好')
+    await store.loadConversations()
+    store.conversations[0].updatedAt = '2026-08-31T12:30:00Z'
+
+    i18n.global.locale.value = 'en-US'
+    const wrapper = mount(ConversationDrawer, { props: { open: true } })
+
+    expect(wrapper.get('.conversation-drawer__time').text()).toContain('Aug')
   })
 })

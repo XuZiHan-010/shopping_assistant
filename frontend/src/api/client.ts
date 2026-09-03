@@ -6,11 +6,30 @@
  */
 import { AppError } from './errors'
 
-/** 配置缺失或非法时抛出，由全局错误区展示。是 `AppError` 的 `CONFIG` 特化。 */
+/** `ApiConfigError` 的稳定原因码，供 `errorCopy` 按当前语言翻译，不进消息目录本身。 */
+export type ApiConfigErrorReason = 'MISSING_BASE_URL' | 'INVALID_BASE_URL' | 'UNSUPPORTED_PROTOCOL'
+
+/**
+ * 配置缺失或非法时抛出，由全局错误区展示。是 `AppError` 的 `CONFIG` 特化。
+ *
+ * `.message` 只是给开发者看日志用的稳定英文摘要，**不是**给用户看的文案——
+ * 展示文案统一由 `describeError()`（`src/utils/errorCopy.ts`）按 `code`
+ * 从消息目录取当前语言的文案，不在异常里逐条硬编码中文句子，才能同时支持
+ * 中英文界面。调用方需要的结构化信息通过 `reason`/`value`（以及镜像它们的
+ * `details`）暴露，不应该解析 `.message` 字符串。
+ */
 export class ApiConfigError extends AppError {
-  constructor(message: string) {
-    super('CONFIG', message)
+  readonly reason: ApiConfigErrorReason
+  readonly value?: string
+
+  constructor(reason: ApiConfigErrorReason, value?: string) {
+    super('CONFIG', `ApiConfigError: ${reason}${value !== undefined ? ` (${value})` : ''}`, {
+      details: { reason, value },
+      shouldReport: true,
+    })
     this.name = 'ApiConfigError'
+    this.reason = reason
+    this.value = value
   }
 }
 
@@ -30,21 +49,18 @@ export function resolveApiBaseUrl(
   const value = raw?.trim()
 
   if (!value) {
-    throw new ApiConfigError(
-      '缺少 VITE_API_BASE_URL 配置，前端不知道该把请求发到哪个后端。' +
-        '请参考 .env.example 配置该变量后重新构建。',
-    )
+    throw new ApiConfigError('MISSING_BASE_URL')
   }
 
   let parsed: URL
   try {
     parsed = new URL(value)
   } catch {
-    throw new ApiConfigError(`VITE_API_BASE_URL 不是合法的绝对地址：${value}`)
+    throw new ApiConfigError('INVALID_BASE_URL', value)
   }
 
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw new ApiConfigError(`VITE_API_BASE_URL 只支持 http 或 https：${value}`)
+    throw new ApiConfigError('UNSUPPORTED_PROTOCOL', value)
   }
 
   // 统一去掉结尾斜杠，调用方拼路径时不必再判断。
