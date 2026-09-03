@@ -1,4 +1,7 @@
 <!doctype html>
+<!-- lang 和 <title> 只是首帧前的默认值（对应 zh-CN 默认语言）；挂载后由
+     `useLocaleStore().restore()`（frontend/src/stores/locale.ts）按上次持久化
+     的语言接管，两者必须保持一致，不要只改这里而不改 store 里的默认值。 -->
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
