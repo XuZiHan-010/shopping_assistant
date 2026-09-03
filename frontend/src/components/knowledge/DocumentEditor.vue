@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import type { KnowledgeDocument } from '@/api/adapters/knowledge'
 
@@ -8,6 +9,7 @@ const props = defineProps<{
   save?: (content: string, headers: Record<string, string>) => Promise<void>
 }>()
 
+const { t } = useI18n()
 const content = ref(props.document.content)
 const conflictMessage = ref('')
 
@@ -20,7 +22,7 @@ watch(
 )
 
 async function handleConflict(): Promise<void> {
-  conflictMessage.value = '文档已被其他维护者修改，请重新加载后合并你的内容。'
+  conflictMessage.value = t('documentEditor.conflictMessage')
 }
 
 async function saveDocument(): Promise<void> {
@@ -42,7 +44,7 @@ defineExpose({ handleConflict })
   <article class="document-editor">
     <header>
       <p>{{ document.path }}</p>
-      <span v-if="document.readOnly">记忆只读</span>
+      <span v-if="document.readOnly">{{ t('documentEditor.memoryReadOnlyBadge') }}</span>
     </header>
     <p v-if="conflictMessage" class="document-editor__conflict" role="alert">
       {{ conflictMessage }}
@@ -50,10 +52,12 @@ defineExpose({ handleConflict })
     <textarea
       v-model="content"
       :readonly="document.readOnly"
-      :aria-label="`${document.path} 内容`"
+      :aria-label="t('documentEditor.contentAria', { path: document.path })"
     />
     <footer v-if="!document.readOnly">
-      <button type="button" data-testid="save" @click="saveDocument">保存修改</button>
+      <button type="button" data-testid="save" @click="saveDocument">
+        {{ t('documentEditor.save') }}
+      </button>
     </footer>
   </article>
 </template>

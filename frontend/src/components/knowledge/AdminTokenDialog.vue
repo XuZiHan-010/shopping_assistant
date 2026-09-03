@@ -1,18 +1,20 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import { resolveViewerToken } from '@/api/client'
 
-withDefaults(
-  defineProps<{
-    title?: string
-    eyebrow?: string
-  }>(),
-  {
-    title: '知识库维护后台',
-    eyebrow: 'BOROUGH · KNOWLEDGE OPS',
-  },
-)
+const props = defineProps<{
+  title?: string
+  eyebrow?: string
+}>()
+
+const { t } = useI18n()
+
+// 与 `PromptDialog.vue` 同样的原因：默认值不能写进 `withDefaults`，否则语言
+// 切换后不会重新渲染，只能靠 computed 在未显式传入时跟随当前语言。
+const resolvedTitle = computed(() => props.title ?? t('adminTokenDialog.title'))
+const resolvedEyebrow = computed(() => props.eyebrow ?? t('adminTokenDialog.eyebrow'))
 
 const emit = defineEmits<{ submit: [token: string] }>()
 const token = ref('')
@@ -39,11 +41,11 @@ function submit(): void {
     aria-modal="true"
     aria-labelledby="admin-token-title"
   >
-    <p class="admin-token-dialog__eyebrow">{{ eyebrow }}</p>
-    <h1 id="admin-token-title">{{ title }}</h1>
-    <p>请输入管理员令牌后继续。</p>
+    <p class="admin-token-dialog__eyebrow">{{ resolvedEyebrow }}</p>
+    <h1 id="admin-token-title">{{ resolvedTitle }}</h1>
+    <p>{{ t('adminTokenDialog.instructions') }}</p>
     <form @submit.prevent="submit">
-      <label for="admin-token">管理员令牌</label>
+      <label for="admin-token">{{ t('adminTokenDialog.tokenLabel') }}</label>
       <input
         id="admin-token"
         v-model="token"
@@ -60,9 +62,9 @@ function submit(): void {
           :checked="useViewerToken"
           @change="toggleViewerToken(($event.target as HTMLInputElement).checked)"
         />
-        使用只读令牌浏览
+        {{ t('adminTokenDialog.viewerToggleLabel') }}
       </label>
-      <button type="submit">进入后台</button>
+      <button type="submit">{{ t('adminTokenDialog.submit') }}</button>
     </form>
   </section>
 </template>

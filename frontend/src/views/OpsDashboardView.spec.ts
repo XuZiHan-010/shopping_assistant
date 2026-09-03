@@ -9,7 +9,12 @@ vi.mock('@/api/analytics', () => ({
 }))
 
 import { getChatBiCategories, getChatBiOverview } from '@/api/analytics'
+import { i18n } from '@/i18n'
 import OpsDashboardView from './OpsDashboardView.vue'
+
+function mountView() {
+  return mount(OpsDashboardView, { global: { plugins: [createPinia(), i18n] } })
+}
 
 const overview = {
   startDate: '2026-08-17',
@@ -36,7 +41,7 @@ describe('OpsDashboardView', () => {
   })
 
   it('没有管理员令牌时只展示令牌对话框且不请求指标', () => {
-    const wrapper = mount(OpsDashboardView, { global: { plugins: [createPinia()] } })
+    const wrapper = mountView()
 
     expect(wrapper.find('#admin-token').exists()).toBe(true)
     expect(wrapper.findAll('[data-testid="north-star-card"]')).toHaveLength(0)
@@ -46,7 +51,7 @@ describe('OpsDashboardView', () => {
   it('验证令牌后渲染六项北极星指标', async () => {
     vi.mocked(getChatBiOverview).mockResolvedValue(overview)
     vi.mocked(getChatBiCategories).mockResolvedValue([])
-    const wrapper = mount(OpsDashboardView, { global: { plugins: [createPinia()] } })
+    const wrapper = mountView()
 
     await wrapper.get('#admin-token').setValue('demo-admin-token')
     await wrapper.get('form').trigger('submit')
@@ -57,7 +62,7 @@ describe('OpsDashboardView', () => {
 
   it('加载失败时显示错误，且不展示可能陈旧的指标卡', async () => {
     vi.mocked(getChatBiOverview).mockRejectedValue(new Error('后端不可用'))
-    const wrapper = mount(OpsDashboardView, { global: { plugins: [createPinia()] } })
+    const wrapper = mountView()
 
     await wrapper.get('#admin-token').setValue('demo-admin-token')
     await wrapper.get('form').trigger('submit')

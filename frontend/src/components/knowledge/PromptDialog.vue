@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 const props = withDefaults(
   defineProps<{
@@ -14,14 +15,18 @@ const props = withDefaults(
   {
     placeholder: '',
     initialValue: '',
-    submitLabel: '确认',
     errorMessage: '',
     pending: false,
   },
 )
 
+const { t } = useI18n()
 const emit = defineEmits<{ submit: [value: string]; cancel: [] }>()
 const value = ref(props.initialValue)
+
+// `submitLabel` 的默认值不能写进 `withDefaults`——那只在组件创建时求值一次，
+// 语言切换后不会重新渲染。未显式传入时改走 computed，跟随当前语言。
+const resolvedSubmitLabel = computed(() => props.submitLabel ?? t('promptDialog.submitDefault'))
 
 function submit(): void {
   const trimmed = value.value.trim()
@@ -32,16 +37,29 @@ function submit(): void {
 
 <template>
   <div class="prompt-dialog-backdrop" role="presentation" @click.self="emit('cancel')">
-    <section class="prompt-dialog" role="dialog" aria-modal="true" aria-labelledby="prompt-dialog-title">
+    <section
+      class="prompt-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="prompt-dialog-title"
+    >
       <h2 id="prompt-dialog-title">{{ title }}</h2>
       <form @submit.prevent="submit">
         <label for="prompt-dialog-input">{{ label }}</label>
-        <input id="prompt-dialog-input" v-model="value" type="text" :placeholder="placeholder" autofocus />
+        <input
+          id="prompt-dialog-input"
+          v-model="value"
+          type="text"
+          :placeholder="placeholder"
+          autofocus
+        />
         <p v-if="errorMessage" class="prompt-dialog__error" role="alert">{{ errorMessage }}</p>
         <footer>
-          <button type="button" data-testid="cancel" @click="emit('cancel')">取消</button>
+          <button type="button" data-testid="cancel" @click="emit('cancel')">
+            {{ t('promptDialog.cancel') }}
+          </button>
           <button type="submit" data-testid="submit" :disabled="pending || !value.trim()">
-            {{ pending ? '处理中…' : submitLabel }}
+            {{ pending ? t('promptDialog.pending') : resolvedSubmitLabel }}
           </button>
         </footer>
       </form>

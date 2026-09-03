@@ -186,6 +186,62 @@ export const enUS = {
     rotate: 'Shuffle',
     noSuggestions: 'No suggested follow-up questions yet.',
   },
+  knowledgeBaseView: {
+    title: 'Knowledge base administration',
+    signOut: 'Sign out',
+    newDocument: 'New document',
+    renameDomain: 'Rename business domain',
+    deleteNode: 'Delete',
+    loadingTree: 'Loading knowledge directory…',
+    selectDocumentPrompt: 'Select a document to maintain.',
+    tokenVerificationFailed: 'Admin token verification failed.',
+    actionFailed: 'Action failed. Please try again.',
+    deleteFailed: 'Delete failed. Please try again.',
+    createDocumentTitle: 'New document',
+    createDocumentLabel: 'Document name',
+    createDocumentPlaceholder: 'e.g. order-fulfillment-definition.md',
+    createDomainTitle: 'New business domain',
+    createDomainLabel: 'Business domain name',
+    createDomainPlaceholder: 'e.g. Customer Service',
+    renameDomainTitle: 'Rename business domain',
+    renameDomainLabel: 'Business domain name',
+  },
+  adminTokenDialog: {
+    eyebrow: 'BOROUGH · KNOWLEDGE OPS',
+    title: 'Knowledge base administration',
+    instructions: 'Enter the admin token to continue.',
+    tokenLabel: 'Admin token',
+    viewerToggleLabel: 'Browse with the read-only token',
+    submit: 'Enter administration',
+  },
+  confirmDeleteDialog: {
+    title: 'Delete knowledge node',
+    domainWarning:
+      'This business domain and all of its documents will be cascade-deleted. This cannot be undone.',
+    documentWarning: 'This document will be deleted. This cannot be undone.',
+    cancel: 'Cancel',
+    confirmPending: 'Deleting…',
+    confirm: 'Confirm delete',
+  },
+  promptDialog: {
+    cancel: 'Cancel',
+    submitDefault: 'Confirm',
+    pending: 'Processing…',
+  },
+  knowledgeTree: {
+    navAria: 'Knowledge base directory',
+    title: 'Knowledge directory',
+    createDomainLabel: '+ Domain',
+    createDomainAria: 'New business domain',
+    readOnlyBadge: 'Read-only',
+  },
+  documentEditor: {
+    memoryReadOnlyBadge: 'Memory (read-only)',
+    contentAria: '{path} content',
+    save: 'Save changes',
+    conflictMessage:
+      'This document was modified by another maintainer. Please reload and merge your changes.',
+  },
   errorCopy: {
     // —— Backend ErrorCode (28 entries) ——
     AUTH_REQUIRED: {
