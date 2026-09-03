@@ -310,6 +310,123 @@ _ANSWER_VALIDATION_MESSAGES: dict[str, str] = {
 }
 
 # ---------------------------------------------------------------------------
+# 来源：backend/app/knowledge/path_policy.py（BUSINESS_SECTIONS）与
+# backend/app/services/knowledge_admin_service.py（虚拟目录树固定节点名，
+# Task 8 Step 4 "树节点只本地化 name"）。这是闭集的固定导航标签,不是用户
+# 创建的业务域名称或任意文档标题——那些不在本表范围内,原样保留。
+# ---------------------------------------------------------------------------
+
+_KNOWLEDGE_TREE_LABELS: dict[str, str] = {
+    "业务": "Business",
+    "业务流程": "Business process",
+    "业务名词解释": "Business glossary",
+    "指标或调用指标平台mcp的skill": "Metrics / metrics-platform MCP skill",
+}
+
+# ---------------------------------------------------------------------------
+# 来源：backend/app/repositories/analytics.py（ResultColumn 内联中文标签）
+#
+# Task 8：跨业务关联查询与临时分组指标导出用到的列标签是直接写在仓储代码里
+# 的字面量，不经过 `analytics/contract.py` 的注册表；与已经登记在
+# `_CONTRACT_*` 分组里的同名列（订单号/订单状态/实付金额/商品编码/商品名称/
+# 退款金额/退款原因/退款状态/退款时间）取值一致，此处不重复登记，只补上
+# 尚未出现过的新标签。"SPU ID" 本身不含汉字，不需要词典条目。
+# ---------------------------------------------------------------------------
+
+_ANALYTICS_REPOSITORY_LABELS: dict[str, str] = {
+    "SPU 名称": "SPU name",
+    "收货城市": "Shipping city",
+    "成交订单数": "Completed order count",
+    "成交用户数": "Completed order user count",
+    "成交件数": "Completed item quantity",
+    "成交金额": "Completed amount",
+    "退款笔数": "Refund count",
+    "退款用户数": "Refund user count",
+    "商品类目": "Product category",
+    "购买数量": "Purchased quantity",
+    "商品金额": "Product amount",
+}
+
+# ---------------------------------------------------------------------------
+# 来源：backend/app/services/report_service.py —— 每日经营日报固定建议与
+# 降级说明（Task 8）。`_suggestions()` 只从这 6 句固定组合里二选二，
+# `_build_response()` 的降级分支只用这 1 句——是与 quality_loop.py 同类的
+# 闭集固定整句，不属于需要模型翻译的自由文本。
+# ---------------------------------------------------------------------------
+
+_DAILY_REPORT_MESSAGES: dict[str, str] = {
+    "暂无近 7 日经营数据，建议保持商品供给和客服响应稳定。": (
+        "No operating data is available for the past 7 days yet. We recommend "
+        "keeping product supply and customer service response steady."
+    ),
+    "可以先补齐商品、保证金和商家资料，提升平台经营基础。": (
+        "Consider completing your product listings, deposit, and merchant "
+        "profile first to strengthen your store's operating foundation."
+    ),
+    "近 7 日存在退款金额，建议优先查看退货退款明细，定位高频原因并优化发货/售后说明。": (
+        "Refunds occurred in the past 7 days. We recommend reviewing the "
+        "return/refund details first to identify frequent causes and improve "
+        "shipping/after-sales information."
+    ),
+    "近 7 日退款压力较低，可以继续保持履约和售后响应稳定。": (
+        "Refund pressure has been low over the past 7 days. Keep fulfillment "
+        "and after-sales response steady."
+    ),
+    "客服工单相对订单量偏高，建议排查催单、物流和商品说明类问题。": (
+        "Support tickets are relatively high compared to order volume. We "
+        "recommend checking for order-urging, logistics, and "
+        "product-description issues."
+    ),
+    "建议继续关注 GMV、交易成功订单量和优惠使用效果，挑选转化较好的商品加大运营。": (
+        "Continue monitoring GMV, successful order volume, and coupon "
+        "effectiveness, and scale up promotion for better-converting "
+        "products."
+    ),
+    "经营数据暂时不可用，本期日报未生成指标。": (
+        "Operating data is temporarily unavailable; no metrics were "
+        "generated for this period's report."
+    ),
+}
+
+# ---------------------------------------------------------------------------
+# 来源：backend/app/metrics/seed.py（METRIC_SEED[*].business_definition）与
+# owner 字面量 "经营分析组"（Task 8）。这批口径整句与
+# `_FIELD_COMMENT_DEFINITIONS`（来源 `metrics/field_comments.py`）文字不同——
+# 前者是正式指标目录的业务口径，后者是二级降级用的字段注释，两套整句都要
+# 分别登记，不能只登记一套。
+# ---------------------------------------------------------------------------
+
+_METRIC_SEED_DEFINITIONS: dict[str, str] = {
+    "统计周期内已支付订单金额之和。": "Sum of paid order amounts during the period.",
+    "统计周期内创建的订单数量。": "Number of orders created during the period.",
+    "统计周期内创建订单的去重用户数，不要求完成付款。": (
+        "Number of distinct users who placed orders during the period, "
+        "regardless of whether payment was completed."
+    ),
+    "统计周期内完成付款的去重用户数。": (
+        "Number of distinct users who completed payment during the period."
+    ),
+    "统计周期内交易成功的订单数量。": (
+        "Number of orders that completed successfully during the period."
+    ),
+    "统计周期内发起退款的订单数量。": (
+        "Number of orders with refunds initiated during the period."
+    ),
+    "统计周期内退款总金额。": "Total refund amount during the period.",
+    "统计周期内发起退货的商品件数。": (
+        "Number of item units returned during the period."
+    ),
+    "退货件数除以同期订单项件数，按查询区间重新计算，不可跨日相加。": (
+        "Returned item quantity divided by order item quantity for the same "
+        "period; recalculated per query range and not additive across days."
+    ),
+    "统计周期内创建的客服工单数量。": (
+        "Number of support tickets created during the period."
+    ),
+    "经营分析组": "Business Analytics Team",
+}
+
+# ---------------------------------------------------------------------------
 # 来源：backend/app/analytics/demo_data.py —— 闭集分类/原因/城市中文值
 # ---------------------------------------------------------------------------
 
@@ -450,6 +567,10 @@ _TRANSLATIONS: dict[str, str] = _merge_translations(
     _REVIEW_SERVICE_MESSAGES,
     _GRAPH_DEGRADE_REASON_MESSAGES,
     _ANSWER_VALIDATION_MESSAGES,
+    _KNOWLEDGE_TREE_LABELS,
+    _ANALYTICS_REPOSITORY_LABELS,
+    _DAILY_REPORT_MESSAGES,
+    _METRIC_SEED_DEFINITIONS,
     _DEMO_DATA_VALUES,
     _STATUS_LABELS,
 )

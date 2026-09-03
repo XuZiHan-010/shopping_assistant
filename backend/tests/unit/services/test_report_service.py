@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from app.localization.locales import SupportedLocale
 from app.repositories.analytics import DailyReportSignals
 from app.services.report_service import DailyReportService
 
@@ -101,6 +102,67 @@ async def test_report_uses_business_yesterday_and_refund_suggestion() -> None:
     assert "退款金额" in report.suggestions[0]
     assert report.degraded is False
     assert conversations.saved_payload is not None
+
+
+@pytest.mark.asyncio
+async def test_report_renders_english_labels_and_suggestions_without_changing_the_cache() -> None:
+    """Task 8：`get_or_create()` 传 `locale=en-US` 时,展示名/单位/建议按
+    `app.localization.catalog` 渲染成英文，但落库的 `saved_payload`
+    （`mark_answer_succeeded()` 收到的载荷）必须是 zh-CN 原文——物化结果永远
+    以 zh-CN 落库，locale 只影响这次请求的返回值，不影响下一次请求缓存命中
+    后按别的 locale 渲染的能力。"""
+
+    conversations = _Conversations()
+    service = DailyReportService(
+        _Session(),
+        conversations,
+        _Analytics(),
+        now=lambda: datetime(2026, 8, 21, 0, 30, tzinfo=UTC),
+        business_timezone="Asia/Shanghai",
+    )
+
+    report = await service.get_or_create(MERCHANT_ID, locale=SupportedLocale.EN_US)
+
+    gmv_metric = next(metric for metric in report.metrics if metric.metric_code == "gmv")
+    assert gmv_metric.display_name == "Transaction GMV"
+    assert gmv_metric.unit == "yuan"
+    assert gmv_metric.value == Decimal("200.00")
+    assert "refund" in report.suggestions[0].lower()
+    assert "退款" not in report.suggestions[0]
+
+    assert conversations.saved_payload is not None
+    saved_metrics = {item["metric_code"]: item for item in conversations.saved_payload["metrics"]}
+    assert saved_metrics["gmv"]["display_name"] == "成交 GMV"
+    assert saved_metrics["gmv"]["unit"] == "元"
+    assert "退款金额" in conversations.saved_payload["suggestions"][0]
+
+
+@pytest.mark.asyncio
+async def test_report_cache_hit_still_renders_the_requested_locale() -> None:
+    """第二次请求命中已物化的日报（`existing.processing_status == "SUCCEEDED"`）
+    时，仍必须按这次请求的 `locale` 渲染，而不是原样返回第一次请求存下来的
+    语言。"""
+
+    conversations = _Conversations()
+    service = DailyReportService(
+        _Session(),
+        conversations,
+        _Analytics(),
+        now=lambda: datetime(2026, 8, 21, 0, 30, tzinfo=UTC),
+        business_timezone="Asia/Shanghai",
+    )
+    first = await service.get_or_create(MERCHANT_ID)
+    conversations.answer = SimpleNamespace(
+        id=first.answer_id,
+        processing_status="SUCCEEDED",
+        response_payload=first.model_dump(mode="json"),
+    )
+
+    second = await service.get_or_create(MERCHANT_ID, locale=SupportedLocale.EN_US)
+
+    assert second.answer_id == first.answer_id
+    gmv_metric = next(metric for metric in second.metrics if metric.metric_code == "gmv")
+    assert gmv_metric.display_name == "Transaction GMV"
 
 
 @pytest.mark.asyncio

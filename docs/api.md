@@ -495,6 +495,22 @@
               "maxLength": 128,
               "title": "Signature"
             }
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/SupportedLocale"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Locale"
+            }
           }
         ],
         "responses": {
@@ -830,6 +846,24 @@
         ],
         "summary": "Get Knowledge Tree",
         "operationId": "get_knowledge_tree_api_admin_knowledge_tree_get",
+        "parameters": [
+          {
+            "name": "content_locale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/SupportedLocale"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Content Locale"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -880,6 +914,7 @@
           "admin-knowledge"
         ],
         "summary": "Get Document",
+        "description": "`content_locale` 缺省时行为与本字段引入前完全一致：原样返回源正文，\n不涉及任何人工译文查找或记忆机器翻译（Task 8 向后兼容）。",
         "operationId": "get_document_api_admin_knowledge_documents__document_path__get",
         "parameters": [
           {
@@ -889,6 +924,22 @@
             "schema": {
               "type": "string",
               "title": "Document Path"
+            }
+          },
+          {
+            "name": "content_locale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/SupportedLocale"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Content Locale"
             }
           }
         ],
@@ -3552,6 +3603,26 @@
           "version": {
             "type": "string",
             "title": "Version"
+          },
+          "content_locale": {
+            "type": "string",
+            "enum": [
+              "zh-CN",
+              "en-US",
+              "mixed",
+              "und"
+            ],
+            "title": "Content Locale"
+          },
+          "translation_status": {
+            "type": "string",
+            "enum": [
+              "SOURCE",
+              "CURRENT",
+              "STALE",
+              "MISSING"
+            ],
+            "title": "Translation Status"
           }
         },
         "type": "object",
@@ -3559,7 +3630,9 @@
           "path",
           "content",
           "read_only",
-          "version"
+          "version",
+          "content_locale",
+          "translation_status"
         ],
         "title": "KnowledgeDocumentResponse"
       },
@@ -3568,13 +3641,29 @@
           "content": {
             "type": "string",
             "title": "Content"
+          },
+          "is_source_version": {
+            "type": "boolean",
+            "title": "Is Source Version",
+            "default": true
+          },
+          "content_locale": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SupportedLocale"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
         "required": [
           "content"
         ],
-        "title": "KnowledgeDocumentUpdateRequest"
+        "title": "KnowledgeDocumentUpdateRequest",
+        "description": "`is_source_version=true`（默认）更新源标题/正文本身；`false` 改为保存\n一份人工译文，此时必须显式提供 `content_locale`——源语言可以是\n`mixed`/`und`，不能靠\"等于源语言之外的那个\"推断目标语言（Task 8 Step 4）。"
       },
       "KnowledgeTreeNode": {
         "properties": {
@@ -3963,6 +4052,15 @@
           "action"
         ],
         "title": "Recommendation"
+      },
+      "SupportedLocale": {
+        "type": "string",
+        "enum": [
+          "zh-CN",
+          "en-US"
+        ],
+        "title": "SupportedLocale",
+        "description": "API 响应可渲染的显示语言。"
       },
       "ThinkingStep": {
         "properties": {

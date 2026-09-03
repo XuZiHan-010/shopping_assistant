@@ -108,3 +108,39 @@ async def test_merchant_token_is_rejected(admin_app: FastAPI) -> None:
         )
 
     assert response.status_code == 401
+
+
+async def test_tree_localizes_fixed_section_names_but_keeps_path_unchanged(
+    admin_client: AsyncClient, seeded_domain: None
+) -> None:
+    """Task 8：树节点只本地化 `name`（固定导航标签），`path` 是 API 定位
+    文档用的真实标识符，绝不随语言变化。用户创建的业务域名称（"交易"）不在
+    闭集词典里，原样保留——不因为翻译不到就报错或留白。"""
+
+    response = await admin_client.get(
+        "/api/admin/knowledge/tree", params={"content_locale": "en-US"}
+    )
+
+    assert response.status_code == 200
+    roots = response.json()["roots"]
+    business = next(root for root in roots if root["path"] == "业务")
+    assert business["name"] == "Business"
+    domain = business["children"][0]
+    assert domain["path"] == "业务/交易"
+    assert domain["name"] == "交易"  # 用户创建的业务域名称：不在词典里，原样保留
+    section_names = {child["path"]: child["name"] for child in domain["children"]}
+    assert section_names["业务/交易/业务流程"] == "Business process"
+    assert section_names["业务/交易/业务名词解释"] == "Business glossary"
+    assert section_names["业务/交易/ddl"] == "ddl"  # 无汉字，原样保留
+
+
+async def test_tree_without_content_locale_keeps_chinese_names_unchanged(
+    admin_client: AsyncClient, seeded_domain: None
+) -> None:
+    """缺省 `content_locale` 时行为与本字段引入前完全一致（向后兼容）。"""
+
+    response = await admin_client.get("/api/admin/knowledge/tree")
+
+    assert response.status_code == 200
+    business = next(root for root in response.json()["roots"] if root["path"] == "业务")
+    assert business["name"] == "业务"

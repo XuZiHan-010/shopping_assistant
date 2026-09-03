@@ -38,6 +38,7 @@ from app.intent.models import (
     QueryIntent,
 )
 from app.intent.whitelist import MAX_DETAIL_LIMIT
+from app.localization.locales import SupportedLocale
 from app.repositories.analytics import AnalyticsRepository, ResultColumn
 from app.schemas.chat import CATEGORY_DISPLAY_NAMES, AnswerMode, QuestionCategory
 
@@ -89,6 +90,13 @@ class ExportSpec:
     cross_business_plan: CrossBusinessPlan | None = None
     generated_metric_plan: GeneratedMetricPlan | None = None
     generated_metric_category: QuestionCategory | None = None
+    #: 导出下载语言，在 `ExportService.create()` 时按当次请求的显示语言固化，
+    #: 不由 `/api/exports/{id}` 在下载时从 `Accept-Language` 重新推导——那条
+    #: 路由是浏览器直接打开的签名 URL，不带这个 Header（Task 8）。这里给出的
+    #: `ZH_CN` 默认值只用于构造阶段（`SafeQueryService` 本身不知道请求语言），
+    #: `ExportService.create()` 总会用调用方传入的真实 locale 覆盖它；旧签名
+    #: （创建于本字段存在之前）反序列化缺省同一个值，兼容按 zh-CN 解释。
+    locale: SupportedLocale = SupportedLocale.ZH_CN
 
 
 @dataclass(frozen=True)

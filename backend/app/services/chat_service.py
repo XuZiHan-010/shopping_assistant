@@ -289,6 +289,7 @@ class ChatService:
                     merchant_id=context.merchant_id,
                     answer_id=answer.id,
                     spec=result.query_result.export_spec,
+                    locale=locale,
                 )
                 response = response.model_copy(update={"export": export})
             if self._cost_guard is not None and self._cost_guard.daily_cap_hit:

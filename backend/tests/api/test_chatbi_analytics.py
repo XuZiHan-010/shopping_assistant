@@ -170,6 +170,25 @@ async def test_categories_return_wrapped_items_with_display_name(
 
 
 @pytest.mark.asyncio
+async def test_categories_return_english_display_name_with_accept_language_header(
+    admin_client: AsyncClient, admin_headers: dict[str, str]
+) -> None:
+    """Task 8：分类展示名走 `localize_catalog_value()`（零 LLM，词典已在 Task 4
+    登记）。`FakeChatBiRepository` 是内存假实现，本用例结构上不可能触发任何
+    真实模型调用。"""
+
+    response = await admin_client.get(
+        CATEGORIES,
+        params=WINDOW,
+        headers={**admin_headers, "Accept-Language": "en-US"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["category_display_name"] == "E-commerce trade"
+    assert response.json()["items"][0]["category"] == "TRADE"
+
+
+@pytest.mark.asyncio
 async def test_rollup_requires_admin_token(admin_client: AsyncClient) -> None:
     assert (await admin_client.post(ROLLUP, json=WINDOW)).status_code == 401
 

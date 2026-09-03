@@ -16,6 +16,9 @@ from app.models.merchant import Merchant
 class MerchantSummary:
     merchant_id: UUID
     display_name: str
+    #: 人工维护的英文展示名；缺失时调用方回退到 `display_name` 本身，
+    #: 不猜测或调用模型生成（见 `app.models.merchant.Merchant.display_name_en`）。
+    display_name_en: str | None = None
 
 
 class MerchantRepository:
@@ -26,15 +29,19 @@ class MerchantRepository:
         if not merchant_ids:
             return []
         result = await self._session.execute(
-            select(Merchant.id, Merchant.display_name).where(
+            select(Merchant.id, Merchant.display_name, Merchant.display_name_en).where(
                 Merchant.id.in_(merchant_ids),
                 Merchant.is_demo.is_(True),
                 Merchant.status == "ACTIVE",
             )
         )
         return [
-            MerchantSummary(merchant_id=merchant_id, display_name=display_name)
-            for merchant_id, display_name in result.all()
+            MerchantSummary(
+                merchant_id=merchant_id,
+                display_name=display_name,
+                display_name_en=display_name_en,
+            )
+            for merchant_id, display_name, display_name_en in result.all()
         ]
 
     async def get_display_name(self, merchant_id: UUID) -> str | None:

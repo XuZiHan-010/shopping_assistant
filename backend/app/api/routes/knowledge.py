@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, Request, Response, status
+from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import (
+    build_global_guarded_llm,
     build_guarded_llm,
     get_app_settings,
     get_database,
@@ -18,7 +19,10 @@ from app.api.dependencies import (
 from app.core.config import Settings
 from app.core.errors import ResourceNotFoundError, error_responses
 from app.db.session import Database
+from app.llm.client import LlmBudget
+from app.localization.locales import SupportedLocale
 from app.repositories.audit import AuditRepository
+from app.repositories.localization import LocalizationRepository
 from app.repositories.merchant import MerchantRepository
 from app.schemas.knowledge import (
     BusinessDomainRenameRequest,
@@ -32,25 +36,64 @@ from app.schemas.knowledge import (
     MemoryCompressResponse,
 )
 from app.services.knowledge_admin_service import KnowledgeAdminService
+from app.services.localization_service import LocalizationService
 from app.services.memory_admin_service import MemoryAdminService
 
 router = APIRouter(prefix="/admin/knowledge", tags=["admin-knowledge"])
+
+#: 只读记忆节点机器翻译的独立小额预算：管理后台一次只翻译一份记忆正文,
+#: 不是聊天链路的批量结构化载荷，不需要复用 `Settings.localization_max_*`
+#: 那套按请求批量预算。
+_MEMORY_TRANSLATION_MAX_TOKENS = 4_000
 
 
 @router.get("/tree", response_model=KnowledgeTreeResponse, responses=error_responses(401, 403, 422))
 async def get_knowledge_tree(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     _admin: Annotated[None, Depends(require_admin_or_viewer_token)],
+    content_locale: Annotated[SupportedLocale | None, Query()] = None,
 ) -> KnowledgeTreeResponse:
-    return await KnowledgeAdminService(session).tree()
+    return await KnowledgeAdminService(session).tree(content_locale=content_locale)
 
 
 def _set_etag(response: Response, version: str) -> None:
     response.headers["ETag"] = f'"{version}"'
 
 
-def _service(session: AsyncSession, settings: Settings) -> KnowledgeAdminService:
-    return KnowledgeAdminService(session, max_document_bytes=settings.knowledge_max_document_bytes)
+def _service(
+    session: AsyncSession,
+    settings: Settings,
+    *,
+    request: Request | None = None,
+    database: Database | None = None,
+) -> KnowledgeAdminService:
+    """知识文档的人工译文增删查（`localization`）永远装配——零 LLM。
+    只读记忆节点的机器翻译兜底（`memory_localizer`/`memory_budget`）需要
+    `request`/`database` 才能构造带费用防护的模型客户端；写端点（创建/更新/
+    删除文档、业务域维护）都不会触达这条路径，调用时省略这两个参数即可。
+    """
+
+    memory_localizer: LocalizationService | None = None
+    memory_budget: LlmBudget | None = None
+    if request is not None and database is not None:
+        guard = build_global_guarded_llm(
+            settings, database, request_id=str(request.state.request_id)
+        )
+        memory_localizer = LocalizationService(
+            LocalizationRepository(session),
+            guard,
+            max_batch_items=settings.localization_max_batch_items,
+            max_batch_chars=settings.localization_max_batch_chars,
+            model=settings.llm_model,
+        )
+        memory_budget = LlmBudget(max_calls=1, max_tokens=_MEMORY_TRANSLATION_MAX_TOKENS)
+    return KnowledgeAdminService(
+        session,
+        max_document_bytes=settings.knowledge_max_document_bytes,
+        localization=LocalizationRepository(session),
+        memory_localizer=memory_localizer,
+        memory_budget=memory_budget,
+    )
 
 
 @router.get(
@@ -61,11 +104,19 @@ def _service(session: AsyncSession, settings: Settings) -> KnowledgeAdminService
 async def get_document(
     document_path: str,
     response: Response,
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_db_session)],
+    database: Annotated[Database, Depends(get_database)],
     settings: Annotated[Settings, Depends(get_app_settings)],
     _admin: Annotated[None, Depends(require_admin_or_viewer_token)],
+    content_locale: Annotated[SupportedLocale | None, Query()] = None,
 ) -> KnowledgeDocumentResponse:
-    document = await _service(session, settings).get_document(document_path)
+    """`content_locale` 缺省时行为与本字段引入前完全一致：原样返回源正文，
+    不涉及任何人工译文查找或记忆机器翻译（Task 8 向后兼容）。"""
+
+    document = await _service(session, settings, request=request, database=database).get_document(
+        document_path, content_locale=content_locale
+    )
     _set_etag(response, document.version)
     return document
 
@@ -104,7 +155,11 @@ async def update_document(
     if_match: Annotated[str | None, Header()] = None,
 ) -> KnowledgeDocumentResponse:
     document = await _service(session, settings).update_document(
-        document_path, payload.content, if_match
+        document_path,
+        payload.content,
+        if_match,
+        is_source_version=payload.is_source_version,
+        content_locale=payload.content_locale,
     )
     await session.commit()
     _set_etag(response, document.version)

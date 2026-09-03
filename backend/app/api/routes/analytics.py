@@ -9,12 +9,15 @@ from fastapi import APIRouter, Depends, Query
 from app.api.dependencies import (
     get_app_settings,
     get_database,
+    get_request_locale,
     require_admin_or_viewer_token,
     require_admin_token,
 )
 from app.core.config import Settings
 from app.core.errors import error_responses
 from app.db.session import Database
+from app.localization.catalog import localize_catalog_value
+from app.localization.locales import SupportedLocale
 from app.repositories.chatbi import ChatBiRepository
 from app.schemas.analytics import (
     ChatBiCategoriesResponse,
@@ -89,6 +92,7 @@ async def chatbi_categories(
     settings: Annotated[Settings, Depends(get_app_settings)],
     database: Annotated[Database, Depends(get_database)],
     _admin: Annotated[None, Depends(require_admin_or_viewer_token)],
+    locale: Annotated[SupportedLocale, Depends(get_request_locale)],
 ) -> ChatBiCategoriesResponse:
     breakdown = await _service(settings, database).categories(
         start_date=window.start_date, end_date=window.end_date
@@ -99,7 +103,7 @@ async def chatbi_categories(
         items=[
             ChatBiCategoryItem(
                 category=item.category,
-                category_display_name=_display_name(item.category),
+                category_display_name=_display_name(item.category, locale),
                 answer_total=item.counters.answer_total,
                 adoption_rate=item.metrics.adoption_rate,
                 user_accuracy_rate=item.metrics.user_accuracy_rate,
@@ -136,8 +140,13 @@ async def chatbi_rollup(
     )
 
 
-def _display_name(category: str) -> str:
+def _display_name(category: str, locale: SupportedLocale) -> str:
+    """分类展示名走 `localize_catalog_value()`（零 LLM）：`CATEGORY_DISPLAY_NAMES`
+    的中文值已经登记在 `app.localization.catalog` 里，en-US 直接查表；zh-CN
+    原样返回中文展示名，与词典的通用约定一致。"""
+
     try:
-        return CATEGORY_DISPLAY_NAMES[QuestionCategory(category)]
+        display_name = CATEGORY_DISPLAY_NAMES[QuestionCategory(category)]
     except (KeyError, ValueError):
         return category
+    return localize_catalog_value(display_name, locale) or display_name
