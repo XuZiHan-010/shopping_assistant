@@ -28,13 +28,17 @@ const option = computed<ChartOption | undefined>(() => {
 
   return {
     animation: !reducedMotion,
-    title: { text: t('trendChart.title'), left: 'left' },
+    // 不在 ECharts option 里额外设置 `title`——标题已经由下方 DOM 的
+    // `<h2 id="trend-chart-title">` 承担并正确随 locale 切换，画布内再叠加
+    // 一份原生 title 会造成同一句话渲染两次。这里刻意与
+    // `MetricChartPanel.vue`（只用 DOM `<figcaption>`，不设置 option.title）
+    // 保持一致。
     tooltip: {
       trigger: 'axis',
       valueFormatter: (value: number | string) =>
         typeof value === 'number' ? formatNumber(value, locale) : value,
     },
-    legend: { data: [legendAdoption, legendHit, legendAnswers], top: 24 },
+    legend: { data: [legendAdoption, legendHit, legendAnswers] },
     // 原始日期字符串（`statDate`）原样透传，不按 locale 重新格式化。
     xAxis: { type: 'category', data: props.daily.map((point) => point.statDate) },
     yAxis: [
@@ -53,7 +57,6 @@ const option = computed<ChartOption | undefined>(() => {
         axisLabel: { formatter: (value: number) => formatNumber(value, locale) },
       },
     ] as unknown as Record<string, unknown>,
-    grid: { top: 64 },
     series: [
       {
         type: 'line',
