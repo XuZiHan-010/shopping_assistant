@@ -195,6 +195,33 @@ test.describe('双语用户旅程（Step 2）', () => {
     // 用户提问回显、快速问题网格等其余内容仍需完整通过审计。
     await expectEnglishOnlyUi(page, conversationColumn(page), KNOWN_FIXTURE_GAP_SELECTOR)
 
+    // ---- 打开已有中文会话第一页 ----
+    // 上面两轮是在中文模式下创建的、仍然「活着」的当前会话——语言切换后
+    // 靠 `reloadForLocale()` 的幂等重放自动更新，从未真正经过
+    // 「从历史记录里点开一个会话」这条路径。这里必须换一条独立的入口：
+    // 打开抽屉，找到那条会话，点抽屉自己的 `conversation-open` 控件
+    // （`ConversationDrawer.vue` 第 97-100 行的 `openConversation`），
+    // 让它走 `chatStore.loadConversation(id)` 的真实点击触发路径，而不是
+    // 直接在 `page.evaluate` 里调用 Store 方法。会话标题本身不在词表翻译
+    // 范围内（Gap 5，另有专门用例核对），仍是原始中文，正好可以拿来定位
+    // 这一条历史记录。
+    await page.getByLabel('Open conversation history').click()
+    const historyItem = page.getByTestId('conversation-item').filter({ hasText: '最近7天退货量趋势' })
+    await expect(historyItem).toBeVisible()
+    await historyItem.getByTestId('conversation-open').click()
+
+    // 打开动作会关闭抽屉、重置当前对话、再按当前语言重新拉一次会话详情——
+    // 断言抽屉确实关闭、且重新加载出的两轮内容都已按英语重新本地化
+    // （`localizeConversationMessage` 的读时重译），证明这不是继续显示切换
+    // 前就已经在内存里的旧状态。
+    await expect(page.getByTestId('drawer-panel')).toHaveCount(0)
+    await expect(page.getByTestId('chat-message')).toHaveCount(4)
+    await expect(thinkingSteps.first()).toHaveText('Identify merchant and conversation context')
+    await expect(conversationColumn(page)).toContainText('Return trend over the last 7 days')
+    await expect(conversationColumn(page)).toContainText("What was yesterday's total GMV?")
+    await expectEnglishOnlyUi(page, page.locator('[data-testid="assistant-header"]'))
+    await expectEnglishOnlyUi(page, conversationColumn(page), KNOWN_FIXTURE_GAP_SELECTOR)
+
     // ---- 刷新仍为英语 ----
     await page.reload()
     await expect(page.locator('html')).toHaveAttribute('lang', 'en-US')
