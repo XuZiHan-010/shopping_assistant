@@ -24,16 +24,7 @@ import type {
   ThinkingStep,
 } from '@/types/chat'
 
-/**
- * `generated.ts` 还没有 `displayed_user_message`（Task 6 新增，本文件写作时
- * `generated.ts` 尚未重新生成——权威定义见
- * `backend/app/schemas/chat.py::ChatResponse`）。手工补丁交叉类型，
- * Task 12 重新生成后这个字段会并入 `generated.ts`，届时可以直接删掉这行
- * 交叉类型，改回纯 `components['schemas']['ChatResponse']`。
- */
-type RawChatResponse = components['schemas']['ChatResponse'] & {
-  displayed_user_message?: string
-}
+type RawChatResponse = components['schemas']['ChatResponse']
 type RawConversationAnswerPayload = components['schemas']['ConversationAnswerPayload']
 
 /**
@@ -295,11 +286,10 @@ export function toChatAnswer(raw: RawChatResponse): ChatAnswer {
   return {
     id: raw.id,
     sessionId: raw.session_id,
-    // 老 fixture（Task 11 之前生成，`docs/fixtures/chat/*.json` 尚未带这个
-    // 字段）没有 `displayed_user_message`；退回空串而不是抛契约错误——这是
-    // 展示层的本地化镜像，不是语义不变量，缺失时 Store 自己会回退到消息的
-    // 原始文本（`ChatMessage.sourceText`），不应该让整条回答因此校验失败。
-    displayedUserMessage: raw.displayed_user_message ?? '',
+    // 展示层的本地化镜像，不是语义不变量——即使值恰好是空字符串，Store 也会
+    // 回退到消息的原始文本（`ChatMessage.sourceText`），不应该让整条回答因此
+    // 校验失败。
+    displayedUserMessage: raw.displayed_user_message,
     answer: raw.answer,
     mode: raw.answer_mode,
     category: raw.category ?? undefined,

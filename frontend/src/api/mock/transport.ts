@@ -19,19 +19,9 @@ import { BUSINESS_SECTIONS } from '@/utils/knowledgeTree'
 type MockKnowledgeDocument = { content: string; read_only: boolean; version: string }
 type MockKnowledgeNode = components['schemas']['KnowledgeTreeNode']
 
-/** 见 `api/adapters/chat.ts` 顶部同名注释：`generated.ts` 尚未跟上 Task 6。 */
-type RawChatResponse = components['schemas']['ChatResponse'] & { displayed_user_message?: string }
-/** 见 `api/chat.ts` 顶部同名注释：`generated.ts` 尚未跟上 Task 7。 */
-type RawConversationListResponse = components['schemas']['ConversationListResponse'] & {
-  localization_degraded: boolean
-  localization_degraded_reason: string | null
-}
-type RawConversationDetailResponse = components['schemas']['ConversationDetailResponse'] & {
-  next_message_cursor: string | null
-  has_more_messages: boolean
-  localization_degraded: boolean
-  localization_degraded_reason: string | null
-}
+type RawChatResponse = components['schemas']['ChatResponse']
+type RawConversationListResponse = components['schemas']['ConversationListResponse']
+type RawConversationDetailResponse = components['schemas']['ConversationDetailResponse']
 
 interface MockOptions {
   chunkSizes?: number[]
@@ -647,7 +637,14 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
       const created: MockKnowledgeDocument = { content: payload.content, read_only: false, version: '1' }
       knowledgeDocuments.set(payload.path, created)
       return jsonResponse(
-        { path: payload.path, ...created } satisfies components['schemas']['KnowledgeDocumentResponse'],
+        {
+          path: payload.path,
+          ...created,
+          // 新建文档只有源正文，与 GET 未指定 content_locale 时的缺省行为
+          // 一致（本文件其它 SOURCE 分支同一取值，见下方 GET/PUT 分支）。
+          content_locale: 'zh-CN',
+          translation_status: 'SOURCE',
+        } satisfies components['schemas']['KnowledgeDocumentResponse'],
         201,
       )
     }

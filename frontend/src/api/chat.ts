@@ -19,24 +19,6 @@ import { AppError } from './errors'
 import { assertResponseLocale, ChatStreamInterruptedError, readChatStream } from './sse'
 import { resolveTransport } from './transport'
 
-/**
- * `generated.ts` 尚未跟上 Task 6/7 新增的字段（`displayed_user_message`、
- * `next_message_cursor`、`has_more_messages`、`localization_degraded*`）——
- * 见 `backend/app/schemas/chat.py` 的 `ConversationListResponse` /
- * `ConversationDetailResponse`。手工补丁交叉类型，Task 12 重新生成后可以
- * 直接删掉，改回纯 `components['schemas'][...]`。
- */
-type RawConversationListResponse = components['schemas']['ConversationListResponse'] & {
-  localization_degraded?: boolean
-  localization_degraded_reason?: string | null
-}
-type RawConversationDetailResponse = components['schemas']['ConversationDetailResponse'] & {
-  next_message_cursor?: string | null
-  has_more_messages?: boolean
-  localization_degraded?: boolean
-  localization_degraded_reason?: string | null
-}
-
 export interface ConversationSummaryView {
   id: string
   title: string
@@ -131,7 +113,7 @@ export async function listConversations(
     { path: `/api/conversations?limit=${limit}`, method: 'GET', auth: 'merchant' },
     signal,
   )
-  const payload = (await response.json()) as RawConversationListResponse
+  const payload = (await response.json()) as components['schemas']['ConversationListResponse']
 
   return {
     items: payload.items.map((item) => ({
@@ -188,7 +170,7 @@ export async function getConversation(
     },
     signal,
   )
-  const payload = (await response.json()) as RawConversationDetailResponse
+  const payload = (await response.json()) as components['schemas']['ConversationDetailResponse']
 
   return {
     id: payload.id,

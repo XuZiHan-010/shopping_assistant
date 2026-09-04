@@ -6,6 +6,7 @@
  * 作业（见 `scripts/export_chat_fixtures.py` 的说明）。
  */
 import chatGreeting from '@fixtures/chat/chat-greeting.json'
+import identityProfile from '@fixtures/chat/identity-profile.json'
 import invalidRefused from '@fixtures/chat/invalid-refused.json'
 import metricGmv from '@fixtures/chat/metric-gmv.json'
 import detailOrder from '@fixtures/chat/detail-order.json'
@@ -31,6 +32,48 @@ const orderDetail = detailOrder as RawChatResponse
 const rule = rulePlatform as RawChatResponse
 const greeting = chatGreeting as RawChatResponse
 const refused = invalidRefused as RawChatResponse
+const identity = identityProfile as RawChatResponse
+
+/**
+ * 双语契约测试专用的翻译模拟（Task 12 Step 4）。
+ *
+ * `docs/fixtures/chat/*.json` 固定是源语言（中文）——真实的中英文差异只在
+ * 运行时由后端翻译服务产生，导出脚本不模拟翻译（见 `mock/scenarios.ts` 顶部
+ * 同一结论）。这里手工构造一份"假想已被翻译成英文"的载荷，只改人类可读的
+ * 文本字段，技术字段（id、枚举、编号、布尔、数值、URL）原样保留，从而验证
+ * Adapter 的 snake_case → camelCase 转换和"技术字段不受本地化影响"这两件事
+ * 在中英文载荷下都成立——Adapter 本身不做任何翻译，只做结构转换。
+ */
+function toEnglishRaw(raw: RawChatResponse): RawChatResponse {
+  const en = (value: string) => `EN: ${value}`
+  const enOrNull = (value: string | null | undefined) =>
+    value == null ? value : en(value)
+
+  return {
+    ...raw,
+    answer: raw.answer ? en(raw.answer) : raw.answer,
+    displayed_user_message: raw.displayed_user_message
+      ? en(raw.displayed_user_message)
+      : raw.displayed_user_message,
+    degraded_reason: enOrNull(raw.degraded_reason),
+    quality_notes: (raw.quality_notes ?? []).map(en),
+    suggestions: (raw.suggestions ?? []).map(en),
+    suggestion_alternates: (raw.suggestion_alternates ?? []).map((group) => group.map(en)),
+    recommendations: raw.recommendations
+      ? raw.recommendations.map((item) => ({
+          ...item,
+          title: en(item.title),
+          evidence: en(item.evidence),
+          action: en(item.action),
+        }))
+      : raw.recommendations,
+    thinking_steps: (raw.thinking_steps ?? []).map((step) => ({ ...step, label: en(step.label) })),
+    metric_display_name: enOrNull(raw.metric_display_name),
+    metric_definition: enOrNull(raw.metric_definition),
+    metric_notice: enOrNull(raw.metric_notice),
+    query_plan: raw.query_plan ? { ...raw.query_plan, summary: en(raw.query_plan.summary) } : raw.query_plan,
+  }
+}
 
 describe('toChatAnswer · 真实载荷', () => {
   it('把 snake_case 映射成领域模型', () => {
@@ -50,9 +93,10 @@ describe('toChatAnswer · 真实载荷', () => {
     expect(answer.displayedUserMessage).toBe('昨天的退货量趋势如何？')
   })
 
-  it('缺少 displayed_user_message 的旧 fixture 退回空串，不抛契约错误', () => {
-    // Task 12 之前的 docs/fixtures/chat/*.json 尚未带这个字段，`refund`
-    // 本身就是这样一份真实的旧 fixture——不需要额外构造缺字段的载荷。
+  it('displayed_user_message 为空串时原样传递，不抛契约错误', () => {
+    // `refund` 这份由后端导出脚本生成的真实 fixture里，该字段本身就是空串
+    // （导出脚本的 stub 上下文没有真实用户提问文本）——空串是合法取值，不是
+    // 字段缺失,不需要额外构造缺字段的载荷。
     const answer = toChatAnswer(refund)
 
     expect(answer.displayedUserMessage).toBe('')
@@ -294,6 +338,111 @@ describe('toChatAnswer · 语义守卫', () => {
       expect((error as Error).message).toMatch(/[一-龥]/)
     }
   })
+})
+
+describe('toChatAnswer · 双语契约：zh-CN / en-US 各覆盖 6 种 answer_mode（Task 12 Step 4）', () => {
+  const cases: Array<{ name: string; raw: RawChatResponse }> = [
+    { name: 'METRIC(gmv)', raw: gmv },
+    { name: 'METRIC(refund)', raw: refund },
+    { name: 'DETAIL', raw: orderDetail },
+    { name: 'RULE', raw: rule },
+    { name: 'IDENTITY', raw: identity },
+    { name: 'CHAT', raw: greeting },
+    { name: 'INVALID', raw: refused },
+  ]
+
+  it.each(cases)(
+    '$name：zh-CN 与 en-US 载荷都能正确转换 camelCase，且技术字段不受语言影响',
+    ({ raw }) => {
+      const zhAnswer = toChatAnswer(raw)
+      const enRaw = toEnglishRaw(raw)
+      const enAnswer = toChatAnswer(enRaw)
+
+      // --- snake_case → camelCase 转换对双语载荷都成立 ---
+      expect(enAnswer.mode).toBe(raw.answer_mode)
+      expect(enAnswer.sessionId).toBe(raw.session_id)
+      if (raw.answer) {
+        expect(enAnswer.answer).toBe(`EN: ${raw.answer}`)
+        expect(enAnswer.answer).not.toBe(zhAnswer.answer)
+      }
+      if (zhAnswer.thinkingSteps.length > 0) {
+        expect(enAnswer.thinkingSteps).toHaveLength(zhAnswer.thinkingSteps.length)
+        enAnswer.thinkingSteps.forEach((step, index) => {
+          expect(step.label).toBe(`EN: ${zhAnswer.thinkingSteps[index].label}`)
+          // node 是内部实现标识，不是给人看的文本，不参与本地化。
+          expect(step.node).toBe(zhAnswer.thinkingSteps[index].node)
+        })
+      }
+      if (zhAnswer.quality.notes.length > 0) {
+        expect(enAnswer.quality.notes).toEqual(zhAnswer.quality.notes.map((note) => `EN: ${note}`))
+      }
+      if (zhAnswer.quality.degradedReason) {
+        expect(enAnswer.quality.degradedReason).toBe(`EN: ${zhAnswer.quality.degradedReason}`)
+      }
+      if (zhAnswer.recommendations.length > 0) {
+        enAnswer.recommendations.forEach((item, index) => {
+          expect(item.title).toBe(`EN: ${zhAnswer.recommendations[index].title}`)
+          expect(item.evidence).toBe(`EN: ${zhAnswer.recommendations[index].evidence}`)
+          expect(item.action).toBe(`EN: ${zhAnswer.recommendations[index].action}`)
+        })
+      }
+      if (zhAnswer.metric) {
+        expect(enAnswer.metric?.displayName).toBe(`EN: ${zhAnswer.metric.displayName}`)
+        expect(enAnswer.metric?.definition).toBe(`EN: ${zhAnswer.metric.definition}`)
+      }
+
+      // --- 技术字段：无论请求语言是什么，值必须逐字相同（不能被"翻译"）---
+      expect(enAnswer.id).toBe(zhAnswer.id)
+      expect(enAnswer.sessionId).toBe(zhAnswer.sessionId)
+      expect(enAnswer.mode).toBe(zhAnswer.mode)
+      expect(enAnswer.category).toBe(zhAnswer.category)
+      expect(enAnswer.quality.status).toBe(zhAnswer.quality.status)
+      expect(enAnswer.quality.attempts).toBe(zhAnswer.quality.attempts)
+      expect(enAnswer.quality.sources).toEqual(zhAnswer.quality.sources)
+      expect(enAnswer.quality.degraded).toBe(zhAnswer.quality.degraded)
+      expect(enAnswer.contractWarnings).toHaveLength(zhAnswer.contractWarnings.length)
+      expect(enAnswer.thinkingSteps.map((step) => step.node)).toEqual(
+        zhAnswer.thinkingSteps.map((step) => step.node),
+      )
+
+      if (zhAnswer.metric) {
+        expect(enAnswer.metric?.code).toBe(zhAnswer.metric.code)
+        expect(enAnswer.metric?.unit).toBe(zhAnswer.metric.unit)
+        expect(enAnswer.metric?.sqlDefinition).toBe(zhAnswer.metric.sqlDefinition)
+        expect(enAnswer.metric?.sourceDatabase).toBe(zhAnswer.metric.sourceDatabase)
+        expect(enAnswer.metric?.sourceTable).toBe(zhAnswer.metric.sourceTable)
+        expect(enAnswer.metric?.source).toBe(zhAnswer.metric.source)
+        expect(enAnswer.metric?.generated).toBe(zhAnswer.metric.generated)
+        expect(enAnswer.metric?.status).toBe(zhAnswer.metric.status)
+      } else {
+        expect(enAnswer.metric).toBeUndefined()
+      }
+
+      if (zhAnswer.data) {
+        expect(enAnswer.data?.totalRows).toBe(zhAnswer.data.totalRows)
+        expect(enAnswer.data?.truncated).toBe(zhAnswer.data.truncated)
+        expect(enAnswer.data?.rows).toEqual(zhAnswer.data.rows)
+      } else {
+        expect(enAnswer.data).toBeUndefined()
+      }
+
+      if (zhAnswer.chart) {
+        expect(enAnswer.chart?.enabled).toBe(zhAnswer.chart.enabled)
+        expect(enAnswer.chart?.dimensionKey).toBe(zhAnswer.chart.dimensionKey)
+        expect(enAnswer.chart?.metricKey).toBe(zhAnswer.chart.metricKey)
+        expect(enAnswer.chart?.data).toEqual(zhAnswer.chart.data)
+      } else {
+        expect(enAnswer.chart).toBeUndefined()
+      }
+
+      if (zhAnswer.export) {
+        expect(enAnswer.export?.id).toBe(zhAnswer.export.id)
+        expect(enAnswer.export?.url).toBe(zhAnswer.export.url)
+      } else {
+        expect(enAnswer.export).toBeUndefined()
+      }
+    },
+  )
 })
 
 describe('toConversationAnswer · 会话详情的助手回答载荷', () => {

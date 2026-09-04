@@ -17,6 +17,7 @@ export const CHAT_FIXTURES = {
     data_rows: null,
     degraded: false,
     degraded_reason: null,
+    displayed_user_message: '',
     export: null,
     id: 'fdeac1b3-e67f-5af8-95a5-e3146025c038',
     metric_code: null,
@@ -47,6 +48,7 @@ export const CHAT_FIXTURES = {
     thinking_steps: [
       { label: '识别商家与会话上下文', node: 'load_context' },
       { label: '读取业务知识索引', node: 'retrieve_knowledge_index' },
+      { label: '判定问题范围', node: 'prefilter_question' },
       { label: '识别问题类型与业务域', node: 'classify_intent' },
       { label: '结构化理解问题', node: 'understand_intent' },
       { label: '校验查询意图', node: 'validate_intent' },
@@ -85,6 +87,7 @@ export const CHAT_FIXTURES = {
     ],
     degraded: false,
     degraded_reason: null,
+    displayed_user_message: '',
     export: {
       expires_at: '2026-07-28T12:15:00Z',
       id: '17575e95-31e5-5282-9d66-2c237c468537',
@@ -131,6 +134,7 @@ export const CHAT_FIXTURES = {
     thinking_steps: [
       { label: '识别商家与会话上下文', node: 'load_context' },
       { label: '读取业务知识索引', node: 'retrieve_knowledge_index' },
+      { label: '判定问题范围', node: 'prefilter_question' },
       { label: '识别问题类型与业务域', node: 'classify_intent' },
       { label: '结构化理解问题', node: 'understand_intent' },
       { label: '校验查询意图', node: 'validate_intent' },
@@ -154,6 +158,7 @@ export const CHAT_FIXTURES = {
     data_rows: [],
     degraded: true,
     degraded_reason: '当前版本尚未开放商家资料查询',
+    displayed_user_message: '',
     export: null,
     id: '180b3336-d074-5498-a7f4-b6ed431ddec4',
     metric_code: null,
@@ -183,6 +188,7 @@ export const CHAT_FIXTURES = {
     thinking_steps: [
       { label: '识别商家与会话上下文', node: 'load_context' },
       { label: '读取业务知识索引', node: 'retrieve_knowledge_index' },
+      { label: '判定问题范围', node: 'prefilter_question' },
       { label: '识别问题类型与业务域', node: 'classify_intent' },
       { label: '结构化理解问题', node: 'understand_intent' },
       { label: '校验查询意图', node: 'validate_intent' },
@@ -206,6 +212,7 @@ export const CHAT_FIXTURES = {
     data_rows: null,
     degraded: false,
     degraded_reason: null,
+    displayed_user_message: '',
     export: null,
     id: '6ae74465-a63a-5ba3-b74f-1d53cdca52aa',
     metric_code: null,
@@ -235,6 +242,7 @@ export const CHAT_FIXTURES = {
     thinking_steps: [
       { label: '识别商家与会话上下文', node: 'load_context' },
       { label: '读取业务知识索引', node: 'retrieve_knowledge_index' },
+      { label: '判定问题范围', node: 'prefilter_question' },
       { label: '识别问题类型与业务域', node: 'classify_intent' },
       { label: '结构化理解问题', node: 'understand_intent' },
       { label: '校验查询意图', node: 'validate_intent' },
@@ -258,6 +266,7 @@ export const CHAT_FIXTURES = {
     data_rows: [{ date: '2026-08-03', gmv: '128000.50' }],
     degraded: false,
     degraded_reason: null,
+    displayed_user_message: '',
     export: null,
     id: 'b24375c9-1f09-5951-bbc4-09c4f4338ffc',
     metric_code: 'gmv',
@@ -300,6 +309,7 @@ export const CHAT_FIXTURES = {
     thinking_steps: [
       { label: '识别商家与会话上下文', node: 'load_context' },
       { label: '读取业务知识索引', node: 'retrieve_knowledge_index' },
+      { label: '判定问题范围', node: 'prefilter_question' },
       { label: '识别问题类型与业务域', node: 'classify_intent' },
       { label: '结构化理解问题', node: 'understand_intent' },
       { label: '校验查询意图', node: 'validate_intent' },
@@ -332,6 +342,7 @@ export const CHAT_FIXTURES = {
     data_rows: [{ date: '2026-08-03', return_count: 186 }],
     degraded: false,
     degraded_reason: null,
+    displayed_user_message: '',
     export: null,
     id: '71967237-7202-5f6c-bd1d-412ddcc6ac2a',
     metric_code: 'return_count',
@@ -372,6 +383,7 @@ export const CHAT_FIXTURES = {
     thinking_steps: [
       { label: '识别商家与会话上下文', node: 'load_context' },
       { label: '读取业务知识索引', node: 'retrieve_knowledge_index' },
+      { label: '判定问题范围', node: 'prefilter_question' },
       { label: '识别问题类型与业务域', node: 'classify_intent' },
       { label: '结构化理解问题', node: 'understand_intent' },
       { label: '校验查询意图', node: 'validate_intent' },
@@ -405,6 +417,7 @@ export const CHAT_FIXTURES = {
     data_rows: null,
     degraded: false,
     degraded_reason: null,
+    displayed_user_message: '',
     export: null,
     id: '7b9f4547-a211-5bde-b7ff-efbd4a0544cf',
     metric_code: null,
@@ -434,6 +447,7 @@ export const CHAT_FIXTURES = {
     thinking_steps: [
       { label: '识别商家与会话上下文', node: 'load_context' },
       { label: '读取业务知识索引', node: 'retrieve_knowledge_index' },
+      { label: '判定问题范围', node: 'prefilter_question' },
       { label: '识别问题类型与业务域', node: 'classify_intent' },
       { label: '结构化理解问题', node: 'understand_intent' },
       { label: '校验查询意图', node: 'validate_intent' },

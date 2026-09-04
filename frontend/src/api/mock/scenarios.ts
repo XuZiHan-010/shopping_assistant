@@ -67,14 +67,16 @@ export const MOCK_MERCHANTS: readonly components['schemas']['DemoMerchant'][] = 
 // ---------------------------------------------------------------------------
 // 双语 Mock（Task 11 Step 8）
 //
-// 真实契约由后端 LLM 翻译服务按 Accept-Language 生成英文内容（Task 1-8）；
-// `docs/fixtures/chat/*.json` 本身要到 Task 12 才会重新导出为真正的双语
-// fixture。在那之前，这里用一张小词表 + 兜底前缀模拟"同一份 fixture 在
-// 不同语言下返回不同内容"这件事本身——重点是让依赖 Accept-Language 分支的
-// 前端逻辑（transport 装配头、mock 按头分流、Store 的 epoch/reload）能被
-// Mock 真实验证，而不是纵容组件自己临时翻译。词表覆盖当前 6 个 fixture
-// 复用的固定思考步骤标签（逐字对应 `backend/app/agent` 的节点标签）与
-// 演示问题文案；命中不到的自由文本一律加 `[en] ` 前缀，不伪装成真翻译。
+// 真实契约由后端 LLM 翻译服务按 Accept-Language 生成英文内容（Task 1-8）。
+// `docs/fixtures/chat/*.json` 由 `scripts/export_chat_fixtures.py` 从 B3
+// FakeAgent 导出，固定是源语言（中文）——它验证的是回答的**结构**（字段、
+// 组合约束），不模拟翻译，Task 12 重新导出后依然如此，也不应该改变这一点。
+// 这里用一张小词表 + 兜底前缀模拟"同一份 fixture 在不同语言下返回不同内容"
+// 这件事本身——重点是让依赖 Accept-Language 分支的前端逻辑（transport 装配
+// 头、mock 按头分流、Store 的 epoch/reload）能被 Mock 真实验证，而不是纵容
+// 组件自己临时翻译。词表覆盖当前 6 个 fixture 复用的固定思考步骤标签（逐字
+// 对应 `backend/app/agent` 的节点标签）与演示问题文案；命中不到的自由文本
+// 一律加 `[en] ` 前缀，不伪装成真翻译。
 // ---------------------------------------------------------------------------
 
 const MOCK_EN_DICTIONARY: Record<string, string> = {
