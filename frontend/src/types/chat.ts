@@ -110,8 +110,13 @@ export interface ChatAnswer {
    * 消息气泡的文本——原始提交文本单独存在 `ChatMessage.sourceText`，
    * 不因为展示语言切换而被覆盖，重放/续接同一轮时要用原文而不是上一次
    * 的展示副本去请求翻译。
+   *
+   * 可选：只有 `toChatAnswer`（实时 `ChatResponse`）能产出真实值。
+   * `toConversationAnswer`（会话详情的助手回答载荷）拿到的 `content` 是
+   * **助手自己的回答正文**，不是配对的用户消息，没有值可填——省略比填一个
+   * 语义错误的值更安全，见该函数内的说明。
    */
-  displayedUserMessage: string
+  displayedUserMessage?: string
   answer: string
   mode: AnswerMode
   category?: QuestionCategory

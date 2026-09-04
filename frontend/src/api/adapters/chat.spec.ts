@@ -15,7 +15,13 @@ import { describe, expect, it } from 'vitest'
 
 import type { components } from '@/api/generated'
 
-import { ChatContractError, toChatAnswer, toFeedbackRequestPayload, toFeedbackState } from './chat'
+import {
+  ChatContractError,
+  toChatAnswer,
+  toConversationAnswer,
+  toFeedbackRequestPayload,
+  toFeedbackState,
+} from './chat'
 
 type RawChatResponse = components['schemas']['ChatResponse']
 
@@ -287,6 +293,38 @@ describe('toChatAnswer · 语义守卫', () => {
     } catch (error) {
       expect((error as Error).message).toMatch(/[一-龥]/)
     }
+  })
+})
+
+describe('toConversationAnswer · 会话详情的助手回答载荷', () => {
+  it('不填 displayedUserMessage——content 是助手自己的回答正文，不是配对的用户消息', () => {
+    const answer = toConversationAnswer(
+      {
+        answer_id: 'answer-1',
+        answer_mode: 'CHAT',
+        thinking_steps: [],
+        quality_status: 'NOT_RUN',
+        quality_attempts: 0,
+        quality_notes: [],
+        degraded: false,
+        degraded_reason: null,
+        is_adopted: false,
+        reaction: null,
+        columns: [],
+        total_rows: null,
+        truncated: null,
+      },
+      {
+        sessionId: 'session-1',
+        // 故意用一句明显是"助手回答"而不是"用户提问"的文本，防止将来有人
+        // 把这个字段的值改回 content 又误以为测试通过了。
+        content: '已完成结构化理解，这是助手的回答正文。',
+        createdAt: '2026-08-01T00:00:00Z',
+      },
+    )
+
+    expect(answer.answer).toBe('已完成结构化理解，这是助手的回答正文。')
+    expect(answer.displayedUserMessage).toBeUndefined()
   })
 })
 

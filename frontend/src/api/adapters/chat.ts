@@ -326,11 +326,14 @@ export function toConversationAnswer(
   return {
     id: raw.answer_id,
     sessionId,
-    // 会话详情的 `content` 已经是服务端按当前请求 locale 本地化后的正文
-    // （`localize_conversation_detail`），与 ChatResponse 的
-    // `displayed_user_message` 语义一致——这里就是它在"历史回答"场景下
-    // 唯一可用的等价来源。
-    displayedUserMessage: content,
+    // 不填 displayedUserMessage：这里的 `content` 是助手自己的回答正文
+    // （调用方 `api/chat.ts::getConversation` 传进来的是当前这条 ASSISTANT
+    // 消息的 `item.content`），不是配对的用户消息，填进 displayedUserMessage
+    // 会是语义错误的值（历史消息的用户气泡另有它自己的 `content`，由
+    // `stores/chat.ts::mergeHistoryMessages` 直接使用，不经过这个字段）。
+    // 该字段留空，消费方（`stores/chat.ts` 的 `answer.displayedUserMessage
+    // || question.text`）天然把 undefined 当"没有更新"处理，不需要在这里
+    // 编造一个值。
     answer: content,
     mode: raw.answer_mode,
     createdAt,

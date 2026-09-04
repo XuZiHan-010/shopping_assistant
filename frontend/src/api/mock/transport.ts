@@ -240,6 +240,43 @@ function localizeFixture(fixture: RawChatResponse, locale: SupportedLocale): Raw
 }
 
 /**
+ * `GET /api/conversations/{id}` 的本地化：与真实后端
+ * `localize_conversation_detail`（`backend/app/localization/payloads.py`）
+ * 同一个不变量——`messages` 存的是源语言，翻译发生在**读时**、按**这次
+ * 请求**的语言重新渲染，不是写入时就把某一次提交恰好用的语言焊死进历史。
+ * 这正是 `continueRoundInNewLocale`（语言切换时命中仍在 PROCESSING 的
+ * 轮次）依赖的路径：中止旧流之后靠这个端点按新语言把结果找回来，如果这里
+ * 不真的翻译，那条路径就只是"凑巧还是原文，测不出问题"。
+ *
+ * 只翻译展示文本：`content`（用户/助手正文）与 `answer_payload` 里的
+ * `thinking_steps[].label`/`quality_notes`/`degraded_reason`；`id`、
+ * `role`、`answer_mode`、`quality_status`、`columns` 等技术字段原样保留。
+ */
+function localizeConversationMessage(
+  message: components['schemas']['ConversationMessage'],
+  locale: SupportedLocale,
+): components['schemas']['ConversationMessage'] {
+  if (locale !== 'en-US') return message
+
+  const payload = message.answer_payload
+  return {
+    ...message,
+    content: mockEnglishText(message.content),
+    answer_payload: payload
+      ? {
+          ...payload,
+          thinking_steps: (payload.thinking_steps ?? []).map((step) => ({
+            ...step,
+            label: mockEnglishText(step.label),
+          })),
+          quality_notes: (payload.quality_notes ?? []).map(mockEnglishText),
+          degraded_reason: payload.degraded_reason ? mockEnglishText(payload.degraded_reason) : payload.degraded_reason,
+        }
+      : payload,
+  }
+}
+
+/**
  * 给 Mock 响应统一打上 `Content-Language`，与真实后端的请求中间件
  * （`backend/app/main.py`）对齐——`sse.ts` 的 `assertResponseLocale` 和
  * Store 的语言切换竞态防线都依赖这个头，Mock 不带的话这两条防线在 Mock
@@ -903,11 +940,13 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
       if (!found) return errorResponse('NOT_FOUND', '会话不存在', 404)
 
       // Mock 的会话历史条数远小于真实分页阈值，不模拟多页——固定返回全部
-      // 消息、`has_more_messages: false`。
+      // 消息、`has_more_messages: false`。消息本身按这次请求的语言重新本地化
+      // （见 localizeConversationMessage），不是原样透传存量数据。
+      const locale = resolveRequestLocale()
       return jsonResponse({
         id: found.id,
         title: found.title,
-        messages: found.messages,
+        messages: found.messages.map((message) => localizeConversationMessage(message, locale)),
         created_at: found.createdAt,
         updated_at: found.createdAt,
         next_message_cursor: null,

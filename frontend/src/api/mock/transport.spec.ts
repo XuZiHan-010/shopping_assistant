@@ -453,6 +453,64 @@ describe('Mock 双语行为（Task 11 Step 8）', () => {
     expect(replayPayload.answer).not.toBe(firstPayload.answer)
   })
 
+  it('GET /api/conversations/{id} 按 Accept-Language 重新本地化 content 与 answer_payload，不是原样返回存量数据', async () => {
+    setCredentialProvider(() => ({ merchantToken: 'demo-token-100' }))
+    const isolated = createMockTransport({ chunkSizes: [16], stepDelayMs: 0 })
+
+    // 提交时是中文，写入历史的是源语言（未经翻译）。
+    const submitted = await isolated(
+      {
+        path: '/api/chat',
+        method: 'POST',
+        body: { message: '你好', client_request_id: 'detail-localize-1' },
+        accept: 'application/json',
+      },
+      new AbortController().signal,
+    )
+    const { session_id: sessionId } = (await submitted.json()) as components['schemas']['ChatResponse']
+
+    const zhDetail = await isolated(
+      { path: `/api/conversations/${sessionId}`, method: 'GET', auth: 'merchant' },
+      new AbortController().signal,
+    )
+    const zhPayload = (await zhDetail.json()) as components['schemas']['ConversationDetailResponse']
+    const zhAssistant = zhPayload.messages.find((m) => m.role === 'assistant')!
+
+    // 同一份历史，换一次请求的语言重新拉——这是 continueRoundInNewLocale
+    // （语言切换时命中仍在 PROCESSING 的轮次）实际依赖的路径：中止旧流之后
+    // 靠这个端点按新语言把结果找回来。
+    setLocaleProvider(() => 'en-US')
+    const enDetail = await isolated(
+      { path: `/api/conversations/${sessionId}`, method: 'GET', auth: 'merchant' },
+      new AbortController().signal,
+    )
+    const enPayload = (await enDetail.json()) as components['schemas']['ConversationDetailResponse']
+    const enAssistant = enPayload.messages.find((m) => m.role === 'assistant')!
+    const enUser = enPayload.messages.find((m) => m.role === 'user')!
+
+    // 正文按新语言重新渲染，技术字段（id/role/answer_mode/quality_status）不变。
+    expect(enUser.content).not.toBe(zhPayload.messages.find((m) => m.role === 'user')!.content)
+    expect(enAssistant.content).not.toBe(zhAssistant.content)
+    expect(enAssistant.id).toBe(zhAssistant.id)
+    expect(enAssistant.answer_payload?.answer_mode).toBe(zhAssistant.answer_payload?.answer_mode)
+    expect(enAssistant.answer_payload?.quality_status).toBe(zhAssistant.answer_payload?.quality_status)
+    // answer_payload 内部的展示文本（thinking_steps 标签）同样重新渲染。
+    if ((zhAssistant.answer_payload?.thinking_steps?.length ?? 0) > 0) {
+      expect(enAssistant.answer_payload?.thinking_steps?.[0]?.label).not.toBe(
+        zhAssistant.answer_payload?.thinking_steps?.[0]?.label,
+      )
+    }
+
+    // 切回中文，能拿回和最初一样的中文正文——不是"翻译一次就回不去了"。
+    setLocaleProvider(() => 'zh-CN')
+    const zhAgain = await isolated(
+      { path: `/api/conversations/${sessionId}`, method: 'GET', auth: 'merchant' },
+      new AbortController().signal,
+    )
+    const zhAgainPayload = (await zhAgain.json()) as components['schemas']['ConversationDetailResponse']
+    expect(zhAgainPayload.messages.find((m) => m.role === 'assistant')!.content).toBe(zhAssistant.content)
+  })
+
   it('知识文档：请求 content_locale=en-US 但尚无译文时返回 MISSING 并回退源正文', async () => {
     const adminTransport = createMockTransport()
     setCredentialProvider(() => ({ adminToken: 'mock-admin-token' }))
