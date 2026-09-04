@@ -38,6 +38,20 @@ describe('toChatAnswer · 真实载荷', () => {
     expect(answer.contractWarnings).toEqual([])
   })
 
+  it('displayed_user_message 映射为 displayedUserMessage（Task 11）', () => {
+    const answer = toChatAnswer({ ...refund, displayed_user_message: '昨天的退货量趋势如何？' })
+
+    expect(answer.displayedUserMessage).toBe('昨天的退货量趋势如何？')
+  })
+
+  it('缺少 displayed_user_message 的旧 fixture 退回空串，不抛契约错误', () => {
+    // Task 12 之前的 docs/fixtures/chat/*.json 尚未带这个字段，`refund`
+    // 本身就是这样一份真实的旧 fixture——不需要额外构造缺字段的载荷。
+    const answer = toChatAnswer(refund)
+
+    expect(answer.displayedUserMessage).toBe('')
+  })
+
   it('METRIC 的指标口径八字段完整映射', () => {
     const metric = toChatAnswer(refund).metric
 

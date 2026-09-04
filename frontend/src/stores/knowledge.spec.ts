@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { setChatTransport, type TransportRequest } from '@/api/transport'
 
 import { useKnowledgeStore } from './knowledge'
+import { useLocaleStore } from './locale'
 
 beforeEach(() => {
   setActivePinia(createPinia())
@@ -273,5 +274,164 @@ describe('知识库后台新建与删除', () => {
       }),
     )
     expect(store.selectedPath).toBe('')
+  })
+})
+
+describe('知识文档：内容语言与版本感知读写（Task 8/11）', () => {
+  it('选中文档时按当前展示语言请求 content_locale', async () => {
+    const store = useKnowledgeStore()
+    store.setAdminToken('admin-token')
+    const localeStore = useLocaleStore()
+    localeStore.setLocale('en-US')
+    const requests: TransportRequest[] = []
+    setChatTransport(async (request) => {
+      requests.push(request)
+      return Response.json({
+        path: 'index/a.md',
+        content: 'English content',
+        read_only: false,
+        version: '1',
+        content_locale: 'en-US',
+        translation_status: 'CURRENT',
+      })
+    })
+
+    await store.selectNode('index/a.md')
+
+    expect(requests[0]?.path).toBe('/api/admin/knowledge/documents/index/a.md?content_locale=en-US')
+    expect(store.selectedDocument?.contentLocale).toBe('en-US')
+    expect(store.selectedDocument?.translationStatus).toBe('CURRENT')
+  })
+
+  it('saveDocument 把 isSourceVersion/contentLocale 原样透传给 API，不做任何 locale 比较推断', async () => {
+    const store = useKnowledgeStore()
+    store.setAdminToken('admin-token')
+    store.selectedDocument = {
+      path: 'index/a.md',
+      content: '原文',
+      readOnly: false,
+      version: 'v1',
+      contentLocale: 'zh-CN',
+      translationStatus: 'SOURCE',
+    }
+    const requests: TransportRequest[] = []
+    setChatTransport(async (request) => {
+      requests.push(request)
+      return Response.json({
+        path: 'index/a.md',
+        content: 'English translation',
+        read_only: false,
+        version: 'v1',
+        content_locale: 'en-US',
+        translation_status: 'CURRENT',
+      })
+    })
+
+    await store.saveDocument('English translation', { 'If-Match': '"v1"' }, {
+      isSourceVersion: false,
+      contentLocale: 'en-US',
+    })
+
+    expect(requests[0]?.body).toEqual({
+      content: 'English translation',
+      is_source_version: false,
+      content_locale: 'en-US',
+    })
+    expect(store.selectedDocument?.translationStatus).toBe('CURRENT')
+  })
+
+  it('saveDocument 不传 options 时默认更新源版本，行为与该参数引入前一致', async () => {
+    const store = useKnowledgeStore()
+    store.setAdminToken('admin-token')
+    store.selectedDocument = {
+      path: 'index/a.md',
+      content: '原文',
+      readOnly: false,
+      version: 'v1',
+      contentLocale: 'zh-CN',
+      translationStatus: 'SOURCE',
+    }
+    const requests: TransportRequest[] = []
+    setChatTransport(async (request) => {
+      requests.push(request)
+      return Response.json({
+        path: 'index/a.md',
+        content: '新正文',
+        read_only: false,
+        version: 'v2',
+        content_locale: 'zh-CN',
+        translation_status: 'SOURCE',
+      })
+    })
+
+    await store.saveDocument('新正文', { 'If-Match': '"v1"' })
+
+    expect(requests[0]?.body).toEqual({
+      content: '新正文',
+      is_source_version: true,
+      content_locale: null,
+    })
+  })
+})
+
+describe('语言切换：重新加载当前选中文档（Task 11 Step 6）', () => {
+  it('切换语言且当前选中一份文档时，按新语言重新拉一次', async () => {
+    const store = useKnowledgeStore()
+    store.setAdminToken('admin-token')
+    const localeStore = useLocaleStore()
+    const requests: TransportRequest[] = []
+    setChatTransport(async (request) => {
+      requests.push(request)
+      const locale = localeStore.locale
+      return Response.json({
+        path: 'index/a.md',
+        content: locale === 'en-US' ? 'English content' : '中文正文',
+        read_only: false,
+        version: '1',
+        content_locale: locale,
+        translation_status: locale === 'en-US' ? 'CURRENT' : 'SOURCE',
+      })
+    })
+
+    await store.selectNode('index/a.md')
+    expect(store.selectedDocument?.content).toBe('中文正文')
+
+    localeStore.setLocale('en-US')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(store.selectedDocument?.content).toBe('English content')
+    expect(requests.some((r) => r.path.includes('content_locale=en-US'))).toBe(true)
+  })
+
+  it('未选中文档（或选中的是目录）时，切换语言不发请求', async () => {
+    const store = useKnowledgeStore()
+    store.setAdminToken('admin-token')
+    const localeStore = useLocaleStore()
+    const requests: TransportRequest[] = []
+    setChatTransport(async (request) => {
+      requests.push(request)
+      return Response.json({ roots: [] })
+    })
+
+    localeStore.setLocale('en-US')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(requests).toEqual([])
+  })
+
+  it('未登录时切换语言不发请求', async () => {
+    const store = useKnowledgeStore()
+    expect(store.adminToken).toBe('')
+    const localeStore = useLocaleStore()
+    const requests: TransportRequest[] = []
+    setChatTransport(async (request) => {
+      requests.push(request)
+      throw new Error('不应发起请求')
+    })
+
+    localeStore.setLocale('en-US')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(requests).toEqual([])
   })
 })

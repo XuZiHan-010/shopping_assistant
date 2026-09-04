@@ -3,7 +3,7 @@ import { createApp } from 'vue'
 
 import '@/assets/styles.css'
 import { i18n } from '@/i18n'
-import { setCredentialProvider } from '@/api/credentials'
+import { setCredentialProvider, setLocaleProvider } from '@/api/credentials'
 import { useAuthStore } from '@/stores/auth'
 import { useAnalyticsStore } from '@/stores/analytics'
 import { useKnowledgeStore } from '@/stores/knowledge'
@@ -30,5 +30,9 @@ setCredentialProvider(() => ({
   // `adminToken` 凭证来源，因此在请求瞬间取当前已授权页面持有的那一个。
   adminToken: useAnalyticsStore(pinia).adminToken || useKnowledgeStore(pinia).adminToken,
 }))
+
+// 与凭证同一模式：transport.ts / sse.ts 都不直接 import `useLocaleStore`，
+// 只在请求瞬间调用这里注册的函数（前端方案 Task 11 Step 5）。
+setLocaleProvider(() => useLocaleStore(pinia).locale)
 
 app.use(router).mount('#app')

@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { buildAuthHeaders, setCredentialProvider } from './credentials'
+import {
+  buildAuthHeaders,
+  buildLocaleHeaders,
+  resolveRequestLocale,
+  setCredentialProvider,
+  setLocaleProvider,
+} from './credentials'
 
 describe('buildAuthHeaders', () => {
   afterEach(() => {
@@ -47,5 +53,40 @@ describe('buildAuthHeaders', () => {
     expect(() => buildAuthHeaders('admin')).toThrow(
       expect.objectContaining({ code: 'AUTH_REQUIRED' }),
     )
+  })
+})
+
+describe('locale provider', () => {
+  afterEach(() => {
+    setLocaleProvider(undefined)
+  })
+
+  it('未注册 provider 时退回中文，与后端缺省解析结果一致', () => {
+    expect(resolveRequestLocale()).toBe('zh-CN')
+    expect(buildLocaleHeaders()).toEqual({ 'Accept-Language': 'zh-CN' })
+  })
+
+  it('注册后按 provider 返回的语言组装请求头', () => {
+    setLocaleProvider(() => 'en-US')
+
+    expect(resolveRequestLocale()).toBe('en-US')
+    expect(buildLocaleHeaders()).toEqual({ 'Accept-Language': 'en-US' })
+  })
+
+  it('provider 可以随时切换，每次都读最新值，不缓存旧语言', () => {
+    let current: 'zh-CN' | 'en-US' = 'zh-CN'
+    setLocaleProvider(() => current)
+    expect(resolveRequestLocale()).toBe('zh-CN')
+
+    current = 'en-US'
+    expect(resolveRequestLocale()).toBe('en-US')
+  })
+
+  it('传 undefined 清空注册，恢复默认语言', () => {
+    setLocaleProvider(() => 'en-US')
+    expect(resolveRequestLocale()).toBe('en-US')
+
+    setLocaleProvider(undefined)
+    expect(resolveRequestLocale()).toBe('zh-CN')
   })
 })

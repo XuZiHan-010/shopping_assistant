@@ -56,6 +56,138 @@ describe('知识文档编辑器', () => {
   })
 })
 
+describe('版本感知提交：is_source_version/content_locale 显式判断（Task 11 gap closure）', () => {
+  it('translationStatus 为 SOURCE（或未提供）时按源版本提交，不带 contentLocale', async () => {
+    const calls: Array<[string, unknown]> = []
+    const wrapper = mountEditor({
+      document: {
+        path: 'index/a.md',
+        content: '原文',
+        readOnly: false,
+        version: 'v1',
+        contentLocale: 'zh-CN',
+        translationStatus: 'SOURCE',
+      },
+      save: async (content: string, _headers: Record<string, string>, options?: unknown) => {
+        calls.push([content, options])
+      },
+    })
+    await wrapper.find('textarea').setValue('改过的源正文')
+    await wrapper.find('[data-testid="save"]').trigger('click')
+
+    expect(calls[0]).toEqual(['改过的源正文', { isSourceVersion: true }])
+  })
+
+  it('translationStatus 为 CURRENT（正在编辑既有译文）时按译文提交，携带当前展示语言', async () => {
+    useLocaleStore().setLocale('en-US')
+    const calls: Array<[string, unknown]> = []
+    const wrapper = mountEditor({
+      document: {
+        path: 'index/a.md',
+        content: 'English translation',
+        readOnly: false,
+        version: 'v1',
+        contentLocale: 'en-US',
+        translationStatus: 'CURRENT',
+      },
+      save: async (content: string, _headers: Record<string, string>, options?: unknown) => {
+        calls.push([content, options])
+      },
+    })
+    await wrapper.find('[data-testid="save"]').trigger('click')
+
+    expect(calls[0]).toEqual(['English translation', { isSourceVersion: false, contentLocale: 'en-US' }])
+  })
+
+  it('translationStatus 为 MISSING（请求译文但尚未保存过）时仍按译文提交，不会误判成编辑源正文', async () => {
+    // 关键回归用例：MISSING 时后端把 content_locale 回退成源语言（zh-CN），
+    // 如果这里改成"比较 document.contentLocale 和当前展示语言"来判断意图，
+    // 会在这个状态下把它错判成"在编辑源正文"——保存时就会把源文档覆盖掉，
+    // 而不是新建一份译文。必须用 translationStatus 本身来判断。
+    useLocaleStore().setLocale('en-US')
+    const calls: Array<[string, unknown]> = []
+    const wrapper = mountEditor({
+      document: {
+        path: 'index/a.md',
+        content: '原文（尚无英文译文，回退显示源正文）',
+        readOnly: false,
+        version: 'v1',
+        contentLocale: 'zh-CN',
+        translationStatus: 'MISSING',
+      },
+      save: async (content: string, _headers: Record<string, string>, options?: unknown) => {
+        calls.push([content, options])
+      },
+    })
+    await wrapper.find('textarea').setValue('New English translation')
+    await wrapper.find('[data-testid="save"]').trigger('click')
+
+    expect(calls[0]).toEqual([
+      'New English translation',
+      { isSourceVersion: false, contentLocale: 'en-US' },
+    ])
+  })
+
+  it('translationStatus 为 STALE 时显示过期提示，未确认前保存按钮禁用', async () => {
+    const calls: Array<[string, unknown]> = []
+    const wrapper = mountEditor({
+      document: {
+        path: 'index/a.md',
+        content: '源正文（译文已过期回退）',
+        readOnly: false,
+        version: 'v1',
+        contentLocale: 'zh-CN',
+        translationStatus: 'STALE',
+      },
+      save: async (content: string, _headers: Record<string, string>, options?: unknown) => {
+        calls.push([content, options])
+      },
+    })
+
+    expect(wrapper.find('[role="alert"]').text()).toContain('已过期')
+    expect(wrapper.get('[data-testid="save"]').attributes('disabled')).toBeDefined()
+
+    await wrapper.find('[data-testid="save"]').trigger('click')
+    expect(calls).toHaveLength(0)
+
+    await wrapper.get('[data-testid="acknowledge-stale"]').trigger('click')
+    expect(wrapper.find('[data-testid="acknowledge-stale"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="save"]').attributes('disabled')).toBeUndefined()
+
+    await wrapper.find('[data-testid="save"]').trigger('click')
+    expect(calls).toHaveLength(1)
+  })
+
+  it('切到另一份文档时，过期确认状态会重置', async () => {
+    const wrapper = mountEditor({
+      document: {
+        path: 'index/a.md',
+        content: '正文',
+        readOnly: false,
+        version: 'v1',
+        contentLocale: 'zh-CN',
+        translationStatus: 'STALE',
+      },
+    })
+    await wrapper.get('[data-testid="acknowledge-stale"]').trigger('click')
+    expect(wrapper.find('[data-testid="acknowledge-stale"]').exists()).toBe(false)
+
+    await wrapper.setProps({
+      document: {
+        path: 'index/b.md',
+        content: '另一份文档',
+        readOnly: false,
+        version: 'v1',
+        contentLocale: 'zh-CN',
+        translationStatus: 'STALE',
+      },
+    })
+
+    expect(wrapper.find('[data-testid="acknowledge-stale"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="save"]').attributes('disabled')).toBeDefined()
+  })
+})
+
 describe('en-US 下确定性文案为英文', () => {
   beforeEach(() => {
     useLocaleStore().setLocale('en-US')

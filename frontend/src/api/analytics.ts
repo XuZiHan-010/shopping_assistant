@@ -4,6 +4,12 @@ import type { ChatBiCategoryRow, ChatBiOverview } from '@/types/analytics'
 import { toChatBiCategories, toChatBiOverview } from './adapters/analytics'
 import { resolveTransport } from './transport'
 
+/**
+ * 同 `report.ts`：展示语言由 `transport.ts` 统一装配的 `Accept-Language`
+ * 头驱动，后端已经把 `category_display_name` 等字段按请求语言渲染好，
+ * 本文件不做任何前端侧翻译（Task 11）。
+ */
+
 export interface ChatBiWindow {
   startDate: string
   endDate: string

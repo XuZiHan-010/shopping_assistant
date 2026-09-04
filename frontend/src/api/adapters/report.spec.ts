@@ -37,4 +37,18 @@ describe('toDailyReport', () => {
     expect(report.degradedReason).toBe('查询失败，暂无法生成经营数据摘要')
     expect(report.metrics).toEqual([])
   })
+
+  it('后端按 Accept-Language 返回英文口径时原样透传，不在前端二次翻译（Task 11）', () => {
+    const report = toDailyReport({
+      answer_id: '00000000-0000-0000-0000-000000000003',
+      report_date: '2026-08-20',
+      metrics: [{ metric_code: 'gmv', display_name: 'GMV', unit: 'CNY', value: '200.00' }],
+      suggestions: ['Suggestion one', 'Suggestion two'],
+      degraded: false,
+      degraded_reason: null,
+    })
+
+    expect(report.metrics[0].displayName).toBe('GMV')
+    expect(report.suggestions).toEqual(['Suggestion one', 'Suggestion two'])
+  })
 })

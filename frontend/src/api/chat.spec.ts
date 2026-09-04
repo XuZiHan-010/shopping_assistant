@@ -99,10 +99,11 @@ describe('会话与商家端点', () => {
       new AbortController().signal,
     )
 
-    const items = await listConversations(new AbortController().signal)
+    const { items, localizationDegraded } = await listConversations(new AbortController().signal)
 
     expect(items.length).toBeGreaterThanOrEqual(1)
     expect(items[0]).toHaveProperty('createdAt')
+    expect(localizationDegraded).toBe(false)
   })
 
   it('演示商家转换为 camelCase 视图模型', async () => {

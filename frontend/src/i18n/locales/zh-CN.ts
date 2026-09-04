@@ -35,6 +35,10 @@ export const zhCN = {
     cancelDeleteAria: '取消删除',
     cancelDelete: '取消',
     deleteAria: '删除会话 {title}',
+    translationDegradedNotice: '本页部分会话标题翻译未完成，已显示占位文案。',
+    retryTranslation: '重试翻译',
+    retryTranslationAria: '重试翻译会话标题',
+    retryingTranslation: '正在重试…',
   },
   merchantSwitcher: {
     triggerAria: '切换当前演示商家',
@@ -240,6 +244,9 @@ export const zhCN = {
     contentAria: '{path} 内容',
     save: '保存修改',
     conflictMessage: '文档已被其他维护者修改，请重新加载后合并你的内容。',
+    translationBadge: '译文（{locale}）',
+    staleTranslationWarning: '译文已过期：源正文在此译文之后被修改过，当前显示的是源正文。保存前请确认这是你想要的结果。',
+    staleTranslationAcknowledge: '我已知悉，继续编辑',
   },
   opsDashboardView: {
     eyebrow: 'BOROUGH · ANALYTICS OPS',

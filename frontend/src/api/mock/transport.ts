@@ -8,17 +8,30 @@
  * 这么测的（后端方案 §14），前后端对称。
  */
 import type { components } from '@/api/generated'
+import type { SupportedLocale } from '@/i18n'
 
-import { buildAuthHeaders } from '../credentials'
+import { buildAuthHeaders, resolveRequestLocale } from '../credentials'
 import type { ChatTransport, TransportRequest } from '../transport'
-import { CHAT_FIXTURES } from './fixtures.generated'
-import { MOCK_MERCHANTS, matchScenario } from './scenarios'
+import { CHAT_FIXTURES, type ChatFixtureKey } from './fixtures.generated'
+import { MOCK_MERCHANTS, matchScenario, mockEnglishMerchantName, mockEnglishText } from './scenarios'
 import { BUSINESS_SECTIONS } from '@/utils/knowledgeTree'
 
 type MockKnowledgeDocument = { content: string; read_only: boolean; version: string }
 type MockKnowledgeNode = components['schemas']['KnowledgeTreeNode']
 
-type RawChatResponse = components['schemas']['ChatResponse']
+/** 见 `api/adapters/chat.ts` 顶部同名注释：`generated.ts` 尚未跟上 Task 6。 */
+type RawChatResponse = components['schemas']['ChatResponse'] & { displayed_user_message?: string }
+/** 见 `api/chat.ts` 顶部同名注释：`generated.ts` 尚未跟上 Task 7。 */
+type RawConversationListResponse = components['schemas']['ConversationListResponse'] & {
+  localization_degraded: boolean
+  localization_degraded_reason: string | null
+}
+type RawConversationDetailResponse = components['schemas']['ConversationDetailResponse'] & {
+  next_message_cursor: string | null
+  has_more_messages: boolean
+  localization_degraded: boolean
+  localization_degraded_reason: string | null
+}
 
 interface MockOptions {
   chunkSizes?: number[]
@@ -188,6 +201,64 @@ function findMockDomainNode(
   return (mockBusinessRoot(knowledgeDocuments).children ?? []).find((domain) => domain.name === name)
 }
 
+/**
+ * 把中文 fixture 转成"看起来是英文响应"的载荷（Task 11 Step 8）。
+ *
+ * 只搬运需要展示语言分流的自由文本字段；`answer_mode`、`category`、
+ * `metric_code` 这类技术字段、`data_rows` 里的原始业务数据，以及
+ * `analysis_sources`/`quality_status` 等枚举值一律原样保留——它们本来就
+ * 不是给最终用户读的展示文案，真实后端也不会翻译它们。
+ */
+function toEnglishFixture(fixture: RawChatResponse): RawChatResponse {
+  return {
+    ...fixture,
+    answer: fixture.answer ? mockEnglishText(fixture.answer) : fixture.answer,
+    degraded_reason: fixture.degraded_reason ? mockEnglishText(fixture.degraded_reason) : fixture.degraded_reason,
+    quality_notes: (fixture.quality_notes ?? []).map(mockEnglishText),
+    suggestions: (fixture.suggestions ?? []).map(mockEnglishText),
+    suggestion_alternates: (fixture.suggestion_alternates ?? []).map((group) => group.map(mockEnglishText)),
+    thinking_steps: (fixture.thinking_steps ?? []).map((step) => ({
+      ...step,
+      label: mockEnglishText(step.label),
+    })),
+    metric_display_name: fixture.metric_display_name ? mockEnglishText(fixture.metric_display_name) : fixture.metric_display_name,
+    metric_definition: fixture.metric_definition ? mockEnglishText(fixture.metric_definition) : fixture.metric_definition,
+    metric_notice: fixture.metric_notice ? mockEnglishText(fixture.metric_notice) : fixture.metric_notice,
+    recommendations: fixture.recommendations
+      ? fixture.recommendations.map((item) => ({
+          title: mockEnglishText(item.title),
+          evidence: mockEnglishText(item.evidence),
+          action: mockEnglishText(item.action),
+        }))
+      : fixture.recommendations,
+  }
+}
+
+/** 按当前请求语言选择 fixture 的展示文案变体。技术字段（id/session_id 等）不受影响。 */
+function localizeFixture(fixture: RawChatResponse, locale: SupportedLocale): RawChatResponse {
+  return locale === 'en-US' ? toEnglishFixture(fixture) : fixture
+}
+
+/**
+ * 给 Mock 响应统一打上 `Content-Language`，与真实后端的请求中间件
+ * （`backend/app/main.py`）对齐——`sse.ts` 的 `assertResponseLocale` 和
+ * Store 的语言切换竞态防线都依赖这个头，Mock 不带的话这两条防线在 Mock
+ * 环境下永远测不出问题。
+ *
+ * 用 `new Response(response.body, ...)` 包一层而不是先读 body：SSE 响应的
+ * body 是尚未消费的 `ReadableStream`，这里绝不能 `await response.text()`
+ * 之类的操作，否则上层再也读不到任何字节。
+ */
+function withContentLanguage(response: Response, locale: SupportedLocale): Response {
+  const headers = new Headers(response.headers)
+  headers.set('Content-Language', locale)
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  })
+}
+
 function encodeSse(fixture: RawChatResponse): Uint8Array {
   let text = ''
   for (const step of fixture.thinking_steps ?? []) {
@@ -241,6 +312,14 @@ type ConversationRecord = {
   title: string
   createdAt: string
   messages: components['schemas']['ConversationMessage'][]
+}
+
+/** 幂等重放需要重新渲染的最小上下文：source fixture 键 + 原始问题文本。 */
+type MockAnswerRecord = {
+  fixtureKey: ChatFixtureKey
+  sessionId: string
+  answerId: string
+  sourceMessage: string
 }
 
 function historyAnswerPayload(
@@ -303,6 +382,25 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
   // 的隔离，Playwright 的隔离 e2e 才不会在假绿的 Mock 上通过。
   const conversationsByTenant = new Map<string, Map<string, ConversationRecord>>()
   const dailyReportsByTenant = new Map<string, components['schemas']['DailyReportResponse']>()
+
+  /**
+   * `client_request_id` → 已产生的回答，按租户隔离，模拟真实后端的幂等重放
+   * （`ChatService.submit` 的 `existing is not None` 分支，Task 11 Step 3）：
+   * 同一个 `client_request_id` 再次提交时，不追加新消息、不"重新查询"，只
+   * 按这次请求的 Accept-Language 重新渲染展示副本。
+   */
+  const answersByTenant = new Map<string, Map<string, MockAnswerRecord>>()
+
+  function answersFor(request: TransportRequest): Map<string, MockAnswerRecord> {
+    const key = tenantKeyFor(request)
+    let table = answersByTenant.get(key)
+    if (!table) {
+      table = new Map()
+      answersByTenant.set(key, table)
+    }
+    return table
+  }
+
   const knowledgeDocuments = new Map([
     ['index/运营手册.md', { content: '# 运营手册\n\n初始内容', read_only: false, version: '1' }],
     [
@@ -310,6 +408,15 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
       { content: '本轮自动沉淀：关注退款率。', read_only: true, version: '1' },
     ],
   ])
+
+  /**
+   * 文档路径 → （目标语言 → 人工译文正文）。与源正文（`knowledgeDocuments`）
+   * 分开存放，镜像后端「源版本 vs 人工译文」的双轨模型（Task 8）。Mock 不
+   * 模拟 STALE 的哈希比对细节，只做最小闭环：源正文一旦被覆盖，该文档下
+   * 全部译文视为失效并清空（真实后端按内容哈希判定，这里简化为"源一变就
+   * 全清"，效果上都是"不会把过期译文当成当前内容返回"）。
+   */
+  const translationsByPath = new Map<string, Map<SupportedLocale, string>>()
 
   function conversationsFor(request: TransportRequest): Map<string, ConversationRecord> {
     const key = tenantKeyFor(request)
@@ -353,7 +460,7 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
     return report
   }
 
-  return async (request: TransportRequest, signal: AbortSignal): Promise<Response> => {
+  const handle = async (request: TransportRequest, signal: AbortSignal): Promise<Response> => {
     if (signal.aborted) throw abortError()
 
     if (request.path.split('?')[0].startsWith('/api/exports/') && request.method === 'GET') {
@@ -369,13 +476,33 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
     if (request.path === '/api/demo/merchants') {
       // 契约里这个键是 merchants，不是 items——与 ConversationListResponse 不同，
       // 别搞混。satisfies 让键名或字段漂移在 typecheck 阶段就炸掉。
+      // 商家显示名按 Accept-Language 分流，与后端 `api/routes/demo.py::_display_name`
+      // 同一套判断（有英文名才用，否则回退中文）——这里用固定映射模拟。
+      const locale = resolveRequestLocale()
+      const merchants = MOCK_MERCHANTS.map((merchant) => ({
+        ...merchant,
+        display_name:
+          locale === 'en-US' ? mockEnglishMerchantName(merchant.display_name) : merchant.display_name,
+      }))
       return jsonResponse({
-        merchants: [...MOCK_MERCHANTS],
+        merchants,
       } satisfies components['schemas']['DemoMerchantListResponse'])
     }
 
     if (request.path === '/api/reports/daily' && request.method === 'GET') {
-      return jsonResponse(dailyReportFor(request))
+      const locale = resolveRequestLocale()
+      const report = dailyReportFor(request)
+      if (locale !== 'en-US') return jsonResponse(report)
+      return jsonResponse({
+        ...report,
+        metrics: (report.metrics ?? []).map((metric) => ({
+          ...metric,
+          display_name: mockEnglishText(metric.display_name),
+          unit: mockEnglishText(metric.unit),
+        })),
+        suggestions: report.suggestions.map(mockEnglishText),
+        degraded_reason: report.degraded_reason ? mockEnglishText(report.degraded_reason) : report.degraded_reason,
+      } satisfies components['schemas']['DailyReportResponse'])
     }
 
     const pathname = request.path.split('?')[0]
@@ -544,7 +671,11 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
       }
     }
 
-    const knowledgePathMatch = /^\/api\/admin\/knowledge\/documents\/(.+)$/.exec(request.path)
+    // `(.+)` 之前会把 `?content_locale=en-US` 这类查询串也吞进 path 分组——
+    // GET 需要读 content_locale 时就非改不可，用 `[^?]+` 把两者分开。
+    const knowledgePathMatch = /^\/api\/admin\/knowledge\/documents\/([^?]+)(\?.*)?$/.exec(
+      request.path,
+    )
     if (knowledgePathMatch) {
       if (tenantKeyFor(request) !== MOCK_ADMIN_TOKEN) {
         return errorResponse('AUTH_REQUIRED', '管理员令牌无效', 401)
@@ -554,10 +685,30 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
       if (!document) return errorResponse('WIKI_NODE_NOT_FOUND', '文档不存在', 404)
 
       if (request.method === 'GET') {
+        const query = new URLSearchParams(knowledgePathMatch[2] ?? '')
+        const requestedLocale = query.get('content_locale') as SupportedLocale | null
+        // 缺省或请求中文：直接返回源正文，行为与本字段引入前完全一致
+        // （Mock 里的源文档统一按中文创作，与后端「未指定 content_locale
+        // 原样返回源正文」的缺省行为一致）。
+        if (!requestedLocale || requestedLocale === 'zh-CN') {
+          return jsonResponse({
+            path,
+            content: document.content,
+            read_only: document.read_only,
+            version: document.version,
+            content_locale: 'zh-CN',
+            translation_status: 'SOURCE',
+          })
+        }
+        const translation = translationsByPath.get(path)?.get(requestedLocale)
         return jsonResponse({
           path,
-          ...document,
-        } satisfies components['schemas']['KnowledgeDocumentResponse'])
+          content: translation ?? document.content,
+          read_only: document.read_only,
+          version: document.version,
+          content_locale: translation ? requestedLocale : 'zh-CN',
+          translation_status: translation ? 'CURRENT' : 'MISSING',
+        })
       }
 
       if (request.method === 'DELETE') {
@@ -567,6 +718,7 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
           return errorResponse('WIKI_VERSION_CONFLICT', '文档已被其他维护者更新', 412)
         }
         knowledgeDocuments.delete(path)
+        translationsByPath.delete(path)
         return new Response(null, { status: 204 })
       }
 
@@ -574,20 +726,78 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
         if (request.headers?.['If-Match'] !== `"${document.version}"`) {
           return errorResponse('WIKI_VERSION_CONFLICT', '文档已被其他维护者更新', 412)
         }
-        const content = (request.body as components['schemas']['KnowledgeDocumentUpdateRequest'])
-          .content
-        const updated = { ...document, content, version: String(Number(document.version) + 1) }
+        const payload = request.body as {
+          content: string
+          is_source_version?: boolean
+          content_locale?: SupportedLocale | null
+        }
+
+        // is_source_version=false：保存一份人工译文，源文档与版本都不动。
+        if (payload.is_source_version === false) {
+          if (!payload.content_locale) {
+            return errorResponse('INVALID_REQUEST', 'is_source_version=false 时必须提供 content_locale', 422)
+          }
+          const table = translationsByPath.get(path) ?? new Map<SupportedLocale, string>()
+          table.set(payload.content_locale, payload.content)
+          translationsByPath.set(path, table)
+          return jsonResponse({
+            path,
+            content: payload.content,
+            read_only: document.read_only,
+            version: document.version,
+            content_locale: payload.content_locale,
+            translation_status: 'CURRENT',
+          })
+        }
+
+        // 默认（is_source_version 缺省或 true）：更新源正文，版本递增。
+        // 源正文变了，所有已保存的人工译文都视为过期——直接清空而不是标记
+        // STALE：mock 不模拟内容哈希比对，效果上同样是"不把过期译文当成
+        // 当前内容返回"。
+        const updated = { ...document, content: payload.content, version: String(Number(document.version) + 1) }
         knowledgeDocuments.set(path, updated)
+        translationsByPath.delete(path)
         return jsonResponse({
           path,
-          ...updated,
-        } satisfies components['schemas']['KnowledgeDocumentResponse'])
+          content: updated.content,
+          read_only: updated.read_only,
+          version: updated.version,
+          content_locale: 'zh-CN',
+          translation_status: 'SOURCE',
+        })
       }
     }
 
     if (request.path === '/api/chat' && request.method === 'POST') {
-      const body = request.body as { message: string; session_id?: string | null }
-      const fixture = CHAT_FIXTURES[matchScenario(body.message)] as RawChatResponse
+      const body = request.body as {
+        message: string
+        session_id?: string | null
+        client_request_id: string
+      }
+      const locale = resolveRequestLocale()
+      const answers = answersFor(request)
+      const existingAnswer = answers.get(body.client_request_id)
+
+      // 幂等重放（Task 11 Step 3 / `ChatService.submit` 的 `existing is not
+      // null` 分支）：同一个 client_request_id 再次提交，不追加新消息、不
+      // 触发新的"经营查询"，只按这次请求的语言重新渲染已有回答的展示副本。
+      if (existingAnswer) {
+        const fixture = CHAT_FIXTURES[existingAnswer.fixtureKey] as RawChatResponse
+        const payload: RawChatResponse = {
+          ...localizeFixture(fixture, locale),
+          session_id: existingAnswer.sessionId,
+          id: existingAnswer.answerId,
+          displayed_user_message:
+            locale === 'en-US'
+              ? mockEnglishText(existingAnswer.sourceMessage)
+              : existingAnswer.sourceMessage,
+        }
+        if (request.accept === 'application/json') return jsonResponse(payload)
+        return sseResponse(payload, signal, resolved)
+      }
+
+      const fixtureKey = matchScenario(body.message)
+      const fixture = CHAT_FIXTURES[fixtureKey] as RawChatResponse
       const sessionId = body.session_id ?? fixture.session_id
       const now = new Date().toISOString()
       const answerId = crypto.randomUUID()
@@ -600,9 +810,12 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
         createdAt: now,
         messages: [],
       }
-      const payload = { ...fixture, session_id: sessionId, id: answerId }
-      // 记下真实往返，历史会话点开才有内容可载入；助手侧只保存与后端详情
-      // 契约一致的脱敏载荷，不能把 data_rows / export 放进历史消息。
+      // 存储用的载荷永远是源语言（未经 localizeFixture），与真实后端
+      // `messages.content`/`Answer.response_payload` 只存原文一致——「翻译成
+      // 请求方语言」是读时才发生的事（Task 6/7），不是写时就把某一次请求
+      // 恰好用的语言焊死进历史（否则用中文提问、之后切到英文，历史消息会
+      // 永远停在中文，`getConversation` 的重新本地化就测不出来）。
+      const sourcePayload = { ...fixture, session_id: sessionId, id: answerId }
       record.messages.push(
         { id: crypto.randomUUID(), role: 'user', content: body.message, created_at: now },
         {
@@ -610,10 +823,25 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
           role: 'assistant',
           content: fixture.answer,
           created_at: now,
-          answer_payload: historyAnswerPayload(payload),
+          answer_payload: historyAnswerPayload(sourcePayload),
         },
       )
       conversations.set(sessionId, record)
+      answers.set(body.client_request_id, {
+        fixtureKey,
+        sessionId,
+        answerId,
+        sourceMessage: body.message,
+      })
+
+      // 只有这一次请求的直接响应按当前 Accept-Language 本地化——与
+      // `_with_displayed_message`/`_run_agent` 的分工一致（`chat_service.py`）。
+      const payload: RawChatResponse = {
+        ...localizeFixture(fixture, locale),
+        session_id: sessionId,
+        id: answerId,
+        displayed_user_message: locale === 'en-US' ? mockEnglishText(body.message) : body.message,
+      }
 
       if (request.accept === 'application/json') return jsonResponse(payload)
       return sseResponse(payload, signal, resolved)
@@ -650,11 +878,16 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
         created_at: item.createdAt,
         updated_at: item.createdAt,
       }))
+      // Mock 会话表本身只存一种语言（提交时的原文），不模拟"标题翻译预算耗尽"
+      // 这种降级——`localization_degraded` 固定 false，字段本身仍然存在，
+      // 好让前端 camelCase 映射与真实契约的形状保持一致（Task 11 Step 7）。
       return jsonResponse({
         items,
         limit: 20,
         offset: 0,
-      } satisfies components['schemas']['ConversationListResponse'])
+        localization_degraded: false,
+        localization_degraded_reason: null,
+      } satisfies RawConversationListResponse)
     }
 
     const detailMatch = /^\/api\/conversations\/([^/]+)$/.exec(pathname)
@@ -669,15 +902,29 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
       const found = conversations.get(id)
       if (!found) return errorResponse('NOT_FOUND', '会话不存在', 404)
 
+      // Mock 的会话历史条数远小于真实分页阈值，不模拟多页——固定返回全部
+      // 消息、`has_more_messages: false`。
       return jsonResponse({
         id: found.id,
         title: found.title,
         messages: found.messages,
         created_at: found.createdAt,
         updated_at: found.createdAt,
-      } satisfies components['schemas']['ConversationDetailResponse'])
+        next_message_cursor: null,
+        has_more_messages: false,
+        localization_degraded: false,
+        localization_degraded_reason: null,
+      } satisfies RawConversationDetailResponse)
     }
 
     return errorResponse('NOT_FOUND', `Mock 未覆盖 ${request.path}`, 404)
+  }
+
+  // 已中止的请求直接拒绝，不走「读 handle() 结果再包 Content-Language」这条
+  // 成功路径——`abortError()` 抛出的是 DOMException，withContentLanguage
+  // 不需要、也不应该接住它。
+  return async (request: TransportRequest, signal: AbortSignal): Promise<Response> => {
+    const response = await handle(request, signal)
+    return withContentLanguage(response, resolveRequestLocale())
   }
 }

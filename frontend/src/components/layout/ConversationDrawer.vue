@@ -19,6 +19,17 @@ const emptyText = computed(() => i18n.global.t('conversationDrawer.empty'))
 const confirmDeleteLabel = computed(() => i18n.global.t('conversationDrawer.confirmDelete'))
 const cancelDeleteAria = computed(() => i18n.global.t('conversationDrawer.cancelDeleteAria'))
 const cancelDeleteLabel = computed(() => i18n.global.t('conversationDrawer.cancelDelete'))
+const translationDegradedNotice = computed(() =>
+  i18n.global.t('conversationDrawer.translationDegradedNotice'),
+)
+const retryTranslationAria = computed(() => i18n.global.t('conversationDrawer.retryTranslationAria'))
+const retryTranslationLabel = computed(() =>
+  i18n.global.t(
+    retryingTranslation.value
+      ? 'conversationDrawer.retryingTranslation'
+      : 'conversationDrawer.retryTranslation',
+  ),
+)
 
 function confirmDeleteAria(conversationTitle: string): string {
   return i18n.global.t('conversationDrawer.confirmDeleteAria', { title: conversationTitle })
@@ -87,6 +98,25 @@ async function openConversation(id: string): Promise<void> {
   await chatStore.loadConversation(id)
   emit('close')
 }
+
+/**
+ * 历史重试入口（Task 10B 遗留缺口，本任务落地）：会话列表接口返回
+ * `localization_degraded: true` 时，本页至少一条会话标题没能在预算内翻译
+ * 完成、改用了目标语言的占位文案（R7）。这个按钮原样重新 GET 同一页
+ * （`limit`/`offset` 不变），已经翻译成功的条目命中缓存，只有仍然缺失的
+ * 部分有机会补上——不是"刷新列表"这种更宽泛的操作。
+ */
+const retryingTranslation = ref(false)
+
+async function retryTranslation(): Promise<void> {
+  if (retryingTranslation.value) return
+  retryingTranslation.value = true
+  try {
+    await chatStore.loadConversations()
+  } finally {
+    retryingTranslation.value = false
+  }
+}
 </script>
 
 <template>
@@ -109,6 +139,23 @@ async function openConversation(id: string): Promise<void> {
       </header>
 
       <p v-if="deleteError" class="conversation-drawer__error" role="alert">{{ deleteError }}</p>
+
+      <div
+        v-if="chatStore.conversationsLocalizationDegraded"
+        class="conversation-drawer__translation-notice"
+        role="status"
+      >
+        <span>{{ translationDegradedNotice }}</span>
+        <button
+          type="button"
+          data-testid="retry-translation"
+          :aria-label="retryTranslationAria"
+          :disabled="retryingTranslation"
+          @click="retryTranslation"
+        >
+          {{ retryTranslationLabel }}
+        </button>
+      </div>
 
       <p v-if="chatStore.conversations.length === 0" class="conversation-drawer__empty">
         {{ emptyText }}
@@ -302,5 +349,35 @@ async function openConversation(id: string): Promise<void> {
   color: var(--color-danger-text);
   background: var(--color-danger-surface);
   font-size: var(--font-size-caption);
+}
+
+.conversation-drawer__translation-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-2) var(--space-2-5);
+  border-radius: var(--radius-small);
+  color: var(--color-text-secondary);
+  background: var(--color-surface-muted);
+  font-size: var(--font-size-caption);
+}
+
+.conversation-drawer__translation-notice button {
+  flex: none;
+  padding: var(--space-0-5) var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  color: var(--color-primary-strong);
+  background: var(--color-surface);
+  font-size: var(--font-size-caption);
+  white-space: nowrap;
+}
+
+.conversation-drawer__translation-notice button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 </style>

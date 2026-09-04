@@ -29,6 +29,10 @@ export const enUS = {
     cancelDeleteAria: 'Cancel delete',
     cancelDelete: 'Cancel',
     deleteAria: 'Delete conversation {title}',
+    translationDegradedNotice: 'Some conversation titles on this page have not finished translating yet.',
+    retryTranslation: 'Retry translation',
+    retryTranslationAria: 'Retry translating conversation titles',
+    retryingTranslation: 'Retrying…',
   },
   merchantSwitcher: {
     triggerAria: 'Switch current demo merchant',
@@ -241,6 +245,10 @@ export const enUS = {
     save: 'Save changes',
     conflictMessage:
       'This document was modified by another maintainer. Please reload and merge your changes.',
+    translationBadge: 'Translation ({locale})',
+    staleTranslationWarning:
+      'Translation is out of date: the source content was changed after this translation. What you see now is the source text. Please confirm before saving.',
+    staleTranslationAcknowledge: 'I understand, continue editing',
   },
   opsDashboardView: {
     eyebrow: 'BOROUGH · ANALYTICS OPS',

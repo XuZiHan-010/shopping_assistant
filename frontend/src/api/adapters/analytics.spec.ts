@@ -98,4 +98,24 @@ describe('Chat BI 契约 Adapter', () => {
       },
     ])
   })
+
+  it('后端按 Accept-Language 返回英文分类展示名时原样透传，不在前端二次翻译（Task 11）', () => {
+    const raw = {
+      items: [
+        {
+          category: 'TRADE',
+          category_display_name: 'Trade analytics',
+          answer_total: 8,
+          adoption_rate: null,
+          user_accuracy_rate: null,
+          system_accuracy_rate: 0.9,
+          avg_thinking_ms: 1900,
+          hit_rate: 0.75,
+          failure_rate: 0,
+        },
+      ],
+    } as components['schemas']['ChatBiCategoriesResponse']
+
+    expect(toChatBiCategories(raw)[0]?.displayName).toBe('Trade analytics')
+  })
 })

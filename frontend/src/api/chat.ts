@@ -6,6 +6,7 @@
  * （后端方案 §8.4：只写一套解析逻辑）。
  */
 import type { components } from '@/api/generated'
+import { resolveRequestLocale } from '@/api/credentials'
 import type { ChatAnswer, FeedbackState, ThinkingStep } from '@/types/chat'
 
 import {
@@ -15,14 +16,43 @@ import {
   toFeedbackState,
 } from './adapters/chat'
 import { AppError } from './errors'
-import { ChatStreamInterruptedError, readChatStream } from './sse'
+import { assertResponseLocale, ChatStreamInterruptedError, readChatStream } from './sse'
 import { resolveTransport } from './transport'
+
+/**
+ * `generated.ts` 尚未跟上 Task 6/7 新增的字段（`displayed_user_message`、
+ * `next_message_cursor`、`has_more_messages`、`localization_degraded*`）——
+ * 见 `backend/app/schemas/chat.py` 的 `ConversationListResponse` /
+ * `ConversationDetailResponse`。手工补丁交叉类型，Task 12 重新生成后可以
+ * 直接删掉，改回纯 `components['schemas'][...]`。
+ */
+type RawConversationListResponse = components['schemas']['ConversationListResponse'] & {
+  localization_degraded?: boolean
+  localization_degraded_reason?: string | null
+}
+type RawConversationDetailResponse = components['schemas']['ConversationDetailResponse'] & {
+  next_message_cursor?: string | null
+  has_more_messages?: boolean
+  localization_degraded?: boolean
+  localization_degraded_reason?: string | null
+}
 
 export interface ConversationSummaryView {
   id: string
   title: string
   createdAt: string
   updatedAt: string
+}
+
+export interface ConversationListView {
+  items: ConversationSummaryView[]
+  /**
+   * 本页任意一条会话标题未能在预算内翻译完成时为 true（后端
+   * `ConversationListResponse.localization_degraded`，Task 7 §8.6.3）。
+   * 未降级时固定 false，与 R7 的显式降级要求一致。
+   */
+  localizationDegraded: boolean
+  localizationDegradedReason?: string
 }
 
 export interface DemoMerchantView {
@@ -70,6 +100,12 @@ export async function submitChat(
 
   if (!response.body) throw new ChatStreamInterruptedError()
 
+  // 二次防线：本轮请求发出之后、响应回来之前，若展示语言已经切换（Task 11
+  // Step 6 的 epoch 机制通常已经 abort 了这次请求），这里用响应自带的
+  // `Content-Language` 再确认一次，防止极窄的竞态窗口把上一语言的回答
+  // 悄悄塞进当前界面（见 `sse.ts` 的 `assertResponseLocale`）。
+  assertResponseLocale(response, resolveRequestLocale())
+
   // done 与 error 互斥由协议保证（readChatStream 不做防御）：这里先到的终止事件
   // 直接决定结果——error 会 throw 并中断循环，done 才会走到下面的赋值。
   // 用 AppError.fromErrorResponse 而不是丢消息的通用 Error：保留后端的 code
@@ -89,20 +125,24 @@ export async function submitChat(
 export async function listConversations(
   signal: AbortSignal,
   limit = 50,
-): Promise<ConversationSummaryView[]> {
+): Promise<ConversationListView> {
   const transport = await resolveTransport()
   const response = await transport(
     { path: `/api/conversations?limit=${limit}`, method: 'GET', auth: 'merchant' },
     signal,
   )
-  const payload = (await response.json()) as components['schemas']['ConversationListResponse']
+  const payload = (await response.json()) as RawConversationListResponse
 
-  return payload.items.map((item) => ({
-    id: item.id,
-    title: item.title ?? '未命名会话',
-    createdAt: item.created_at,
-    updatedAt: item.updated_at,
-  }))
+  return {
+    items: payload.items.map((item) => ({
+      id: item.id,
+      title: item.title ?? '未命名会话',
+      createdAt: item.created_at,
+      updatedAt: item.updated_at,
+    })),
+    localizationDegraded: payload.localization_degraded ?? false,
+    localizationDegradedReason: payload.localization_degraded_reason ?? undefined,
+  }
 }
 
 export interface ConversationDetailView {
@@ -116,22 +156,47 @@ export interface ConversationDetailView {
     answer?: ChatAnswer
     feedback?: FeedbackState
   }>
+  /** 更早一页的游标；为 `undefined` 时已经翻到最早一条（后端 §8.6.3）。 */
+  nextMessageCursor?: string
+  hasMoreMessages: boolean
+  /** 本页任意条目未能在预算内翻译完成时为 true，改用目标语言占位文案（R7）。 */
+  localizationDegraded: boolean
+  localizationDegradedReason?: string
+}
+
+export interface GetConversationOptions {
+  /** 游标分页：省略即第一页（最新 `messageLimit` 条）。 */
+  before?: string
+  messageLimit?: number
 }
 
 export async function getConversation(
   id: string,
   signal: AbortSignal,
+  options: GetConversationOptions = {},
 ): Promise<ConversationDetailView> {
   const transport = await resolveTransport()
+  const query = new URLSearchParams()
+  if (options.messageLimit) query.set('message_limit', String(options.messageLimit))
+  if (options.before) query.set('message_before', options.before)
+  const queryString = query.toString()
   const response = await transport(
-    { path: `/api/conversations/${id}`, method: 'GET', auth: 'merchant' },
+    {
+      path: `/api/conversations/${id}${queryString ? `?${queryString}` : ''}`,
+      method: 'GET',
+      auth: 'merchant',
+    },
     signal,
   )
-  const payload = (await response.json()) as components['schemas']['ConversationDetailResponse']
+  const payload = (await response.json()) as RawConversationDetailResponse
 
   return {
     id: payload.id,
     title: payload.title ?? '未命名会话',
+    nextMessageCursor: payload.next_message_cursor ?? undefined,
+    hasMoreMessages: payload.has_more_messages ?? false,
+    localizationDegraded: payload.localization_degraded ?? false,
+    localizationDegradedReason: payload.localization_degraded_reason ?? undefined,
     messages: payload.messages.map((item) => {
       const answerPayload = item.answer_payload
       return {

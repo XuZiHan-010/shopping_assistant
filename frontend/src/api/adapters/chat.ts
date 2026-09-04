@@ -24,7 +24,16 @@ import type {
   ThinkingStep,
 } from '@/types/chat'
 
-type RawChatResponse = components['schemas']['ChatResponse']
+/**
+ * `generated.ts` 还没有 `displayed_user_message`（Task 6 新增，本文件写作时
+ * `generated.ts` 尚未重新生成——权威定义见
+ * `backend/app/schemas/chat.py::ChatResponse`）。手工补丁交叉类型，
+ * Task 12 重新生成后这个字段会并入 `generated.ts`，届时可以直接删掉这行
+ * 交叉类型，改回纯 `components['schemas']['ChatResponse']`。
+ */
+type RawChatResponse = components['schemas']['ChatResponse'] & {
+  displayed_user_message?: string
+}
 type RawConversationAnswerPayload = components['schemas']['ConversationAnswerPayload']
 
 /**
@@ -286,6 +295,11 @@ export function toChatAnswer(raw: RawChatResponse): ChatAnswer {
   return {
     id: raw.id,
     sessionId: raw.session_id,
+    // 老 fixture（Task 11 之前生成，`docs/fixtures/chat/*.json` 尚未带这个
+    // 字段）没有 `displayed_user_message`；退回空串而不是抛契约错误——这是
+    // 展示层的本地化镜像，不是语义不变量，缺失时 Store 自己会回退到消息的
+    // 原始文本（`ChatMessage.sourceText`），不应该让整条回答因此校验失败。
+    displayedUserMessage: raw.displayed_user_message ?? '',
     answer: raw.answer,
     mode: raw.answer_mode,
     category: raw.category ?? undefined,
@@ -312,6 +326,11 @@ export function toConversationAnswer(
   return {
     id: raw.answer_id,
     sessionId,
+    // 会话详情的 `content` 已经是服务端按当前请求 locale 本地化后的正文
+    // （`localize_conversation_detail`），与 ChatResponse 的
+    // `displayed_user_message` 语义一致——这里就是它在"历史回答"场景下
+    // 唯一可用的等价来源。
+    displayedUserMessage: content,
     answer: content,
     mode: raw.answer_mode,
     createdAt,

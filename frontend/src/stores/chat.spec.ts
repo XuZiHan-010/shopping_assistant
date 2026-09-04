@@ -1,16 +1,57 @@
 import { createPinia, setActivePinia } from 'pinia'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { setLocaleProvider } from '@/api/credentials'
 import { AppError } from '@/api/errors'
 import { createMockTransport } from '@/api/mock/transport'
 import { setChatTransport, type TransportRequest } from '@/api/transport'
 
 import { useChatStore } from './chat'
+import { useLocaleStore } from './locale'
 
 beforeEach(() => {
   setActivePinia(createPinia())
   setChatTransport(createMockTransport({ chunkSizes: [4], stepDelayMs: 0 }))
 })
+
+afterEach(() => {
+  setLocaleProvider(undefined)
+})
+
+/** 手动控制 settle 时机的 Promise，用来构造"谁先谁后返回"的确定性竞态。 */
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((res) => {
+    resolve = res
+  })
+  return { promise, resolve }
+}
+
+function conversationListPayload(item: { id: string; title: string }) {
+  return {
+    items: [{ id: item.id, title: item.title, created_at: '2026-08-01T00:00:00Z', updated_at: '2026-08-01T00:00:00Z' }],
+    limit: 20,
+    offset: 0,
+    localization_degraded: false,
+    localization_degraded_reason: null,
+  }
+}
+
+/**
+ * `submitChat`（`api/chat.ts`）固定用 `accept: 'text/event-stream'` 请求，
+ * 手写的替身 transport 也必须按 SSE 帧格式编码响应体，不能直接
+ * `Response.json(...)`——`readChatStream` 只认 `event:`/`data:` 帧，收到
+ * 普通 JSON body 会因为找不到 `done`/`error` 帧而抛 `ChatStreamInterruptedError`，
+ * 在 `replayRoundInNewLocale`/`continueRoundInNewLocale` 的空 catch 里被
+ * 默默吞掉，现象是"什么都没发生"，很容易被误判成别的 bug。
+ */
+function sseChatResponse(payload: Record<string, unknown>): Response {
+  const text = `event: done\ndata: ${JSON.stringify(payload)}\n\n`
+  return new Response(new TextEncoder().encode(text), {
+    status: 200,
+    headers: { 'content-type': 'text/event-stream; charset=utf-8' },
+  })
+}
 
 function installFeedbackTransport(
   onFeedback: (request: TransportRequest, signal: AbortSignal) => Promise<Response>,
@@ -547,5 +588,458 @@ describe('消息 origin 与历史消息重试', () => {
     expect(await store.retryMessage(assistant.localId)).toBe(false)
     // 拒绝重试之外，消息本身没有被误置成别的状态。
     expect(assistant.status).toBe('complete')
+  })
+})
+
+describe('语言切换：epoch 竞态防护（Task 11 Step 2）', () => {
+  it('中文请求较晚返回、英语请求较早返回：切到英语后中文响应被丢弃，Store 最终只含英语数据', async () => {
+    const store = useChatStore()
+    const localeStore = useLocaleStore()
+
+    // 先正常拉一次会话列表（中文），让 conversationsLoaded 变 true——
+    // 语言切换只重新加载"已经在用"的数据，这是触发第二次 loadConversations()
+    // 的前提。
+    setChatTransport(async () => Response.json(conversationListPayload({ id: 'zh-seed', title: '中文种子' })))
+    await store.loadConversations()
+
+    const zh = deferred<Response>()
+    const en = deferred<Response>()
+    setLocaleProvider(() => localeStore.locale)
+    // 按"第几次调用"分发响应，不按调用那一刻读到的 locale 分发：
+    // `store.loadConversations()` 内部要经过若干次 await（resolveTransport
+    // 本身也是 async）才真正执行到这个 transport 函数，如果在这段真实的
+    // 微任务延迟里去读 `localeStore.locale`，读到的可能已经是切换后的新值——
+    // 这不是这条测试要验证的东西（那是 transport.spec.ts 的职责），这里只
+    // 关心"先发出的请求" vs "语言切换后发出的请求"谁的响应先到、Store 是否
+    // 按 epoch 正确取舍，用调用顺序钉死两次请求分别对应哪个 Deferred。
+    let callCount = 0
+    setChatTransport(async () => {
+      callCount += 1
+      return callCount === 1 ? zh.promise : en.promise
+    })
+
+    // 模拟"中文这次请求还没回来，用户就切到了英语"：先手动发起一次中文请求
+    // （不经过 reloadForLocale，代表任意一次仍在途的中文刷新），再切语言。
+    const staleZhLoad = store.loadConversations()
+    localeStore.setLocale('en-US') // 触发 watch → reloadForLocale()，epoch += 1，发出新的英语请求
+
+    // 英语先回来。
+    en.resolve(Response.json(conversationListPayload({ id: 'en-1', title: 'English conversation' })))
+    await vi.waitFor(() => expect(store.conversations).toEqual([expect.objectContaining({ id: 'en-1' })]))
+
+    // 中文后回来——必须被丢弃，不能覆盖已经写入的英语数据。
+    zh.resolve(Response.json(conversationListPayload({ id: 'zh-late', title: '过期的中文响应' })))
+    await staleZhLoad
+    // 给一次事件循环，确认"迟到的中文响应"确实被处理过（而不是还没跑到那一行）。
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(store.conversations).toEqual([expect.objectContaining({ id: 'en-1', title: 'English conversation' })])
+  })
+
+  it('会话列表的竞态丢弃不影响当前会话（sessionId/messages）与原始发送状态', async () => {
+    const store = useChatStore()
+    const localeStore = useLocaleStore()
+    setLocaleProvider(() => localeStore.locale)
+
+    await store.submitMessage('昨天总 GMV 是多少？')
+    const sessionIdBefore = store.sessionId
+    const messagesBefore = store.messages.length
+
+    setChatTransport(async () => Response.json(conversationListPayload({ id: 'zh-seed', title: '中文种子' })))
+    await store.loadConversations()
+
+    const zh = deferred<Response>()
+    const en = deferred<Response>()
+    setChatTransport(async (request) => {
+      if (request.path.startsWith('/api/conversations') && request.method === 'GET') {
+        return localeStore.locale === 'en-US' ? en.promise : zh.promise
+      }
+      // 语言切换也会尝试重放/续接当前会话里已完成的 live 轮次
+      // （replayRoundInNewLocale）；这条路径在本用例里不是断言重点，
+      // 给一个立刻挂起的 Promise，不让它干扰下面对会话列表竞态的断言。
+      return new Promise<Response>(() => {})
+    })
+
+    localeStore.setLocale('en-US')
+    en.resolve(Response.json(conversationListPayload({ id: 'en-1', title: 'English conversation' })))
+    await vi.waitFor(() => expect(store.conversations.length).toBeGreaterThan(0))
+    zh.resolve(Response.json(conversationListPayload({ id: 'zh-late', title: '过期中文' })))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    // 当前会话（sessionId）和已有消息数量不受这条"只影响会话列表"的竞态波及。
+    expect(store.sessionId).toBe(sessionIdBefore)
+    expect(store.messages.length).toBe(messagesBefore)
+  })
+})
+
+describe('语言切换：SSE 轮次续接/重放，不重放仍在 PROCESSING 的轮次（Task 11 Step 3）', () => {
+  it('切换语言时命中仍在 PROCESSING 的轮次：不用同一 clientRequestId 重放，改用会话详情拿本地化回答', async () => {
+    const store = useChatStore()
+    const localeStore = useLocaleStore()
+    setLocaleProvider(() => localeStore.locale)
+
+    // 先完成第一轮，拿到 sessionId——continueRoundInNewLocale 需要已知的
+    // sessionId 才能查会话详情。
+    await store.submitMessage('你好')
+    const sessionId = store.sessionId!
+
+    const postCallCountByClientRequestId = new Map<string, number>()
+    const round2Post = deferred<Response>()
+    const detail = deferred<Response>()
+    let round2ClientRequestId = ''
+
+    setChatTransport(async (request: TransportRequest) => {
+      if (request.path === '/api/chat' && request.method === 'POST') {
+        const body = request.body as { client_request_id: string }
+        postCallCountByClientRequestId.set(
+          body.client_request_id,
+          (postCallCountByClientRequestId.get(body.client_request_id) ?? 0) + 1,
+        )
+        if (body.client_request_id === round2ClientRequestId) {
+          // 第二轮的 POST 永不 settle：模拟服务端仍在 PROCESSING。
+          return round2Post.promise
+        }
+        // 其它 client_request_id（第一轮语言切换时的幂等重放）立刻给一个
+        // 简单响应，不让它干扰本用例只关心第二轮的断言。
+        return sseChatResponse({
+          id: crypto.randomUUID(),
+          session_id: sessionId,
+          displayed_user_message: 'Hello',
+          answer: 'replayed',
+          answer_mode: 'CHAT',
+          category: 'UNKNOWN',
+          thinking_steps: [],
+          quality_status: 'NOT_RUN',
+          quality_attempts: 0,
+          quality_notes: [],
+          analysis_sources: ['NONE'],
+          degraded: false,
+          degraded_reason: null,
+          suggestions: [],
+          suggestion_alternates: [],
+          created_at: new Date().toISOString(),
+        })
+      }
+      if (request.path === `/api/conversations/${sessionId}` && request.method === 'GET') {
+        return detail.promise
+      }
+      throw new Error(`未预期的请求：${request.method} ${request.path}`)
+    })
+
+    // 发起第二轮，但不 await——它会一直挂在 round2Post 上，模拟"仍在处理"。
+    const pendingRound2 = store.submitMessage('最近 7 天退货量趋势')
+    await vi.waitFor(() => expect(store.messages.at(-1)?.status).toBe('pending'))
+    round2ClientRequestId = store.messages.at(-1)!.clientRequestId
+    const round2AssistantLocalId = store.messages.at(-1)!.localId
+
+    localeStore.setLocale('en-US')
+
+    // 断言："生成中"占位状态保持，且没有用同一 clientRequestId 立刻重放。
+    await vi.waitFor(() => {
+      expect(store.messages.find((m) => m.localId === round2AssistantLocalId)?.status).toBe('pending')
+    })
+    expect(postCallCountByClientRequestId.get(round2ClientRequestId)).toBe(1)
+
+    // 服务端其实已经处理完了：通过会话详情把本地化后的完整回答和
+    // displayed_user_message 交回来。
+    detail.resolve(
+      Response.json({
+        id: sessionId,
+        title: 'Return trend',
+        messages: [
+          { id: crypto.randomUUID(), role: 'user', content: '你好', created_at: '2026-08-01T00:00:00Z' },
+          {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            content: '已完成结构化理解。',
+            created_at: '2026-08-01T00:00:01Z',
+            answer_payload: {
+              answer_id: crypto.randomUUID(),
+              answer_mode: 'CHAT',
+              thinking_steps: [],
+              quality_status: 'NOT_RUN',
+              quality_attempts: 0,
+              quality_notes: [],
+              degraded: false,
+              degraded_reason: null,
+              is_adopted: false,
+              reaction: null,
+              columns: [],
+              total_rows: null,
+              truncated: null,
+            },
+          },
+          {
+            id: crypto.randomUUID(),
+            role: 'user',
+            content: 'Return trend over the last 7 days',
+            created_at: '2026-08-01T00:00:02Z',
+          },
+          {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            content: 'Return trend analysis in English.',
+            created_at: '2026-08-01T00:00:03Z',
+            answer_payload: {
+              answer_id: crypto.randomUUID(),
+              answer_mode: 'METRIC',
+              thinking_steps: [],
+              quality_status: 'PASSED',
+              quality_attempts: 1,
+              quality_notes: [],
+              degraded: false,
+              degraded_reason: null,
+              is_adopted: false,
+              reaction: null,
+              columns: [],
+              total_rows: null,
+              truncated: null,
+            },
+          },
+        ],
+        created_at: '2026-08-01T00:00:00Z',
+        updated_at: '2026-08-01T00:00:03Z',
+        next_message_cursor: null,
+        has_more_messages: false,
+        localization_degraded: false,
+        localization_degraded_reason: null,
+      }),
+    )
+
+    await vi.waitFor(() => {
+      expect(store.messages.find((m) => m.localId === round2AssistantLocalId)?.status).toBe('complete')
+    })
+    const round2Assistant = store.messages.find((m) => m.localId === round2AssistantLocalId)!
+    expect(round2Assistant.text).toBe('Return trend analysis in English.')
+    // 用户气泡改用 displayed_user_message（会话详情里已经本地化过的 content），
+    // 不保留乐观的源语言气泡。
+    const round2User = store.messages[store.messages.indexOf(round2Assistant) - 1]
+    expect(round2User.text).toBe('Return trend over the last 7 days')
+    // 全程只提交过一次这个 clientRequestId，没有在仍是 PROCESSING 时重放。
+    expect(postCallCountByClientRequestId.get(round2ClientRequestId)).toBe(1)
+
+    // 让第一轮悬而未决的重放 Promise 有地方去，避免测试结束时留下未处理拒绝。
+    round2Post.resolve(new Response(null, { status: 599 }))
+    await pendingRound2.catch(() => {})
+  })
+
+  it('切换语言时命中已 SUCCEEDED 的轮次：同 clientRequestId 重放合法，命中幂等分支拿到本地化副本，且不经过 pending/streaming', async () => {
+    const store = useChatStore()
+    const localeStore = useLocaleStore()
+    setLocaleProvider(() => localeStore.locale)
+
+    await store.submitMessage('你好')
+    const clientRequestId = store.messages[1].clientRequestId
+    const sessionId = store.sessionId!
+    const statusesDuringReplay: string[] = []
+
+    const postCallCountByClientRequestId = new Map<string, number>()
+    setChatTransport(async (request: TransportRequest) => {
+      if (request.path === '/api/chat' && request.method === 'POST') {
+        const body = request.body as { client_request_id: string }
+        postCallCountByClientRequestId.set(
+          body.client_request_id,
+          (postCallCountByClientRequestId.get(body.client_request_id) ?? 0) + 1,
+        )
+        return sseChatResponse({
+          id: crypto.randomUUID(),
+          session_id: sessionId,
+          displayed_user_message: 'Hello',
+          answer: 'Hello! How can I help?',
+          answer_mode: 'CHAT',
+          category: 'UNKNOWN',
+          thinking_steps: [],
+          quality_status: 'NOT_RUN',
+          quality_attempts: 0,
+          quality_notes: [],
+          analysis_sources: ['NONE'],
+          degraded: false,
+          degraded_reason: null,
+          suggestions: [],
+          suggestion_alternates: [],
+          created_at: new Date().toISOString(),
+        })
+      }
+      throw new Error(`未预期的请求：${request.method} ${request.path}`)
+    })
+
+    // 在切换语言触发重放期间持续采样 assistant.status，证明幂等命中不会
+    // 让 UI 闪回"生成中"。
+    const assistantLocalId = store.messages[1].localId
+    const sampler = setInterval(() => {
+      const assistant = store.messages.find((m) => m.localId === assistantLocalId)
+      if (assistant) statusesDuringReplay.push(assistant.status)
+    }, 0)
+
+    localeStore.setLocale('en-US')
+    await vi.waitFor(() => expect(store.messages[1].text).toBe('Hello! How can I help?'))
+    clearInterval(sampler)
+
+    // 原始提交走的是 beforeEach 装好的默认 Mock transport（不在这张计数表
+    // 里）；这里的计数表只在切换语言之后才安装，因此“1”就代表“语言切换
+    // 触发了恰好一次同 clientRequestId 的重放请求”——既不是 0（没重放，
+    // 界面停在旧语言），也不是 2+（重复重放）。
+    expect(postCallCountByClientRequestId.get(clientRequestId)).toBe(1)
+    expect(store.messages[1].status).toBe('complete')
+    expect(statusesDuringReplay.every((status) => status === 'complete')).toBe(true)
+    // 用户气泡也换成这次重放返回的 displayed_user_message。
+    expect(store.messages[0].text).toBe('Hello')
+  })
+})
+
+describe('会话详情分页、翻译重试与降级标记（Task 11 Step 6 / Task 10B 缺口收尾）', () => {
+  function detailResponse(opts: {
+    messages: Array<{ id: string; role: 'user' | 'assistant'; content: string; createdAt: string }>
+    nextCursor: string | null
+    hasMore: boolean
+    degraded: boolean
+    degradedReason?: string | null
+  }): Response {
+    return Response.json({
+      id: 'conv-1',
+      title: '示例会话',
+      messages: opts.messages.map((m) => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        created_at: m.createdAt,
+      })),
+      created_at: '2026-08-01T00:00:00Z',
+      updated_at: '2026-08-01T00:10:00Z',
+      next_message_cursor: opts.nextCursor,
+      has_more_messages: opts.hasMore,
+      localization_degraded: opts.degraded,
+      localization_degraded_reason: opts.degradedReason ?? null,
+    })
+  }
+
+  it('loadConversation 首次打开会带回 hasMoreMessages/nextMessageCursor/localizationDegraded', async () => {
+    const store = useChatStore()
+    setChatTransport(async (request) => {
+      if (request.path.startsWith('/api/conversations/conv-1')) {
+        return detailResponse({
+          messages: [{ id: 'm2', role: 'assistant', content: '答案', createdAt: '2026-08-01T00:01:00Z' }],
+          nextCursor: 'cursor-1',
+          hasMore: true,
+          degraded: true,
+          degradedReason: '翻译预算已用尽',
+        })
+      }
+      throw new Error(`未预期的请求：${request.path}`)
+    })
+
+    await store.loadConversation('conv-1')
+
+    expect(store.hasMoreMessages).toBe(true)
+    expect(store.nextMessageCursor).toBe('cursor-1')
+    expect(store.localizationDegraded).toBe(true)
+    expect(store.localizationDegradedReason).toBe('翻译预算已用尽')
+  })
+
+  it('loadMoreMessages 用 nextMessageCursor 请求更早一页，合并到已展示消息最前面且按时间正序', async () => {
+    const store = useChatStore()
+    const requests: TransportRequest[] = []
+    setChatTransport(async (request) => {
+      requests.push(request)
+      if (request.path === '/api/conversations/conv-1') {
+        return detailResponse({
+          messages: [{ id: 'm2', role: 'assistant', content: '较新的回答', createdAt: '2026-08-01T00:05:00Z' }],
+          nextCursor: 'cursor-1',
+          hasMore: true,
+          degraded: false,
+        })
+      }
+      if (request.path === '/api/conversations/conv-1?message_before=cursor-1') {
+        return detailResponse({
+          messages: [{ id: 'm1', role: 'user', content: '较早的问题', createdAt: '2026-08-01T00:00:00Z' }],
+          nextCursor: null,
+          hasMore: false,
+          degraded: false,
+        })
+      }
+      throw new Error(`未预期的请求：${request.path}`)
+    })
+
+    await store.loadConversation('conv-1')
+    await store.loadMoreMessages()
+
+    expect(store.messages.map((m) => m.text)).toEqual(['较早的问题', '较新的回答'])
+    expect(store.hasMoreMessages).toBe(false)
+    expect(store.nextMessageCursor).toBeUndefined()
+    expect(requests.some((r) => r.path.includes('message_before=cursor-1'))).toBe(true)
+  })
+
+  it('hasMoreMessages 为 false 时 loadMoreMessages 是 no-op，不发多余请求', async () => {
+    const store = useChatStore()
+    const requests: TransportRequest[] = []
+    setChatTransport(async (request) => {
+      requests.push(request)
+      return detailResponse({ messages: [], nextCursor: null, hasMore: false, degraded: false })
+    })
+
+    await store.loadConversation('conv-1')
+    const callsAfterOpen = requests.length
+    await store.loadMoreMessages()
+
+    expect(requests.length).toBe(callsAfterOpen)
+  })
+
+  it('retryLocalization 用同一游标（首页）重新拉当前页，翻译成功后覆盖占位内容', async () => {
+    const store = useChatStore()
+    let call = 0
+    const requests: TransportRequest[] = []
+    setChatTransport(async (request) => {
+      requests.push(request)
+      call += 1
+      if (call === 1) {
+        return detailResponse({
+          messages: [
+            { id: 'm1', role: 'assistant', content: '[翻译降级占位]', createdAt: '2026-08-01T00:00:00Z' },
+          ],
+          nextCursor: null,
+          hasMore: false,
+          degraded: true,
+          degradedReason: '翻译预算已用尽',
+        })
+      }
+      return detailResponse({
+        messages: [
+          { id: 'm1', role: 'assistant', content: '已成功翻译的正文', createdAt: '2026-08-01T00:00:00Z' },
+        ],
+        nextCursor: null,
+        hasMore: false,
+        degraded: false,
+      })
+    })
+
+    await store.loadConversation('conv-1')
+    expect(store.localizationDegraded).toBe(true)
+    expect(store.messages[0].text).toBe('[翻译降级占位]')
+
+    await store.retryLocalization()
+
+    expect(store.localizationDegraded).toBe(false)
+    expect(store.messages[0].text).toBe('已成功翻译的正文')
+    // 两次请求路径相同（都是第一页，不带 before）——「翻译重试用同一游标
+    // 覆盖该页」的直接证据。
+    expect(requests[0].path).toBe(requests[1].path)
+  })
+
+  it('conversationsLocalizationDegraded 反映会话列表接口返回的降级标记，供抽屉渲染重试入口', async () => {
+    const store = useChatStore()
+    setChatTransport(async () =>
+      Response.json({
+        items: [],
+        limit: 20,
+        offset: 0,
+        localization_degraded: true,
+        localization_degraded_reason: '标题翻译预算已用尽',
+      }),
+    )
+
+    await store.loadConversations()
+
+    expect(store.conversationsLocalizationDegraded).toBe(true)
+    expect(store.conversationsLocalizationDegradedReason).toBe('标题翻译预算已用尽')
   })
 })

@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 
 import {
@@ -7,6 +7,7 @@ import {
   listConversations,
   submitChat,
   submitFeedback,
+  type ConversationDetailView,
   type ConversationSummaryView,
 } from '@/api/chat'
 import { toAppError } from '@/api/errors'
@@ -17,6 +18,8 @@ import type {
   FeedbackState,
   ThinkingStep,
 } from '@/types/chat'
+
+import { useLocaleStore } from './locale'
 
 function newMessage(
   role: ChatMessage['role'],
@@ -29,6 +32,7 @@ function newMessage(
     clientRequestId,
     role,
     text,
+    sourceText: text,
     createdAt: new Date().toISOString(),
     status,
     steps: [],
@@ -50,6 +54,28 @@ export const useChatStore = defineStore('chat', () => {
   const sessionId = ref<string | undefined>(undefined)
   const selectedRoundId = ref<string | undefined>(undefined)
   const controllers = new Map<string, AbortController>()
+
+  /**
+   * 每次语言切换递增一次。写状态之前先比较请求发出时快照的 epoch 与当前
+   * epoch——不一致说明这个响应对应的是已经被切走的语言，直接丢弃，不写入
+   * Store（Task 11 Step 6 的原子刷新/防竞态机制）。
+   */
+  const localeEpoch = ref(0)
+
+  // 当前打开会话的分页/降级状态。reset() 会清空——它们和 messages 一样，
+  // 描述的是"当前这个会话"，不是跨会话持久化的东西。
+  const nextMessageCursor = ref<string | undefined>(undefined)
+  const hasMoreMessages = ref(false)
+  /** 当前已加载最后一页所用的 `before` 游标；用于「翻译重试」重新拉同一页。 */
+  const currentPageCursor = ref<string | undefined>(undefined)
+  const localizationDegraded = ref(false)
+  const localizationDegradedReason = ref<string | undefined>(undefined)
+
+  // 会话列表的降级状态，与「当前打开哪个会话」无关，reset() 不清它。
+  const conversationsLocalizationDegraded = ref(false)
+  const conversationsLocalizationDegradedReason = ref<string | undefined>(undefined)
+  /** 是否已经成功拉过一次会话列表；语言切换时只重载「已经在用」的数据。 */
+  const conversationsLoaded = ref(false)
 
   const isEmptyConversation = computed(() => messages.value.length === 0)
 
@@ -99,16 +125,29 @@ export const useChatStore = defineStore('chat', () => {
     messages.value = []
     sessionId.value = undefined
     selectedRoundId.value = undefined
+    nextMessageCursor.value = undefined
+    hasMoreMessages.value = false
+    currentPageCursor.value = undefined
+    localizationDegraded.value = false
+    localizationDegradedReason.value = undefined
   }
 
-  async function runRound(assistant: ChatMessage, text: string): Promise<void> {
+  /**
+   * `question` 现在传整个 `ChatMessage`，不只是文本：请求体必须用
+   * `question.sourceText`（用户原始提交文本，永不改写），成功后要把
+   * `question.text` 覆盖成 `answer.displayedUserMessage`——乐观气泡不再是
+   * 「一直显示用户敲的原文」，而是「本轮完成后改显示按当前语言渲染的展示
+   * 副本」（Task 6/11）。
+   */
+  async function runRound(assistant: ChatMessage, question: ChatMessage): Promise<void> {
     const controller = new AbortController()
     controllers.set(assistant.localId, controller)
+    const epochAtRequest = localeEpoch.value
 
     try {
       const answer = await submitChat(
         {
-          message: text,
+          message: question.sourceText ?? question.text,
           sessionId: sessionId.value,
           clientRequestId: assistant.clientRequestId,
         },
@@ -122,11 +161,18 @@ export const useChatStore = defineStore('chat', () => {
         controller.signal,
       )
 
+      // 本轮进行期间发生过语言切换：`reloadForLocale` 已经/将要接管这条消息
+      // 的续接或重放，这次响应对应的是旧语言，丢弃不写。
+      if (epochAtRequest !== localeEpoch.value) return
+
       assistant.answer = answer
       assistant.text = answer.answer
       assistant.status = 'complete'
       sessionId.value = answer.sessionId
       selectedRoundId.value = assistant.localId
+      // displayedUserMessage 在旧 fixture／降级路径下可能是空串占位，此时保留
+      // 已经在展示的文本，不用空值覆盖掉一个原本可读的气泡。
+      question.text = answer.displayedUserMessage || question.text
     } catch (raw) {
       // 错误码分支，不是字符串/name 比对：Task 1 把一切错误统一包成
       // AppError 后，`(error as Error).name` 恒为 `'AppError'`，原先靠
@@ -134,6 +180,11 @@ export const useChatStore = defineStore('chat', () => {
       // 都会看到「出错了」而不是「已取消」。`toAppError` 是幂等的，raw 已经
       // 是 AppError 时直接透传。
       const error = toAppError(raw)
+      if (error.code === 'CANCELLED' && epochAtRequest !== localeEpoch.value) {
+        // 语言切换触发的中止，不是用户主动点「停止」：`reloadForLocale` 的
+        // 续接/重放逻辑会接管这条消息的后续状态，这里不能覆盖它。
+        return
+      }
       assistant.status = error.code === 'CANCELLED' ? 'cancelled' : 'error'
       assistant.error = error
     } finally {
@@ -160,16 +211,18 @@ export const useChatStore = defineStore('chat', () => {
     messages.value.push(user, rawAssistant)
 
     // 陷阱：push 进去的是原始对象；push 完之后 messages.value 是响应式数组，
-    // 但 rawAssistant 变量本身仍然指向未经代理的原始对象。如果直接把
-    // rawAssistant 传给 runRound，里面对 status/steps/answer 的赋值都发生在
+    // 但 rawAssistant/user 变量本身仍然指向未经代理的原始对象。如果直接把
+    // 它们传给 runRound，里面对 status/steps/answer/text 的赋值都发生在
     // 原始对象上，不经过响应式代理的 set 陷阱，不会触发依赖更新——组件读到的
     // 数值最终是对的（因为代理只是转发到同一个原始对象），但从来不会因为这些
     // 赋值而重新渲染，界面就会永远停在 push 那一刻的状态（例如卡在「正在准备」
-    // 且看不到最终答案）。这里必须重新从 messages.value 里取出代理版本再传下去
-    // ——与 retryMessage 的做法一致。
+    // 且看不到最终答案，或用户气泡永远显示乐观原文、等不到
+    // displayedUserMessage 覆盖）。这里必须重新从 messages.value 里取出代理
+    // 版本再传下去——与 retryMessage 的做法一致。
     const assistant = messages.value.find((message) => message.localId === rawAssistant.localId)!
+    const proxyUser = messages.value.find((message) => message.localId === user.localId)!
 
-    await runRound(assistant, content)
+    await runRound(assistant, proxyUser)
     return true
   }
 
@@ -254,26 +307,93 @@ export const useChatStore = defineStore('chat', () => {
     assistant.error = undefined
     assistant.steps = []
 
-    await runRound(assistant, question.text)
+    await runRound(assistant, question)
     return true
   }
 
   const conversations = ref<ConversationSummaryView[]>([])
 
   async function loadConversations(): Promise<void> {
+    const epochAtRequest = localeEpoch.value
     const controller = beginTrackedRequest(LOAD_CONVERSATIONS_KEY)
+    let view: Awaited<ReturnType<typeof listConversations>>
     try {
-      conversations.value = await listConversations(controller.signal)
+      view = await listConversations(controller.signal)
+    } catch (raw) {
+      // 与 loadConversation 同理：被更晚的同类请求（或语言切换）取代时，
+      // 这里必须静默吞掉，不能变成未处理的 Promise 拒绝。
+      if (toAppError(raw).code === 'CANCELLED') return
+      throw raw
     } finally {
       endTrackedRequest(LOAD_CONVERSATIONS_KEY, controller)
     }
+
+    if (epochAtRequest !== localeEpoch.value) return
+
+    conversations.value = view.items
+    conversationsLocalizationDegraded.value = view.localizationDegraded
+    conversationsLocalizationDegradedReason.value = view.localizationDegradedReason
+    conversationsLoaded.value = true
   }
 
-  async function loadConversation(id: string): Promise<void> {
+  /**
+   * 把一批历史消息按 message ID 去重合并进 `messages.value`，保持时间正序
+   * （Task 11 Step 6：分页加载更早一页、或翻译重试重新拉同一页，都要复用
+   * 这个函数）。已有本地 `localId`/`clientRequestId` 的消息会保留原值，只
+   * 更新展示内容——这样组件不会因为「同一条消息换了个 localId」而丢失任何
+   * 依赖 key 的本地 UI 状态。没有 `messageId` 的消息是当前会话里尚未持久化
+   * 确认的 `'live'` 消息，不参与去重，始终排在合并结果最后（它们必然比任何
+   * 已翻页的历史消息更新）。
+   */
+  function mergeHistoryMessages(fetched: ConversationDetailView['messages']): void {
+    const liveMessages = messages.value.filter((message) => !message.messageId)
+    const byId = new Map(
+      messages.value
+        .filter((message): message is ChatMessage & { messageId: string } =>
+          Boolean(message.messageId),
+        )
+        .map((message) => [message.messageId, message]),
+    )
+    for (const item of fetched) {
+      const existing = byId.get(item.id)
+      byId.set(item.id, {
+        localId: existing?.localId ?? crypto.randomUUID(),
+        messageId: item.id,
+        clientRequestId: existing?.clientRequestId ?? crypto.randomUUID(),
+        role: item.role,
+        text: item.content,
+        sourceText: item.content,
+        createdAt: item.createdAt,
+        status: 'complete',
+        steps: [],
+        answer: item.answer,
+        feedback: item.feedback,
+        feedbackPersisted: item.answer ? true : undefined,
+        origin: 'history',
+      })
+    }
+    const historySorted = [...byId.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    messages.value = [...historySorted, ...liveMessages]
+  }
+
+  /**
+   * 拉一页会话详情并写入 Store。`resetFirst` 由调用方显式指定，不从
+   * `id === sessionId.value` 之类的条件推断——"重新整页打开这个会话"（哪怕
+   * 恰好是当前已打开的那个）和"给当前会话追加/重试某一页"是两种不同的
+   * 调用意图，混在一起判断曾经导致过一个真实 bug：历史上"重新打开同一个
+   * 会话"被误判成"续接当前会话"，`reset()` 被跳过，新拉回来的历史消息和
+   * 尚未清空的 live 消息叠在一起，同一轮问答显示了两遍。
+   */
+  async function fetchAndApplyConversationPage(
+    id: string,
+    before: string | undefined,
+    resetFirst: boolean,
+  ): Promise<void> {
+    const epochAtRequest = localeEpoch.value
     const controller = beginTrackedRequest(LOAD_CONVERSATION_KEY)
-    let detail: Awaited<ReturnType<typeof getConversation>>
+    let detail: ConversationDetailView
     try {
-      detail = await getConversation(id, controller.signal)
+      detail = await getConversation(id, controller.signal, { before })
     } catch (raw) {
       // beginTrackedRequest 用同一个 key 覆盖：连续点开两个会话，或在加载途中
       // 切换商家触发 reset()，都会 abort 掉这个还在途的请求。这不是用户可感知
@@ -289,8 +409,12 @@ export const useChatStore = defineStore('chat', () => {
       endTrackedRequest(LOAD_CONVERSATION_KEY, controller)
     }
 
-    // 顺序要紧：reset() 会清空 sessionId，放到赋值之后会把刚设好的会话 ID 抹掉。
-    reset()
+    // 响应回来之前语言已经切换：这个响应对应旧语言，丢弃，交给
+    // reloadForLocale 已经发起的新请求收尾。
+    if (epochAtRequest !== localeEpoch.value) return
+
+    // 顺序要紧：reset() 会清空 sessionId，放到赋值之前调用。
+    if (resetFirst) reset()
     // `detail.id` 直接当作后续 /api/chat 的 session_id 使用，前提是两者共享
     // 同一个 UUID 空间——已通过读后端源码确认成立：
     // `backend/app/services/chat_service.py::_resolve_conversation` 把
@@ -300,25 +424,37 @@ export const useChatStore = defineStore('chat', () => {
     // `getConversation`）返回的 `ConversationDetailResponse.id` 正是同一张
     // `Conversation` 表的 `id`。所以「会话 id 就是 session_id」这个假设成立，
     // 不需要额外的 id 映射。
-    sessionId.value = detail.id
+    sessionId.value = id
+    currentPageCursor.value = before
+    nextMessageCursor.value = detail.nextMessageCursor
+    hasMoreMessages.value = detail.hasMoreMessages
+    localizationDegraded.value = detail.localizationDegraded
+    localizationDegradedReason.value = detail.localizationDegradedReason
     // 历史消息没有流式过程，直接落到终态；助手消息由详情的脱敏载荷装配出
     // answer、质量状态和反馈状态。origin 标为 'history'：
     // retryMessage 靠它拒绝对历史消息发起重试（这些消息在本次会话里从未真正
     // 发起过请求，没有可重放的上下文）。
-    messages.value = detail.messages.map((item) => ({
-      localId: crypto.randomUUID(),
-      messageId: item.id,
-      clientRequestId: crypto.randomUUID(),
-      role: item.role,
-      text: item.content,
-      createdAt: item.createdAt,
-      status: 'complete' as const,
-      steps: [],
-      answer: item.answer,
-      feedback: item.feedback,
-      feedbackPersisted: item.answer ? true : undefined,
-      origin: 'history' as const,
-    }))
+    mergeHistoryMessages(detail.messages)
+  }
+
+  /** 整页重新打开某个会话——哪怕它恰好是当前已打开的那个，也会先 reset()。 */
+  async function loadConversation(id: string): Promise<void> {
+    await fetchAndApplyConversationPage(id, undefined, true)
+  }
+
+  /** 加载更早一页历史消息（滚动到顶部触发），追加到已展示消息的最前面。 */
+  async function loadMoreMessages(): Promise<void> {
+    if (!sessionId.value || !hasMoreMessages.value || !nextMessageCursor.value) return
+    await fetchAndApplyConversationPage(sessionId.value, nextMessageCursor.value, false)
+  }
+
+  /**
+   * 翻译重试（Task 10B 遗留缺口的落地入口）：用同一个游标重新拉当前这一页，
+   * 让 `localization_degraded` 时缺失的条目有机会命中缓存翻译成功。
+   */
+  async function retryLocalization(): Promise<void> {
+    if (!sessionId.value) return
+    await fetchAndApplyConversationPage(sessionId.value, currentPageCursor.value, false)
   }
 
   /**
@@ -327,6 +463,9 @@ export const useChatStore = defineStore('chat', () => {
    */
   function clearConversations(): void {
     conversations.value = []
+    conversationsLocalizationDegraded.value = false
+    conversationsLocalizationDegradedReason.value = undefined
+    conversationsLoaded.value = false
   }
 
   async function removeConversation(id: string): Promise<void> {
@@ -341,6 +480,142 @@ export const useChatStore = defineStore('chat', () => {
     if (sessionId.value === id) reset()
   }
 
+  // ---------------------------------------------------------------------
+  // 语言切换（Task 11 Step 6）
+  // ---------------------------------------------------------------------
+
+  /**
+   * 语言切换时命中"还在生成中"的实时轮次：中止旧流，改用目标语言的占位
+   * 文案继续显示"生成中"，再通过会话详情取回本地化后的完整回答——**不**
+   * 用同一个 `clientRequestId` 立刻重放，服务端那一轮此时仍是 `PROCESSING`，
+   * 重放只会拿到 409 `REQUEST_IN_PROGRESS`（brief Step 3 原文）。
+   *
+   * 已知简化：只尝试一次会话详情，不做轮询/退避。真实部署下如果这一次请求
+   * 时后端仍未写完这一轮，占位状态会一直停留，要等用户下次手动刷新/重新
+   * 打开会话才能看到结果——足够覆盖测试要求的"随后通过会话详情拿到本地化
+   * 回答"这条路径，但不是生产级的健壮轮询实现。
+   */
+  async function continueRoundInNewLocale(assistant: ChatMessage, question: ChatMessage): Promise<void> {
+    // 中止旧流：runRound 的 catch 分支会看到 CANCELLED + epoch 不一致，
+    // 主动放弃覆盖这里即将写入的占位/最终状态（见 runRound 注释）。
+    controllers.get(assistant.localId)?.abort()
+    assistant.status = 'pending'
+    assistant.steps = []
+    assistant.error = undefined
+
+    const epochAtRequest = localeEpoch.value
+    const sid = sessionId.value
+    if (!sid) return
+
+    try {
+      const detail = await getConversation(sid, new AbortController().signal)
+      if (epochAtRequest !== localeEpoch.value || sessionId.value !== sid) return
+
+      const lastUser = [...detail.messages].reverse().find((item) => item.role === 'user')
+      const lastAssistant = [...detail.messages].reverse().find((item) => item.role === 'assistant')
+
+      if (lastAssistant?.answer) {
+        assistant.answer = lastAssistant.answer
+        assistant.text = lastAssistant.answer.answer
+        assistant.status = 'complete'
+        assistant.messageId = lastAssistant.id
+      }
+      if (lastUser) question.text = lastUser.content
+    } catch {
+      // 静默失败：详情暂不可用或后端仍在处理，保持"生成中"占位状态。用户
+      // 可以手动重新打开这个会话，或稍后再切一次语言触发重试——不把这类
+      // 瞬时失败升级成消息级的 error 状态（那会把一条尚未失败的回答误报
+      // 成失败）。
+    }
+  }
+
+  /**
+   * 语言切换时命中"已经成功完成"的实时轮次：同一个 `clientRequestId` 重放
+   * 合法（服务端那一轮已经是 `SUCCEEDED`），命中幂等分支直接拿回本地化
+   * 副本，不产生新的经营查询（brief Step 3 原文）。
+   *
+   * 全程不改 `assistant.status`——它本来就是 'complete'，命中幂等分支
+   * 不应该让 UI 闪回"生成中"。
+   */
+  async function replayRoundInNewLocale(assistant: ChatMessage, question: ChatMessage): Promise<void> {
+    const epochAtRequest = localeEpoch.value
+    const controller = new AbortController()
+    controllers.set(assistant.localId, controller)
+
+    try {
+      const answer = await submitChat(
+        {
+          message: question.sourceText ?? question.text,
+          sessionId: sessionId.value,
+          clientRequestId: assistant.clientRequestId,
+        },
+        { onStep() {} },
+        controller.signal,
+      )
+      if (epochAtRequest !== localeEpoch.value) return
+
+      assistant.answer = answer
+      assistant.text = answer.answer
+      question.text = answer.displayedUserMessage || question.text
+    } catch {
+      // 重放失败不升级为消息级错误：这条回答此前已经成功过一次，界面上
+      // 保留（可能是上一语言的）已完成结果，好过让用户以为回答丢了。
+    } finally {
+      if (controllers.get(assistant.localId) === controller) controllers.delete(assistant.localId)
+    }
+  }
+
+  /**
+   * 语言切换的统一入口：递增 epoch（让所有仍在途的旧语言响应在写入前被
+   * 判定为过期而丢弃）、续接/重放当前会话里仍处于 'live' 的轮次、再并行
+   * 重新加载"当前路由已经在用"的会话列表和会话详情。
+   *
+   * 只清"只与展示语言有关的派生缓存"（消息文本、会话标题、降级状态），
+   * 不清草稿、`sessionId`、原始发送状态——由 `useChatComposer` 之类的
+   * 输入区自己持有草稿，本 Store 从不touch 它；`sessionId` 全程不变。
+   */
+  async function reloadForLocale(): Promise<void> {
+    localeEpoch.value += 1
+
+    const liveAssistants = messages.value.filter(
+      (message) => message.role === 'assistant' && message.origin === 'live',
+    )
+    const hasLiveRounds = liveAssistants.length > 0
+
+    const tasks: Promise<unknown>[] = liveAssistants.map((assistant) => {
+      const questionIndex = messages.value.findIndex((m) => m.localId === assistant.localId) - 1
+      const question = messages.value[questionIndex]
+      if (!question) return Promise.resolve()
+
+      if (assistant.status === 'pending' || assistant.status === 'streaming') {
+        return continueRoundInNewLocale(assistant, question)
+      }
+      if (assistant.status === 'complete') {
+        return replayRoundInNewLocale(assistant, question)
+      }
+      return Promise.resolve()
+    })
+
+    // 当前会话里全部是历史消息（没有本次会话产生的 live 轮次）时，直接整页
+    // 重新拉一次即可拿到新语言的标题/正文；有 live 轮次时，上面的续接/重放
+    // 已经在处理这些消息，不能再整页覆盖，否则会把它们和刚拉回来的历史
+    // 版本重复叠加。
+    if (sessionId.value && !hasLiveRounds) {
+      tasks.push(fetchAndApplyConversationPage(sessionId.value, currentPageCursor.value, false))
+    }
+    if (conversationsLoaded.value) tasks.push(loadConversations())
+
+    await Promise.all(tasks)
+  }
+
+  const localeStore = useLocaleStore()
+  watch(
+    () => localeStore.locale,
+    () => {
+      void reloadForLocale()
+    },
+  )
+
   return {
     messages,
     sessionId,
@@ -350,6 +625,12 @@ export const useChatStore = defineStore('chat', () => {
     assistantRounds,
     currentAnswer,
     conversations,
+    nextMessageCursor,
+    hasMoreMessages,
+    localizationDegraded,
+    localizationDegradedReason,
+    conversationsLocalizationDegraded,
+    conversationsLocalizationDegradedReason,
     submitMessage,
     retryMessage,
     cancelMessage,
@@ -357,8 +638,11 @@ export const useChatStore = defineStore('chat', () => {
     selectRound,
     loadConversations,
     loadConversation,
+    loadMoreMessages,
+    retryLocalization,
     removeConversation,
     clearConversations,
+    reloadForLocale,
     reset,
   }
 })

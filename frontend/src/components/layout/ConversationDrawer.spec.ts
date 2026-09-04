@@ -173,3 +173,71 @@ describe('ConversationDrawer', () => {
     expect(wrapper.get('.conversation-drawer__time').text()).toContain('Aug')
   })
 })
+
+describe('ConversationDrawer · 历史重试入口（Task 10B 缺口收尾）', () => {
+  it('localizationDegraded 为 false 时不显示重试翻译入口', async () => {
+    const store = useChatStore()
+    await store.submitMessage('你好')
+    await store.loadConversations()
+
+    const wrapper = mount(ConversationDrawer, { props: { open: true } })
+
+    expect(wrapper.find('[data-testid="retry-translation"]').exists()).toBe(false)
+  })
+
+  it('会话列表降级时显示重试翻译入口，点击后重新拉取，成功后隐藏', async () => {
+    const store = useChatStore()
+    let call = 0
+    setChatTransport(async (request) => {
+      if (request.path.startsWith('/api/conversations') && request.method === 'GET') {
+        call += 1
+        return Response.json({
+          items: [{ id: 'c1', title: call === 1 ? '[占位]' : '真实标题', created_at: '2026-08-01T00:00:00Z', updated_at: '2026-08-01T00:00:00Z' }],
+          limit: 20,
+          offset: 0,
+          localization_degraded: call === 1,
+          localization_degraded_reason: call === 1 ? '翻译预算已用尽' : null,
+        })
+      }
+      throw new Error(`未预期的请求：${request.path}`)
+    })
+
+    await store.loadConversations()
+    expect(store.conversationsLocalizationDegraded).toBe(true)
+
+    const wrapper = mount(ConversationDrawer, { props: { open: true } })
+    expect(wrapper.find('[data-testid="retry-translation"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('部分会话标题翻译未完成')
+
+    await wrapper.get('[data-testid="retry-translation"]').trigger('click')
+    await flushPromises()
+
+    expect(call).toBe(2)
+    expect(store.conversationsLocalizationDegraded).toBe(false)
+    expect(wrapper.find('[data-testid="retry-translation"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('真实标题')
+  })
+
+  it('英文模式下重试翻译入口文案与提示均为英文', async () => {
+    i18n.global.locale.value = 'en-US'
+    const store = useChatStore()
+    setChatTransport(async () =>
+      Response.json({
+        items: [],
+        limit: 20,
+        offset: 0,
+        localization_degraded: true,
+        localization_degraded_reason: 'Translation budget exhausted',
+      }),
+    )
+    await store.loadConversations()
+
+    const wrapper = mount(ConversationDrawer, { props: { open: true } })
+
+    expect(wrapper.get('[data-testid="retry-translation"]').text()).toBe('Retry translation')
+    expect(wrapper.get('[data-testid="retry-translation"]').attributes('aria-label')).toBe(
+      'Retry translating conversation titles',
+    )
+    expect(wrapper.text()).toContain('have not finished translating')
+  })
+})

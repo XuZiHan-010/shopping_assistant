@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { setCredentialProvider } from './credentials'
+import { setCredentialProvider, setLocaleProvider } from './credentials'
 import { createFetchTransport } from './transport'
 
 const BASE_URL = 'http://127.0.0.1:8000'
@@ -27,6 +27,7 @@ describe('createFetchTransport', () => {
     vi.unstubAllEnvs()
     vi.unstubAllGlobals()
     setCredentialProvider(undefined)
+    setLocaleProvider(undefined)
   })
 
   it('GET 不带 Content-Type，POST 带且 body 已序列化', async () => {
@@ -127,6 +128,52 @@ describe('createFetchTransport', () => {
     await expect(
       transport({ path: '/api/conversations', method: 'GET' }, new AbortController().signal),
     ).rejects.toMatchObject({ code: 'NETWORK' })
+  })
+
+  it('请求带上当前注册的 Accept-Language（Task 11 Step 1）', async () => {
+    setLocaleProvider(() => 'en-US')
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ items: [] }))
+    vi.stubGlobal('fetch', fetchMock)
+    const transport = createFetchTransport()
+
+    await transport({ path: '/api/conversations', method: 'GET' }, new AbortController().signal)
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ headers: expect.objectContaining({ 'Accept-Language': 'en-US' }) }),
+    )
+  })
+
+  it('流式（SSE）请求同样带上 Accept-Language，不是只有非流式路径才带', async () => {
+    setLocaleProvider(() => 'en-US')
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(new ReadableStream(), { status: 200, headers: { 'content-type': 'text/event-stream' } }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    const transport = createFetchTransport()
+
+    await transport(
+      { path: '/api/chat', method: 'POST', body: {}, accept: 'text/event-stream' },
+      new AbortController().signal,
+    )
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ headers: expect.objectContaining({ 'Accept-Language': 'en-US' }) }),
+    )
+  })
+
+  it('未注册 locale provider 时退回中文', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ items: [] }))
+    vi.stubGlobal('fetch', fetchMock)
+    const transport = createFetchTransport()
+
+    await transport({ path: '/api/conversations', method: 'GET' }, new AbortController().signal)
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ headers: expect.objectContaining({ 'Accept-Language': 'zh-CN' }) }),
+    )
   })
 
   it('req.auth 缺省为 merchant，缺凭证时在发出请求前就拒绝', async () => {
