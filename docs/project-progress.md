@@ -2,7 +2,59 @@
 
 > 本文件只保留当前可继续开发的事实快照，不追加每日流水账。
 
-**最后更新：2026-08-26**
+**最后更新：2026-09-05**
+
+> **2026-09-05 全栈中英文显示与 AI 内容本地化（`feature/bilingual-localization` 分支，14 个 Task 全部完成）**：
+> 按 `plans/2026-08-31-full-stack-bilingual-localization.md` 用 subagent-driven-development 逐 Task
+> 实现+独立审查+发现问题修复再复审，14 个 Task 全部通过审查收尾（Task 1-8 后端本地化基础设施、
+> Task 9 前端 i18n、Task 10A-10D 四个前端页面迁移、Task 11 前端 API/Store 层联动、Task 12 契约
+> 再生成、Task 13 端到端测试、Task 14 全量验证+真实模型付费验收）。核心能力：`SupportedLocale`
+> (`zh-CN`/`en-US`) 驱动响应显示语言，`SourceLanguage`（多出 `mixed`/`und`）驱动内容源语言探测；
+> 确定性词典（`app/localization/catalog.py`，零 LLM）覆盖闭集词汇，自由文本经受费用防护的
+> `LocalizationService.localize_many()`（源语言命中/受保护 token/词典命中/人工译文命中/机器缓存
+> 命中/LLM 批量调用的优先级级联，超预算按条目降级为目标语言占位、任何情况下不回落源语言）；
+> 机器译文缓存与资源级人工译文均按 `merchant_id`/`GLOBAL` 强制隔离；前端 `vue-i18n` + 双语消息
+> 目录 + `LanguageSwitcher.vue` + `useLocaleStore()`（localStorage 持久化）覆盖三个既有路由；
+> 历史会话按游标分页翻译、降级页可同游标重试；知识文档源版本与人工译文版本独立编辑、按源版本
+> 隔离过期；CSV 导出语言由创建时签名固化。
+>
+> **真实模型付费验收（用户已按 R3 明确同意）**：Docker/PostgreSQL 全程不可用（与本文件历次记录
+> 一致），绕开 API/DB 层，用真实 `wiki_seed.json`/`METRIC_SEED` 构造内存版检索/指标目录，`MerchantQaGraph`
+> 与 `LocalizationService` 均接真实 `DeepSeekLlmClient`（`deepseek-v4-flash`）。14 个验收场景（6 种
+> Chat 模式各 1 条英语问题、2 条中文问/英语答、2 条历史批量翻译、1 条跨语言知识召回、1 条翻译失败
+> 按条目降级、1 条英文 CSV 导出零调用、1 条英文范围内提问零 LLM）**实际消耗真实调用 26 次（20 次
+> AGENT + 6 次 LOCALIZATION）、31,583 token**，远低于已披露的上限（本地化 ≤48、Agent 单请求 ≤10）。
+> 12/14 场景干净通过；3 个场景（RULE/跨语言知识召回相关）因知识正文本身未注册人工英译，按既有设计
+> 正确保留中文原文（非缺陷）；**真实模型跑出 1 个此前任何 Fake 测试都无法触达的真实缺陷**：
+> `AnswerService.fallback_draft()`（质量循环耗尽重试后的确定性兜底路径）此前完全硬编码中文、
+> 无 `locale` 参数，英语请求校验连续失败两次后最终 `answer` 会渲染成中文，违反本项目"英语模式
+> 零中文残留"的完成定义。已当场立项修复：给 `fallback_draft()`/`_fallback()` 补齐 `locale` 参数
+> （沿用同文件既有的 `dict[SupportedLocale, str]` 模板模式），并顺带发现修复：模板插值用的
+> `metric.display_name`/`.unit` 本身是闭集中文常量，不经 `_catalog_text()` 转换会在英文句子里
+> 露出中文指标名。修复本身零真实 LLM 调用（`FakeLlmClient`），独立审查发现修复引入一处英文冠词
+> 重复的语法小问题（"The the business metric..."，不违反零中文要求但不够地道），已按全部 8 处
+> 用法逐一核对修复。另发现 2 个纯格式问题（知识来源标签硬编码中文全角冒号"："、`quality_loop.py`
+> 多条校验意见用中文全角"；"拼接——后者是 Task 6 复核时已登记的既有已知项，本轮只是首次真实复现）。
+>
+> **明确尚未做、需要后续单独处理**：① **本效果新增的翻译/本地化专属不变量从未在真实 PostgreSQL
+> 上跑过**（源正文不改、历史语言回填、人工译文过期判定、跨商家缓存隔离反例、游标分页重试——均只
+> 有 Fake 仓储单测和真实模型验收覆盖，本机 Docker 全程不可用，是本效果之外、贯穿本项目全程的既有
+> 环境约束）；② `LocalizationRepository.purge_expired_machine()`（30 天缓存过期清理）没有任何
+> Cron/定时任务调用（不是正确性问题——缓存键按内容哈希，过期未清理的行只是闲置存储不会被误命中——
+> 但"过期清理生效"在运维意义上目前是假的），`docs/deployment.md`"双语本地化"节给出三个方案选项，
+> 用户/运维需选一个；③ `npm run format:check` 在 20 个文件上有真实 Prettier 格式漂移（纯格式，非
+> 逻辑），系 Task 9-13 期间累积、此前没有任何一个 Task 的门禁跑过 `format:check`；④ `npm run typecheck`
+> 有 7 个错误，6 个是 Task 11 起已知的既有基线（`mountX` 测试辅助函数类型），第 7 个是 Task 12
+> 自己引入却未被 Task 12 自身发现的回归（`adapters/chat.spec.ts` 的 `enOrNull()` 返回类型），
+> 均为纯测试文件类型错误、零生产运行时影响（`vue-tsc -b` 的构建路径不含 spec 文件），已定位好
+> 一行修复方案但按范围未执行；⑤ `AGENTS.md` §7.2/§7.5/§8.8、`docs/deployment.md`、`.gitignore`
+> （移除 `plans/` 整目录忽略规则）已同步更新；本文件的这条快照是唯一的最终收口记录。
+>
+> 全过程一次工作区污染事故（一个已跑偏的实现代理在自己会话内错误执行了 stash 操作，把此前已经
+> 安全 stash 隔离、未采纳的另一次跑偏尝试内容重新带回工作区，混入本应只改 3 个文档文件的改动里）
+> 已被发现、可逆地 stash 保留、清理干净后重新派发，未造成任何代码/文档丢失，过程详见 SDD 账本
+> `.superpowers/sdd/2026-08-31-full-stack-bilingual-localization/progress.md`。全部提交仍停留在
+> `feature/bilingual-localization` 分支本地；是否合并/推送/发布仍需用户另行明确许可（R2）。
 
 > **2026-08-26 零 LLM 问题范围前置闸门**：新增 `openspec/changes/add-question-prefilter-gate`
 > 完整规划与实现——对外部署下，此前每个问题（含明显无关提问，如「CNN 和 RNN 的区别」）都会
@@ -591,6 +643,10 @@ savepoint 隔离，统计查询失败只会回落静态推荐，不会污染主�
 
 ## 风险与约束
 
+- **双语本地化（`feature/bilingual-localization` 分支）的翻译/隔离专属不变量从未在真实 PostgreSQL
+  上验证**：源正文不改、历史语言回填、人工译文过期判定、跨商家缓存隔离反例、游标分页重试等均只有
+  Fake 仓储单测覆盖；`LocalizationRepository.purge_expired_machine()`（30 天缓存过期清理）尚无
+  Cron 调用；详见本文件顶部 2026-09-05 条目与 `docs/deployment.md`"双语本地化"节。
 - **主工作副本当前有大量未提交改动**（2026-08-24 发现）：`git status` 约 60 个文件为
   `M`/`??`，涵盖 D1/D3 能力与全新的 Chat BI 衡量看板，均只存在于工作树里，不在任何提交或
   远端分支上。查看这些能力「是否已完成」时不能只看本文件的文字描述，要先跑 `git status`/
