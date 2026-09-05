@@ -517,6 +517,7 @@ merchant_assistant/
 | --- | --- | --- |
 | `frontend/src/views/AssistantView.vue` | P0 | 商家助手三栏主页面 |
 | `frontend/src/components/layout/MerchantSwitcher.vue` | P0 | 演示商家切换器，MVP 的唯一身份入口 |
+| `frontend/src/components/layout/LanguageSwitcher.vue` | P1 已实现 | 中/英语言切换器；写入 `useLocaleStore()` 并持久化到 localStorage，刷新后保留选择 |
 | `frontend/src/views/KnowledgeBaseView.vue` | P1 已实现 | 知识库维护后台；令牌仅内存持有，通过 `X-Admin-Token` 进入 |
 | `frontend/src/views/LoginView.vue` | **P2** | 真实用户体系上线后才创建。**MVP 和 P1 都不做登录页**，不要提前建这个文件 |
 
@@ -547,6 +548,12 @@ merchant_assistant/
 | `frontend/src/stores/chat.ts` | 会话、消息、当前轮次和加载状态 |
 | `frontend/src/stores/auth.ts` | 当前演示商家、Token 与管理员权限；P0 不含登录态 |
 | `frontend/src/stores/knowledge.ts` | 知识库目录和编辑状态 |
+| `frontend/src/stores/locale.ts` | `useLocaleStore()`：当前显示语言，localStorage 持久化与自愈式失败兜底 |
+| `frontend/src/i18n/index.ts` | 创建 `vue-i18n` 实例；`SupportedLocale`/`DEFAULT_LOCALE`/`SUPPORTED_LOCALES` 字面量与后端 `app/localization/locales.py` 的 `SupportedLocale` 严格一致，作为 `Accept-Language` 派生值直发后端 |
+| `frontend/src/i18n/keys.ts` | 消息目录类型形状，由 `locales/zh-CN.ts`（事实源）派生；`t()` 调用禁止 `t(key as any)` 绕过 key 校验 |
+| `frontend/src/i18n/locales/zh-CN.ts`、`en-US.ts` | 双语消息目录；`en-US.ts` 用 `satisfies MessageSchema` 校验 key 集合与中文完全一致 |
+| `frontend/src/utils/errorCopy.ts` | `AppErrorCode` → 展示文案的穷尽映射，随 `useLocaleStore()` 当前语言渲染；`surface`/`action` 是行为分支枚举不进消息目录 |
+| `frontend/src/utils/localizedFormat.ts` | 日期、数字、货币的共享格式化工具，显式接收 `locale`，不内置默认语言 |
 | `frontend/src/api/client.ts` | API 基础地址的唯一读取点 [P0/F0]；HTTP 客户端、鉴权和统一错误处理 [F3]。**不提供同源 `/api` 回退**——静态镜像不代理 `/api`，配置缺失必须报错而非静默 404 |
 | `frontend/scripts/check-generated.mjs` | `generated.ts` 漂移检查：重新生成到临时文件并与提交版本比对。构建期不跑 codegen，全靠它兜住脱节 |
 | `frontend/scripts/check-first-paint.mjs` | 生产构建的首屏静态依赖门禁：阻止 ECharts 被预加载或经入口静态 import 链带入首屏 |
@@ -683,6 +690,23 @@ ORM 模型与 API Schema 分开，禁止直接把 ORM 对象作为外部接口�
 
 正式部署后，运行时可编辑知识应存入 PostgreSQL 或对象存储，不依赖 Railway 临时文件系统。
 
+### 8.8 本地化
+
+| [现有] 路径 | 职责 |
+| --- | --- |
+| `backend/app/localization/locales.py` | `SupportedLocale`（响应显示语言，只允许 `zh-CN`/`en-US`）与 `SourceLanguage`（内容源语言探测，多出 `mixed`/`und`）；两者语义不同，不得混用 |
+| `backend/app/localization/catalog.py` | 确定性中英词典：零 LLM 调用，只覆盖状态码、指标/维度/明细列展示名、单位、业务域名称、质量循环固定文案等闭集词汇；自由文本一律走 `LocalizationService` |
+| `backend/app/localization/payloads.py` | 会话列表/详情响应的按页本地化 payload 组装；只翻译当前页内容，不重新实现级联判定逻辑本身 |
+| `backend/app/localization/error_messages.py` | 稳定错误 `code` → 双语 `message` 的唯一渲染点；处理器不得为英语请求直传中文原句 |
+| `backend/app/services/localization_service.py` | 受费用保护的批量本地化服务 `LocalizationService.localize_many()`：按源语言等于目标/仅含受保护 token/词典命中/人工译文命中/机器缓存命中/LLM 批量调用的优先级级联；超预算按条目降级为目标语言占位，任何情况下不回落源语言 |
+| `backend/app/repositories/localization.py` | 机器译文缓存与资源级人工译文的纯数据访问，不调用 LLM；按 `merchant_id`/`GLOBAL` 强制隔离，不提供可绕过作用域选择的便利方法 |
+| `backend/app/models/localization.py` | 机器翻译缓存表与资源级人工译文表 ORM；两张表按 `scope_kind` + `merchant_id` 的 CHECK 约束和唯一索引隔离 |
+| `backend/app/prompts/localization.py` | 批量翻译系统提示词：JSON-only，抵御源文本（不可信用户/商家内容）中的注入指令；`LOCALIZATION_PROMPT_VERSION` 是机器缓存键的一部分 |
+
+`backend/app/api/dependencies.py` 新增 `get_request_locale()`：从请求 `Accept-Language` 头解析可信 `SupportedLocale`，供路由和 Service 层按显示语言渲染响应；与该文件里既有的商家身份、预算依赖注入职责并列，不单独拆表。
+
+本地化调用与主 Agent 调用共用费用防护基础设施但预算独立：`Settings.localization_max_calls_per_request`/`localization_max_tokens_per_request`/`localization_max_batch_items`/`localization_max_batch_chars` 见 `backend/app/core/config.py`，不占用 `llm_max_calls_per_request` 等主 Agent 预算，`llm_usage.purpose` 用 `AGENT`/`LOCALIZATION` 区分两条费用曲线。
+
 ---
 
 ## 九、数据库职责
@@ -717,6 +741,8 @@ ORM 模型与 API Schema 分开，禁止直接把 ORM 对象作为外部接口�
 [P0] orders / order_items / refunds / products / support_tickets
 [P1，已落地] merchant_memories
 [P1] chatbi_qa_daily   # 日 × 商家 × 问题分类的可重算 Chat BI 计数汇总
+[P1，已落地] machine_translation_cache  # 机器译文缓存，按 merchant_id/GLOBAL 隔离，30 天过期
+[P1，已落地] resource_localizations     # 资源级人工译文，按资源 ID/字段/源版本隔离
 [P1] attachments
 [P2] users              # 真实用户体系上线时才创建
 ```
