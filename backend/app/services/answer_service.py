@@ -147,6 +147,21 @@ _CN_DURATION_CAPTURE = re.compile(r"(?:最近|过去)\s*(\d+)\s*天")
 _DATE_RANGE_ISSUE = "回答陈述的日期区间超出了本次查询的实际范围"
 
 
+def _catalog_text(message: str, locale: SupportedLocale) -> str:
+    """从 `app.localization.catalog` 查一句已登记的固定中文整句的目标语言译文。
+
+    `zh-CN` 原样返回；`en-US` 查不到时兜底原句而不是抛异常，宁可让极端情况
+    下混入一句未翻译的中文，也不能让本地化本身变成新的故障源。这是
+    `_localized_validation_message()`（`_validate()` 的 issue 文案）与
+    `_fallback()`（确定性兜底草稿里不带插值的固定短语，如两条建议的
+    `title`/`action`）共用的同一条查表逻辑。
+    """
+
+    if locale is SupportedLocale.ZH_CN:
+        return message
+    return localize_catalog_value(message, locale) or message
+
+
 def _localized_validation_message(message: str, locale: SupportedLocale) -> str:
     """把 `_validate()` 产出的固定中文 issue 文案渲染成目标语言。
 
@@ -158,9 +173,97 @@ def _localized_validation_message(message: str, locale: SupportedLocale) -> str:
     未翻译的中文，也不能让本地校验本身变成新的故障源。
     """
 
-    if locale is SupportedLocale.ZH_CN:
-        return message
-    return localize_catalog_value(message, locale) or message
+    return _catalog_text(message, locale)
+
+
+# ---------------------------------------------------------------------------
+# Task 14 Step 7 finding A：`_fallback()` 产出的确定性兜底草稿过去完全不接受
+# `locale`，任何语言的请求耗尽质量循环重试后都会拿到硬编码中文——这是本次
+# 修复的核心缺口。这些模板都带插值（行数、指标名、数值……），不是固定整句，
+# 因此不进 `catalog.py`（那张表只做精确整句字典查找）；改用与
+# `quality_loop.py` 的 `_PASS_NOTE_TEMPLATES`/`_REJECT_NOTE_TEMPLATES` 完全
+# 相同的 `dict[SupportedLocale, str]` + `.format()` 模式，不发明新写法。
+# 不带插值的固定短语（两条建议各自的 `title`/`action`）则复用
+# `_catalog_text()`，登记进 `catalog.py` 的
+# `_ANSWER_SERVICE_FALLBACK_MESSAGES`，与 `_ANSWER_VALIDATION_MESSAGES`
+# 同一来源分组风格。
+# ---------------------------------------------------------------------------
+
+_DEFAULT_METRIC_LABEL: Final[dict[SupportedLocale, str]] = {
+    SupportedLocale.ZH_CN: "经营指标",
+    SupportedLocale.EN_US: "the business metric",
+}
+_FALLBACK_NO_COMPARISON_VALUE_TEMPLATES: Final[dict[SupportedLocale, str]] = {
+    SupportedLocale.ZH_CN: "本次查询未取得可汇总的{metric_label}数值，无法进行对比。",
+    SupportedLocale.EN_US: (
+        "This query did not return a summable value for {metric_label}, so no "
+        "comparison can be made."
+    ),
+}
+_FALLBACK_COMPARISON_WITH_RATIO_TEMPLATES: Final[dict[SupportedLocale, str]] = {
+    SupportedLocale.ZH_CN: (
+        "本次查询的{metric_label}为 {current}{unit}，对比周期为 {baseline}{unit}，"
+        "变化 {ratio}%。"
+    ),
+    SupportedLocale.EN_US: (
+        "The {metric_label} for this query is {current}{unit}, versus "
+        "{baseline}{unit} for the comparison period — a change of {ratio}%."
+    ),
+}
+_FALLBACK_COMPARISON_NO_RATIO_TEMPLATES: Final[dict[SupportedLocale, str]] = {
+    SupportedLocale.ZH_CN: (
+        "本次查询的{metric_label}为 {current}{unit}；对比基期无数据或为零，"
+        "无法计算变化率。"
+    ),
+    SupportedLocale.EN_US: (
+        "The {metric_label} for this query is {current}{unit}; the comparison "
+        "baseline has no data or is zero, so the change rate cannot be "
+        "calculated."
+    ),
+}
+_FALLBACK_TRUNCATED_TEMPLATES: Final[dict[SupportedLocale, str]] = {
+    SupportedLocale.ZH_CN: (
+        "本次仅展示部分结果，共预览 {total_rows} 行{metric_label}数据，"
+        "不对预览行做合计。"
+    ),
+    SupportedLocale.EN_US: (
+        "This is a partial result: {total_rows} preview row(s) of "
+        "{metric_label} data. The previewed rows are not totalled."
+    ),
+}
+_FALLBACK_NON_ADDITIVE_TEMPLATES: Final[dict[SupportedLocale, str]] = {
+    SupportedLocale.ZH_CN: "本次查询返回 {total_rows} 行{metric_label}数据；该指标不做跨日合计。",
+    SupportedLocale.EN_US: (
+        "This query returned {total_rows} row(s) of {metric_label} data; this "
+        "metric is not totalled across days."
+    ),
+}
+_FALLBACK_SUMMARY_TEMPLATES: Final[dict[SupportedLocale, str]] = {
+    SupportedLocale.ZH_CN: (
+        "本次查询的{metric_label}合计 {total}{unit}；最新日期 {latest_label} 为 "
+        "{latest_value}{unit}；峰值 {peak_value}{unit} 出现在 {peak_label}。"
+    ),
+    SupportedLocale.EN_US: (
+        "The {metric_label} totals {total}{unit} for this query; the latest "
+        "date, {latest_label}, is {latest_value}{unit}; the peak of "
+        "{peak_value}{unit} occurred on {peak_label}."
+    ),
+}
+_FALLBACK_NO_VALUE_TEMPLATES: Final[dict[SupportedLocale, str]] = {
+    SupportedLocale.ZH_CN: "本次查询返回 {total_rows} 行数据，暂未形成可汇总的{metric_label}数值。",
+    SupportedLocale.EN_US: (
+        "This query returned {total_rows} row(s) of data; no summable value "
+        "for {metric_label} is available yet."
+    ),
+}
+_FALLBACK_SINGLE_VALUE_TEMPLATES: Final[dict[SupportedLocale, str]] = {
+    SupportedLocale.ZH_CN: "本次查询的{metric_label}为 {value}{unit}。",
+    SupportedLocale.EN_US: "The {metric_label} for this query is {value}{unit}.",
+}
+_FALLBACK_ROW_COUNT_EVIDENCE_TEMPLATES: Final[dict[SupportedLocale, str]] = {
+    SupportedLocale.ZH_CN: "本次查询返回 {total_rows} 行数据。",
+    SupportedLocale.EN_US: "This query returned {total_rows} row(s) of data.",
+}
 
 
 @dataclass(frozen=True)
@@ -202,7 +305,7 @@ class AnswerService:
         result = await llm.complete(
             system=build_answer_system_prompt(locale),
             user=user,
-            fallback=self._fallback(facts).model_dump_json(),
+            fallback=self._fallback(facts, locale=locale).model_dump_json(),
             budget=budget,
             options=STRUCTURED_CALL_OPTIONS,
         )
@@ -225,56 +328,79 @@ class AnswerService:
     ) -> list[str]:
         return self._validate(draft, facts, locale=locale)
 
-    def fallback_draft(self, facts: AnswerFacts) -> AnswerDraft:
-        return self._fallback(facts)
+    def fallback_draft(
+        self, facts: AnswerFacts, *, locale: SupportedLocale = SupportedLocale.ZH_CN
+    ) -> AnswerDraft:
+        return self._fallback(facts, locale=locale)
 
     def facts_json(self, facts: AnswerFacts) -> str:
         return _facts_json(facts)
 
-    def _fallback(self, facts: AnswerFacts) -> AnswerDraft:
+    def _fallback(
+        self, facts: AnswerFacts, *, locale: SupportedLocale = SupportedLocale.ZH_CN
+    ) -> AnswerDraft:
         metric = facts.metric
         result = facts.query_result
-        metric_label = metric.display_name if metric is not None else "经营指标"
-        unit = metric.unit if metric is not None else ""
+        # `metric.display_name`/`metric.unit` 命中正式指标目录或字段注释时，
+        # 取值是 `catalog.py` 的 `_CONTRACT_METRIC_LABELS`/`_UNIT_LABELS` 已经
+        # 登记过的闭集中文词汇（如「退款金额」「元」）——不查表直接拼进模板，
+        # en-US 请求会在英文句式里嵌一段中文指标名，等于没修。查不到（如
+        # 商家自定义或大模型生成口径）时原样保留，与本文件其余 `_catalog_text`
+        # 调用点一致：宁可残留一个词，也不假装有译文。
+        metric_label = (
+            _catalog_text(metric.display_name, locale)
+            if metric is not None
+            else _DEFAULT_METRIC_LABEL[locale]
+        )
+        unit = _catalog_text(metric.unit, locale) if metric is not None else ""
         summary = self._derive_summary(facts)
         value = _first_metric_value(result, metric.metric_code if metric is not None else None)
         if result.comparison is not None:
-            answer = _comparison_answer(result.comparison, metric_label, unit)
+            answer = _comparison_answer(result.comparison, metric_label, unit, locale)
         elif result.truncated:
-            answer = (
-                f"本次仅展示部分结果，共预览 {result.total_rows} 行{metric_label}数据，"
-                "不对预览行做合计。"
+            answer = _FALLBACK_TRUNCATED_TEMPLATES[locale].format(
+                total_rows=result.total_rows, metric_label=metric_label
             )
         elif result.non_additive and len(result.rows) > 1:
-            answer = f"本次查询返回 {result.total_rows} 行{metric_label}数据；该指标不做跨日合计。"
+            answer = _FALLBACK_NON_ADDITIVE_TEMPLATES[locale].format(
+                total_rows=result.total_rows, metric_label=metric_label
+            )
         elif (
             summary.total is not None
             and summary.latest_label is not None
             and summary.peak_label is not None
         ):
-            answer = (
-                f"本次查询的{metric_label}合计 {summary.total}{unit}；"
-                f"最新日期 {summary.latest_label} 为 {summary.latest_value}{unit}；"
-                f"峰值 {summary.peak_value}{unit} 出现在 {summary.peak_label}。"
+            answer = _FALLBACK_SUMMARY_TEMPLATES[locale].format(
+                metric_label=metric_label,
+                total=summary.total,
+                unit=unit,
+                latest_label=summary.latest_label,
+                latest_value=summary.latest_value,
+                peak_value=summary.peak_value,
+                peak_label=summary.peak_label,
             )
         elif value is None:
-            answer = (
-                f"本次查询返回 {result.total_rows} 行数据，暂未形成可汇总的{metric_label}数值。"
+            answer = _FALLBACK_NO_VALUE_TEMPLATES[locale].format(
+                total_rows=result.total_rows, metric_label=metric_label
             )
         else:
-            answer = f"本次查询的{metric_label}为 {value}{unit}。"
+            answer = _FALLBACK_SINGLE_VALUE_TEMPLATES[locale].format(
+                metric_label=metric_label, value=value, unit=unit
+            )
         return AnswerDraft(
             answer=answer,
             recommendations=[
                 Recommendation(
-                    title="核对查询范围",
-                    evidence=f"本次查询返回 {result.total_rows} 行数据。",
-                    action="确认日期范围和筛选条件是否覆盖要分析的业务。",
+                    title=_catalog_text("核对查询范围", locale),
+                    evidence=_FALLBACK_ROW_COUNT_EVIDENCE_TEMPLATES[locale].format(
+                        total_rows=result.total_rows
+                    ),
+                    action=_catalog_text("确认日期范围和筛选条件是否覆盖要分析的业务。", locale),
                 ),
                 Recommendation(
-                    title="持续观察指标",
+                    title=_catalog_text("持续观察指标", locale),
                     evidence=answer,
-                    action="结合后续周期数据判断变化是否持续。",
+                    action=_catalog_text("结合后续周期数据判断变化是否持续。", locale),
                 ),
             ],
         )
@@ -362,19 +488,23 @@ class AnswerService:
         )
 
 
-def _comparison_answer(comparison: ComparisonResult, metric_label: str, unit: str) -> str:
+def _comparison_answer(
+    comparison: ComparisonResult, metric_label: str, unit: str, locale: SupportedLocale
+) -> str:
     """D3 裁定：兜底文案必须如实说明环比/同比，基期算不出比例时不得省略说明（R7）。"""
 
     if comparison.current_value is None:
-        return f"本次查询未取得可汇总的{metric_label}数值，无法进行对比。"
+        return _FALLBACK_NO_COMPARISON_VALUE_TEMPLATES[locale].format(metric_label=metric_label)
     if comparison.change_ratio is not None:
-        return (
-            f"本次查询的{metric_label}为 {comparison.current_value}{unit}，"
-            f"对比周期为 {comparison.baseline_value}{unit}，变化 {comparison.change_ratio}%。"
+        return _FALLBACK_COMPARISON_WITH_RATIO_TEMPLATES[locale].format(
+            metric_label=metric_label,
+            current=comparison.current_value,
+            unit=unit,
+            baseline=comparison.baseline_value,
+            ratio=comparison.change_ratio,
         )
-    return (
-        f"本次查询的{metric_label}为 {comparison.current_value}{unit}；"
-        "对比基期无数据或为零，无法计算变化率。"
+    return _FALLBACK_COMPARISON_NO_RATIO_TEMPLATES[locale].format(
+        metric_label=metric_label, current=comparison.current_value, unit=unit
     )
 
 

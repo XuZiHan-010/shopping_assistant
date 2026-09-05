@@ -310,6 +310,28 @@ _ANSWER_VALIDATION_MESSAGES: dict[str, str] = {
 }
 
 # ---------------------------------------------------------------------------
+# 来源：backend/app/services/answer_service.py（AnswerService._fallback()）——
+# 确定性兜底草稿里两条 Recommendation 各自的 title/action，不带插值的固定
+# 整句，因此登记在这里；带插值的 answer 正文模板本身留在 answer_service.py
+# 内以 `dict[SupportedLocale, str]` + `.format()` 维护，与 `quality_loop.py`
+# 的 `_PASS_NOTE_TEMPLATES`/`_REJECT_NOTE_TEMPLATES` 同一模式，不进本表
+# （Task 14 Step 7 finding A）。
+# ---------------------------------------------------------------------------
+
+_ANSWER_SERVICE_FALLBACK_MESSAGES: dict[str, str] = {
+    "核对查询范围": "Verify the query scope",
+    "确认日期范围和筛选条件是否覆盖要分析的业务。": (
+        "Confirm that the date range and filters cover the business you want "
+        "to analyze."
+    ),
+    "持续观察指标": "Keep monitoring the metric",
+    "结合后续周期数据判断变化是否持续。": (
+        "Combine with data from subsequent periods to determine whether the "
+        "change persists."
+    ),
+}
+
+# ---------------------------------------------------------------------------
 # 来源：backend/app/knowledge/path_policy.py（BUSINESS_SECTIONS）与
 # backend/app/services/knowledge_admin_service.py（虚拟目录树固定节点名，
 # Task 8 Step 4 "树节点只本地化 name"）。这是闭集的固定导航标签,不是用户
@@ -567,6 +589,7 @@ _TRANSLATIONS: dict[str, str] = _merge_translations(
     _REVIEW_SERVICE_MESSAGES,
     _GRAPH_DEGRADE_REASON_MESSAGES,
     _ANSWER_VALIDATION_MESSAGES,
+    _ANSWER_SERVICE_FALLBACK_MESSAGES,
     _KNOWLEDGE_TREE_LABELS,
     _ANALYTICS_REPOSITORY_LABELS,
     _DAILY_REPORT_MESSAGES,

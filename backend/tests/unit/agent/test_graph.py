@@ -152,6 +152,45 @@ async def test_graph_rule_answer_uses_knowledge_content_and_source() -> None:
     assert "商品上架前必须完成资质审核" in result.response.answer
     assert "rules/listing.md" in result.response.answer
     assert result.response.analysis_sources == [AnalysisSource.KNOWLEDGE]
+    # Finding B 回归（反方向）：中文来源标签后面必须仍是全角冒号，不能被
+    # Finding B 的修复误伤成英文冒号。
+    assert "来源：rules/listing.md" in result.response.answer
+
+
+@pytest.mark.asyncio
+async def test_graph_rule_answer_uses_ascii_colon_for_source_label_in_english() -> None:
+    """Task 14 Step 7 finding B：`_knowledge_answer()` 过去把 `来源`/`Source`
+    标签正确本地化了，但标签后面的分隔符硬编码成中文全角冒号「：」，不随
+    `locale` 切换——en-US 请求下会得到 "Source：rules/listing.md" 这种中英
+    混杂的分隔符。这里断言 en-US 请求得到的是 ASCII "Source: "，且不出现
+    全角冒号。"""
+
+    llm = FakeLlmClient(
+        responses=[
+            json.dumps(
+                {
+                    "answer_mode": "RULE",
+                    "category": "PLATFORM_RULE",
+                    "intent_keywords": ["listing"],
+                }
+            ),
+            rule_response(),
+        ]
+    )
+    graph = MerchantQaGraph(
+        retrieval=KnowledgeRetrieval(
+            K([D("rules/listing.md", "Products must pass a qualification review before listing.")])
+        ),
+        intent_service_llm=llm,
+        catalog=MetricCatalog(M(), llm),
+    )
+
+    result = await graph.run(
+        "What are the rules for listing a product?", uuid4(), locale=SupportedLocale.EN_US
+    )
+
+    assert "Source: rules/listing.md" in result.response.answer
+    assert "：" not in result.response.answer
 
 
 @pytest.mark.asyncio
@@ -584,3 +623,28 @@ async def test_english_locale_localizes_a_real_answer_validation_failure() -> No
     assert "internal identifier" in notes_text
     offending = [note for note in result.response.quality_notes if _HAN.search(note)]
     assert offending == [], f"quality_notes 混入了汉字：{offending!r}"
+
+    # Task 14 Step 7 finding A 的真实接线回归：`quality_max_attempts=1` 让这
+    # 唯一一次起草因校验失败而耗尽重试，`QualityLoop.run()` 落到
+    # `AnswerService.fallback_draft()` 的确定性兜底草稿——过去这条路径完全
+    # 不接受 `locale`，即使整轮请求是 en-US，最终写入 `response.answer` 和
+    # `response.recommendations` 的仍是硬编码中文。这里直接扫描
+    # `answer`/`recommendations` 这两个由 `AnswerDraft` 填充的字段（而不是
+    # 只看 quality_notes），因为漏本地化的正是它们，只测 quality_notes 之前
+    # 完全捕捉不到这个缺口。
+    #
+    # 刻意不对整份 `response` payload 做无差别扫描：METRIC 模式下
+    # `metric_display_name`/`metric_unit` 等字段来自 `analytics/contract.py`
+    # 的中文口径常量，只在 `chat_service.py` 落库前的 LLM 批量本地化那一层
+    # 才会被翻译（需要真实数据库会话），graph 层单测天然测不到、也不该测——
+    # 那是与本次 finding A/B 无关的既有缺口，不在这次修复范围内。
+    answer_visible = _collect_visible_strings(result.response.answer)
+    recommendations_visible = _collect_visible_strings(
+        [rec.model_dump(mode="json") for rec in result.response.recommendations or []]
+    )
+    offending_answer = [
+        text for text in answer_visible + recommendations_visible if _HAN.search(text)
+    ]
+    assert offending_answer == [], f"确定性兜底草稿混入了汉字：{offending_answer!r}"
+    assert result.response.recommendations, "确定性兜底草稿应仍带两条建议"
+    assert len(result.response.recommendations) == 2

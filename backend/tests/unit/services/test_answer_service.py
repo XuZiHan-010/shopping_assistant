@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from decimal import Decimal
 
@@ -528,6 +529,43 @@ def test_fallback_reports_total_latest_and_peak_for_additive_time_series() -> No
     assert "合计 18" in draft.answer
     assert "最新日期 2026-08-17" in draft.answer
     assert "峰值 15" in draft.answer
+
+
+_HAN = re.compile("[一-鿿]")
+
+
+def test_fallback_draft_renders_english_when_locale_is_en_us() -> None:
+    """Task 14 Step 7 finding A：`fallback_draft()` 过去完全不接受 `locale`
+    参数，任何语言的请求耗尽质量循环重试后都会拿到硬编码中文兜底文案。这里
+    直接对 `AnswerService.fallback_draft(facts, locale=EN_US)` 的产出做断言：
+    `answer` 正文和两条 `Recommendation` 的 `title`/`evidence`/`action` 六个
+    字段都不得残留汉字。"""
+
+    from app.localization.locales import SupportedLocale
+    from app.services.answer_service import AnswerService
+
+    draft = AnswerService().fallback_draft(_trend_facts(), locale=SupportedLocale.EN_US)
+
+    assert not _HAN.search(draft.answer), draft.answer
+    assert "18" in draft.answer
+    assert "2026-08-17" in draft.answer
+    assert "15" in draft.answer
+    for recommendation in draft.recommendations:
+        assert not _HAN.search(recommendation.title), recommendation.title
+        assert not _HAN.search(recommendation.evidence), recommendation.evidence
+        assert not _HAN.search(recommendation.action), recommendation.action
+
+
+def test_fallback_draft_still_renders_chinese_by_default() -> None:
+    """回归防线：新增 `locale` 参数不能悄悄改变既有零参数调用点的默认语言。"""
+
+    from app.services.answer_service import AnswerService
+
+    draft = AnswerService().fallback_draft(_trend_facts())
+
+    assert "合计 18" in draft.answer
+    assert draft.recommendations[0].title == "核对查询范围"
+    assert draft.recommendations[1].title == "持续观察指标"
 
 
 def test_fallback_refuses_to_total_a_non_additive_metric() -> None:

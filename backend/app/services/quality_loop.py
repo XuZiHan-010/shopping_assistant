@@ -85,7 +85,7 @@ class QualityLoop:
         *,
         locale: SupportedLocale = SupportedLocale.ZH_CN,
     ) -> QualityOutcome:
-        fallback = self._answers.fallback_draft(facts)
+        fallback = self._answers.fallback_draft(facts, locale=locale)
         notes: list[str] = []
         issues: list[str] = []
         previous = ""

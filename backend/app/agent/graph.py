@@ -1179,8 +1179,13 @@ def _knowledge_answer(detail: KnowledgeResult | None, locale: SupportedLocale) -
 
     hits = detail.hits
     source_label = _text("来源", "Source", locale)
+    # Task 14 Step 7 finding B：标签本身（"来源"/"Source"）已经按 locale 选取，
+    # 但分隔符过去硬编码成中文全角冒号「：」，en-US 请求会得到
+    # "Source：xxx" 这种中英混杂的分隔符。分隔符与标签同源、同一 `_text()`
+    # 选取方式，不额外发明新写法。
+    source_separator = _text("：", ": ", locale)
     excerpts = [
-        f"- {hit.content.strip()}\n  {source_label}：{hit.source_path}"
+        f"- {hit.content.strip()}\n  {source_label}{source_separator}{hit.source_path}"
         for hit in hits
         if hit.content.strip()
     ]
