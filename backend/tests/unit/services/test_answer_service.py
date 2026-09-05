@@ -568,6 +568,93 @@ def test_fallback_draft_still_renders_chinese_by_default() -> None:
     assert draft.recommendations[1].title == "持续观察指标"
 
 
+def test_fallback_uses_a_single_article_when_metric_is_unresolved_on_summary_branch() -> None:
+    """回归测试（reviewer 2026-09-05 复核发现的 Important 缺口）：
+    `_DEFAULT_METRIC_LABEL[EN_US]` 曾经自带 "the"（"the business metric"），
+    撞上 4 个模板（对比两支/合计摘要/单值）自己已经拼了 "The {metric_label}"，
+    产出 "The the business metric totals ..." 这种双冠词语法错误——只在
+    `facts.metric is None`（指标解析完全失败）时才会触发，两条既有 en-US
+    测试都用真实 `MetricPayload` 夹具，从未覆盖到这条路径，是真实的测试
+    覆盖缺口。这里直接把 `_trend_facts()`（走 summary 分支）的 `metric`
+    换成 `None`，断言渲染结果只有一个冠词。"""
+
+    from app.localization.locales import SupportedLocale
+    from app.services.answer_service import AnswerService
+
+    facts = replace(_trend_facts(), metric=None)
+
+    draft = AnswerService().fallback_draft(facts, locale=SupportedLocale.EN_US)
+
+    assert "the the" not in draft.answer.lower()
+    assert "The business metric totals 18" in draft.answer
+
+
+def test_fallback_uses_a_single_article_when_metric_is_unresolved_on_comparison_branch() -> None:
+    """同一个双冠词风险在对比分支上独立可复现：`result.comparison is not None`
+    的判定完全不依赖 `facts.metric`，指标解析失败时对比类问题同样会落到这条
+    兜底分支。"""
+
+    from app.localization.locales import SupportedLocale
+    from app.services.answer_service import AnswerService
+
+    facts = replace(_comparison_facts(), metric=None)
+
+    draft = AnswerService().fallback_draft(facts, locale=SupportedLocale.EN_US)
+
+    assert "the the" not in draft.answer.lower()
+    assert "The business metric for this query is 150.00" in draft.answer
+
+
+def test_fallback_english_truncated_branch_has_correct_grammar_and_no_han() -> None:
+    """补齐 reviewer Minor 建议里点名的"仅靠代码审查、从未跑过"的截断分支：
+    真实（非 None）指标下 en-US 的截断兜底文案既不残留汉字，也不因为
+    "of {metric_label} data" 这种复合名词结构被误加冠词。"""
+
+    from app.localization.locales import SupportedLocale
+    from app.services.answer_service import AnswerService
+
+    facts = _trend_facts()
+    draft = AnswerService().fallback_draft(
+        replace(facts, query_result=replace(facts.query_result, truncated=True)),
+        locale=SupportedLocale.EN_US,
+    )
+
+    assert not _HAN.search(draft.answer), draft.answer
+    assert "preview row(s) of Return count data" in draft.answer
+    assert "of the Return count data" not in draft.answer
+
+
+def test_fallback_english_non_additive_branch_has_correct_grammar_and_no_han() -> None:
+    """同上，补齐非加和指标分支。"""
+
+    from app.localization.locales import SupportedLocale
+    from app.services.answer_service import AnswerService
+
+    draft = AnswerService().fallback_draft(_non_additive_facts(), locale=SupportedLocale.EN_US)
+
+    assert not _HAN.search(draft.answer), draft.answer
+    assert "row(s) of Return rate data" in draft.answer
+    assert "not totalled across days" in draft.answer
+
+
+def test_fallback_english_comparison_no_ratio_branch_has_correct_grammar_and_no_han() -> None:
+    """补齐对比分支里「基期算不出比例」这条子分支：只有 `change_ratio=None` 才
+    会走 `_FALLBACK_COMPARISON_NO_RATIO_TEMPLATES`，与「有比例」子分支是两条
+    不同模板，需要各自覆盖。"""
+
+    from app.localization.locales import SupportedLocale
+    from app.services.answer_service import AnswerService
+
+    draft = AnswerService().fallback_draft(
+        _comparison_facts(change_ratio=None), locale=SupportedLocale.EN_US
+    )
+
+    assert not _HAN.search(draft.answer), draft.answer
+    assert "the the" not in draft.answer.lower()
+    assert "The Transaction GMV for this query is 150.00" in draft.answer
+    assert "cannot be calculated" in draft.answer
+
+
 def test_fallback_refuses_to_total_a_non_additive_metric() -> None:
     from app.services.answer_service import AnswerService
 

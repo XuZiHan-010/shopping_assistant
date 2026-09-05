@@ -189,14 +189,23 @@ def _localized_validation_message(message: str, locale: SupportedLocale) -> str:
 # 同一来源分组风格。
 # ---------------------------------------------------------------------------
 
+#: `metric_label` 本身**不带冠词**——8 个模板里有 4 个（对比两支/合计摘要/
+#: 单值）自带 "The {metric_label}"，若默认值再带一次 "the" 会产出
+#: "The the business metric ..." 这种双冠词语法错误（reviewer 2026-09-05
+#: 复核实测复现）；另外 2 个模板（无可汇总对比值/无可汇总数值）不自带冠词，
+#: 因此在各自模板串里显式补 "the {metric_label}"，而不是让默认值偷偷带上
+#: 冠词——同一个变量在 8 处调用点必须服从同一条语法角色约定，不能靠默认值
+#: 里藏一个冠词来"蒙混过关"某几个模板。截断/非加和两个模板用
+#: "of {metric_label} data" 复合名词结构，英语惯用法本就不加冠词
+#: （类比 "of sales data"），维持不变。
 _DEFAULT_METRIC_LABEL: Final[dict[SupportedLocale, str]] = {
     SupportedLocale.ZH_CN: "经营指标",
-    SupportedLocale.EN_US: "the business metric",
+    SupportedLocale.EN_US: "business metric",
 }
 _FALLBACK_NO_COMPARISON_VALUE_TEMPLATES: Final[dict[SupportedLocale, str]] = {
     SupportedLocale.ZH_CN: "本次查询未取得可汇总的{metric_label}数值，无法进行对比。",
     SupportedLocale.EN_US: (
-        "This query did not return a summable value for {metric_label}, so no "
+        "This query did not return a summable value for the {metric_label}, so no "
         "comparison can be made."
     ),
 }
@@ -253,7 +262,7 @@ _FALLBACK_NO_VALUE_TEMPLATES: Final[dict[SupportedLocale, str]] = {
     SupportedLocale.ZH_CN: "本次查询返回 {total_rows} 行数据，暂未形成可汇总的{metric_label}数值。",
     SupportedLocale.EN_US: (
         "This query returned {total_rows} row(s) of data; no summable value "
-        "for {metric_label} is available yet."
+        "for the {metric_label} is available yet."
     ),
 }
 _FALLBACK_SINGLE_VALUE_TEMPLATES: Final[dict[SupportedLocale, str]] = {
