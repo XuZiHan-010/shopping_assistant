@@ -2,8 +2,48 @@
 
 > 本文件只保留当前可继续开发的事实快照，不追加每日流水账。
 
-**最后更新：2026-09-05**
+**最后更新：2026-09-06**
 
+> **2026-09-06 本地首次真实 PostgreSQL 全量回归 + 两处真实缺陷修复（`feature/bilingual-localization`
+> 分支，commit `2010f24`）**：用户要求启动本地前后端自行验收，本机 Docker 起来后顺带做了一次自查。
+> 本分支最近一次真正跑通 `REQUIRE_INTEGRATION_DB=1 pytest` 是 2026-08-24（`docs/project-progress.md`
+> 历史记录），此后 Task 8 后续修复、Task 14、整分支复审全部工作**从未被集成测试在真实库上验证过**——
+> 测试库不可达时套件默认静默跳过（不带该环境变量），这正是上条 2026-09-05 记录里"①"项标注的既有
+> 环境约束。本次库真实可用后第一次跑通全量，发现并修复：
+> ① `app/repositories/knowledge.py`：`KnowledgeRepository.upsert_by_source_path()`/
+> `insert_if_absent_by_source_path()` 直接构造 `KnowledgeDocument` 时漏填 `source_locale`，撞上
+> 迁移加的 NOT NULL 约束；这条写路径只有 `scripts/import_wiki.py` 和应用启动时的
+> `seed_wiki_documents()` 会真正执行，是"NOT NULL 列缺写入"这类缺陷（Task 8/整分支复审已修复过
+> 3 次，均在 `messages`/`answers`/`KnowledgeAdminRepository` 三处）第 4 次出现，且是这条写路径
+> 有史以来第一次真正跑到真实数据库。
+> ② `app/localization/payloads.py`：会话详情/列表翻译降级时统一展示目标语言占位文案，对 `mixed`
+> 源语言（如中文问题夹杂 "GMV" 缩写）也不例外，导致用户自己的原话被替换成"翻译暂不可用，请重试"——
+> 用真实接口手工复现后确认。经用户明确决策后修复：`app/localization/locales.py` 新增
+> `dominant_script()`，按汉字/英文字母数量粗略判定 `mixed` 文本的"主体语言"；只有主体语言与目标
+> 展示语言一致时（如中文问题夹 "GMV"，对中文读者展示原文仍可读）才在降级时展示原文，且不再计入
+> `localization_degraded`（读者看到的已是完整可读内容，没有"重试"的必要）；主体语言与目标不一致
+> （如系统提示文案"LLM 未配置或暂不可用……"对英文读者而言主体仍是不可读的中文）或源语言明确是
+> 另一种受支持语言时，继续展示占位文案，避免把未翻译的外语原文误当译文静默展示。
+> 同时补齐 8 处测试夹具（`test_chat.py`/`test_exports.py`/`test_chatbi_rollup.py`/
+> `test_export_repository.py`/`test_export_service.py`/`test_memory_agent_history.py`）直接构造
+> `KnowledgeDocument`/`Answer`/`Message` 时漏填 `source_locale`/`response_locale` 的缺陷——纯测试
+> 代码，不影响生产路径，但意味着这些测试从写下起就没有真正在真实库上跑通过。
+> 全量 `REQUIRE_INTEGRATION_DB=1 pytest`：**1388 passed**，仅 1 个失败
+> （`test_committed_wiki_seed_matches_reference_wiki_byte_for_byte`）——已定位为参考 Wiki 目录
+> `yshopping-merchant-ai 4/` 本身不在这次使用的 git worktree 里（只存在于主项目目录，R8 只读参考
+> 项目未被 worktree 检出），不是代码缺陷，主项目目录下运行会通过。ruff/mypy 全绿。本地前后端已
+> 用 `app/run.py`（Windows 下 `uvicorn` CLI/`fastapi dev` 均不可用，见下一段）+ `npm run dev` 跑通，
+> `GET /api/reports/daily`、`GET /api/conversations`、前端首页均已实测 200。
+>
+> Windows 本地启动踩坑记录（供下次直接复用，不算缺陷）：`uv run fastapi dev` 因缺 `fastapi[standard]`
+> 不可用；`uv run uvicorn app.main:app` 因 app 是工厂函数需加 `--factory` 并指向 `create_app`；
+> 直接起 uvicorn 即便这样仍会因 Windows 默认 `ProactorEventLoop` 与 psycopg 异步模式不兼容而数据库
+> 降级——正确入口是项目已有的 `uv run python -m app.run`（内部用 `app/core/runtime.py` 的
+> `loop_factory()` 显式传给 `uvicorn.run(loop=...)`）。
+>
+> 上条 2026-09-05 记录"明确尚未做"的①已被本条部分兑现（翻译/本地化专属不变量首次在真实 PostgreSQL
+> 上跑通），②③④⑤仍未处理，不重复记录。
+>
 > **2026-09-05 全栈中英文显示与 AI 内容本地化（`feature/bilingual-localization` 分支，14 个 Task 全部完成）**：
 > 按 `plans/2026-08-31-full-stack-bilingual-localization.md` 用 subagent-driven-development 逐 Task
 > 实现+独立审查+发现问题修复再复审，14 个 Task 全部通过审查收尾（Task 1-8 后端本地化基础设施、
