@@ -233,7 +233,7 @@ Railway 的 Config File Path 不跟随 Root Directory。即使 Service Root 已�
 ### 回滚指引
 
 - **只回滚代码、不回滚迁移**：本效果的两个迁移是纯增量（新表 + 新增列），不修改任何既有列的语义或删除任何数据；只回退应用代码到迁移前版本即可安全共存于已迁移的数据库——旧代码不知道新列/新表存在，会继续按原有行为工作。
-- **确需回滚迁移**（例如新表结构本身有缺陷）：`alembic downgrade 20260823_0014` 会依次撤销 `20260831_0016`（先删除五个新增列，`display_name_en`/`purpose` 之外的四个分类列因为已回填真实历史数据，降级会永久丢弃这些回填结果）和 `20260831_0015`（删除两张新表，连同其中已经产生的机器译文缓存和人工译文一起丢弃）。降级前必须确认没有依赖这些列/表的代码仍在运行。
+- **确需回滚迁移**（例如新表结构本身有缺陷）：`alembic downgrade 20260823_0014` 会依次撤销 `20260831_0016`（先删除六个新增列——`messages.source_locale`、`answers.response_locale`、`knowledge_documents.source_locale`、`merchant_memories.source_locale`、`merchants.display_name_en`、`llm_usage.purpose`；`display_name_en`/`purpose` 之外的四个分类列因为已回填真实历史数据，降级会永久丢弃这些回填结果）和 `20260831_0015`（删除两张新表，连同其中已经产生的机器译文缓存和人工译文一起丢弃）。降级前必须确认没有依赖这些列/表的代码仍在运行。
 - **只想临时关闭翻译功能、不动数据库**：把四个 `LOCALIZATION_MAX_*` 中的 `LOCALIZATION_MAX_CALLS_PER_REQUEST` 设为最小值（`1`）不能完全禁用，因为它仍允许 1 次调用；真正的开关是上游是否发起翻译请求（前端语言切换与 `Accept-Language`），本效果没有提供单独的 `LOCALIZATION_ENABLED` 总开关。如需紧急止损，可临时不配置 `LLM_API_KEY`（主 Agent 与本地化共用同一把 DeepSeek Key），两条调用路径会一起进入现有的 LLM 不可用降级分支，而不是只关翻译。
 
 ## 单 worker 与多实例限制
