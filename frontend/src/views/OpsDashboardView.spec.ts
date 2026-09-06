@@ -87,7 +87,11 @@ describe('OpsDashboardView en-US 下确定性文案为英文', () => {
     const wrapper = mountView()
 
     expect(wrapper.get('h1').text()).toBe('Chat BI operations dashboard')
-    expect(wrapper.find('[data-testid="language-switcher"]').exists()).toBe(false)
+    // 语言切换器在授权前（令牌对话框阶段）就要可用——直接落地在 /ops-dashboard
+    // 的用户（例如收藏的管理链接）在输入令牌之前也应该能切换语言，不必先
+    // 猜对存量语言才能看懂这个对话框（Finding 4：之前只在 v-else 分支里
+    // 渲染，未授权页面完全够不到它）。
+    expect(wrapper.find('[data-testid="language-switcher"]').exists()).toBe(true)
   })
 
   it('验证令牌后顶栏、窗口选择、刷新按钮、指标卡与分类表均为英文', async () => {

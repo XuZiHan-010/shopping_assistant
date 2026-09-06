@@ -104,6 +104,9 @@ onMounted(() => {
 <template>
   <main class="knowledge-base">
     <template v-if="!knowledgeStore.adminToken">
+      <div class="knowledge-base__pre-auth-actions">
+        <LanguageSwitcher />
+      </div>
       <AdminTokenDialog @submit="authorize" />
       <p v-if="authorizationError" class="knowledge-base__authorization-error" role="alert">
         {{ authorizationError }}
@@ -300,5 +303,12 @@ onMounted(() => {
   width: min(100%, 31rem);
   margin: calc(-1 * var(--space-6)) auto 0;
   color: var(--color-danger-text);
+}
+
+.knowledge-base__pre-auth-actions {
+  display: flex;
+  justify-content: flex-end;
+  width: min(100%, 31rem);
+  margin: 0 auto var(--space-4);
 }
 </style>

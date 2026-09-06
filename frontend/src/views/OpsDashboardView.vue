@@ -68,6 +68,9 @@ onMounted(() => {
 <template>
   <main class="ops-dashboard">
     <template v-if="!analyticsStore.adminToken">
+      <div class="ops-dashboard__pre-auth-actions">
+        <LanguageSwitcher />
+      </div>
       <AdminTokenDialog
         :title="t('opsDashboardView.title')"
         :eyebrow="t('opsDashboardView.eyebrow')"
@@ -256,6 +259,13 @@ onMounted(() => {
 .ops-dashboard__authorization-error {
   width: min(100%, 31rem);
   margin: calc(-1 * var(--space-6)) auto 0;
+}
+
+.ops-dashboard__pre-auth-actions {
+  display: flex;
+  justify-content: flex-end;
+  width: min(100%, 31rem);
+  margin: 0 auto var(--space-4);
 }
 
 .ops-dashboard__loading {

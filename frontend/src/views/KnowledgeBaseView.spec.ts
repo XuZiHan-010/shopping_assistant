@@ -101,6 +101,24 @@ describe('KnowledgeBaseView', () => {
     setChatTransport(undefined)
   })
 
+  it('未授权时也能看到并使用统一语言切换器，不必先输入令牌才能切换语言（Finding 4）', async () => {
+    const wrapper = mount(KnowledgeBaseView, { global: { plugins: [createPinia(), i18n] } })
+
+    // 未授权、只展示令牌对话框时也要能摸到语言切换器——直接落地在
+    // /knowledge-base 的用户（例如收藏的管理链接）在输入令牌之前也应该能
+    // 切换语言。之前它只在 v-else（授权后）分支里渲染，pre-auth 页面完全
+    // 够不到它。
+    const switcher = wrapper.find('[data-testid="language-switcher"]')
+    expect(switcher.exists()).toBe(true)
+    expect(wrapper.get('h1').text()).toBe('知识库维护后台')
+
+    // 不只是渲染出来——点击真的要生效：验证它确实驱动了 localeStore 并让
+    // 令牌对话框本身重新按新语言渲染。
+    await switcher.trigger('click')
+
+    expect(wrapper.get('h1').text()).toBe('Knowledge base administration')
+  })
+
   it('无效管理员令牌后保留输入入口，允许直接重试', async () => {
     setChatTransport(async () => {
       throw new AppError('AUTH_REQUIRED', '管理员令牌无效', { status: 401 })
