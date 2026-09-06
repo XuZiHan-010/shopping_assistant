@@ -16,6 +16,14 @@ export const useAuthStore = defineStore('auth', () => {
   const selected = ref<DemoMerchantView | undefined>(undefined)
   const restoreNotice = ref('')
 
+  /**
+   * 每次语言切换递增一次。写状态之前先比较请求发出时快照的 epoch 与当前
+   * epoch——不一致说明这个响应对应的是已经被切走的语言，直接丢弃，不写入
+   * Store（与 `stores/chat.ts` 同一套机制，Task 11 Step 6 的原子刷新/防
+   * 竞态防护——之前只在 chat.ts 落地，本次补齐到 auth.ts）。
+   */
+  const localeEpoch = ref(0)
+
   const displayNames = computed(() => merchants.value.map((item) => item.displayName))
 
   async function loadMerchants(): Promise<void> {
@@ -85,18 +93,30 @@ export const useAuthStore = defineStore('auth', () => {
    * 那是尚未完成初始 `restore()` 的情况，不该抢在它前面发请求。
    */
   async function reloadForLocale(): Promise<void> {
+    // 无条件先递增：即使这次调用本身是 no-op（尚未加载过商家列表），也要让
+    // 任何仍在途的旧 epoch 请求在响应回来时被判定为过期而丢弃。
+    localeEpoch.value += 1
     if (merchants.value.length === 0) return
 
+    const epochAtRequest = localeEpoch.value
     const previousMerchantId = selected.value?.merchantId
     const previousToken = selected.value?.token
 
+    let nextMerchants: DemoMerchantView[]
     try {
-      merchants.value = await listDemoMerchants(new AbortController().signal)
+      nextMerchants = await listDemoMerchants(new AbortController().signal)
     } catch {
       // 静默失败：保留当前（可能是上一语言）的商家列表和选中项，不能让一次
       // 语言切换的刷新失败打断用户正在做的事。
       return
     }
+
+    // 响应回来之前又发生了一次语言切换：这次响应对应的是已经过期的语言，
+    // 丢弃，交给更晚那次 reloadForLocale 的请求收尾——否则先发后至的旧语言
+    // 响应可能覆盖掉后发先至的新语言响应已经写入的数据。
+    if (epochAtRequest !== localeEpoch.value) return
+
+    merchants.value = nextMerchants
 
     if (!previousMerchantId) return
     const fresh = merchants.value.find((item) => item.merchantId === previousMerchantId)

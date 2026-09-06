@@ -617,4 +617,42 @@ describe('Mock 双语行为（Task 11 Step 8）', () => {
     expect(readPayload.translation_status).toBe('MISSING')
     expect(readPayload.content).toBe('# 运营手册\n\n更新后的正文')
   })
+
+  it('/api/admin/analytics/chatbi/categories 按 Accept-Language 返回不同语言的 category_display_name，category 机器码不变', async () => {
+    const adminTransport = createMockTransport()
+    setCredentialProvider(() => ({ adminToken: 'mock-admin-token' }))
+
+    interface CategoriesPayload {
+      items: components['schemas']['ChatBiCategoryItem'][]
+    }
+
+    const zh = await adminTransport(
+      {
+        path: '/api/admin/analytics/chatbi/categories?start_date=2026-08-17&end_date=2026-08-23',
+        method: 'GET',
+        auth: 'admin',
+      },
+      new AbortController().signal,
+    )
+    const zhPayload = (await zh.json()) as CategoriesPayload
+
+    setLocaleProvider(() => 'en-US')
+    const en = await adminTransport(
+      {
+        path: '/api/admin/analytics/chatbi/categories?start_date=2026-08-17&end_date=2026-08-23',
+        method: 'GET',
+        auth: 'admin',
+      },
+      new AbortController().signal,
+    )
+    const enPayload = (await en.json()) as CategoriesPayload
+
+    expect(zhPayload.items[0].category_display_name).toBe('交易分析')
+    expect(enPayload.items[0].category_display_name).toBe('Trade analysis')
+    expect(zhPayload.items[1].category_display_name).toBe('未分类')
+    expect(enPayload.items[1].category_display_name).toBe('Uncategorized')
+    // category 是机器码技术字段，不受语言影响。
+    expect(enPayload.items[0].category).toBe(zhPayload.items[0].category)
+    expect(enPayload.items[1].category).toBe(zhPayload.items[1].category)
+  })
 })

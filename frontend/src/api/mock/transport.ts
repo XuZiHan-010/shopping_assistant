@@ -579,13 +579,19 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
       }
 
       if (pathname === '/api/admin/analytics/chatbi/categories' && request.method === 'GET') {
+        // `category_display_name` 与其它端点一样按 Accept-Language 分流
+        // （与后端 `api/routes/analytics.py::_display_name` 同一套判断）；
+        // `category`（机器码）是技术字段，不受语言影响。
+        const locale = resolveRequestLocale()
+        const localizeCategoryName = (name: string): string =>
+          locale === 'en-US' ? mockEnglishText(name) : name
         return jsonResponse({
           start_date: '2026-08-17',
           end_date: '2026-08-23',
           items: [
             {
               category: 'TRADE',
-              category_display_name: '交易分析',
+              category_display_name: localizeCategoryName('交易分析'),
               answer_total: 12,
               adoption_rate: null,
               user_accuracy_rate: 0.75,
@@ -596,7 +602,7 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
             },
             {
               category: 'UNKNOWN',
-              category_display_name: '未分类',
+              category_display_name: localizeCategoryName('未分类'),
               answer_total: 6,
               adoption_rate: 0,
               user_accuracy_rate: null,

@@ -99,6 +99,8 @@ const MOCK_EN_DICTIONARY: Record<string, string> = {
   你好: 'Hello',
   帮我修改订单金额: 'Help me modify the order amount',
   '我的商家资料是什么？': 'What is my merchant profile?',
+  交易分析: 'Trade analysis',
+  未分类: 'Uncategorized',
 }
 
 /**

@@ -30,6 +30,19 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
   const loading = ref(false)
   const errorMessage = ref('')
 
+  /**
+   * 每次语言切换递增一次。写状态之前先比较请求发出时快照的 epoch 与当前
+   * epoch——不一致说明这个响应对应的是已经被切走的语言，直接丢弃，不写入
+   * Store（与 `stores/chat.ts` 同一套机制，Task 11 Step 6 的原子刷新/防
+   * 竞态防护——之前只在 chat.ts 落地，本次补齐到 knowledge.ts）。
+   *
+   * 这里的风险比另外两个 Store 更高：`selectedDocument` 一旦被过期响应
+   * 覆盖成错误语言的内容，管理员如果没注意到就直接保存（默认
+   * `isSourceVersion: true`），会把源文档本身覆盖成错误语言——不只是一次
+   * UI 展示错误，是一次真实的数据损坏。
+   */
+  const localeEpoch = ref(0)
+
   const selectedNode = computed(() => findNode(roots.value, selectedPath.value))
 
   function setAdminToken(token: string): void {
@@ -67,9 +80,15 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
    */
   async function loadDocument(path: string): Promise<void> {
     if (!adminToken.value) throw new AppError('AUTH_REQUIRED', '未授权，请先输入管理员令牌。')
-    selectedDocument.value = await getKnowledgeDocument(path, new AbortController().signal, {
+    const epochAtRequest = localeEpoch.value
+    const document = await getKnowledgeDocument(path, new AbortController().signal, {
       contentLocale: localeStore.locale,
     })
+    // 响应回来之前又发生了一次语言切换：这份文档对应的是已经过期的语言，
+    // 丢弃，交给更晚那次 reloadForLocale/selectNode 的请求收尾——不能让它
+    // 覆盖已经写入的正确语言内容（见上面 localeEpoch 的风险说明）。
+    if (epochAtRequest !== localeEpoch.value) return
+    selectedDocument.value = document
   }
 
   async function selectNode(path: string): Promise<void> {
@@ -165,6 +184,10 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
    * 文档、或选中的是目录（非 `.md`）时都直接跳过。
    */
   async function reloadForLocale(): Promise<void> {
+    // 无条件先递增：即使这次调用本身是 no-op（未登录/未选中文档），也要让
+    // 任何仍在途的旧 epoch 请求（例如手动点开这份文档触发的 loadDocument()）
+    // 在响应回来时被判定为过期而丢弃。
+    localeEpoch.value += 1
     if (!adminToken.value) return
     if (!selectedPath.value.toLowerCase().endsWith('.md')) return
     try {

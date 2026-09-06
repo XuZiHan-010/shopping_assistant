@@ -180,9 +180,14 @@ export const useChatStore = defineStore('chat', () => {
       // 都会看到「出错了」而不是「已取消」。`toAppError` 是幂等的，raw 已经
       // 是 AppError 时直接透传。
       const error = toAppError(raw)
-      if (error.code === 'CANCELLED' && epochAtRequest !== localeEpoch.value) {
-        // 语言切换触发的中止，不是用户主动点「停止」：`reloadForLocale` 的
-        // 续接/重放逻辑会接管这条消息的后续状态，这里不能覆盖它。
+      // 本轮进行期间发生过语言切换：不管这次失败是不是取消（`CANCELLED`）
+      // 触发的——`assertResponseLocale` 在竞态窗口内可能抛出
+      // `ResponseLocaleMismatchError`（code 为 `CONTRACT`），网络抖动也可能
+      // 恰好在这个窗口炸出任意其它错误——只要 epoch 已经不是发起请求时的那个，
+      // 这个错误就属于已经被切走的旧语言，`reloadForLocale` 的续接/重放逻辑
+      // 会接管这条消息的后续状态，这里必须静默丢弃，不能覆盖它、也不能弹给
+      // 用户一条「出错了」。
+      if (epochAtRequest !== localeEpoch.value) {
         return
       }
       assistant.status = error.code === 'CANCELLED' ? 'cancelled' : 'error'

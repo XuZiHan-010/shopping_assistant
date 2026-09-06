@@ -823,6 +823,114 @@ describe('语言切换：SSE 轮次续接/重放，不重放仍在 PROCESSING �
     await pendingRound2.catch(() => {})
   })
 
+  it('Finding 2 回归：语言切换后原 runRound 收到非 CANCELLED 的过期响应，不会覆盖 continueRoundInNewLocale 已写入的正确状态', async () => {
+    const store = useChatStore()
+    const localeStore = useLocaleStore()
+    setLocaleProvider(() => localeStore.locale)
+
+    await store.submitMessage('你好')
+    const sessionId = store.sessionId!
+
+    const round2Post = deferred<Response>()
+    const detail = deferred<Response>()
+    let round2ClientRequestId = ''
+
+    setChatTransport(async (request: TransportRequest) => {
+      if (request.path === '/api/chat' && request.method === 'POST') {
+        const body = request.body as { client_request_id: string }
+        if (body.client_request_id === round2ClientRequestId) {
+          // 第二轮的 POST 永不正常 settle：稍后手动喂给它一个非 CANCELLED
+          // 的失败响应，模拟"abort 没能抢先生效，过期请求自己也失败了"。
+          return round2Post.promise
+        }
+        return sseChatResponse({
+          id: crypto.randomUUID(),
+          session_id: sessionId,
+          displayed_user_message: 'Hello',
+          answer: 'replayed',
+          answer_mode: 'CHAT',
+          category: 'UNKNOWN',
+          thinking_steps: [],
+          quality_status: 'NOT_RUN',
+          quality_attempts: 0,
+          quality_notes: [],
+          analysis_sources: ['NONE'],
+          degraded: false,
+          degraded_reason: null,
+          suggestions: [],
+          suggestion_alternates: [],
+          created_at: new Date().toISOString(),
+        })
+      }
+      if (request.path === `/api/conversations/${sessionId}` && request.method === 'GET') {
+        return detail.promise
+      }
+      throw new Error(`未预期的请求：${request.method} ${request.path}`)
+    })
+
+    const pendingRound2 = store.submitMessage('最近 7 天退货量趋势')
+    await vi.waitFor(() => expect(store.messages.at(-1)?.status).toBe('pending'))
+    round2ClientRequestId = store.messages.at(-1)!.clientRequestId
+    const round2AssistantLocalId = store.messages.at(-1)!.localId
+
+    // 触发语言切换：epoch += 1，continueRoundInNewLocale 接管这条消息的后续状态。
+    localeStore.setLocale('en-US')
+
+    detail.resolve(
+      Response.json({
+        id: sessionId,
+        title: 'Return trend',
+        messages: [
+          { id: crypto.randomUUID(), role: 'user', content: '你好', created_at: '2026-08-01T00:00:00Z' },
+          {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            content: 'Return trend analysis in English.',
+            created_at: '2026-08-01T00:00:01Z',
+            answer_payload: {
+              answer_id: crypto.randomUUID(),
+              answer_mode: 'METRIC',
+              thinking_steps: [],
+              quality_status: 'PASSED',
+              quality_attempts: 1,
+              quality_notes: [],
+              degraded: false,
+              degraded_reason: null,
+              is_adopted: false,
+              reaction: null,
+              columns: [],
+              total_rows: null,
+              truncated: null,
+            },
+          },
+        ],
+        created_at: '2026-08-01T00:00:00Z',
+        updated_at: '2026-08-01T00:00:01Z',
+        next_message_cursor: null,
+        has_more_messages: false,
+        localization_degraded: false,
+        localization_degraded_reason: null,
+      }),
+    )
+
+    await vi.waitFor(() => {
+      expect(store.messages.find((m) => m.localId === round2AssistantLocalId)?.status).toBe('complete')
+    })
+
+    // 原始 runRound 仍挂在旧 epoch 下发出的 round2Post 上。现在让它收到一个
+    // 非 CANCELLED 的失败响应（body 为 null 会触发 ChatStreamInterruptedError，
+    // code 是 STREAM_INTERRUPTED，不是 CANCELLED）——修复前这里会把上面刚
+    // 写好的 'complete' 覆盖成 'error'，界面对用户弹出一条虚假错误。
+    round2Post.resolve(new Response(null, { status: 599 }))
+    await pendingRound2.catch(() => {})
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const round2Assistant = store.messages.find((m) => m.localId === round2AssistantLocalId)!
+    expect(round2Assistant.status).toBe('complete')
+    expect(round2Assistant.error).toBeUndefined()
+    expect(round2Assistant.text).toBe('Return trend analysis in English.')
+  })
+
   it('切换语言时命中已 SUCCEEDED 的轮次：同 clientRequestId 重放合法，命中幂等分支拿到本地化副本，且不经过 pending/streaming', async () => {
     const store = useChatStore()
     const localeStore = useLocaleStore()
