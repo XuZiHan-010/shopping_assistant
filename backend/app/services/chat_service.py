@@ -40,6 +40,7 @@ from app.schemas.chat import AnswerMode, ChatRequest, ChatResponse, ThinkingStep
 from app.schemas.localization import LocalizeItem
 from app.services.export_service import ExportService
 from app.services.merchant_scope import MerchantScopeService
+from app.services.quality_loop import _MSG_DAILY_BUDGET_EXCEEDED
 from app.services.safe_query import QueryResult
 
 logger = logging.getLogger(__name__)
@@ -295,7 +296,12 @@ class ChatService:
             if self._cost_guard is not None and self._cost_guard.daily_cap_hit:
                 if result.query_result is None:
                     raise DailyBudgetExhaustedError
-                fallback_reason = "今日模型用量已达上限，本次只提供受控数据摘要"
+                # Finding 4（全分支复审）：这句提示过去在这里独立重复了一份字面量,
+                # 与 `quality_loop._MSG_DAILY_BUDGET_EXCEEDED` 只靠"两处手动保持
+                # 一致"维系——任一侧改词都会让另一侧在 `en-US` 下查不到译文,
+                # 静默 fallback 回中文原句。直接复用同一个常量,漂移在这里就
+                # 不再可能发生。
+                fallback_reason = _MSG_DAILY_BUDGET_EXCEEDED
                 response = response.model_copy(
                     update={
                         "degraded": True,

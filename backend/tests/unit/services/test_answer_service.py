@@ -940,6 +940,34 @@ def test_additive_claim_check_catches_english_total_claim(service) -> None:
     assert any("非加和" in issue for issue in issues)
 
 
+def test_additive_claim_phrases_all_six_zh_phrases_resolve_to_a_non_empty_en_value() -> None:
+    """全分支复审 Finding 5：`_ADDITIVE_CLAIM_PHRASES_EN` 是模块导入时通过
+    `localize_catalog_value()` 反查 `_ADDITIVE_CLAIM_PHRASES_ZH` 六个短语算出
+    来的，任何一个短语在 `app.localization.catalog` 里的登记被误删都会让它
+    静默从结果里消失——不会在任何地方报错，只是这个非加和指标幻觉校验在
+    `en-US` 下悄悄少了一条防线，比 `zh-CN` 弱。
+
+    这里没有直接断言 `len(_ADDITIVE_CLAIM_PHRASES_EN) == len(_ADDITIVE_CLAIM_PHRASES_ZH)`
+    ——实测当前是 5 对 6，原因是"合计"和"总计"在 catalog 里都合法地译成同一个
+    英文词 `total`，构造 `_ADDITIVE_CLAIM_PHRASES_EN` 时用的
+    `dict.fromkeys()` 会把这个重复去掉，这是正确的去重行为，不是覆盖缺口。
+    真正需要钉死的不变式是"六个中文短语各自都能在 catalog 里查到非空英文
+    译文"，直接对六个源短语逐一断言,不受去重是否发生、去重掉几个的影响。
+    """
+
+    from app.localization.catalog import localize_catalog_value
+    from app.localization.locales import SupportedLocale
+    from app.services.answer_service import _ADDITIVE_CLAIM_PHRASES_ZH
+
+    resolved = {
+        zh_phrase: localize_catalog_value(zh_phrase, SupportedLocale.EN_US)
+        for zh_phrase in _ADDITIVE_CLAIM_PHRASES_ZH
+    }
+    missing = [zh_phrase for zh_phrase, en_phrase in resolved.items() if not en_phrase]
+
+    assert not missing, f"以下中文合计断言短语在 catalog 中缺少英文译文: {missing}"
+
+
 def _facts_for_last_3_days():
     """真实查询区间只有 2026-08-05 至 2026-08-07 这 3 天。
 

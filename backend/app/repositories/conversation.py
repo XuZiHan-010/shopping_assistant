@@ -16,7 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import InvalidRequestError
-from app.localization.locales import detect_source_language
+from app.localization.locales import SourceLanguage, detect_source_language
 from app.models.answer import Answer, Feedback
 from app.models.conversation import Conversation, Message
 
@@ -483,6 +483,11 @@ class ConversationRepository:
             client_request_id=client_request_id,
             request_digest=request_digest,
             processing_status="PROCESSING",
+            # `response_locale` 是 NOT NULL 且无 `default=`/`server_default=`
+            # 的列（见 `app/models/answer.py` 的字段注释）：这里写入前实际
+            # 语言还未知，用 CHECK 约束允许的 `und`（undetermined）占位；
+            # `mark_answer_succeeded()` 在回答成功后会用真实探测结果覆盖它。
+            response_locale=str(SourceLanguage.UND),
         )
         self._session.add(answer)
         await self._session.flush()

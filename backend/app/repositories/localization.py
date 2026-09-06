@@ -68,6 +68,18 @@ class ResourceTranslationLookup:
 
 
 def _validate_scope(scope: LocalizationScope) -> None:
+    """校验 `scope.kind` 本身，再校验它与 `merchant_id` 的配对。
+
+    第一条检查是防御性的：`ScopeKind` 在类型检查层已经是
+    `Literal["MERCHANT", "GLOBAL"]`，但类型标注不构成运行时保证——它挡不住
+    有意或意外绕过静态检查构造出的第三个取值。`upsert_machine()` 和
+    `upsert_human()` 都把 `scope_kind`/`scope.kind` 通过 f-string 直接拼进
+    `index_where` SQL 子句（不是绑定参数），这里没有校验的话，一个不属于
+    这两个字面量的杂散取值会被原样拼进 SQL 一起执行，而不是在应用层就先
+    报错拦下来。"""
+
+    if scope.kind not in ("MERCHANT", "GLOBAL"):
+        raise ValueError(f"未知的 LocalizationScope.kind: {scope.kind!r}")
     if scope.kind == "MERCHANT" and scope.merchant_id is None:
         raise ValueError("MERCHANT 作用域必须提供 merchant_id")
     if scope.kind == "GLOBAL" and scope.merchant_id is not None:

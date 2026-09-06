@@ -42,6 +42,7 @@ from app.llm.client import (
 )
 from app.localization.catalog import localize_catalog_value
 from app.localization.locales import (
+    SQL_KEYWORDS,
     SourceLanguage,
     SupportedLocale,
     detect_source_language,
@@ -75,34 +76,8 @@ _PROTECT_PATTERN = re.compile(
     r"|(?P<code>[A-Za-z_][A-Za-z0-9_]*)",
     re.IGNORECASE,
 )
-_SQL_KEYWORDS = {
-    "SELECT",
-    "FROM",
-    "WHERE",
-    "INSERT",
-    "UPDATE",
-    "DELETE",
-    "JOIN",
-    "GROUP",
-    "ORDER",
-    "INTO",
-    "VALUES",
-    "LIMIT",
-    "INNER",
-    "LEFT",
-    "RIGHT",
-    "OUTER",
-    "DISTINCT",
-    "HAVING",
-    "UNION",
-    "DROP",
-    "TABLE",
-    "SUM",
-    "COUNT",
-    "AVG",
-    "MAX",
-    "MIN",
-}
+#: SQL 关键字表已收敛到 `app.localization.locales.SQL_KEYWORDS` 单一定义，
+#: 这里不再维护独立拷贝——两份历史拷贝曾经真的漂移过，见该常量的定义处说明。
 
 
 @dataclass(frozen=True)
@@ -125,7 +100,7 @@ def _protect(text: str) -> _Protected:
     def _replace(match: re.Match[str]) -> str:
         code = match.group("code")
         if code is not None and not (
-            "_" in code or any(ch.isdigit() for ch in code) or code.upper() in _SQL_KEYWORDS
+            "_" in code or any(ch.isdigit() for ch in code) or code.upper() in SQL_KEYWORDS
         ):
             return code
         placeholder = _PLACEHOLDER_TEMPLATE.format(index=len(tokens))

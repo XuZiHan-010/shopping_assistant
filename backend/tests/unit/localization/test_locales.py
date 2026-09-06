@@ -15,6 +15,7 @@ from __future__ import annotations
 import pytest
 
 from app.localization.locales import (
+    SQL_KEYWORDS,
     SourceLanguage,
     SupportedLocale,
     detect_source_language,
@@ -110,3 +111,19 @@ def test_detect_source_language_rejects_sql_as_english(text: str) -> None:
     """纯 SQL 语句（含裸表名/列名）不得被误判为 `en-US`。"""
 
     assert detect_source_language(text) is SourceLanguage.UND
+
+
+def test_sql_keywords_is_the_single_shared_source() -> None:
+    """全分支复审 Finding 2：`app.services.localization_service` 过去独立
+    维护了一份 `_SQL_KEYWORDS`，与这里的表各自漂移过（一份有 `DROP`/`TABLE`
+    没有 `AS`/`AND`/`OR`，另一份反过来）。合并后 `localization_service` 直接
+    从这里 `import SQL_KEYWORDS` 复用同一个对象，不再有第二份定义可以漂移——
+    这里用对象恒等断言钉死"只有一份定义"，而不是比较两份取值是否恰好相等
+    （那样即使又长出一份拷贝，只要凑巧取值相同也测不出来）。"""
+
+    from app.services import localization_service
+
+    assert localization_service.SQL_KEYWORDS is SQL_KEYWORDS
+    assert not hasattr(localization_service, "_SQL_KEYWORDS")
+    # 并集覆盖：两份历史拷贝各自独有的关键字都必须在合并后的表里出现。
+    assert {"AS", "AND", "OR", "DROP", "TABLE"} <= SQL_KEYWORDS

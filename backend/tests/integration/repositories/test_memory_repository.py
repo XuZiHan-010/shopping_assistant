@@ -8,7 +8,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.localization.locales import SupportedLocale, hash_source_text
+from app.localization.locales import SourceLanguage, SupportedLocale, hash_source_text
 from app.models.merchant import Merchant
 from app.repositories.localization import LocalizationRepository
 from app.repositories.memory import MerchantMemoryRepository
@@ -96,7 +96,7 @@ async def test_upsert_replacing_content_cleans_up_the_old_content_derived_cache(
     await localization.upsert_machine(
         merchant_id=merchant.id,
         source_hash=old_hash,
-        source_language=SupportedLocale.ZH_CN,  # type: ignore[arg-type]
+        source_language=SourceLanguage.ZH_CN,
         target_locale=SupportedLocale.EN_US,
         translated_text="Old memory content",
         model="test-model",

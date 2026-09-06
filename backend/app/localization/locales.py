@@ -97,42 +97,54 @@ _SQL_SELECT_PATTERN = re.compile(
 # 大小写不敏感匹配——真实 SQL 里 `select`/`from`/`sum` 等关键字几乎总是
 # 全部大写或全部小写，混合大小写的情况极少；不收录 `in`/`on`/`by`/`not`
 # 这类同时是常见英文单词、且在这里误剔除代价更高的词。
-_SQL_KEYWORDS = {
-    "SELECT",
-    "FROM",
-    "WHERE",
-    "INSERT",
-    "UPDATE",
-    "DELETE",
-    "JOIN",
-    "GROUP",
-    "ORDER",
-    "INTO",
-    "VALUES",
-    "LIMIT",
-    "INNER",
-    "LEFT",
-    "RIGHT",
-    "OUTER",
-    "DISTINCT",
-    "HAVING",
-    "UNION",
-    "SUM",
-    "COUNT",
-    "AVG",
-    "MAX",
-    "MIN",
-    "AS",
-    "AND",
-    "OR",
-}
+#
+# 全仓库唯一一份"活"的 SQL 关键字表：`app.services.localization_service`
+# 的 `_protect()`/`_PROTECT_PATTERN` 直接从这里导入复用，不再各写一份——
+# 两份独立维护的拷贝曾经真的漂移过（一份有 `DROP`/`TABLE` 没有
+# `AS`/`AND`/`OR`，另一份反过来），本次合并取两者并集，任何一处新增关键字
+# 都会同时对两个使用方生效。`migrations/versions/20260831_0016_*.py` 里还有
+# 第三份**刻意冻结**的拷贝，用于历史行回填分类，不属于本表的复用范围，也
+# 永远不应该被改成 import 这里——见该迁移文件模块顶部的说明。
+SQL_KEYWORDS = frozenset(
+    {
+        "SELECT",
+        "FROM",
+        "WHERE",
+        "INSERT",
+        "UPDATE",
+        "DELETE",
+        "JOIN",
+        "GROUP",
+        "ORDER",
+        "INTO",
+        "VALUES",
+        "LIMIT",
+        "INNER",
+        "LEFT",
+        "RIGHT",
+        "OUTER",
+        "DISTINCT",
+        "HAVING",
+        "UNION",
+        "DROP",
+        "TABLE",
+        "SUM",
+        "COUNT",
+        "AVG",
+        "MAX",
+        "MIN",
+        "AS",
+        "AND",
+        "OR",
+    }
+)
 
 
 def _replace_code_token(match: re.Match[str]) -> str:
     token = match.group(0)
     if "_" in token or any(ch.isdigit() for ch in token):
         return " "
-    if token.upper() in _SQL_KEYWORDS:
+    if token.upper() in SQL_KEYWORDS:
         return " "
     return token
 
