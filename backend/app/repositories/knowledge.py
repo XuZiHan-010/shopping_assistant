@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.knowledge import KnowledgeDocument
+from app.repositories.knowledge_admin import classify_source_locale
 
 
 class KnowledgeRepository:
@@ -49,6 +50,7 @@ class KnowledgeRepository:
                 source=source,
                 is_complete=is_complete,
                 status="ACTIVE",
+                source_locale=classify_source_locale(title, content),
             )
             self._session.add(document)
             return document
@@ -59,6 +61,7 @@ class KnowledgeRepository:
         existing.source = source
         existing.is_complete = is_complete
         existing.version += 1
+        existing.source_locale = classify_source_locale(title, content)
         return existing
 
     async def insert_if_absent_by_source_path(
@@ -87,6 +90,7 @@ class KnowledgeRepository:
                 source=source,
                 is_complete=is_complete,
                 status="ACTIVE",
+                source_locale=classify_source_locale(title, content),
             )
         )
         return True

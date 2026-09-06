@@ -14,10 +14,20 @@
 `reaction`（枚举协议值）、`answer_id`（ID）——这些字段在
 `ConversationAnswerPayload`/`ConversationSummary` 里原样保留，本模块不触碰。
 
-超预算按条目降级，不整页失败：未能在预算内完成翻译的条目返回目标语言占位
-文案，**任何情况下都不回落源语言原文**（R7）；调用方据此把
-`localization_degraded`/`localization_degraded_reason` 置入响应，前端对同一
-游标/分页参数重新 GET 即为重试，已成功条目命中机器缓存不会重复调用模型。
+超预算按条目降级，不整页失败：未能在预算内完成翻译的条目默认返回目标语言
+占位文案（R7）。**例外**见 `_degrade_shows_original()`：源语言是 `und`
+（没有可翻译的自然语言内容）总是展示原文；源语言是 `mixed` 时只在文本的
+"主体语言"（`dominant_script()`，按汉字/英文字母数量粗略判定）与目标展示
+语言一致时才展示原文——比如中文问题里夹杂 "GMV" 这类英文缩写，对中文读者
+展示原文仍然可读，翻译失败时展示占位文案反而会把用户自己说的话隐藏掉；但
+一句以英文缩写开头、其余全是中文的系统提示文案，对英文读者展示原文毫无
+意义，仍然展示占位文案。源语言精确等于目标语言，或明确是目标语言之外的
+**另一种**受支持语言（`zh-CN` 源配 `en-US` 目标，反之亦然）时都不触发这条
+例外——前者在 `LocalizationService.localize_many()` 里已经原样返回，不算
+降级；后者展示占位文案，避免把未翻译的外语内容误当成已完成翻译静默展示给
+读者。调用方据此把 `localization_degraded`/`localization_degraded_reason`
+置入响应，前端对同一游标/分页参数重新 GET 即为重试，已成功条目命中机器
+缓存不会重复调用模型。
 """
 
 from __future__ import annotations
@@ -27,7 +37,13 @@ from typing import Any, Protocol
 from uuid import UUID
 
 from app.llm.client import LlmBudget
-from app.localization.locales import SupportedLocale, hash_source_text
+from app.localization.locales import (
+    SourceLanguage,
+    SupportedLocale,
+    detect_source_language,
+    dominant_script,
+    hash_source_text,
+)
 from app.models.answer import Answer, Feedback
 from app.models.conversation import Conversation, Message
 from app.repositories.localization import LocalizationScope
@@ -90,9 +106,39 @@ def _placeholder(target_locale: SupportedLocale) -> str:
     return _UNAVAILABLE_PLACEHOLDER[target_locale]
 
 
+def _degrade_shows_original(original: str, target_locale: SupportedLocale) -> bool:
+    """降级时是否展示原文而不是占位文案。
+
+    `und`（没有可翻译的自然语言内容，比如纯 ID/数字）总是展示原文。
+
+    `mixed` 只在文本的"主体语言"（`dominant_script()`）与目标展示语言一致
+    时才展示原文——比如中文问题夹了个 "GMV"，对中文读者展示原文仍然可读；
+    但一句以 "LLM" 开头、其余全是中文的系统提示文案，对英文读者展示原文
+    毫无意义，这种情况仍然展示占位文案。不按这个方向区分的话，任何只夹了
+    一两个英文缩写的纯中文系统文案，在英文请求下翻译失败时都会整句展示
+    中文原文，而不是一句清楚说"翻译暂不可用"的占位文案。
+
+    源语言精确等于目标语言的情况不会走到这里——级联在
+    `LocalizationService.localize_many()` 里已经原样返回，不算降级。源语言
+    明确是目标语言之外的**另一种**受支持语言（`zh-CN` 源配 `en-US` 目标，
+    反之亦然）时也展示占位文案，不触发这条例外。
+    """
+
+    source_language = detect_source_language(original)
+    if source_language is SourceLanguage.UND:
+        return True
+    if source_language is SourceLanguage.MIXED:
+        return dominant_script(original) == target_locale
+    return False
+
+
 class _Resolver:
     """包一层 `resolved` 字典的取值逻辑：空源文本直接原样返回（没有可翻译
-    内容，不算降级）；非空源文本缺席时记一次降级并返回占位文案。"""
+    内容，不算降级）；非空源文本缺席时按 `_degrade_shows_original()` 决定
+    返回原文还是占位文案——**只有真正展示占位文案才记一次降级**：展示原文
+    时读者看到的是完整、可读的内容，没有任何东西需要"重试"，`degraded`/
+    `localization_degraded_reason` 继续置位只会让前端展示一条没有实际意义
+    的重试提示。"""
 
     def __init__(self, resolved: Mapping[str, str], target_locale: SupportedLocale) -> None:
         self._resolved = resolved
@@ -104,6 +150,8 @@ class _Resolver:
             return original
         translated = self._resolved.get(key)
         if translated is None:
+            if _degrade_shows_original(original, self._target_locale):
+                return original
             self.degraded = True
             return _placeholder(self._target_locale)
         return translated

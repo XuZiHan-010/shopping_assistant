@@ -524,6 +524,7 @@ async def test_end_to_end_prefilter_rejection_persists_and_replays_in_conversati
                 content="下单、支付与履约的交易流程说明。",
                 source="test-seed",
                 source_path="业务/交易/业务流程/交易流程.md",
+                source_locale=str(SupportedLocale.ZH_CN),
             )
         )
         await session.commit()

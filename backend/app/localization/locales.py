@@ -193,6 +193,26 @@ def detect_source_language(text: str) -> SourceLanguage:
     return SourceLanguage.UND
 
 
+def dominant_script(text: str) -> SupportedLocale:
+    """`mixed` 源文本按字符量粗略判定"主体语言"：汉字数多于英文字母数按中文
+    处理，反之按英文处理，汉字数与英文字母数相等时按中文处理（与
+    `SupportedLocale` 默认回退 `zh-CN` 保持一致）。
+
+    只对 `detect_source_language()` 判定为 `mixed` 的文本才有意义——纯中文/
+    纯英文已经能被 `detect_source_language()` 直接判定，不需要这个函数；
+    `und`（无自然语言内容）调用这个函数也没有意义。用途见
+    `app.localization.payloads._degrade_shows_original()`：mixed 内容翻译
+    降级时，只对"主体语言"与目标展示语言一致的读者展示原文——比如中文问题
+    夹了 "GMV" 这样的英文缩写，对中文读者展示原文仍然可读；反过来，一句
+    以英文缩写 "LLM" 开头、其余全是中文的系统提示文案，对英文读者展示原文
+    毫无意义，仍然应该展示占位文案。
+    """
+
+    han_count = len(_HAN_PATTERN.findall(text))
+    latin_count = sum(len(match.group(0)) for match in _LATIN_WORD_PATTERN.finditer(text))
+    return SupportedLocale.EN_US if latin_count > han_count else SupportedLocale.ZH_CN
+
+
 def hash_source_text(text: str) -> str:
     """源文本的确定性哈希，是机器译文缓存键（`source_hash`）的唯一算法。
 

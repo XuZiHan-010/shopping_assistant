@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analytics.chatbi_metrics import QaCounters
 from app.db.session import Database
+from app.localization.locales import SourceLanguage
 from app.models.answer import Answer, Feedback
 from app.models.conversation import Conversation
 from app.models.merchant import Merchant
@@ -53,6 +54,7 @@ async def _seed(session: AsyncSession) -> None:
             },
             elapsed_ms=elapsed,
             created_at=CREATED_AT,
+            response_locale=str(SourceLanguage.UND),
         )
         session.add(answer)
         await session.flush()

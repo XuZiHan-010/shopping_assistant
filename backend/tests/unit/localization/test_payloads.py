@@ -275,6 +275,61 @@ async def test_detail_placeholders_missing_items_and_flags_degraded_without_leak
 
 
 @pytest.mark.asyncio
+async def test_detail_degrade_shows_original_for_mixed_source_language() -> None:
+    """源语言是 `mixed`（中文夹英文缩写，比如 "GMV"）、且主体语言与目标展示
+    语言一致时，翻译失败不该把用户自己说的话换成占位文案——目标语言本来就是
+    文本的主体语言，展示原文仍然可读，且读者看到的是完整内容，不算降级
+    （不应该触发前端的"翻译重试"提示）。纯粹另一种受支持语言（zh-CN 源配
+    en-US 目标）不享有这个例外，见上面
+    `test_detail_placeholders_missing_items_and_flags_degraded_without_leaking_source`。
+    """
+
+    user_message = _message("USER", "昨天总 GMV 是多少？")
+    fake = FakeLocalizationService({})  # 全部缺席，模拟本地化不可用
+
+    title, messages, degraded, reason = await localize_conversation_detail(
+        service=fake,
+        budget=_budget(),
+        merchant_id=MERCHANT_ID,
+        title=None,
+        messages=[user_message],
+        answers_by_user_message={},
+        target_locale=SupportedLocale.ZH_CN,
+    )
+
+    assert title is None
+    assert messages[0].content == "昨天总 GMV 是多少？"
+    assert degraded is False
+    assert reason is None
+
+
+@pytest.mark.asyncio
+async def test_detail_degrade_still_placeholders_mixed_text_whose_dominant_script_differs() -> (
+    None
+):
+    """`mixed` 源语言不是无条件展示原文：主体语言是中文的文案（只夹了英文
+    缩写 "LLM"）对英文读者来说仍然不可读，翻译失败必须继续展示占位文案，
+    而不是把这句读者看不懂的中文原样甩给他们。"""
+
+    user_message = _message("USER", "LLM 未配置或暂不可用，已返回可见降级结果。")
+    fake = FakeLocalizationService({})
+
+    _, messages, degraded, reason = await localize_conversation_detail(
+        service=fake,
+        budget=_budget(),
+        merchant_id=MERCHANT_ID,
+        title=None,
+        messages=[user_message],
+        answers_by_user_message={},
+        target_locale=EN_US,
+    )
+
+    assert messages[0].content == "Translation unavailable — retry"
+    assert degraded is True
+    assert reason is not None
+
+
+@pytest.mark.asyncio
 async def test_detail_leaves_empty_assistant_content_untouched() -> None:
     """纯 DETAIL 回答的 `answer` 是精确空串（R7 之外的既有契约）,空字符串没
     有可翻译内容,不应该被当成"缺席条目"打上占位符或计入降级。"""
