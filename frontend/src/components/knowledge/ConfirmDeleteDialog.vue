@@ -34,7 +34,9 @@ const emit = defineEmits<{ confirm: []; cancel: [] }>()
         该业务域及其全部文档将被级联删除，此操作不可撤销。
       </p>
       <p v-else class="confirm-delete-dialog__warning">该文档将被删除，此操作不可撤销。</p>
-      <p v-if="errorMessage" class="confirm-delete-dialog__error" role="alert">{{ errorMessage }}</p>
+      <p v-if="errorMessage" class="confirm-delete-dialog__error" role="alert">
+        {{ errorMessage }}
+      </p>
       <footer>
         <button type="button" data-testid="cancel" @click="emit('cancel')">取消</button>
         <button type="button" data-testid="confirm" :disabled="pending" @click="emit('confirm')">

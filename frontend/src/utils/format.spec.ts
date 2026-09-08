@@ -21,6 +21,16 @@ describe('formatCell', () => {
     expect(formatCell(false)).toBe('否')
   })
 
+  it('不把负零或四舍五入归零的小负数显示成 -0', () => {
+    expect(formatCell(-0)).toBe('0')
+    expect(formatCell(-0.001, '元')).toBe('0 元')
+  })
+
+  it('保留真实负数的负号', () => {
+    expect(formatCell(-1.5, '元')).toBe('-1.5 元')
+    expect(formatCell(-1234.56)).toBe('-1,234.56')
+  })
+
   it('不会让超长 JSON 撑破单元格', () => {
     const value = JSON.stringify({ note: 'x'.repeat(500) })
 

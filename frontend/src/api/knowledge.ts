@@ -70,7 +70,12 @@ export async function createKnowledgeDocument(
 ): Promise<KnowledgeDocument> {
   const transport = await resolveTransport()
   const response = await transport(
-    { path: '/api/admin/knowledge/documents', method: 'POST', body: { path, content }, auth: 'admin' },
+    {
+      path: '/api/admin/knowledge/documents',
+      method: 'POST',
+      body: { path, content },
+      auth: 'admin',
+    },
     signal,
   )
   return toKnowledgeDocument(
@@ -101,12 +106,15 @@ export async function createBusinessDomain(
 ): Promise<KnowledgeTreeNode> {
   const transport = await resolveTransport()
   const response = await transport(
-    { path: '/api/admin/knowledge/business-domains', method: 'POST', body: { name }, auth: 'admin' },
+    {
+      path: '/api/admin/knowledge/business-domains',
+      method: 'POST',
+      body: { name },
+      auth: 'admin',
+    },
     signal,
   )
-  return toKnowledgeTreeNode(
-    (await response.json()) as components['schemas']['KnowledgeTreeNode'],
-  )
+  return toKnowledgeTreeNode((await response.json()) as components['schemas']['KnowledgeTreeNode'])
 }
 
 export async function renameBusinessDomain(
@@ -126,9 +134,7 @@ export async function renameBusinessDomain(
     },
     signal,
   )
-  return toKnowledgeTreeNode(
-    (await response.json()) as components['schemas']['KnowledgeTreeNode'],
-  )
+  return toKnowledgeTreeNode((await response.json()) as components['schemas']['KnowledgeTreeNode'])
 }
 
 export async function deleteBusinessDomain(

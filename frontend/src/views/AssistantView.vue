@@ -224,11 +224,21 @@ function startNewConversation(): void {
         @update:model-value="selectMerchant"
       />
       <div class="header-actions">
-        <RouterLink class="knowledge-link" to="/knowledge-base" aria-label="知识库维护" title="知识库维护">
+        <RouterLink
+          class="knowledge-link"
+          to="/knowledge-base"
+          aria-label="知识库维护"
+          title="知识库维护"
+        >
           <BookOpen :size="18" aria-hidden="true" />
           <span>知识库</span>
         </RouterLink>
-        <RouterLink class="ops-link" to="/ops-dashboard" aria-label="Chat BI 运营看板" title="Chat BI 运营看板">
+        <RouterLink
+          class="ops-link"
+          to="/ops-dashboard"
+          aria-label="Chat BI 运营看板"
+          title="Chat BI 运营看板"
+        >
           <BarChart3 :size="18" aria-hidden="true" />
           <span>看板</span>
         </RouterLink>

@@ -118,7 +118,9 @@ function mockIndexRoot(knowledgeDocuments: Map<string, MockKnowledgeDocument>): 
   return mockDirectoryNode('index', false, children)
 }
 
-function mockBusinessRoot(knowledgeDocuments: Map<string, MockKnowledgeDocument>): MockKnowledgeNode {
+function mockBusinessRoot(
+  knowledgeDocuments: Map<string, MockKnowledgeDocument>,
+): MockKnowledgeNode {
   const domainNames = new Set<string>()
   for (const path of knowledgeDocuments.keys()) {
     const segments = path.split('/')
@@ -185,7 +187,9 @@ function findMockDomainNode(
   knowledgeDocuments: Map<string, MockKnowledgeDocument>,
   name: string,
 ): MockKnowledgeNode | undefined {
-  return (mockBusinessRoot(knowledgeDocuments).children ?? []).find((domain) => domain.name === name)
+  return (mockBusinessRoot(knowledgeDocuments).children ?? []).find(
+    (domain) => domain.name === name,
+  )
 }
 
 function encodeSse(fixture: RawChatResponse): Uint8Array {
@@ -480,15 +484,23 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
       if (knowledgeDocuments.has(payload.path)) {
         return errorResponse('WIKI_NODE_EXISTS', '同名文档已存在', 409)
       }
-      const created: MockKnowledgeDocument = { content: payload.content, read_only: false, version: '1' }
+      const created: MockKnowledgeDocument = {
+        content: payload.content,
+        read_only: false,
+        version: '1',
+      }
       knowledgeDocuments.set(payload.path, created)
       return jsonResponse(
-        { path: payload.path, ...created } satisfies components['schemas']['KnowledgeDocumentResponse'],
+        {
+          path: payload.path,
+          ...created,
+        } satisfies components['schemas']['KnowledgeDocumentResponse'],
         201,
       )
     }
 
-    const businessDomainMatch = request.path.split('?')[0] === '/api/admin/knowledge/business-domains'
+    const businessDomainMatch =
+      request.path.split('?')[0] === '/api/admin/knowledge/business-domains'
     if (businessDomainMatch) {
       if (tenantKeyFor(request) !== MOCK_ADMIN_TOKEN) {
         return errorResponse('AUTH_REQUIRED', '管理员令牌无效', 401)
@@ -529,7 +541,10 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
         for (const [path, document] of [...knowledgeDocuments.entries()]) {
           if (path.startsWith(prefix)) {
             knowledgeDocuments.delete(path)
-            knowledgeDocuments.set(`业务/${payload.new_name}/${path.slice(prefix.length)}`, document)
+            knowledgeDocuments.set(
+              `业务/${payload.new_name}/${path.slice(prefix.length)}`,
+              document,
+            )
           }
         }
         return jsonResponse(findMockDomainNode(knowledgeDocuments, payload.new_name))

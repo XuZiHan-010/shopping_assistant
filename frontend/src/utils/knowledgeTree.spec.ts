@@ -4,7 +4,11 @@ import type { KnowledgeTreeNode } from '@/api/adapters/knowledge'
 
 import { canDeleteNode, findNode, isBusinessDomain, isDocumentParent } from './knowledgeTree'
 
-function directory(path: string, readOnly = false, children: KnowledgeTreeNode[] = []): KnowledgeTreeNode {
+function directory(
+  path: string,
+  readOnly = false,
+  children: KnowledgeTreeNode[] = [],
+): KnowledgeTreeNode {
   return {
     name: path.split('/').at(-1) ?? path,
     path,
@@ -84,7 +88,11 @@ describe('canDeleteNode', () => {
 
 describe('findNode', () => {
   it('在嵌套目录树中按路径找到节点', () => {
-    const roots = [directory('业务', false, [directory('业务/客服', false, [document('业务/客服/业务流程/x.md')])])]
+    const roots = [
+      directory('业务', false, [
+        directory('业务/客服', false, [document('业务/客服/业务流程/x.md')]),
+      ]),
+    ]
 
     expect(findNode(roots, '业务/客服/业务流程/x.md')?.path).toBe('业务/客服/业务流程/x.md')
   })
