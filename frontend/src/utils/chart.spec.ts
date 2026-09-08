@@ -60,19 +60,55 @@ describe('summarizeChart', () => {
         type: 'BAR',
         dimensionKey: 'category',
         data: [
-          { category: '食品', gmv: '60' },
-          { category: '家居', gmv: '40' },
+          { category: '食品', gmv: '60000.1' },
+          { category: '家居', gmv: '40000.2' },
         ],
       },
       'PIE',
     )
 
-    expect(summary.total).toBe(100)
+    expect(summary.total).toBe(60000.1 + 40000.2)
+    expect(summary.sentence).toContain('合计 100,000.3 元')
+    expect(summary.sentence).not.toContain('100000.29999999999')
     expect(summary.sentence).toContain('食品')
     expect(summary.sentence).not.toMatch(/趋势|环比/)
   })
 
   it('首点为零时不计算 Infinity 环比', () => {
     expect(summarizeChart(trendChart, 'LINE').sentence).not.toContain('Infinity')
+  })
+
+  it('合计不把浮点误差尾数写进摘要', () => {
+    const summary = summarizeChart(
+      {
+        ...trendChart,
+        data: [
+          { business_date: '2026-08-01', gmv: '0.1' },
+          { business_date: '2026-08-02', gmv: '0.2' },
+        ],
+      },
+      'LINE',
+    )
+
+    expect(summary.sentence).toContain('0.3')
+    expect(summary.sentence).not.toContain('0.30000000000000004')
+  })
+
+  it('合计与最高值都走明细表那套数字格式', () => {
+    const summary = summarizeChart(
+      {
+        ...trendChart,
+        allowedTypes: ['BAR'],
+        type: 'BAR',
+        data: [
+          { business_date: '2026-08-01', gmv: '1234.5' },
+          { business_date: '2026-08-02', gmv: '0.1' },
+        ],
+      },
+      'BAR',
+    )
+
+    expect(summary.sentence).toContain('合计 1,234.6 元')
+    expect(summary.sentence).toContain('为最高值 1,234.5 元')
   })
 })

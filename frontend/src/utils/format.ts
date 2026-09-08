@@ -1,6 +1,9 @@
 const EMPTY_CELL = '—'
 const MAX_CELL_LENGTH = 160
 
+// Intl 会把 -0 及四舍五入后归零的小负数输出成 "-0"。
+const NEGATIVE_ZERO = /^-0(?:\.0+)?$/
+
 export function toNumber(value: unknown): number | null {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null
   if (typeof value !== 'string' || value.trim() === '') return null
@@ -26,7 +29,9 @@ export function formatCell(value: unknown, unit?: string): string {
   const numeric = toNumber(value)
   if (numeric !== null) {
     const formatted = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 }).format(numeric)
-    return unit ? `${formatted} ${unit}` : formatted
+    // 不使用兼容性较差的 signDisplay 选项，直接规范化渲染后的负零。
+    const safe = NEGATIVE_ZERO.test(formatted) ? formatted.slice(1) : formatted
+    return unit ? `${safe} ${unit}` : safe
   }
 
   if (typeof value === 'object') return truncate(JSON.stringify(value))

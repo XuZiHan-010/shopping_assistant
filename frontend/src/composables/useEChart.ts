@@ -56,6 +56,8 @@ export function useEChart(
   }
 
   onMounted(render)
-  watch([option, enabled], render)
+  // 容器是 v-if 控制的子节点；它本身出现或消失就是渲染时机，不能只靠 enabled 代替。
+  // flush 必须是 post：option 与容器可能在同一次更新中出现，默认 pre 会早于 DOM 打补丁。
+  watch([option, enabled, container], render, { flush: 'post' })
   onBeforeUnmount(dispose)
 }

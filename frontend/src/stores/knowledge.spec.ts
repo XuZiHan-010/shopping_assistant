@@ -208,7 +208,12 @@ describe('知识库后台新建与删除', () => {
       },
     ]
     store.selectedPath = 'index/a.md'
-    store.selectedDocument = { path: 'index/a.md', content: '正文', readOnly: false, version: 'fresh-v2' }
+    store.selectedDocument = {
+      path: 'index/a.md',
+      content: '正文',
+      readOnly: false,
+      version: 'fresh-v2',
+    }
 
     const requests: TransportRequest[] = []
     setChatTransport(async (request) => {

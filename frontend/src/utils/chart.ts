@@ -1,6 +1,6 @@
 import type { ChartSeries } from '@/types/chat'
 
-import { toNumber } from './format'
+import { formatCell, toNumber } from './format'
 
 export type ChartType = 'LINE' | 'BAR' | 'PIE'
 
@@ -19,7 +19,12 @@ export interface ChartOption {
 }
 
 export interface ChartSummary {
+  /**
+   * 未格式化的原始求和，可能带有浮点误差尾数（例如 0.1 + 0.2 = 0.30000000000000004）。
+   * 它仅用于参与计算（如占比）；任何面向用户的展示都必须先经过 formatCell。
+   */
   total: number
+  /** 已按明细表相同格式渲染的摘要文案。 */
   sentence: string
 }
 
@@ -111,7 +116,9 @@ export function summarizeChart(chart: ChartSeries, type: ChartType): ChartSummar
     (point): point is { label: string; value: number } => point.value !== null,
   )
   const total = numeric.reduce((sum, point) => sum + point.value, 0)
-  const unit = chart.unit ? ` ${chart.unit}` : ''
+  // 走和明细表同一个格式化入口：直接插值会把浮点求和的误差尾数
+  // （0.1 + 0.2 = 0.30000000000000004）原样写进用户可见的摘要里。
+  const totalText = formatCell(total, chart.unit)
   const top = numeric.reduce<{ label: string; value: number } | undefined>(
     (current, point) => (!current || point.value > current.value ? point : current),
     undefined,
@@ -121,7 +128,7 @@ export function summarizeChart(chart: ChartSeries, type: ChartType): ChartSummar
     const share = top && total !== 0 ? ((top.value / total) * 100).toFixed(1) : '0.0'
     return {
       total,
-      sentence: top ? `合计 ${total}${unit}，${top.label} 占比 ${share}%。` : '没有可汇总的数据。',
+      sentence: top ? `合计 ${totalText}，${top.label} 占比 ${share}%。` : '没有可汇总的数据。',
     }
   }
 
@@ -130,14 +137,17 @@ export function summarizeChart(chart: ChartSeries, type: ChartType): ChartSummar
     const last = numeric.at(-1)!.value
     if (first !== 0) {
       const change = ((last - first) / Math.abs(first)) * 100
-      return { total, sentence: `合计 ${total}${unit}，末期较首期变化 ${change.toFixed(1)}%。` }
+      return {
+        total,
+        sentence: `合计 ${totalText}，末期较首期变化 ${change.toFixed(1)}%。`,
+      }
     }
   }
 
   return {
     total,
     sentence: top
-      ? `合计 ${total}${unit}，${top.label} 为最高值 ${top.value}${unit}。`
+      ? `合计 ${totalText}，${top.label} 为最高值 ${formatCell(top.value, chart.unit)}。`
       : '没有可汇总的数据。',
   }
 }

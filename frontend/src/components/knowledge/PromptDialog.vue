@@ -32,11 +32,22 @@ function submit(): void {
 
 <template>
   <div class="prompt-dialog-backdrop" role="presentation" @click.self="emit('cancel')">
-    <section class="prompt-dialog" role="dialog" aria-modal="true" aria-labelledby="prompt-dialog-title">
+    <section
+      class="prompt-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="prompt-dialog-title"
+    >
       <h2 id="prompt-dialog-title">{{ title }}</h2>
       <form @submit.prevent="submit">
         <label for="prompt-dialog-input">{{ label }}</label>
-        <input id="prompt-dialog-input" v-model="value" type="text" :placeholder="placeholder" autofocus />
+        <input
+          id="prompt-dialog-input"
+          v-model="value"
+          type="text"
+          :placeholder="placeholder"
+          autofocus
+        />
         <p v-if="errorMessage" class="prompt-dialog__error" role="alert">{{ errorMessage }}</p>
         <footer>
           <button type="button" data-testid="cancel" @click="emit('cancel')">取消</button>

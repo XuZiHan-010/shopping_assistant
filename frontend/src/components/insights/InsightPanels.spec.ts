@@ -83,8 +83,10 @@ describe('MetricChartPanel', () => {
 
   it('后端提供 visualization 时展示图表摘要', () => {
     const wrapper = mount(MetricChartPanel, { props: { answer: metricAnswer } })
+    const summary = wrapper.get('[data-testid="chart-summary"]').text()
 
-    expect(wrapper.get('[data-testid="chart-summary"]').text()).toContain('128000')
+    expect(summary).toContain('合计 128,000.5 元')
+    expect(summary).toContain('为最高值 128,000.5 元')
     expect(wrapper.find('[data-testid="chart-empty"]').exists()).toBe(false)
   })
 

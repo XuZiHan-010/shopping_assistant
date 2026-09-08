@@ -1,5 +1,5 @@
 import { mount } from '@vue/test-utils'
-import { defineComponent, h, ref } from 'vue'
+import { defineComponent, h, nextTick, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ChartOption } from '@/utils/chart'
@@ -51,5 +51,54 @@ describe('useEChart', () => {
 
     wrapper.unmount()
     expect(echartsMock.chartInstance.dispose).toHaveBeenCalledTimes(1)
+  })
+
+  it('容器随 option 一起出现时仍会初始化图表', async () => {
+    // MetricChartPanel 把容器放在 `v-if="validation.renderable && chart"` 后面：
+    // 首个带图表的回答到达时，option 和容器是同一次更新里出现的。上面那条用例
+    // 的容器无条件渲染，走不到这条路径——首屏空图表正是从这里漏过去的。
+    const chartOption = ref<ChartOption | undefined>(undefined)
+    const enabled = ref(false)
+
+    const Harness = defineComponent({
+      setup() {
+        const element = ref<HTMLElement | null>(null)
+        useEChart(element, chartOption, enabled)
+        return () => (enabled.value ? h('div', { ref: element }) : h('p', '暂无图表'))
+      },
+    })
+
+    mount(Harness)
+    expect(echartsMock.init).not.toHaveBeenCalled()
+
+    chartOption.value = option
+    enabled.value = true
+    await nextTick()
+
+    expect(echartsMock.init).toHaveBeenCalledTimes(1)
+    expect(echartsMock.chartInstance.setOption).toHaveBeenCalledWith(option, { notMerge: true })
+  })
+  it('容器晚于 enabled 出现时补上初始化，而不是静默放弃', async () => {
+    const chartOption = ref<ChartOption | undefined>(option)
+    const enabled = ref(true)
+    const containerReady = ref(false)
+
+    const Harness = defineComponent({
+      setup() {
+        const element = ref<HTMLElement | null>(null)
+        useEChart(element, chartOption, enabled)
+        return () => (containerReady.value ? h('div', { ref: element }) : h('p', '容器还没到'))
+      },
+    })
+
+    mount(Harness)
+    await nextTick()
+    expect(echartsMock.init).not.toHaveBeenCalled()
+
+    containerReady.value = true
+    await nextTick()
+
+    expect(echartsMock.init).toHaveBeenCalledTimes(1)
+    expect(echartsMock.chartInstance.setOption).toHaveBeenCalledWith(option, { notMerge: true })
   })
 })
