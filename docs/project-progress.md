@@ -15,7 +15,12 @@
 > 另修复两条 `ChatMessage` 导出测试的时间敏感性：局部冻结时钟，未修改生产代码或生成 fixture。
 > 最终前端验证：Vitest **46 files / 360 tests passed**、`npm run typecheck`、`npm run lint`、
 > `npm run format:check` 均通过；未调用真实 LLM，`api/generated.ts` 与
-> `api/mock/fixtures.generated.ts` 均未改动。计划要求的 Git 提交尚未执行，等待用户明确授权。
+> `api/mock/fixtures.generated.ts` 均未改动。用户已明确授权提交，已推送至 `origin/main`
+> （commit `df3d949`）。同一批推送还包含 `README.md`/`README.en.md`/`docs/images/`
+> （commit `016a9de`）；`feature/bilingual-localization` 分支（中英文全栈本地化，此前从未
+> 推送）也已首次推送到 `origin`，含一处新修复：`AssistantView.vue` 的每日经营日报此前未监听
+> `localeStore.locale`，切换展示语言不会重新拉取日报，已补上与 `chatStore` 一致的 watch
+> （该分支尚未合并回 `main`，未创建 PR）。
 
 > **2026-08-26 零 LLM 问题范围前置闸门**：新增 `openspec/changes/add-question-prefilter-gate`
 > 完整规划与实现——对外部署下，此前每个问题（含明显无关提问，如「CNN 和 RNN 的区别」）都会
