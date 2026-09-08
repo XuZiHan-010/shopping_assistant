@@ -13,6 +13,7 @@ import MerchantSwitcher from '@/components/layout/MerchantSwitcher.vue'
 import { useAppError } from '@/composables/useAppError'
 import { useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
+import { useLocaleStore } from '@/stores/locale'
 import { getDailyReport } from '@/api/report'
 import { submitFeedback } from '@/api/chat'
 import type { DailyReport } from '@/types/report'
@@ -20,6 +21,7 @@ import type { DailyReport } from '@/types/report'
 const { t } = useI18n()
 const authStore = useAuthStore()
 const chatStore = useChatStore()
+const localeStore = useLocaleStore()
 const { showError } = useAppError()
 const dailyReport = ref<DailyReport>()
 const dailyReportController = ref<AbortController>()
@@ -178,6 +180,16 @@ onMounted(async () => {
   await loadDailyReport()
   refreshConversations()
 })
+
+// chatStore 自己在 reloadForLocale() 里监听了这个 store 重新拉会话和当前回答，
+// 但日报是 AssistantView 私有状态，不在 chatStore 管辖范围内，得单独补一份同样
+// 的监听——否则切换语言后日报卡片会停留在切换前的语言，其余区域却都变了。
+watch(
+  () => localeStore.locale,
+  () => {
+    void loadDailyReport()
+  },
+)
 
 function selectMerchant(displayName: string): void {
   // 仍然只在「合法且确实换了商家」时重置会话——F1 复查整改定下的行为，
