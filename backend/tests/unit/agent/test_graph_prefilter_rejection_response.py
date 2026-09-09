@@ -77,3 +77,16 @@ async def test_rejection_response_offers_followup_suggestions() -> None:
     response = await _rejected_response()
 
     assert len(response.suggestions) > 0
+
+
+def test_rejection_message_is_registered_in_the_bilingual_catalog() -> None:
+    """Task 5：拒答文案必须是 `catalog.py` 能查到译文的"词表键"——按当前请求
+    locale 渲染成对应语言由 Task 6 接线，这里只守住这句字面量没有和词典登记项
+    悄悄漂移（例如有人改了措辞却忘了同步 catalog.py）。
+    """
+
+    from app.agent.graph import _PREFILTER_REJECTION_MESSAGE
+    from app.localization.catalog import localize_catalog_value
+    from app.localization.locales import SupportedLocale
+
+    assert localize_catalog_value(_PREFILTER_REJECTION_MESSAGE, SupportedLocale.EN_US) is not None

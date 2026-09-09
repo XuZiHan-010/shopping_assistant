@@ -9,6 +9,7 @@ import pytest
 from app.analytics.contract import DETAIL_SPECS
 from app.core.errors import AppError, ErrorCode, ResourceNotFoundError
 from app.intent.models import CrossBusinessPlan, CrossBusinessPlanType, GeneratedMetricPlan
+from app.localization.locales import SupportedLocale
 from app.repositories.analytics import DetailResult, ResultColumn
 from app.schemas.chat import QuestionCategory
 from app.services.export_service import ExportService
@@ -234,3 +235,139 @@ async def test_tampered_generated_metric_export_spec_is_refused() -> None:
 
     with pytest.raises(ResourceNotFoundError):
         await service.download_from_url(info.url, now=now + timedelta(minutes=1))
+
+
+@pytest.mark.asyncio
+async def test_english_export_renders_english_headers_and_leaves_ids_and_amounts_unchanged() -> (
+    None
+):
+    """Task 8 Step 7: 表头随 locale 渲染，订单号/SKU/金额数值原样不变。"""
+
+    now = datetime(2026, 8, 5, tzinfo=UTC)
+    exports = _Exports()
+    service = ExportService(exports, _Analytics(), signing_secret="test-secret", ttl_minutes=15)
+    info = await service.create(
+        merchant_id=uuid4(),
+        answer_id=uuid4(),
+        spec=ExportSpec(
+            table="orders",
+            columns=("business_date", "order_no", "order_status", "paid_amount", "placed_at"),
+            start=date(2026, 8, 1),
+            end=date(2026, 8, 5),
+            filters=(("order_status", "PAID"),),
+        ),
+        locale=SupportedLocale.EN_US,
+        now=now,
+    )
+
+    csv_data = await service.download_from_url(info.url, now=now + timedelta(minutes=1))
+
+    assert csv_data.startswith("﻿Order no.\r\n")
+    # `_Analytics.export_detail()` always returns the fixed row below, whose
+    # `order_no` cell happens to be a formula-looking string ("=formula") —
+    # the escaping prefix is orthogonal to locale rendering and must survive
+    # unchanged; a real order number/SKU/amount would pass through untouched
+    # too since none of those are catalog entries.
+    assert "'=formula" in csv_data
+
+
+@pytest.mark.asyncio
+async def test_same_data_two_locale_exports_are_two_non_interchangeable_signed_links() -> None:
+    now = datetime(2026, 8, 5, tzinfo=UTC)
+    exports = _Exports()
+    service = ExportService(exports, _Analytics(), signing_secret="test-secret", ttl_minutes=15)
+    merchant_id, answer_id = uuid4(), uuid4()
+    spec = ExportSpec(
+        table="orders",
+        columns=("business_date", "order_no", "order_status", "paid_amount", "placed_at"),
+        start=date(2026, 8, 1),
+        end=date(2026, 8, 5),
+        filters=(("order_status", "PAID"),),
+    )
+
+    zh_info = await service.create(
+        merchant_id=merchant_id, answer_id=answer_id, spec=spec, now=now
+    )
+    en_info = await service.create(
+        merchant_id=merchant_id,
+        answer_id=answer_id,
+        spec=spec,
+        locale=SupportedLocale.EN_US,
+        now=now,
+    )
+
+    assert zh_info.url != en_info.url
+    zh_query = zh_info.url.split("?", 1)[1]
+    en_query = en_info.url.split("?", 1)[1]
+    zh_signature = dict(part.split("=", 1) for part in zh_query.split("&"))["signature"]
+    en_signature = dict(part.split("=", 1) for part in en_query.split("&"))["signature"]
+    assert zh_signature != en_signature
+
+
+@pytest.mark.asyncio
+async def test_tampering_the_locale_query_parameter_is_rejected_by_signature_check() -> None:
+    now = datetime(2026, 8, 5, tzinfo=UTC)
+    exports = _Exports()
+    service = ExportService(exports, _Analytics(), signing_secret="test-secret", ttl_minutes=15)
+    info = await service.create(
+        merchant_id=uuid4(),
+        answer_id=uuid4(),
+        spec=ExportSpec(
+            table="orders",
+            columns=("business_date", "order_no", "order_status", "paid_amount", "placed_at"),
+            start=date(2026, 8, 1),
+            end=date(2026, 8, 5),
+            filters=(("order_status", "PAID"),),
+        ),
+        now=now,
+    )
+    assert "locale=zh-CN" in info.url
+    tampered_url = info.url.replace("locale=zh-CN", "locale=en-US")
+
+    with pytest.raises(AppError) as error:
+        await service.download_from_url(tampered_url, now=now + timedelta(minutes=1))
+    assert error.value.code is ErrorCode.MERCHANT_SCOPE_VIOLATION
+
+
+@pytest.mark.asyncio
+async def test_old_link_without_a_locale_query_parameter_still_downloads_as_zh_cn() -> None:
+    """签名 URL 创建于 `locale` 字段引入之前：`export_spec` 没有 "locale" key，
+    query 也没有 `locale` 参数，签名仍按当年的三段式公式计算——必须继续可下载,
+    并按 zh-CN 渲染（Task 8 Step 7 向后兼容断言）。"""
+
+    now = datetime(2026, 8, 5, tzinfo=UTC)
+    exports = _Exports()
+    merchant_id, answer_id = uuid4(), uuid4()
+    service = ExportService(exports, _Analytics(), signing_secret="test-secret", ttl_minutes=15)
+    expires_at = now + timedelta(minutes=15)
+    export_id = uuid4()
+    exports.record = _Record(
+        id=export_id,
+        merchant_id=merchant_id,
+        answer_id=answer_id,
+        export_spec={
+            "table": "orders",
+            "columns": ["business_date", "order_no", "order_status", "paid_amount", "placed_at"],
+            "start": date(2026, 8, 1).isoformat(),
+            "end": date(2026, 8, 5).isoformat(),
+            "filters": [["order_status", "PAID"]],
+            "date_filtered": True,
+            "kind": "detail",
+            "cross_business_plan": None,
+            "generated_metric_plan": None,
+            "generated_metric_category": None,
+            # 故意不带 "locale" key，模拟真正的历史记录。
+        },
+        expires_at=expires_at,
+    )
+    # 旧签名只用三段式负载（export_id:merchant_id:expires_at），没有 locale。
+    legacy_signature = service._signature(export_id, merchant_id, expires_at)
+    old_style_url = (
+        f"/api/exports/{export_id}"
+        f"?merchant_id={merchant_id}&expires_at={int(expires_at.timestamp())}"
+        f"&signature={legacy_signature}"
+    )
+
+    csv_data = await service.download_from_url(old_style_url, now=now + timedelta(minutes=1))
+
+    assert csv_data.startswith("﻿订单号\r\n")

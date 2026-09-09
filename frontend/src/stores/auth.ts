@@ -1,7 +1,9 @@
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 
 import { listDemoMerchants, type DemoMerchantView } from '@/api/chat'
+
+import { useLocaleStore } from './locale'
 
 /**
  * 只持久化非敏感的商家标识。Token 仅进内存与请求头，
@@ -13,6 +15,14 @@ export const useAuthStore = defineStore('auth', () => {
   const merchants = ref<DemoMerchantView[]>([])
   const selected = ref<DemoMerchantView | undefined>(undefined)
   const restoreNotice = ref('')
+
+  /**
+   * 每次语言切换递增一次。写状态之前先比较请求发出时快照的 epoch 与当前
+   * epoch——不一致说明这个响应对应的是已经被切走的语言，直接丢弃，不写入
+   * Store（与 `stores/chat.ts` 同一套机制，Task 11 Step 6 的原子刷新/防
+   * 竞态防护——之前只在 chat.ts 落地，本次补齐到 auth.ts）。
+   */
+  const localeEpoch = ref(0)
 
   const displayNames = computed(() => merchants.value.map((item) => item.displayName))
 
@@ -71,6 +81,57 @@ export const useAuthStore = defineStore('auth', () => {
     if (merchants.value[0]) select(merchants.value[0])
   }
 
+  /**
+   * 语言切换时重新拉一次商家列表——`/api/demo/merchants` 的 `display_name`
+   * 按 Accept-Language 分流（`backend/app/api/routes/demo.py::_display_name`），
+   * 不重新拉的话切换语言后切换器还会显示上一语言的商家名。
+   *
+   * 只重新指向"同一个商家"的新展示名，`token` 原样保留（`merchantId` 不变
+   * 则 Token 也不变——演示 Token 不随语言轮换）；`invalidate()` 清空过的
+   * Token 不会因为这次刷新被悄悄复活，一次单纯的语言切换不应该有"重新登录"
+   * 的副作用。未曾加载过商家列表（`merchants.value` 为空）时直接跳过——
+   * 那是尚未完成初始 `restore()` 的情况，不该抢在它前面发请求。
+   */
+  async function reloadForLocale(): Promise<void> {
+    // 无条件先递增：即使这次调用本身是 no-op（尚未加载过商家列表），也要让
+    // 任何仍在途的旧 epoch 请求在响应回来时被判定为过期而丢弃。
+    localeEpoch.value += 1
+    if (merchants.value.length === 0) return
+
+    const epochAtRequest = localeEpoch.value
+    const previousMerchantId = selected.value?.merchantId
+    const previousToken = selected.value?.token
+
+    let nextMerchants: DemoMerchantView[]
+    try {
+      nextMerchants = await listDemoMerchants(new AbortController().signal)
+    } catch {
+      // 静默失败：保留当前（可能是上一语言）的商家列表和选中项，不能让一次
+      // 语言切换的刷新失败打断用户正在做的事。
+      return
+    }
+
+    // 响应回来之前又发生了一次语言切换：这次响应对应的是已经过期的语言，
+    // 丢弃，交给更晚那次 reloadForLocale 的请求收尾——否则先发后至的旧语言
+    // 响应可能覆盖掉后发先至的新语言响应已经写入的数据。
+    if (epochAtRequest !== localeEpoch.value) return
+
+    merchants.value = nextMerchants
+
+    if (!previousMerchantId) return
+    const fresh = merchants.value.find((item) => item.merchantId === previousMerchantId)
+    if (!fresh) return
+    selected.value = previousToken === undefined ? { ...fresh, token: undefined } : fresh
+  }
+
+  const localeStore = useLocaleStore()
+  watch(
+    () => localeStore.locale,
+    () => {
+      void reloadForLocale()
+    },
+  )
+
   return {
     merchants,
     selected,
@@ -80,5 +141,6 @@ export const useAuthStore = defineStore('auth', () => {
     selectByDisplayName,
     restore,
     invalidate,
+    reloadForLocale,
   }
 })

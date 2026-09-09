@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Protocol
+from typing import Literal, Protocol
 from uuid import UUID
 
 from app.analytics.dates import business_today
@@ -42,10 +42,18 @@ class LlmCostGuard:
         settings: Settings,
         *,
         request_id: str,
-        merchant_id: UUID,
+        merchant_id: UUID | None,
+        purpose: Literal["AGENT", "LOCALIZATION"] = "AGENT",
     ) -> None:
+        """`merchant_id` 放宽为可空：`/api/admin/*` 的全局调用（如本地化的
+        GLOBAL 作用域翻译）没有商家上下文，`llm_usage.merchant_id` 本身也早已
+        可空（ON DELETE SET NULL）。`purpose` 区分主 Agent 流程与 Task 4 的
+        本地化通道，写入 `llm_usage.purpose`，供预算看板分开统计两条费用。
+        """
+
         self._inner, self._repository, self._settings = inner, repository, settings
         self._request_id, self._merchant_id = request_id, merchant_id
+        self._purpose = purpose
         self.daily_cap_hit = False
 
     def is_configured(self) -> bool:
@@ -91,6 +99,7 @@ class LlmCostGuard:
                 failure_kind=None,
                 status="BUDGET_REJECTED",
                 merchant_id=self._merchant_id,
+                purpose=self._purpose,
             )
             raise LlmDailyBudgetExceededError
         try:
@@ -110,6 +119,7 @@ class LlmCostGuard:
                 failure_kind=None,
                 status="FAILED",
                 merchant_id=self._merchant_id,
+                purpose=self._purpose,
             )
             raise
         if result.usage_known:
@@ -126,5 +136,6 @@ class LlmCostGuard:
             failure_kind=result.failure_kind.value if result.failure_kind is not None else None,
             status="FAILED" if result.degraded else "SUCCEEDED",
             merchant_id=self._merchant_id,
+            purpose=self._purpose,
         )
         return result

@@ -4,15 +4,22 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createMockTransport } from '@/api/mock/transport'
 import { setChatTransport } from '@/api/transport'
-import { QUICK_QUESTIONS } from '@/constants/quickQuestions'
+import { QUICK_QUESTIONS, quickQuestions } from '@/constants/quickQuestions'
+import { i18n } from '@/i18n'
 import { useChatStore } from '@/stores/chat'
+import { useLocaleStore } from '@/stores/locale'
 
 import ChatComposer from './ChatComposer.vue'
 import ChatMessage from './ChatMessage.vue'
 import ConversationColumn from './ConversationColumn.vue'
 
+function mountColumn() {
+  return mount(ConversationColumn, { global: { plugins: [i18n] } })
+}
+
 beforeEach(() => {
   setActivePinia(createPinia())
+  useLocaleStore().setLocale('zh-CN')
   setChatTransport(createMockTransport({ chunkSizes: [16], stepDelayMs: 0 }))
 })
 
@@ -31,14 +38,14 @@ function stubScrollMetrics(list: HTMLElement, messageCount: () => number): void 
 
 describe('ConversationColumn', () => {
   it('组合独立的 ChatComposer 与可滚动消息区域', () => {
-    const wrapper = mount(ConversationColumn)
+    const wrapper = mountColumn()
 
     expect(wrapper.findComponent(ChatComposer).exists()).toBe(true)
     expect(wrapper.find('[data-testid="chat-list"]').exists()).toBe(true)
   })
 
   it('空会话时展示四个分类快速问题，点击即完成一轮问答', async () => {
-    const wrapper = mount(ConversationColumn)
+    const wrapper = mountColumn()
     const store = useChatStore()
 
     const entries = wrapper.findAll('[data-testid="quick-question"]')
@@ -61,7 +68,7 @@ describe('ConversationColumn', () => {
   })
 
   it('有消息后不再展示空状态', async () => {
-    const wrapper = mount(ConversationColumn)
+    const wrapper = mountColumn()
     const store = useChatStore()
 
     await store.submitMessage('你好')
@@ -72,7 +79,7 @@ describe('ConversationColumn', () => {
   })
 
   it('新消息到达时自动滚到底', async () => {
-    const wrapper = mount(ConversationColumn)
+    const wrapper = mountColumn()
     const store = useChatStore()
     const list = wrapper.get('[data-testid="chat-list"]').element as HTMLElement
     stubScrollMetrics(list, () => store.messages.length)
@@ -85,7 +92,7 @@ describe('ConversationColumn', () => {
   })
 
   it('用户向上翻看历史时不抢滚动，滚回底部后重新跟随', async () => {
-    const wrapper = mount(ConversationColumn)
+    const wrapper = mountColumn()
     const store = useChatStore()
     const list = wrapper.get('[data-testid="chat-list"]').element as HTMLElement
     stubScrollMetrics(list, () => store.messages.length)
@@ -112,7 +119,7 @@ describe('ConversationColumn', () => {
   })
 
   it('演示数据的降级提示必须出现在回答卡片上（R7）', async () => {
-    const wrapper = mount(ConversationColumn)
+    const wrapper = mountColumn()
     const store = useChatStore()
 
     await store.submitMessage('我的商家资料是什么？')
@@ -129,7 +136,7 @@ describe('ConversationColumn', () => {
   })
 
   it('只有助手轮次可选中，用户消息不承担选中交互', async () => {
-    const wrapper = mount(ConversationColumn)
+    const wrapper = mountColumn()
     const store = useChatStore()
 
     await store.submitMessage('昨天总 GMV 是多少？')
@@ -150,7 +157,7 @@ describe('ConversationColumn', () => {
 
   it('上一轮在途时既拒绝新提交，也把输入区的发送按钮禁掉', async () => {
     setChatTransport(createMockTransport({ chunkSizes: [1], stepDelayMs: 5 }))
-    const wrapper = mount(ConversationColumn)
+    const wrapper = mountColumn()
     const store = useChatStore()
 
     const pending = store.submitMessage('你好')
@@ -176,7 +183,7 @@ describe('ConversationColumn', () => {
   })
 
   it('单轮时不显示轮次目录，两轮起才显示且点击能切回上一轮', async () => {
-    const wrapper = mount(ConversationColumn)
+    const wrapper = mountColumn()
     const store = useChatStore()
 
     await store.submitMessage('昨天总 GMV 是多少？')
@@ -206,7 +213,7 @@ describe('ConversationColumn', () => {
     // @retry="chatStore.retryMessage"，返回值被静默丢弃，TypeScript 不会报错，
     // 其余测试也不会变红，用户点重试却再也看不到任何提示。
     setChatTransport(createMockTransport({ chunkSizes: [1], stepDelayMs: 5 }))
-    const wrapper = mount(ConversationColumn)
+    const wrapper = mountColumn()
     const store = useChatStore()
 
     const pending = store.submitMessage('你好')
@@ -242,7 +249,7 @@ describe('ConversationColumn', () => {
     // 任务间隔，让「已经收到过 step、但流还没结束」的中间态真的可以被观察到，
     // 不会所有事件在同一个 microtask 里被一次性处理完。
     setChatTransport(createMockTransport({ chunkSizes: [40], stepDelayMs: 5 }))
-    const wrapper = mount(ConversationColumn)
+    const wrapper = mountColumn()
     const store = useChatStore()
 
     const pending = store.submitMessage('你好')
@@ -289,7 +296,7 @@ describe('ConversationColumn', () => {
       }
       return mock(request, signal)
     })
-    const wrapper = mount(ConversationColumn)
+    const wrapper = mountColumn()
     const store = useChatStore()
     await store.submitMessage('昨天总 GMV 是多少？')
     const assistant = wrapper.findAllComponents(ChatMessage).at(-1)!
@@ -299,5 +306,20 @@ describe('ConversationColumn', () => {
 
     expect(store.messages[1].feedback).toEqual({ isAdopted: true, reaction: null })
     expect(store.messages[1].feedbackPersisted).toBe(true)
+  })
+
+  it('en-US 下欢迎语、空态和快速问题均为英文', () => {
+    useLocaleStore().setLocale('en-US')
+    const wrapper = mountColumn()
+
+    expect(wrapper.text()).toContain("Hi, I'm your business assistant")
+    expect(wrapper.text()).toContain('Quick start')
+    const entries = wrapper.findAll('[data-testid="quick-question"]')
+    const enQuestions = quickQuestions('en-US')
+    expect(entries).toHaveLength(enQuestions.length)
+    expect(entries.map((entry) => entry.attributes('data-question'))).toEqual(
+      enQuestions.map((item) => item.question),
+    )
+    expect(wrapper.text()).not.toMatch(/[一-龥]/)
   })
 })

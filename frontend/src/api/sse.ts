@@ -8,6 +8,7 @@
  * 可能是半个事件，也可能是多个事件，还可能把一个中文字切成两半。
  */
 import type { components } from '@/api/generated'
+import type { SupportedLocale } from '@/i18n'
 import type { ThinkingStep } from '@/types/chat'
 
 import { AppError } from './errors'
@@ -33,6 +34,39 @@ export class ChatStreamInterruptedError extends AppError {
   constructor() {
     super('STREAM_INTERRUPTED', '回答流意外中断，请重试。', { retryable: true })
     this.name = 'ChatStreamInterruptedError'
+  }
+}
+
+/**
+ * 响应语言与当前展示语言不一致时抛出的契约错误。
+ *
+ * 二次防线：语言切换时 Store 会主动 `AbortController.abort()` 掉旧流
+ * （Task 11 Step 6），正常情况下过期请求根本走不到这里；但 abort 信号和
+ * 网络response 到达终究是两条异步链路，理论上仍可能出现「abort 还没生效，
+ * 响应已经在路上」的极窄竞态窗口。后端在**每个**响应上都会回显
+ * `Content-Language`（`backend/app/main.py` 的请求中间件），与请求发出时刻
+ * 的 `Accept-Language` 一一对应；比较它与「此刻」的展示语言，能在 abort
+ * 没来得及生效时兜住这最后一步，而不是把上一语言的回答悄悄塞进当前界面。
+ */
+export class ResponseLocaleMismatchError extends AppError {
+  constructor(actual: string, expected: SupportedLocale) {
+    super('CONTRACT', `响应语言（${actual}）与当前展示语言（${expected}）不一致，已丢弃过期响应。`, {
+      shouldReport: true,
+    })
+    this.name = 'ResponseLocaleMismatchError'
+  }
+}
+
+/**
+ * 校验响应的 `Content-Language` 头与调用方此刻期望的展示语言是否一致。
+ *
+ * 后端在缺少该头时也可能不设置（如反向代理直接拦下的 5xx 页面）——此时不做
+ * 判断，交给既有的错误处理路径，不在这里编造一个「语言不一致」的假象。
+ */
+export function assertResponseLocale(response: Response, expected: SupportedLocale): void {
+  const actual = response.headers.get('Content-Language')
+  if (actual && actual !== expected) {
+    throw new ResponseLocaleMismatchError(actual, expected)
   }
 }
 

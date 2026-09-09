@@ -32,6 +32,7 @@ from app.intent.models import (
     GeneratedMetricPlan,
     QueryIntent,
 )
+from app.localization.locales import SupportedLocale
 from app.main import create_app
 from app.metrics.catalog import MetricPayload
 from app.repositories.analytics import AnalyticsRepository
@@ -76,7 +77,14 @@ class DeterministicE2EAnalyticsAgent:
         self._query_service = query_service
         self._context = context
 
-    async def run(self, message: str, session_id: UUID) -> AgentRunResult:
+    async def run(
+        self,
+        message: str,
+        session_id: UUID,
+        *,
+        locale: SupportedLocale = SupportedLocale.ZH_CN,
+    ) -> AgentRunResult:
+        del locale  # F4 浏览器验收固定用中文演示问法，不测试本地化。
         if "查询订单" in message:
             return await self._cross_business_detail(message, session_id)
         if "按城市" in message:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from uuid import uuid4
 
 import pytest
@@ -8,8 +9,28 @@ import pytest
 from app.agent.graph import GRAPH_NODES, MerchantQaGraph
 from app.knowledge.retrieval import KnowledgeRetrieval
 from app.llm.fake import FakeLlmClient
+from app.localization.locales import SupportedLocale
 from app.metrics.catalog import MetricCatalog
+from app.repositories.analytics import ResultColumn
 from app.schemas.chat import AnalysisSource, AnswerMode, QualityStatus
+from app.services.safe_query import QueryResult
+
+_HAN = re.compile("[一-鿿]")
+
+
+def _collect_visible_strings(value: object) -> list[str]:
+    """递归收集 ChatResponse 里所有字符串叶子节点，供中文残留断言使用。"""
+
+    found: list[str] = []
+    if isinstance(value, str):
+        found.append(value)
+    elif isinstance(value, dict):
+        for item in value.values():
+            found.extend(_collect_visible_strings(item))
+    elif isinstance(value, list | tuple):
+        for item in value:
+            found.extend(_collect_visible_strings(item))
+    return found
 
 
 class D:
@@ -131,6 +152,45 @@ async def test_graph_rule_answer_uses_knowledge_content_and_source() -> None:
     assert "商品上架前必须完成资质审核" in result.response.answer
     assert "rules/listing.md" in result.response.answer
     assert result.response.analysis_sources == [AnalysisSource.KNOWLEDGE]
+    # Finding B 回归（反方向）：中文来源标签后面必须仍是全角冒号，不能被
+    # Finding B 的修复误伤成英文冒号。
+    assert "来源：rules/listing.md" in result.response.answer
+
+
+@pytest.mark.asyncio
+async def test_graph_rule_answer_uses_ascii_colon_for_source_label_in_english() -> None:
+    """Task 14 Step 7 finding B：`_knowledge_answer()` 过去把 `来源`/`Source`
+    标签正确本地化了，但标签后面的分隔符硬编码成中文全角冒号「：」，不随
+    `locale` 切换——en-US 请求下会得到 "Source：rules/listing.md" 这种中英
+    混杂的分隔符。这里断言 en-US 请求得到的是 ASCII "Source: "，且不出现
+    全角冒号。"""
+
+    llm = FakeLlmClient(
+        responses=[
+            json.dumps(
+                {
+                    "answer_mode": "RULE",
+                    "category": "PLATFORM_RULE",
+                    "intent_keywords": ["listing"],
+                }
+            ),
+            rule_response(),
+        ]
+    )
+    graph = MerchantQaGraph(
+        retrieval=KnowledgeRetrieval(
+            K([D("rules/listing.md", "Products must pass a qualification review before listing.")])
+        ),
+        intent_service_llm=llm,
+        catalog=MetricCatalog(M(), llm),
+    )
+
+    result = await graph.run(
+        "What are the rules for listing a product?", uuid4(), locale=SupportedLocale.EN_US
+    )
+
+    assert "Source: rules/listing.md" in result.response.answer
+    assert "：" not in result.response.answer
 
 
 @pytest.mark.asyncio
@@ -358,3 +418,233 @@ async def test_backend_date_clamp_is_reported_to_the_user() -> None:
     result = await graph.run("2020 年 GMV", uuid4())
 
     assert any("日期" in note for note in result.response.quality_notes)
+
+
+# --- Task 6：locale 贯穿问答图 ----------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_english_locale_produces_a_response_with_no_han_characters() -> None:
+    """Task 6 Step 1 的图层等价验证：`locale=en-US` 时整份 `ChatResponse`
+    （技术字段除外）不应含任何汉字——不需要真实数据库或真实 LLM，直接对
+    `MerchantQaGraph.run(..., locale=...)` 的产出做递归扫描。
+
+    HTTP 层的端到端等价测试（brief Step 1 原文示例）见
+    `tests/api/test_chat.py::test_english_chat_localizes_every_visible_field`，
+    因为需要真实 PostgreSQL 落库整轮会话/回答，在本地无 Docker 环境下只能
+    跳过；这里在图这一层直接验证同一件事，不依赖数据库。
+    """
+
+    llm = FakeLlmClient(
+        responses=[
+            json.dumps({"answer_mode": "CHAT", "category": "UNKNOWN", "intent_keywords": []}),
+            json.dumps(
+                {
+                    "answer_mode": "CHAT",
+                    "category": "UNKNOWN",
+                    "metric": None,
+                    "dimensions": [],
+                    "filters": {},
+                    "date_range": None,
+                    "sort": None,
+                    "limit": None,
+                    "followup_reference": False,
+                    "needs_attachment": False,
+                }
+            ),
+        ]
+    )
+    graph = MerchantQaGraph(
+        retrieval=KnowledgeRetrieval(K()), intent_service_llm=llm, catalog=MetricCatalog(M(), llm)
+    )
+
+    result = await graph.run("Hello there", uuid4(), locale=SupportedLocale.EN_US)
+
+    assert result.response.answer_mode is AnswerMode.CHAT
+    assert result.response.answer == "Structured understanding complete."
+    assert [step.label for step in result.steps] == [
+        "Identifying merchant and conversation context",
+        "Loading the business knowledge index",
+        "Determining question scope",
+        "Classifying question type and business domain",
+        "Structuring the question intent",
+        "Validating the query intent",
+        "Loading business knowledge details",
+        "Querying business data",
+        "Composing the answer",
+        "Validating and reviewing answer quality",
+        "Generating suggested questions",
+        "Saving this answer",
+    ]
+    payload = result.response.model_dump(mode="json")
+    # 技术字段（id、UUID、协议枚举值、node 内部标识）不受本条断言约束；
+    # 白名单只保留真正会出现汉字的人类可读字段范围一致地扫描整份 payload。
+    visible = _collect_visible_strings(payload)
+    offending = [text for text in visible if _HAN.search(text)]
+    assert offending == [], f"英文响应混入了汉字：{offending!r}"
+
+
+@pytest.mark.asyncio
+async def test_default_locale_is_chinese_and_unaffected_by_task_6() -> None:
+    """默认（未显式传 locale）行为必须还是中文——不能因为新增了 locale 参数
+    就意外改变了所有既有零参数调用点的既有语言。"""
+
+    llm = FakeLlmClient(
+        responses=[
+            json.dumps({"answer_mode": "CHAT", "category": "UNKNOWN", "intent_keywords": []}),
+            json.dumps(
+                {
+                    "answer_mode": "CHAT",
+                    "category": "UNKNOWN",
+                    "metric": None,
+                    "dimensions": [],
+                    "filters": {},
+                    "date_range": None,
+                    "sort": None,
+                    "limit": None,
+                    "followup_reference": False,
+                    "needs_attachment": False,
+                }
+            ),
+        ]
+    )
+    graph = MerchantQaGraph(
+        retrieval=KnowledgeRetrieval(K()), intent_service_llm=llm, catalog=MetricCatalog(M(), llm)
+    )
+
+    result = await graph.run("你好", uuid4())
+
+    assert result.response.answer == "已完成结构化理解。"
+    assert result.steps[0].label == "识别商家与会话上下文"
+
+
+class _FakeQueryService:
+    """让 METRIC 分支真正 `queried=True`，从而真正跑到 `_quality_loop` 节点
+    （而不是 CHAT 短路：`facts is None` 时 `_quality_loop` 直接跳过）。"""
+
+    async def execute(self, context: object, intent: object, *, now: object, keywords=()):
+        del context, intent, now, keywords
+        return QueryResult(
+            columns=(ResultColumn("refund_amount", "退款金额", "METRIC"),),
+            rows=[{"refund_amount": 500}],
+            total_rows=1,
+            truncated=False,
+            source_tables=("refunds",),
+            plan_steps=("scan refunds",),
+            export_spec=None,
+            notes=(),
+            non_additive=False,
+        )
+
+
+@pytest.mark.asyncio
+async def test_english_locale_localizes_a_real_answer_validation_failure() -> None:
+    """回归测试（code review 发现的 Important 缺口）：`quality_loop.py` 里
+    `_MSG_EMPTY_MODEL_OUTPUT`/`_MSG_UNPARSEABLE_JSON` 曾经漏接
+    `_localized()`，`answer_service.py::_validate()` 曾经完全不接受
+    `locale` 参数——都不会被"零 Han 残留"测试捕获，因为那些测试走的是
+    CHAT/degraded 快速路径（`facts is None` 时 `_quality_loop` 直接
+    `return self._step(state, "quality_loop")`，根本不会调用
+    `QualityLoop.run()`）。
+
+    这里真正让 METRIC 分支查询成功（`_FakeQueryService`），逼真实的
+    `_quality_loop` → `AnswerService._validate()` 跑起来：模型第一次起草的
+    回答里混入一个内部 UUID，`_validate()` 会产出一条真实校验失败
+    （不是 JSON 解析失败），必须能在 `en-US` 请求下正确本地化，不能在
+    `quality_notes` 里混入中文。
+    """
+
+    llm = FakeLlmClient(
+        responses=[
+            json.dumps(
+                {"answer_mode": "METRIC", "category": "REFUND", "intent_keywords": ["refund"]}
+            ),
+            json.dumps(
+                {
+                    "answer_mode": "METRIC",
+                    "category": "REFUND",
+                    "metric": "refund_amount",
+                    "dimensions": [],
+                    "filters": {},
+                    "date_range": None,
+                    "sort": None,
+                    "limit": None,
+                    "followup_reference": False,
+                    "needs_attachment": False,
+                }
+            ),
+            # 起草：混入一个内部 UUID——`AnswerService._validate()` 的
+            # `_UUID` 检查会真实触发，产出一条本地校验 issue（不是模型输出
+            # 为空/无法解析这种上游失败）。
+            json.dumps(
+                {
+                    "answer": (
+                        "Refund order 123e4567-e89b-12d3-a456-426614174000 "
+                        "totalled 500 CNY."
+                    ),
+                    "recommendations": [
+                        {
+                            "title": "Verify query scope",
+                            "evidence": "This query returned 1 row.",
+                            "action": "Confirm the date range covers what you need.",
+                        },
+                        {
+                            "title": "Verify metric definition",
+                            "evidence": "Identified metric code: refund_amount.",
+                            "action": "Adjust the question if the definition is unexpected.",
+                        },
+                    ],
+                }
+            ),
+        ]
+    )
+    graph = MerchantQaGraph(
+        retrieval=KnowledgeRetrieval(K()),
+        intent_service_llm=llm,
+        catalog=MetricCatalog(M(), llm),
+        query_service=_FakeQueryService(),
+        merchant_id=uuid4(),
+        answer_llm=llm,
+        reviewer_llm=llm,
+        # 只给一轮机会：起草失败校验后直接落 DEGRADED，不需要为重试再排更多
+        # FakeLlmClient 响应——`_MSG_MAX_RETRIES_REACHED` 本身已经是既有测试
+        # 覆盖过的路径，这里只关心"这一轮的校验 issue 有没有被正确本地化"。
+        quality_max_attempts=1,
+    )
+
+    result = await graph.run(
+        "Refund amount in the last 7 days", uuid4(), locale=SupportedLocale.EN_US
+    )
+
+    assert result.response.answer_mode is AnswerMode.METRIC
+    assert result.response.quality_status is QualityStatus.DEGRADED
+    # 真正命中了本地校验 issue（不是走空转/无关分支）：英文译文必须出现。
+    notes_text = " ".join(result.response.quality_notes)
+    assert "internal identifier" in notes_text
+    offending = [note for note in result.response.quality_notes if _HAN.search(note)]
+    assert offending == [], f"quality_notes 混入了汉字：{offending!r}"
+
+    # Task 14 Step 7 finding A 的真实接线回归：`quality_max_attempts=1` 让这
+    # 唯一一次起草因校验失败而耗尽重试，`QualityLoop.run()` 落到
+    # `AnswerService.fallback_draft()` 的确定性兜底草稿——过去这条路径完全
+    # 不接受 `locale`，即使整轮请求是 en-US，最终写入 `response.answer` 和
+    # `response.recommendations` 的仍是硬编码中文。这里直接扫描
+    # `answer`/`recommendations` 这两个由 `AnswerDraft` 填充的字段（而不是
+    # 只看 quality_notes），因为漏本地化的正是它们，只测 quality_notes 之前
+    # 完全捕捉不到这个缺口。
+    #
+    # 刻意不对整份 `response` payload 做无差别扫描：METRIC 模式下
+    # `metric_display_name`/`metric_unit` 等字段来自 `analytics/contract.py`
+    # 的中文口径常量，只在 `chat_service.py` 落库前的 LLM 批量本地化那一层
+    # 才会被翻译（需要真实数据库会话），graph 层单测天然测不到、也不该测——
+    # 那是与本次 finding A/B 无关的既有缺口，不在这次修复范围内。
+    answer_visible = _collect_visible_strings(result.response.answer)
+    recommendations_visible = _collect_visible_strings(
+        [rec.model_dump(mode="json") for rec in result.response.recommendations or []]
+    )
+    offending_answer = [
+        text for text in answer_visible + recommendations_visible if _HAN.search(text)
+    ]
+    assert offending_answer == [], f"确定性兜底草稿混入了汉字：{offending_answer!r}"
+    assert result.response.recommendations, "确定性兜底草稿应仍带两条建议"
+    assert len(result.response.recommendations) == 2

@@ -5,12 +5,111 @@ import {
   createKnowledgeDocument,
   deleteBusinessDomain,
   deleteKnowledgeDocument,
+  getKnowledgeDocument,
   renameBusinessDomain,
+  updateKnowledgeDocument,
 } from './knowledge'
 import { setChatTransport, type TransportRequest } from './transport'
 
 afterEach(() => {
   setChatTransport(undefined)
+})
+
+describe('知识库文档版本感知读写（Task 8/11）', () => {
+  it('读取时携带 content_locale 查询参数，返回内容语言与译文状态', async () => {
+    const requests: TransportRequest[] = []
+    setChatTransport(async (request) => {
+      requests.push(request)
+      return Response.json({
+        path: 'index/a.md',
+        content: 'English content',
+        read_only: false,
+        version: '1',
+        content_locale: 'en-US',
+        translation_status: 'CURRENT',
+      })
+    })
+
+    const document = await getKnowledgeDocument('index/a.md', new AbortController().signal, {
+      contentLocale: 'en-US',
+    })
+
+    expect(requests[0]?.path).toBe('/api/admin/knowledge/documents/index/a.md?content_locale=en-US')
+    expect(document.contentLocale).toBe('en-US')
+    expect(document.translationStatus).toBe('CURRENT')
+  })
+
+  it('未指定 contentLocale 时不附加查询参数，行为与引入前一致', async () => {
+    const requests: TransportRequest[] = []
+    setChatTransport(async (request) => {
+      requests.push(request)
+      return Response.json({
+        path: 'index/a.md',
+        content: '正文',
+        read_only: false,
+        version: '1',
+        content_locale: 'zh-CN',
+        translation_status: 'SOURCE',
+      })
+    })
+
+    await getKnowledgeDocument('index/a.md', new AbortController().signal)
+
+    expect(requests[0]?.path).toBe('/api/admin/knowledge/documents/index/a.md')
+  })
+
+  it('默认更新源版本：is_source_version 为 true，content_locale 为 null', async () => {
+    const requests: TransportRequest[] = []
+    setChatTransport(async (request) => {
+      requests.push(request)
+      return Response.json({
+        path: 'index/a.md',
+        content: '新正文',
+        read_only: false,
+        version: '2',
+        content_locale: 'zh-CN',
+        translation_status: 'SOURCE',
+      })
+    })
+
+    await updateKnowledgeDocument('index/a.md', '新正文', '"1"', new AbortController().signal)
+
+    expect(requests[0]).toMatchObject({
+      method: 'PUT',
+      body: { content: '新正文', is_source_version: true, content_locale: null },
+      headers: { 'If-Match': '"1"' },
+    })
+  })
+
+  it('显式保存译文：is_source_version 为 false，携带目标 content_locale', async () => {
+    const requests: TransportRequest[] = []
+    setChatTransport(async (request) => {
+      requests.push(request)
+      return Response.json({
+        path: 'index/a.md',
+        content: 'English translation',
+        read_only: false,
+        version: '1',
+        content_locale: 'en-US',
+        translation_status: 'CURRENT',
+      })
+    })
+
+    const document = await updateKnowledgeDocument(
+      'index/a.md',
+      'English translation',
+      '"1"',
+      new AbortController().signal,
+      { isSourceVersion: false, contentLocale: 'en-US' },
+    )
+
+    expect(requests[0]).toMatchObject({
+      method: 'PUT',
+      body: { content: 'English translation', is_source_version: false, content_locale: 'en-US' },
+    })
+    expect(document.contentLocale).toBe('en-US')
+    expect(document.translationStatus).toBe('CURRENT')
+  })
 })
 
 describe('知识库后台写操作 API', () => {
@@ -35,6 +134,8 @@ describe('知识库后台写操作 API', () => {
       content: '内容',
       readOnly: false,
       version: '1',
+      contentLocale: 'und',
+      translationStatus: 'SOURCE',
     })
     expect(requests).toEqual([
       expect.objectContaining({

@@ -1,8 +1,15 @@
 import { mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { nextTick } from 'vue'
 
+import { i18n } from '@/i18n'
+
 import MerchantSwitcher from './MerchantSwitcher.vue'
+
+beforeEach(() => {
+  // 每个用例都从中文默认语言出发，避免上一条用例切到英文后残留。
+  i18n.global.locale.value = 'zh-CN'
+})
 
 describe('MerchantSwitcher', () => {
   it('选择商家时更新 v-model，且名称始终可见', async () => {
@@ -60,5 +67,22 @@ describe('MerchantSwitcher', () => {
     expect(document.activeElement).toBe(trigger.element)
     wrapper.unmount()
     outsideButton.remove()
+  })
+
+  it('英文模式下触发按钮与列表 aria-label 均为英文', async () => {
+    i18n.global.locale.value = 'en-US'
+
+    const wrapper = mount(MerchantSwitcher, {
+      props: {
+        modelValue: 'Borough商家100',
+        merchants: ['Borough商家100', 'Borough商家101'],
+      },
+    })
+
+    expect(wrapper.get('button').attributes('aria-label')).toBe('Switch current demo merchant')
+
+    await wrapper.get('button').trigger('click')
+
+    expect(wrapper.get('ul').attributes('aria-label')).toBe('Demo merchants')
   })
 })

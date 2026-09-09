@@ -1,6 +1,9 @@
 import { mount } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
 import { nextTick } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { i18n } from '@/i18n'
 
 const echartsMock = vi.hoisted(() => {
   const chartInstance = { setOption: vi.fn(), resize: vi.fn(), dispose: vi.fn() }
@@ -33,6 +36,7 @@ const point: ChatBiDailyPoint = {
 
 describe('TrendChart 与真实 useEChart 的挂载时序', () => {
   beforeEach(() => {
+    setActivePinia(createPinia())
     echartsMock.init.mockClear()
     echartsMock.chartInstance.setOption.mockClear()
     vi.stubGlobal('ResizeObserver', ResizeObserverStub)
@@ -40,7 +44,10 @@ describe('TrendChart 与真实 useEChart 的挂载时序', () => {
   })
 
   it('daily 迟到时容器与 option 同批出现，仍会初始化图表', async () => {
-    const wrapper = mount(TrendChart, { props: { daily: [] as ChatBiDailyPoint[] } })
+    const wrapper = mount(TrendChart, {
+      props: { daily: [] as ChatBiDailyPoint[] },
+      global: { plugins: [i18n] },
+    })
 
     expect(echartsMock.init).not.toHaveBeenCalled()
 

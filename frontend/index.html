@@ -1,10 +1,16 @@
 <!doctype html>
+<!-- lang 和 <title> 只是首帧前的默认值（对应 zh-CN 默认语言）；挂载后由
+     `useLocaleStore().restore()`（frontend/src/stores/locale.ts）按上次持久化
+     的语言接管，两者必须保持一致，不要只改这里而不改 store 里的默认值。 -->
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Borough 商家 AI 助手：经营数据、分析与行动建议。" />
     <title>Borough 商家 AI 助手</title>
+    <!-- 挂载后由 App.vue 按当前语言把 href 切到 borough-logo.svg /
+         borough-logo-en.svg，这里只给出首帧前的默认值（对应 zh-CN）。 -->
+    <link rel="icon" type="image/svg+xml" href="/borough-logo.svg" />
   </head>
   <body>
     <div id="app"></div>

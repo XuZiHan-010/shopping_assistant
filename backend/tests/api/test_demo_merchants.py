@@ -19,8 +19,19 @@ class FakeMerchantRepository:
             MerchantSummary(
                 merchant_id=MERCHANT_ONE_ID,
                 display_name="Borough商家100",
+                display_name_en="Borough Merchant 100",
             )
         ]
+
+
+class FakeMerchantRepositoryWithoutEnglishName:
+    """`display_name_en` 缺失（未人工维护）时的商家：验证 en-US 请求回退到
+    中文源展示名，而不是报错或留空。"""
+
+    async def list_demo_by_ids(self, merchant_ids: list[UUID]) -> list[MerchantSummary]:
+        if MERCHANT_ONE_ID not in merchant_ids:
+            return []
+        return [MerchantSummary(merchant_id=MERCHANT_ONE_ID, display_name="Borough商家100")]
 
 
 def demo_settings(
@@ -60,6 +71,49 @@ async def test_demo_endpoint_returns_only_server_configured_merchants() -> None:
             }
         ]
     }
+    await app.state.database.dispose()
+
+
+@pytest.mark.asyncio
+async def test_demo_endpoint_returns_english_display_name_with_accept_language_header() -> None:
+    """Step 6: 按 Header 返回对应展示名，且绝不触发 LLM——`FakeMerchantRepository`
+    是内存假实现，本用例结构上不可能产生真实模型调用。"""
+
+    app = create_app(demo_settings(enabled=True))
+    app.dependency_overrides[get_merchant_repository] = FakeMerchantRepository
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        response = await client.get(
+            "/api/demo/merchants", headers={"Accept-Language": "en-US"}
+        )
+
+    assert response.status_code == 200
+    assert response.json()["merchants"] == [
+        {
+            "merchant_id": str(MERCHANT_ONE_ID),
+            "display_name": "Borough Merchant 100",
+            "token": "merchant-one-token",
+        }
+    ]
+    await app.state.database.dispose()
+
+
+@pytest.mark.asyncio
+async def test_demo_endpoint_falls_back_to_chinese_name_when_english_name_is_unset() -> None:
+    app = create_app(demo_settings(enabled=True))
+    app.dependency_overrides[get_merchant_repository] = FakeMerchantRepositoryWithoutEnglishName
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        response = await client.get(
+            "/api/demo/merchants", headers={"Accept-Language": "en-US"}
+        )
+
+    assert response.status_code == 200
+    assert response.json()["merchants"][0]["display_name"] == "Borough商家100"
     await app.state.database.dispose()
 
 

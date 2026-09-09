@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
 import { CHAT_FIXTURES } from './mock/fixtures.generated'
-import { ChatStreamInterruptedError, SseFrameBuffer, readChatStream } from './sse'
+import {
+  assertResponseLocale,
+  ChatStreamInterruptedError,
+  ResponseLocaleMismatchError,
+  SseFrameBuffer,
+  readChatStream,
+} from './sse'
 
 function streamOf(bytes: Uint8Array, sizes: number[]): ReadableStream<Uint8Array> {
   return new ReadableStream<Uint8Array>({
@@ -98,5 +104,33 @@ describe('readChatStream', () => {
     }
 
     expect(events).toEqual([{ type: 'error', error: payload }])
+  })
+})
+
+describe('assertResponseLocale', () => {
+  function responseWithContentLanguage(value: string | null): Response {
+    const headers = new Headers()
+    if (value) headers.set('Content-Language', value)
+    return new Response(null, { status: 200, headers })
+  }
+
+  it('响应语言与期望一致时不抛异常', () => {
+    expect(() => assertResponseLocale(responseWithContentLanguage('en-US'), 'en-US')).not.toThrow()
+  })
+
+  it('响应语言与期望不一致时抛出可上报的契约错误（语言切换竞态的二次防线）', () => {
+    expect(() => assertResponseLocale(responseWithContentLanguage('zh-CN'), 'en-US')).toThrow(
+      ResponseLocaleMismatchError,
+    )
+    try {
+      assertResponseLocale(responseWithContentLanguage('zh-CN'), 'en-US')
+      expect.unreachable('应抛出 ResponseLocaleMismatchError')
+    } catch (error) {
+      expect(error).toMatchObject({ code: 'CONTRACT', shouldReport: true })
+    }
+  })
+
+  it('响应缺少 Content-Language 头时不做判断，交给既有错误处理路径', () => {
+    expect(() => assertResponseLocale(responseWithContentLanguage(null), 'en-US')).not.toThrow()
   })
 })

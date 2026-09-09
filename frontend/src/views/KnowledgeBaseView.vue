@@ -1,16 +1,19 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import AdminTokenDialog from '@/components/knowledge/AdminTokenDialog.vue'
 import ConfirmDeleteDialog from '@/components/knowledge/ConfirmDeleteDialog.vue'
 import DocumentEditor from '@/components/knowledge/DocumentEditor.vue'
 import KnowledgeTree from '@/components/knowledge/KnowledgeTree.vue'
+import LanguageSwitcher from '@/components/layout/LanguageSwitcher.vue'
 import PromptDialog from '@/components/knowledge/PromptDialog.vue'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { canDeleteNode, isBusinessDomain, isDocumentParent } from '@/utils/knowledgeTree'
 
 type DialogType = 'create-document' | 'create-domain' | 'rename-domain' | 'delete' | null
 
+const { t } = useI18n()
 const knowledgeStore = useKnowledgeStore()
 const authorizationError = ref('')
 const dialog = ref<DialogType>(null)
@@ -28,7 +31,8 @@ async function authorize(token: string): Promise<void> {
   try {
     await knowledgeStore.loadTree()
   } catch (error) {
-    authorizationError.value = error instanceof Error ? error.message : '管理员令牌验证失败。'
+    authorizationError.value =
+      error instanceof Error ? error.message : t('knowledgeBaseView.tokenVerificationFailed')
     knowledgeStore.signOut()
   }
 }
@@ -67,7 +71,7 @@ async function submitDialog(value: string): Promise<void> {
     }
     closeDialog()
   } catch (error) {
-    dialogError.value = error instanceof Error ? error.message : '操作失败，请重试。'
+    dialogError.value = error instanceof Error ? error.message : t('knowledgeBaseView.actionFailed')
   } finally {
     dialogPending.value = false
   }
@@ -80,7 +84,7 @@ async function confirmDelete(): Promise<void> {
     await knowledgeStore.deleteSelected()
     closeDialog()
   } catch (error) {
-    dialogError.value = error instanceof Error ? error.message : '删除失败，请重试。'
+    dialogError.value = error instanceof Error ? error.message : t('knowledgeBaseView.deleteFailed')
   } finally {
     dialogPending.value = false
   }
@@ -89,7 +93,8 @@ async function confirmDelete(): Promise<void> {
 onMounted(() => {
   if (knowledgeStore.adminToken) {
     void knowledgeStore.loadTree().catch((error: unknown) => {
-      authorizationError.value = error instanceof Error ? error.message : '管理员令牌验证失败。'
+      authorizationError.value =
+        error instanceof Error ? error.message : t('knowledgeBaseView.tokenVerificationFailed')
       knowledgeStore.signOut()
     })
   }
@@ -99,6 +104,9 @@ onMounted(() => {
 <template>
   <main class="knowledge-base">
     <template v-if="!knowledgeStore.adminToken">
+      <div class="knowledge-base__pre-auth-actions">
+        <LanguageSwitcher />
+      </div>
       <AdminTokenDialog @submit="authorize" />
       <p v-if="authorizationError" class="knowledge-base__authorization-error" role="alert">
         {{ authorizationError }}
@@ -108,9 +116,14 @@ onMounted(() => {
       <header class="knowledge-base__header">
         <div>
           <p>BOROUGH · KNOWLEDGE OPS</p>
-          <h1>知识库维护后台</h1>
+          <h1>{{ t('knowledgeBaseView.title') }}</h1>
         </div>
-        <button type="button" @click="knowledgeStore.signOut">退出后台</button>
+        <div class="knowledge-base__header-actions">
+          <LanguageSwitcher />
+          <button class="knowledge-base__sign-out" type="button" @click="knowledgeStore.signOut">
+            {{ t('knowledgeBaseView.signOut') }}
+          </button>
+        </div>
       </header>
       <p v-if="knowledgeStore.errorMessage" role="alert">{{ knowledgeStore.errorMessage }}</p>
       <section class="knowledge-base__workspace">
@@ -128,7 +141,7 @@ onMounted(() => {
               :disabled="!canCreateDocument"
               @click="openDialog('create-document')"
             >
-              新建文档
+              {{ t('knowledgeBaseView.newDocument') }}
             </button>
             <button
               type="button"
@@ -136,7 +149,7 @@ onMounted(() => {
               :disabled="!canRenameDomain"
               @click="openDialog('rename-domain')"
             >
-              重命名业务域
+              {{ t('knowledgeBaseView.renameDomain') }}
             </button>
             <button
               type="button"
@@ -144,25 +157,25 @@ onMounted(() => {
               :disabled="!canDelete"
               @click="openDialog('delete')"
             >
-              删除
+              {{ t('knowledgeBaseView.deleteNode') }}
             </button>
           </div>
-          <p v-if="knowledgeStore.loading">正在加载知识目录…</p>
+          <p v-if="knowledgeStore.loading">{{ t('knowledgeBaseView.loadingTree') }}</p>
           <DocumentEditor
             v-else-if="knowledgeStore.selectedDocument"
             :document="knowledgeStore.selectedDocument"
             :save="knowledgeStore.saveDocument"
           />
-          <p v-else>请选择一篇文档进行维护。</p>
+          <p v-else>{{ t('knowledgeBaseView.selectDocumentPrompt') }}</p>
         </div>
       </section>
     </template>
 
     <PromptDialog
       v-if="dialog === 'create-document'"
-      title="新建文档"
-      label="文档名称"
-      placeholder="例如：订单履约口径.md"
+      :title="t('knowledgeBaseView.createDocumentTitle')"
+      :label="t('knowledgeBaseView.createDocumentLabel')"
+      :placeholder="t('knowledgeBaseView.createDocumentPlaceholder')"
       :error-message="dialogError"
       :pending="dialogPending"
       @submit="submitDialog"
@@ -170,9 +183,9 @@ onMounted(() => {
     />
     <PromptDialog
       v-else-if="dialog === 'create-domain'"
-      title="新建业务域"
-      label="业务域名称"
-      placeholder="例如：客服"
+      :title="t('knowledgeBaseView.createDomainTitle')"
+      :label="t('knowledgeBaseView.createDomainLabel')"
+      :placeholder="t('knowledgeBaseView.createDomainPlaceholder')"
       :error-message="dialogError"
       :pending="dialogPending"
       @submit="submitDialog"
@@ -180,8 +193,8 @@ onMounted(() => {
     />
     <PromptDialog
       v-else-if="dialog === 'rename-domain'"
-      title="重命名业务域"
-      label="业务域名称"
+      :title="t('knowledgeBaseView.renameDomainTitle')"
+      :label="t('knowledgeBaseView.renameDomainLabel')"
       :initial-value="selectedNode?.name ?? ''"
       :error-message="dialogError"
       :pending="dialogPending"
@@ -228,7 +241,13 @@ onMounted(() => {
   margin: var(--space-1) 0 0;
 }
 
-.knowledge-base__header button {
+.knowledge-base__header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.knowledge-base__sign-out {
   min-height: var(--control-height);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-control);
@@ -284,5 +303,12 @@ onMounted(() => {
   width: min(100%, 31rem);
   margin: calc(-1 * var(--space-6)) auto 0;
   color: var(--color-danger-text);
+}
+
+.knowledge-base__pre-auth-actions {
+  display: flex;
+  justify-content: flex-end;
+  width: min(100%, 31rem);
+  margin: 0 auto var(--space-4);
 }
 </style>

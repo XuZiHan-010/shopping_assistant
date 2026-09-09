@@ -4,15 +4,20 @@
 而越权必须同时写 audit_logs——用假 Repository 证明不了这一点。
 """
 
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient
 from sqlalchemy import select
 
+from app.localization.locales import SupportedLocale, detect_source_language, hash_source_text
 from app.models.answer import Answer
+from app.models.conversation import Message
 from app.models.operations import AuditLog
+from app.prompts.localization import LOCALIZATION_PROMPT_VERSION
+from app.repositories.conversation import ConversationRepository
+from app.repositories.localization import LocalizationRepository
 from tests.conftest import (
     MERCHANT_ONE_AUTH,
     MERCHANT_ONE_ID,
@@ -21,6 +26,26 @@ from tests.conftest import (
 )
 
 pytestmark = pytest.mark.asyncio
+
+
+def _contains_han(text: str) -> bool:
+    return any("一" <= ch <= "鿿" for ch in text)
+
+
+def _collect_strings(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        collected: list[str] = []
+        for item in value.values():
+            collected.extend(_collect_strings(item))
+        return collected
+    if isinstance(value, list):
+        collected = []
+        for item in value:
+            collected.extend(_collect_strings(item))
+        return collected
+    return []
 
 
 async def start_conversation(
@@ -335,3 +360,353 @@ async def test_request_body_merchant_id_cannot_widen_the_data_scope(
     assert [item["id"] for item in listing_two.json()["items"]] == [
         str(response.json()["session_id"])
     ]
+
+
+# ---------------------------------------------------------------------------
+# Task 7（§8.6.3）：历史会话按页本地化、消息游标分页、按条目降级
+# ---------------------------------------------------------------------------
+
+
+async def _seed_messages(
+    app: FastAPI,
+    merchant_id: UUID,
+    *,
+    title: str,
+    count: int,
+) -> tuple[UUID, list[UUID]]:
+    """直接写库造出一个只有纯文本消息的会话，跳过完整 Agent 流程——分页边界
+    与本地化 payload 组装本身不依赖真实模型调用，绕开它能让测试更快、更少
+    受"未配置真实 LLM 时具体回答内容是什么"这类无关因素影响。每条消息单独
+    提交一次事务，避免 PostgreSQL `now()`在同一事务内保持不变导致时间戳并列。
+    """
+
+    async with app.state.database.session() as session:
+        repository = ConversationRepository(session)
+        conversation = await repository.create(merchant_id, title)
+        await session.commit()
+        conversation_id = conversation.id
+
+    message_ids: list[UUID] = []
+    for index in range(count):
+        role = "USER" if index % 2 == 0 else "ASSISTANT"
+        async with app.state.database.session() as session:
+            repository = ConversationRepository(session)
+            message = await repository.create_message(
+                merchant_id, conversation_id, role, f"消息 {index}"
+            )
+            await session.commit()
+            message_ids.append(message.id)
+    return conversation_id, message_ids
+
+
+async def test_conversation_detail_localizes_history_and_hides_source_han_text(
+    postgres_client: AsyncClient,
+    postgres_app: FastAPI,
+) -> None:
+    """Task 7 Step 1（brief）核心失败示例：中文历史会话用英文请求查看时，
+    可见文本里不应再出现任何汉字，且数据库里的原文必须原样保留。"""
+
+    conversation_id = await start_conversation(
+        postgres_client,
+        MERCHANT_ONE_AUTH,
+        message="最近7天退款金额",
+        key="locale-detail-1",
+    )
+
+    response = await postgres_client.get(
+        f"/api/conversations/{conversation_id}?message_limit=20",
+        headers={**MERCHANT_ONE_AUTH, "Accept-Language": "en-US"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["Content-Language"] == "en-US"
+    body = response.json()
+    assert len(body["messages"]) <= 20
+    assert not any(_contains_han(text) for text in _collect_strings(body))
+
+    async with postgres_app.state.database.session() as session:
+        original_content = await session.scalar(
+            select(Message.content).where(
+                Message.conversation_id == UUID(conversation_id),
+                Message.role == "USER",
+            )
+        )
+    assert original_content == "最近7天退款金额"
+
+
+async def test_conversation_detail_cursor_pagination_serves_newest_page_first(
+    postgres_client: AsyncClient,
+    postgres_app: FastAPI,
+) -> None:
+    conversation_id, message_ids = await _seed_messages(
+        postgres_app, MERCHANT_ONE_ID, title="分页会话", count=7
+    )
+
+    first = await postgres_client.get(
+        f"/api/conversations/{conversation_id}",
+        headers=MERCHANT_ONE_AUTH,
+        params={"message_limit": 5},
+    )
+    assert first.status_code == 200
+    first_body = first.json()
+    assert len(first_body["messages"]) == 5
+    assert first_body["has_more_messages"] is True
+    assert first_body["next_message_cursor"] is not None
+
+    second = await postgres_client.get(
+        f"/api/conversations/{conversation_id}",
+        headers=MERCHANT_ONE_AUTH,
+        params={"message_limit": 5, "message_before": first_body["next_message_cursor"]},
+    )
+    assert second.status_code == 200
+    second_body = second.json()
+    assert len(second_body["messages"]) == 2
+    assert second_body["has_more_messages"] is False
+    assert second_body["next_message_cursor"] is None
+
+    all_ids = {message["id"] for message in first_body["messages"]} | {
+        message["id"] for message in second_body["messages"]
+    }
+    assert all_ids == {str(message_id) for message_id in message_ids}
+
+
+async def test_message_cursor_from_another_conversation_is_rejected(
+    postgres_client: AsyncClient,
+    postgres_app: FastAPI,
+) -> None:
+    conversation_a_id, _ = await _seed_messages(
+        postgres_app, MERCHANT_ONE_ID, title="会话 A", count=2
+    )
+    conversation_b_id, _ = await _seed_messages(
+        postgres_app, MERCHANT_ONE_ID, title="会话 B", count=1
+    )
+
+    page = await postgres_client.get(
+        f"/api/conversations/{conversation_a_id}",
+        headers=MERCHANT_ONE_AUTH,
+        params={"message_limit": 1},
+    )
+    cursor = page.json()["next_message_cursor"]
+    assert cursor is not None
+
+    response = await postgres_client.get(
+        f"/api/conversations/{conversation_b_id}",
+        headers=MERCHANT_ONE_AUTH,
+        params={"message_before": cursor},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "INVALID_REQUEST"
+
+
+async def test_message_cursor_from_another_merchant_is_rejected(
+    postgres_client: AsyncClient,
+    postgres_app: FastAPI,
+) -> None:
+    conversation_id, _ = await _seed_messages(
+        postgres_app, MERCHANT_ONE_ID, title="商家一的会话", count=2
+    )
+    other_conversation_id = await start_conversation(
+        postgres_client, MERCHANT_TWO_AUTH, key="cursor-scope-own"
+    )
+
+    page = await postgres_client.get(
+        f"/api/conversations/{conversation_id}",
+        headers=MERCHANT_ONE_AUTH,
+        params={"message_limit": 1},
+    )
+    cursor = page.json()["next_message_cursor"]
+    assert cursor is not None
+
+    response = await postgres_client.get(
+        f"/api/conversations/{other_conversation_id}",
+        headers=MERCHANT_TWO_AUTH,
+        params={"message_before": cursor},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "INVALID_REQUEST"
+
+
+async def test_conversation_list_flags_localization_degraded_when_title_cannot_translate(
+    postgres_client: AsyncClient,
+) -> None:
+    conversation_id = await start_conversation(
+        postgres_client,
+        MERCHANT_ONE_AUTH,
+        message="最近30天优惠券核销笔数",
+        key="list-degraded-1",
+    )
+
+    response = await postgres_client.get(
+        "/api/conversations",
+        headers={**MERCHANT_ONE_AUTH, "Accept-Language": "en-US"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["items"][0]["id"] == conversation_id
+    assert body["localization_degraded"] is True
+    assert body["localization_degraded_reason"] is not None
+    assert body["items"][0]["title"] == "Translation unavailable — retry"
+
+
+async def test_translation_cache_resolves_independently_per_merchant_for_identical_content(
+    postgres_client: AsyncClient,
+    postgres_app: FastAPI,
+) -> None:
+    """Task 7 Step 2：商家 B 请求自己的会话时，即使源文本与商家 A 的缓存
+    字节相同，也必须按 B 自己的作用域重新解析，绝不能读到 A 的私有译文。"""
+
+    source_text = "最近30天的复购率变化趋势说明"
+    conversation_id = await start_conversation(
+        postgres_client, MERCHANT_TWO_AUTH, message=source_text, key="cache-scope-1"
+    )
+
+    source_hash = hash_source_text(source_text)
+    source_language = detect_source_language(source_text)
+    async with postgres_app.state.database.session() as session:
+        localization = LocalizationRepository(session)
+        await localization.upsert_machine(
+            merchant_id=MERCHANT_ONE_ID,
+            source_hash=source_hash,
+            source_language=source_language,
+            target_locale=SupportedLocale.EN_US,
+            translated_text="MERCHANT-A-PRIVATE-TRANSLATION",
+            model="test-fixture",
+            prompt_version=LOCALIZATION_PROMPT_VERSION,
+        )
+        await localization.upsert_machine(
+            merchant_id=MERCHANT_TWO_ID,
+            source_hash=source_hash,
+            source_language=source_language,
+            target_locale=SupportedLocale.EN_US,
+            translated_text="MERCHANT-B-OWN-TRANSLATION",
+            model="test-fixture",
+            prompt_version=LOCALIZATION_PROMPT_VERSION,
+        )
+        await session.commit()
+
+    response = await postgres_client.get(
+        f"/api/conversations/{conversation_id}",
+        headers={**MERCHANT_TWO_AUTH, "Accept-Language": "en-US"},
+    )
+
+    assert response.status_code == 200
+    assert "MERCHANT-B-OWN-TRANSLATION" in response.text
+    assert "MERCHANT-A-PRIVATE-TRANSLATION" not in response.text
+
+
+async def test_deleting_a_conversation_purges_its_translation_cache_without_affecting_others(
+    postgres_client: AsyncClient,
+    postgres_app: FastAPI,
+) -> None:
+    """Task 7 Step 6：删除会话把派生机器翻译缓存清理放进同一事务；哈希若同
+    时被同一商家其它内容/别的商家复用，删除后应保持不受影响。"""
+
+    source_text = "最近14天的商品上架数量趋势"
+    conversation_id = await start_conversation(
+        postgres_client, MERCHANT_ONE_AUTH, message=source_text, key="delete-cache-1"
+    )
+
+    source_hash = hash_source_text(source_text)
+    source_language = detect_source_language(source_text)
+    async with postgres_app.state.database.session() as session:
+        localization = LocalizationRepository(session)
+        await localization.upsert_machine(
+            merchant_id=MERCHANT_ONE_ID,
+            source_hash=source_hash,
+            source_language=source_language,
+            target_locale=SupportedLocale.EN_US,
+            translated_text="Cached translation before deletion",
+            model="test-fixture",
+            prompt_version=LOCALIZATION_PROMPT_VERSION,
+        )
+        await localization.upsert_machine(
+            merchant_id=MERCHANT_TWO_ID,
+            source_hash=source_hash,
+            source_language=source_language,
+            target_locale=SupportedLocale.EN_US,
+            translated_text="Merchant two keeps its own cache",
+            model="test-fixture",
+            prompt_version=LOCALIZATION_PROMPT_VERSION,
+        )
+        await session.commit()
+
+    deleted = await postgres_client.delete(
+        f"/api/conversations/{conversation_id}",
+        headers=MERCHANT_ONE_AUTH,
+    )
+    assert deleted.status_code == 204
+
+    async with postgres_app.state.database.session() as session:
+        localization = LocalizationRepository(session)
+        merchant_one_hits = await localization.get_merchant_machine_many(
+            merchant_id=MERCHANT_ONE_ID,
+            source_hashes=[source_hash],
+            target_locale=SupportedLocale.EN_US,
+            prompt_version=LOCALIZATION_PROMPT_VERSION,
+        )
+        merchant_two_hits = await localization.get_merchant_machine_many(
+            merchant_id=MERCHANT_TWO_ID,
+            source_hashes=[source_hash],
+            target_locale=SupportedLocale.EN_US,
+            prompt_version=LOCALIZATION_PROMPT_VERSION,
+        )
+
+    assert merchant_one_hits == {}
+    assert merchant_two_hits[source_hash].translated_text == "Merchant two keeps its own cache"
+
+
+async def test_answer_payload_survives_a_page_boundary_split_of_its_pair(
+    postgres_client: AsyncClient,
+) -> None:
+    """协调者复核发现的缺陷回归：消息严格按 USER/ASSISTANT 交替写入，
+    `message_limit` 为奇数时分页边界必然把某一轮拆到两页。这条测试构造
+    两轮真实问答（4 条消息）后用 `message_limit=3` 请求详情——第一页会是
+    [ASSISTANT(轮1), USER(轮2), ASSISTANT(轮2)]，轮1 的 ASSISTANT 消息正好
+    落在边界上，必须仍然带着完整的 `answer_payload`（不能因为它配对的
+    USER 消息落在更早、未加载的那一页而丢失思考步骤/质量说明等字段）。
+    """
+
+    conversation_id = await start_conversation(
+        postgres_client,
+        MERCHANT_ONE_AUTH,
+        message="昨天总 GMV 是多少？",
+        key="boundary-split-1",
+    )
+    first_turn_detail = await postgres_client.get(
+        f"/api/conversations/{conversation_id}",
+        headers=MERCHANT_ONE_AUTH,
+    )
+    first_turn_answer_id = first_turn_detail.json()["messages"][1]["answer_payload"]["answer_id"]
+
+    follow_up = await postgres_client.post(
+        "/api/chat",
+        headers={**MERCHANT_ONE_AUTH, "Accept": "application/json"},
+        json={
+            "message": "最近7天退货量趋势",
+            "session_id": conversation_id,
+            "client_request_id": "boundary-split-2",
+        },
+    )
+    assert follow_up.status_code == 200
+
+    response = await postgres_client.get(
+        f"/api/conversations/{conversation_id}",
+        headers=MERCHANT_ONE_AUTH,
+        params={"message_limit": 3},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [message["role"] for message in body["messages"]] == [
+        "ASSISTANT",
+        "USER",
+        "ASSISTANT",
+    ]
+    boundary_message = body["messages"][0]
+    assert boundary_message["answer_payload"] is not None
+    assert boundary_message["answer_payload"]["answer_id"] == first_turn_answer_id
+    # 拆分被成功续接，本身不构成降级。
+    assert body["localization_degraded"] is False

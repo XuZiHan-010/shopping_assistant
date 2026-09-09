@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { AlertTriangle, ExternalLink, Ruler } from '@lucide/vue'
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import type { ChatAnswer } from '@/types/chat'
+
+const { t } = useI18n()
 
 const props = defineProps<{ answer?: ChatAnswer }>()
 
@@ -15,11 +18,11 @@ const isUnverified = computed(
 const sourceLabel = computed(() => {
   switch (metric.value?.source) {
     case 'METRIC_CATALOG':
-      return '正式指标目录'
+      return t('metricDefinitionPanel.source.metricCatalog')
     case 'FIELD_COMMENT':
-      return '受控字段注释'
+      return t('metricDefinitionPanel.source.fieldComment')
     case 'AI_GENERATED':
-      return '模型候选口径'
+      return t('metricDefinitionPanel.source.aiGenerated')
     default:
       return undefined
   }
@@ -28,11 +31,11 @@ const sourceLabel = computed(() => {
 const statusLabel = computed(() => {
   switch (metric.value?.status) {
     case 'ACTIVE':
-      return '已核验'
+      return t('metricDefinitionPanel.status.active')
     case 'DEPRECATED':
-      return '已弃用'
+      return t('metricDefinitionPanel.status.deprecated')
     case 'UNVERIFIED':
-      return '待核验'
+      return t('metricDefinitionPanel.status.unverified')
     default:
       return undefined
   }
@@ -40,10 +43,10 @@ const statusLabel = computed(() => {
 </script>
 
 <template>
-  <section class="metric-panel" aria-label="指标口径">
+  <section class="metric-panel" :aria-label="t('metricDefinitionPanel.sectionAria')">
     <header class="metric-panel__header">
       <Ruler :size="15" aria-hidden="true" />
-      <h2>指标口径</h2>
+      <h2>{{ t('metricDefinitionPanel.title') }}</h2>
     </header>
 
     <div v-if="metric" class="metric-panel__body">
@@ -56,36 +59,36 @@ const statusLabel = computed(() => {
         role="status"
       >
         <AlertTriangle :size="13" aria-hidden="true" />
-        <span>{{ metric.notice ?? '该指标口径尚未核验，请谨慎参考。' }}</span>
+        <span>{{ metric.notice ?? t('metricDefinitionPanel.unverifiedFallback') }}</span>
       </p>
 
       <dl class="metric-panel__fields">
         <div class="metric-panel__field">
-          <dt>业务口径</dt>
+          <dt>{{ t('metricDefinitionPanel.fieldDefinition') }}</dt>
           <dd>{{ metric.definition }}</dd>
         </div>
         <div class="metric-panel__field">
-          <dt>SQL 口径</dt>
+          <dt>{{ t('metricDefinitionPanel.fieldSql') }}</dt>
           <dd>{{ metric.sqlDefinition }}</dd>
         </div>
         <div class="metric-panel__field">
-          <dt>单位</dt>
+          <dt>{{ t('metricDefinitionPanel.fieldUnit') }}</dt>
           <dd>{{ metric.unit }}</dd>
         </div>
         <div class="metric-panel__field">
-          <dt>来源</dt>
+          <dt>{{ t('metricDefinitionPanel.fieldSource') }}</dt>
           <dd>{{ sourceLabel }}</dd>
         </div>
         <div class="metric-panel__field">
-          <dt>来源库表</dt>
+          <dt>{{ t('metricDefinitionPanel.fieldSourceTable') }}</dt>
           <dd>{{ metric.sourceDatabase }} · {{ metric.sourceTable }}</dd>
         </div>
         <div v-if="metric.dimensions.length" class="metric-panel__field">
-          <dt>可用维度</dt>
-          <dd>{{ metric.dimensions.join('、') }}</dd>
+          <dt>{{ t('metricDefinitionPanel.fieldDimensions') }}</dt>
+          <dd>{{ metric.dimensions.join(t('metricDefinitionPanel.dimensionsSeparator')) }}</dd>
         </div>
         <div v-if="metric.reportUrl" class="metric-panel__field">
-          <dt>关联报表</dt>
+          <dt>{{ t('metricDefinitionPanel.fieldReport') }}</dt>
           <dd>
             <a
               :href="metric.reportUrl"
@@ -94,29 +97,30 @@ const statusLabel = computed(() => {
               target="_blank"
               rel="noopener noreferrer"
             >
-              打开关联报表 <ExternalLink :size="13" aria-hidden="true" />
+              {{ t('metricDefinitionPanel.openReportLink') }}
+              <ExternalLink :size="13" aria-hidden="true" />
             </a>
           </dd>
         </div>
         <div class="metric-panel__field">
-          <dt>负责人</dt>
+          <dt>{{ t('metricDefinitionPanel.fieldOwner') }}</dt>
           <dd>{{ metric.owner }}</dd>
         </div>
         <div class="metric-panel__field">
-          <dt>状态</dt>
+          <dt>{{ t('metricDefinitionPanel.fieldStatus') }}</dt>
           <dd>{{ statusLabel }}</dd>
         </div>
       </dl>
 
       <div v-if="queryPlan" class="metric-panel__query-plan" data-testid="query-plan-summary">
-        <span>查询计划摘要</span>
+        <span>{{ t('metricDefinitionPanel.queryPlanLabel') }}</span>
         <p>{{ queryPlan }}</p>
       </div>
     </div>
 
     <div v-else class="metric-panel__empty" data-testid="metric-empty">
-      <span>暂无指标口径</span>
-      <p>发起指标类问题后，这里会显示对应的指标定义、来源与负责人。</p>
+      <span>{{ t('metricDefinitionPanel.emptyTitle') }}</span>
+      <p>{{ t('metricDefinitionPanel.emptyBody') }}</p>
     </div>
   </section>
 </template>

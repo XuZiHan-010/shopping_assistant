@@ -1,22 +1,34 @@
 <script setup lang="ts">
 import { Sparkles } from '@lucide/vue'
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
-import { QUICK_QUESTIONS } from '@/constants/quickQuestions'
+import { quickQuestions } from '@/constants/quickQuestions'
 import { useChatStore } from '@/stores/chat'
+import { useLocaleStore } from '@/stores/locale'
 
 import ChatComposer from './ChatComposer.vue'
 import ChatMessage from './ChatMessage.vue'
 import ConversationNav from './ConversationNav.vue'
 
+const { t } = useI18n()
+const localeStore = useLocaleStore()
 const chatStore = useChatStore()
+
+const currentQuickQuestions = computed(() => quickQuestions(localeStore.locale))
 
 // 目录条目要显示的是「问题」，可选中的却是「助手轮次」——两者是相邻的一对消息
 // （submitMessage 成对入列）。在这里把这层配对一次性摊平，目录组件只管渲染。
 const rounds = computed(() =>
   chatStore.messages.flatMap((message, index) =>
     message.role === 'assistant'
-      ? [{ localId: message.localId, question: chatStore.messages[index - 1]?.text ?? '本轮提问' }]
+      ? [
+          {
+            localId: message.localId,
+            question:
+              chatStore.messages[index - 1]?.text ?? t('conversationColumn.defaultQuestion'),
+          },
+        ]
       : [],
   ),
 )
@@ -59,7 +71,7 @@ watch(
 const retryNotice = ref('')
 let retryNoticeTimer: ReturnType<typeof setTimeout> | undefined
 
-function showRetryNotice(text = '上一轮回答仍在处理中，请稍候再试。'): void {
+function showRetryNotice(text = t('conversationColumn.retryBusyNotice')): void {
   retryNotice.value = text
   clearTimeout(retryNoticeTimer)
   retryNoticeTimer = setTimeout(() => {
@@ -98,7 +110,11 @@ onUnmounted(() => clearTimeout(retryNoticeTimer))
 </script>
 
 <template>
-  <main class="conversation-column" aria-label="商家助手对话" data-testid="conversation-column">
+  <main
+    class="conversation-column"
+    :aria-label="t('conversationColumn.mainAria')"
+    data-testid="conversation-column"
+  >
     <!-- 只有一轮时目录没有导航价值，反而占掉对话区高度。 -->
     <ConversationNav
       v-if="rounds.length >= 2"
@@ -116,16 +132,16 @@ onUnmounted(() => clearTimeout(retryNoticeTimer))
       <section class="welcome-card">
         <div class="welcome-card__icon"><Sparkles :size="19" aria-hidden="true" /></div>
         <div>
-          <h2>您好，我是您的经营助手</h2>
-          <p>可以查询经营指标、查看业务明细，也可以结合数据给出分析与建议。</p>
+          <h2>{{ t('conversationColumn.welcomeTitle') }}</h2>
+          <p>{{ t('conversationColumn.welcomeBody') }}</p>
         </div>
       </section>
 
       <section v-if="chatStore.isEmptyConversation" class="empty-card">
-        <span class="empty-card__eyebrow">快速体验</span>
-        <strong>点一个问题，看看助手能做什么</strong>
+        <span class="empty-card__eyebrow">{{ t('conversationColumn.quickEyebrow') }}</span>
+        <strong>{{ t('conversationColumn.quickTitle') }}</strong>
         <ul class="quick-questions">
-          <li v-for="item in QUICK_QUESTIONS" :key="item.question">
+          <li v-for="item in currentQuickQuestions" :key="item.question">
             <!-- data-question 让测试拿到「问题本身」，不用从含分类眉标的按钮全文里剥。 -->
             <button
               type="button"

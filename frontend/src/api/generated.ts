@@ -76,6 +76,10 @@ export interface paths {
         /**
          * Post Chat
          * @description 默认返回 SSE；明确请求 JSON 时返回与 done 同构的响应。
+         *
+         *     `locale` 从 `Accept-Language` 解析而来（Task 2 的 `get_request_locale`）；
+         *     `ChatRequest` 本身不带 locale 字段，显式传给 `ChatService.submit()`，图内
+         *     节点只从强类型 `AgentState.locale` 读取（Task 6 Step 5）。
          */
         post: operations["post_chat_api_chat_post"];
         delete?: never;
@@ -108,11 +112,25 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Conversation */
+        /**
+         * Get Conversation
+         * @description 会话详情：消息按 `message_before` 游标分页（Task 7，§8.6.3），只翻译
+         *     当前这一页——第一页固定取最新 `message_limit` 条,历史更早的内容要靠
+         *     `next_message_cursor` 继续翻页才会被处理,不会因为打开一次会话就把整份
+         *     历史一次性送进翻译预算。
+         */
         get: operations["get_conversation_api_conversations__conversation_id__get"];
         put?: never;
         post?: never;
-        /** Delete Conversation */
+        /**
+         * Delete Conversation
+         * @description 删除会话时把派生的机器翻译缓存清理放进同一事务（Task 7 Step 6）：
+         *     删除前先按会话全部历史（标题、消息正文、已保存 Answer payload 的思考
+         *     步骤/质量说明/降级原因）计算商家作用域的源哈希集合，删除会话（级联删
+         *     messages/answers）后按这批哈希清理缓存，最后一次性提交。哈希若同时被
+         *     该商家其它内容复用，删除缓存只会导致那部分内容之后重新翻译一次，不影
+         *     响任何原始数据（`docs/backend-development-plan.md` §8.6.3 与 brief Step 6）。
+         */
         delete: operations["delete_conversation_api_conversations__conversation_id__delete"];
         options?: never;
         head?: never;
@@ -234,7 +252,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Document */
+        /**
+         * Get Document
+         * @description `content_locale` 缺省时行为与本字段引入前完全一致：原样返回源正文，
+         *     不涉及任何人工译文查找或记忆机器翻译（Task 8 向后兼容）。
+         */
         get: operations["get_document_api_admin_knowledge_documents__document_path__get"];
         /** Update Document */
         put: operations["update_document_api_admin_knowledge_documents__document_path__put"];
@@ -556,6 +578,11 @@ export interface components {
              * Format: uuid
              */
             session_id: string;
+            /**
+             * Displayed User Message
+             * @default
+             */
+            displayed_user_message: string;
             /** Answer */
             answer: string;
             answer_mode: components["schemas"]["AnswerMode"];
@@ -675,6 +702,20 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+            /** Next Message Cursor */
+            next_message_cursor?: string | null;
+            /**
+             * Has More Messages
+             * @default false
+             */
+            has_more_messages: boolean;
+            /**
+             * Localization Degraded
+             * @default false
+             */
+            localization_degraded: boolean;
+            /** Localization Degraded Reason */
+            localization_degraded_reason?: string | null;
         };
         /** ConversationListResponse */
         ConversationListResponse: {
@@ -684,6 +725,13 @@ export interface components {
             limit: number;
             /** Offset */
             offset: number;
+            /**
+             * Localization Degraded
+             * @default false
+             */
+            localization_degraded: boolean;
+            /** Localization Degraded Reason */
+            localization_degraded_reason?: string | null;
         };
         /** ConversationMessage */
         ConversationMessage: {
@@ -886,11 +934,32 @@ export interface components {
             read_only: boolean;
             /** Version */
             version: string;
+            /**
+             * Content Locale
+             * @enum {string}
+             */
+            content_locale: "zh-CN" | "en-US" | "mixed" | "und";
+            /**
+             * Translation Status
+             * @enum {string}
+             */
+            translation_status: "SOURCE" | "CURRENT" | "STALE" | "MISSING";
         };
-        /** KnowledgeDocumentUpdateRequest */
+        /**
+         * KnowledgeDocumentUpdateRequest
+         * @description `is_source_version=true`（默认）更新源标题/正文本身；`false` 改为保存
+         *     一份人工译文，此时必须显式提供 `content_locale`——源语言可以是
+         *     `mixed`/`und`，不能靠"等于源语言之外的那个"推断目标语言（Task 8 Step 4）。
+         */
         KnowledgeDocumentUpdateRequest: {
             /** Content */
             content: string;
+            /**
+             * Is Source Version
+             * @default true
+             */
+            is_source_version: boolean;
+            content_locale?: components["schemas"]["SupportedLocale"] | null;
         };
         /**
          * KnowledgeTreeNode
@@ -1056,6 +1125,12 @@ export interface components {
             /** Action */
             action: string;
         };
+        /**
+         * SupportedLocale
+         * @description API 响应可渲染的显示语言。
+         * @enum {string}
+         */
+        SupportedLocale: "zh-CN" | "en-US";
         /** ThinkingStep */
         ThinkingStep: {
             /** Label */
@@ -1299,7 +1374,10 @@ export interface operations {
     };
     get_conversation_api_conversations__conversation_id__get: {
         parameters: {
-            query?: never;
+            query?: {
+                message_limit?: number;
+                message_before?: string | null;
+            };
             header?: never;
             path: {
                 conversation_id: string;
@@ -1417,6 +1495,7 @@ export interface operations {
                 merchant_id: string;
                 expires_at: number;
                 signature: string;
+                locale?: components["schemas"]["SupportedLocale"] | null;
             };
             header?: never;
             path: {
@@ -1689,7 +1768,9 @@ export interface operations {
     };
     get_knowledge_tree_api_admin_knowledge_tree_get: {
         parameters: {
-            query?: never;
+            query?: {
+                content_locale?: components["schemas"]["SupportedLocale"] | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1736,7 +1817,9 @@ export interface operations {
     };
     get_document_api_admin_knowledge_documents__document_path__get: {
         parameters: {
-            query?: never;
+            query?: {
+                content_locale?: components["schemas"]["SupportedLocale"] | null;
+            };
             header?: never;
             path: {
                 document_path: string;

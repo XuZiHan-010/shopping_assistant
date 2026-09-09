@@ -50,6 +50,10 @@ class Message(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
             "role IN ('USER', 'ASSISTANT', 'SYSTEM')",
             name="ck_messages_role",
         ),
+        CheckConstraint(
+            "source_locale IN ('zh-CN', 'en-US', 'mixed', 'und')",
+            name="ck_messages_source_locale",
+        ),
         Index("ix_messages_conversation_created", "conversation_id", "created_at"),
         Index("ix_messages_merchant_created", "merchant_id", "created_at"),
     )
@@ -66,3 +70,7 @@ class Message(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
     )
     role: Mapped[str] = mapped_column(String(16), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    # 消息正文本身使用的语言（`SourceLanguage`），不是显示语言；由
+    # `20260831_0016_content_locale_metadata` 迁移对历史行按 `content` 分类回填，
+    # 禁止用数据库默认值统一标成 `zh-CN`。见 `app/localization/locales.py`。
+    source_locale: Mapped[str] = mapped_column(String(16), nullable=False)

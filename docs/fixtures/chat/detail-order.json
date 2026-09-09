@@ -24,6 +24,7 @@
   ],
   "degraded": false,
   "degraded_reason": null,
+  "displayed_user_message": "",
   "export": {
     "expires_at": "2026-07-28T12:15:00Z",
     "id": "17575e95-31e5-5282-9d66-2c237c468537",

@@ -18,6 +18,8 @@ from app.core.errors import (
     DailyReportFeedbackConflictError,
     RequestInProgressError,
 )
+from app.localization.catalog import localize_catalog_value
+from app.localization.locales import SupportedLocale
 from app.repositories.analytics import DailyReportSignals
 from app.schemas.report import DailyReportMetric, DailyReportResponse
 
@@ -114,7 +116,9 @@ class DailyReportService:
         self._now = now or (lambda: datetime.now(UTC))
         self._business_timezone = business_timezone
 
-    async def get_or_create(self, merchant_id: UUID) -> DailyReportResponse:
+    async def get_or_create(
+        self, merchant_id: UUID, *, locale: SupportedLocale = SupportedLocale.ZH_CN
+    ) -> DailyReportResponse:
         report_date = business_today(self._now(), timezone=self._business_timezone) - timedelta(
             days=1
         )
@@ -123,7 +127,7 @@ class DailyReportService:
             merchant_id, client_request_id
         )
         if existing is not None and existing.processing_status == "SUCCEEDED":
-            return _response_from_answer(existing)
+            return _localize_response(_response_from_answer(existing), locale)
 
         response = await self._build_response(merchant_id, report_date)
         conversation = await self._conversations.get_or_create_daily_report_conversation(
@@ -142,7 +146,7 @@ class DailyReportService:
                 answer, response.model_dump(mode="json")
             )
             await self._session.commit()
-            return response
+            return _localize_response(response, locale)
         except IntegrityError as error:
             # 并发首次请求时，数据库唯一约束裁定胜者。失败事务回滚后重读已物化的日报，
             # 而不让同一商家收到一次 500 或重复生成一份日报。
@@ -151,7 +155,7 @@ class DailyReportService:
                 merchant_id, client_request_id
             )
             if raced is not None and raced.processing_status == "SUCCEEDED":
-                return _response_from_answer(raced)
+                return _localize_response(_response_from_answer(raced), locale)
             if raced is not None:
                 raise RequestInProgressError() from error
             raise
@@ -160,6 +164,8 @@ class DailyReportService:
         self,
         merchant_id: UUID,
         report_date: date,
+        *,
+        locale: SupportedLocale = SupportedLocale.ZH_CN,
     ) -> DailyReportResponse:
         """受控地替换一个历史日报，普通读取路径不调用本方法。"""
 
@@ -195,7 +201,7 @@ class DailyReportService:
                 answer, response.model_dump(mode="json")
             )
             await self._session.commit()
-            return response
+            return _localize_response(response, locale)
         except IntegrityError as error:
             await self._session.rollback()
             raise RequestInProgressError() from error
@@ -257,3 +263,49 @@ def _response_from_answer(answer: _AnswerLike) -> DailyReportResponse:
     if answer.response_payload is None:
         raise RuntimeError("日报回答缺少持久化载荷")
     return DailyReportResponse.model_validate(answer.response_payload)
+
+
+def _localize_response(
+    response: DailyReportResponse, locale: SupportedLocale
+) -> DailyReportResponse:
+    """把物化后的日报（永远以 zh-CN 落库，见 `_build_response()`）渲染成目标
+    语言的展示形态，不改动持久化内容——同一份物化结果按请求语言各自渲染，
+    不为每种语言各存一份。
+
+    `display_name`/`unit`/`suggestions`/`degraded_reason` 全部是闭集固定文案
+    （指标展示名与单位见 `analytics/contract.py`；建议与降级说明见
+    `report_service.py` 自身的 `_suggestions()`/`_NO_DATA_SUGGESTIONS`），
+    因此全部经 `localize_catalog_value()` 零 LLM 渲染；词典未命中时原样保留，
+    不调用大模型（日报端点不接受费用防护参数，也不应该为固定文案产生真实
+    调用）。`metric_code`、`value`、`report_date`、`answer_id` 保持不变。
+    """
+
+    if locale is SupportedLocale.ZH_CN:
+        return response
+
+    metrics = [
+        metric.model_copy(
+            update={
+                "display_name": localize_catalog_value(metric.display_name, locale)
+                or metric.display_name,
+                "unit": localize_catalog_value(metric.unit, locale) or metric.unit,
+            }
+        )
+        for metric in response.metrics
+    ]
+    suggestions = [
+        localize_catalog_value(suggestion, locale) or suggestion
+        for suggestion in response.suggestions
+    ]
+    degraded_reason = (
+        localize_catalog_value(response.degraded_reason, locale) or response.degraded_reason
+        if response.degraded_reason
+        else response.degraded_reason
+    )
+    return response.model_copy(
+        update={
+            "metrics": metrics,
+            "suggestions": suggestions,
+            "degraded_reason": degraded_reason,
+        }
+    )

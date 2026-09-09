@@ -48,7 +48,10 @@ async def run(args: argparse.Namespace) -> None:
             f"经营数据天数 {args.days}、随机种子 {args.random_seed} 将在 B4 使用。"
         )
         for merchant in merchants:
-            print(f"- {merchant.merchant_code}: {merchant.display_name} ({merchant.id})")
+            print(
+                f"- {merchant.merchant_code}: {merchant.display_name} "
+                f"/ {merchant.display_name_en} ({merchant.id})"
+            )
         return
 
     settings = get_settings()

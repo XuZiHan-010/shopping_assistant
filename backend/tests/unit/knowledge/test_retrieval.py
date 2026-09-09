@@ -2,10 +2,37 @@
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 import pytest
 
 from app.knowledge.retrieval import KnowledgeRetrieval, strip_metric_suffix
+from app.llm.client import LlmBudget
+from app.localization.locales import SupportedLocale
 from app.schemas.chat import QuestionCategory
+
+
+class _FakeLocalizer:
+    """跨语言召回测试专用：模拟 `LocalizationService.localize_many()` 的形状，
+    按固定映射表返回译文，不真的调用任何模型。`calls` 计数用于断言相同问题
+    命中缓存/已命中语料时不会重复发起「LLM 调用」。"""
+
+    def __init__(self, translations: dict[str, str]) -> None:
+        self.calls = 0
+        self.received_texts: list[str] = []
+        self._translations = translations
+
+    async def localize_many(
+        self, *, scope: object, items: object, target_locale: object, budget: object
+    ) -> dict[str, str]:
+        self.calls += 1
+        resolved: dict[str, str] = {}
+        for item in items:  # type: ignore[attr-defined]
+            self.received_texts.append(item.text)
+            translated = self._translations.get(item.text)
+            if translated is not None:
+                resolved[item.key] = translated
+        return resolved
 
 
 class _FakeDocument:
@@ -239,3 +266,163 @@ async def test_platform_rule_keeps_whole_library_rule_view() -> None:
     )
 
     assert "平台规则/rule.md" in {hit.source_path for hit in result.hits}
+
+
+# --- Task 6：跨语言知识召回 ------------------------------------------------
+
+
+def _listing_requirement_documents() -> list[_FakeDocument]:
+    """只有中文语料——英文关键词按原文检索必然零命中，必须靠查询规范化才能召回。"""
+
+    return [
+        _FakeDocument(
+            "业务/商品/业务性质介绍/商品规则.md",
+            "商品规则",
+            "商品上架需提供资质与类目信息。",
+            category="GOODS",
+        ),
+        _FakeDocument(
+            "业务/商品/业务性质介绍/商品定价.md",
+            "商品定价",
+            "定价策略与折扣区间说明。",
+            category="GOODS",
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cross_language_retrieval_recalls_a_chinese_document_for_english_question() -> None:
+    """英语问题命中中文语料失败时，额外发起一次查询规范化译文重试召回。
+
+    断言 `retrieval_queries`（这里是方法返回的 queries 列表）同时包含英语
+    原问题和 Fake 返回的中文检索查询，最终命中的文档与直接用中文关键词检索
+    出的文档相同，原问题文本本身完全未被改写。
+    """
+
+    question = "What are the product listing requirements?"
+    normalized_query = "商品上架规则要求"
+    localizer = _FakeLocalizer({question: normalized_query})
+    retrieval = KnowledgeRetrieval(
+        _FakeRepository(_listing_requirement_documents()),
+        merchant_id=uuid4(),
+        localizer=localizer,
+    )
+
+    result, queries = await retrieval.load_domain_with_cross_language_retrieval(
+        QuestionCategory.GOODS,
+        # 英文关键词对纯中文语料完全不命中——注意不能传 `()`：GOODS 域文档本身
+        # 靠 `DOMAIN_KEYWORDS` 别名就会全部匹配，空关键词根本不会触发缩窄，
+        # 会让"第一次检索"看起来像是命中了，掩盖跨语言重试要验证的行为。
+        ("product listing requirements",),
+        question=question,
+        locale=SupportedLocale.EN_US,
+        budget=LlmBudget(4, 4_000),
+    )
+
+    assert result.matched is True
+    assert [hit.source_path for hit in result.hits] == ["业务/商品/业务性质介绍/商品规则.md"]
+    assert queries == [question, normalized_query]
+    # 原问题文本必须原样未被改写——规范化译文只用于这一次检索匹配。
+    assert queries[0] == question
+    assert localizer.calls == 1
+
+    # 用中文关键词直接检索，命中的文档必须与跨语言路径命中的文档完全相同，
+    # 证明规范化译文确实复用了同一套匹配逻辑，不是另一条独立通道。
+    direct = await retrieval.load_domain(QuestionCategory.GOODS, (normalized_query,))
+    assert [hit.source_path for hit in direct.hits] == [hit.source_path for hit in result.hits]
+
+
+@pytest.mark.asyncio
+async def test_cross_language_retrieval_never_overwrites_knowledge_content() -> None:
+    """规范化译文只用于检索匹配，绝不写回知识库内容——命中文档的标题/正文必须
+    是原始中文，不会被英文问题或英文译文污染。"""
+
+    question = "What are the product listing requirements?"
+    localizer = _FakeLocalizer({question: "商品上架规则要求"})
+    retrieval = KnowledgeRetrieval(
+        _FakeRepository(_listing_requirement_documents()),
+        merchant_id=uuid4(),
+        localizer=localizer,
+    )
+
+    result, _ = await retrieval.load_domain_with_cross_language_retrieval(
+        QuestionCategory.GOODS,
+        ("product listing requirements",),
+        question=question,
+        locale=SupportedLocale.EN_US,
+        budget=LlmBudget(4, 4_000),
+    )
+
+    assert result.hits[0].title == "商品规则"
+    assert result.hits[0].content == "商品上架需提供资质与类目信息。"
+    assert "requirements" not in result.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_cross_language_retrieval_skips_the_extra_call_when_already_matched() -> None:
+    """已经命中就没必要多花一次查询规范化调用——最多增加 1 次的约束里，
+    「不必要时是 0 次」同样重要。"""
+
+    localizer = _FakeLocalizer({"any": "any"})
+    retrieval = KnowledgeRetrieval(
+        _FakeRepository(_documents()), merchant_id=uuid4(), localizer=localizer
+    )
+
+    result, queries = await retrieval.load_domain_with_cross_language_retrieval(
+        QuestionCategory.REFUND,
+        (),
+        question="What is the return process?",
+        locale=SupportedLocale.EN_US,
+        budget=LlmBudget(4, 4_000),
+    )
+
+    assert result.matched is True
+    assert queries == ["What is the return process?"]
+    assert localizer.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_cross_language_retrieval_does_not_trigger_for_a_same_language_miss() -> None:
+    """中文问题在中文语料里未命中，属于真正的未命中，不该触发任何翻译调用。"""
+
+    localizer = _FakeLocalizer({})
+    retrieval = KnowledgeRetrieval(
+        _FakeRepository(_documents()), merchant_id=uuid4(), localizer=localizer
+    )
+
+    result, queries = await retrieval.load_domain_with_cross_language_retrieval(
+        QuestionCategory.SCM,
+        (),
+        question="供应链的入库流程是什么",
+        locale=SupportedLocale.ZH_CN,
+        budget=LlmBudget(4, 4_000),
+    )
+
+    assert result.matched is False
+    assert queries == ["供应链的入库流程是什么"]
+    assert localizer.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_cross_language_retrieval_gives_up_quietly_when_the_localizer_has_nothing() -> None:
+    """规范化调用本身失败/降级（Fake 对该问题没有译文）时按未命中原样返回，
+    不抛异常，也不会假装命中。"""
+
+    localizer = _FakeLocalizer({})  # 空映射：模拟翻译调用失败/降级
+    retrieval = KnowledgeRetrieval(
+        _FakeRepository(_listing_requirement_documents()),
+        merchant_id=uuid4(),
+        localizer=localizer,
+    )
+
+    result, queries = await retrieval.load_domain_with_cross_language_retrieval(
+        QuestionCategory.GOODS,
+        ("product listing requirements",),
+        question="What are the product listing requirements?",
+        locale=SupportedLocale.EN_US,
+        budget=LlmBudget(4, 4_000),
+    )
+
+    assert result.matched is False
+    assert queries == ["What are the product listing requirements?"]
+    assert localizer.calls == 1

@@ -104,6 +104,19 @@ export interface SuggestedQuestions {
 export interface ChatAnswer {
   id: string
   sessionId: string
+  /**
+   * 用户本轮问题按当前请求 `Accept-Language` 渲染的显示副本（后端
+   * `ChatResponse.displayed_user_message`，Task 6）。Store 用它覆盖乐观
+   * 消息气泡的文本——原始提交文本单独存在 `ChatMessage.sourceText`，
+   * 不因为展示语言切换而被覆盖，重放/续接同一轮时要用原文而不是上一次
+   * 的展示副本去请求翻译。
+   *
+   * 可选：只有 `toChatAnswer`（实时 `ChatResponse`）能产出真实值。
+   * `toConversationAnswer`（会话详情的助手回答载荷）拿到的 `content` 是
+   * **助手自己的回答正文**，不是配对的用户消息，没有值可填——省略比填一个
+   * 语义错误的值更安全，见该函数内的说明。
+   */
+  displayedUserMessage?: string
   answer: string
   mode: AnswerMode
   category?: QuestionCategory
@@ -137,7 +150,24 @@ export interface ChatMessage {
   /** 幂等键。入列时生成并常驻，重试路径直接从消息对象拿（前端方案 §5.9）。 */
   clientRequestId: string
   role: 'user' | 'assistant'
+  /**
+   * 当前应该展示的文本。对 `origin: 'live'` 的用户消息，本轮完成后会被
+   * `ChatAnswer.displayedUserMessage` 覆盖；对历史消息，取会话详情已经
+   * 按请求 locale 本地化过的 `content`。组件只读这一个字段，不关心背后是
+   * 源文本还是译文。
+   */
   text: string
+  /**
+   * 用户原始提交文本，创建后永不改写。语言切换需要用同一 `clientRequestId`
+   * 重放或续接某一轮时（Task 11 Step 6），必须拿这份原文去请求新语言的
+   * 翻译，而不是拿上一次已经展示过的 `text`（否则会变成对译文再翻译）。
+   * 仅用户消息有意义；助手消息上该字段没有实际用途。
+   *
+   * 可选是因为历史上（Task 11 之前）直接构造的消息字面量不会带这个字段——
+   * 消费方一律按 `message.sourceText ?? message.text` 兜底，不强制所有旧
+   * 调用点跟着改。
+   */
+  sourceText?: string
   createdAt: string
   status: MessageStatus
   steps: ThinkingStep[]

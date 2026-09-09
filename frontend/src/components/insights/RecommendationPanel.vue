@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { Lightbulb, MessageCircleQuestion } from '@lucide/vue'
 import { computed, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import type { ChatAnswer } from '@/types/chat'
+
+const { t } = useI18n()
 
 const props = defineProps<{ answer?: ChatAnswer }>()
 
@@ -33,16 +36,16 @@ function rotateSuggestions(): void {
 </script>
 
 <template>
-  <section class="recommendation-panel" aria-label="行动建议">
+  <section class="recommendation-panel" :aria-label="t('recommendationPanel.sectionAria')">
     <div v-if="!answer" class="recommendation-panel__empty" data-testid="recommendation-empty">
-      <span>暂无行动建议</span>
-      <p>基于经营数据的建议和后续问题会显示在这里。</p>
+      <span>{{ t('recommendationPanel.emptyTitle') }}</span>
+      <p>{{ t('recommendationPanel.emptyBody') }}</p>
     </div>
 
     <template v-else>
       <header class="recommendation-panel__header">
         <Lightbulb :size="15" aria-hidden="true" />
-        <h2>行动建议</h2>
+        <h2>{{ t('recommendationPanel.title') }}</h2>
       </header>
 
       <ul v-if="recommendations.length > 0" class="recommendation-panel__list">
@@ -52,16 +55,22 @@ function rotateSuggestions(): void {
           class="recommendation-panel__item"
         >
           <p class="recommendation-panel__title">{{ recommendation.title }}</p>
-          <p class="recommendation-panel__evidence">依据：{{ recommendation.evidence }}</p>
-          <p class="recommendation-panel__action">建议：{{ recommendation.action }}</p>
+          <p class="recommendation-panel__evidence">
+            {{ t('recommendationPanel.evidencePrefix') }}{{ recommendation.evidence }}
+          </p>
+          <p class="recommendation-panel__action">
+            {{ t('recommendationPanel.actionPrefix') }}{{ recommendation.action }}
+          </p>
         </li>
       </ul>
-      <p v-else class="recommendation-panel__notice">本轮回答暂无可执行的行动建议。</p>
+      <p v-else class="recommendation-panel__notice">
+        {{ t('recommendationPanel.noRecommendations') }}
+      </p>
 
       <div class="recommendation-panel__suggestions">
         <header class="recommendation-panel__header">
           <MessageCircleQuestion :size="15" aria-hidden="true" />
-          <h2>猜你想问</h2>
+          <h2>{{ t('recommendationPanel.suggestionsTitle') }}</h2>
           <button
             v-if="canRotateSuggestions"
             type="button"
@@ -69,7 +78,7 @@ function rotateSuggestions(): void {
             data-testid="rotate-suggestions"
             @click="rotateSuggestions"
           >
-            换一换
+            {{ t('recommendationPanel.rotate') }}
           </button>
         </header>
 
@@ -85,7 +94,9 @@ function rotateSuggestions(): void {
             </button>
           </li>
         </ul>
-        <p v-else class="recommendation-panel__notice">暂无推荐追问问题。</p>
+        <p v-else class="recommendation-panel__notice">
+          {{ t('recommendationPanel.noSuggestions') }}
+        </p>
       </div>
     </template>
   </section>

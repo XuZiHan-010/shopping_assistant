@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 
 import type { components } from '@/api/generated'
-import { setCredentialProvider } from '../credentials'
+import { setCredentialProvider, setLocaleProvider } from '../credentials'
 import { readChatStream } from '../sse'
 import type { ChatTransport } from '../transport'
 import { QUICK_QUESTIONS } from '@/constants/quickQuestions'
@@ -47,6 +47,7 @@ async function listVia(target: ChatTransport, token: string): Promise<{ items: u
 describe('createMockTransport', () => {
   afterEach(() => {
     setCredentialProvider(undefined)
+    setLocaleProvider(undefined)
   })
 
   // F3 Task 7：Playwright 强制 VITE_USE_MOCK=true，隔离 e2e 因此必然跑在 Mock
@@ -60,12 +61,15 @@ describe('createMockTransport', () => {
   // 遍历全部场景而不只是快速问题入口：快速体验区只暴露 4 个分类入口，
   // 但兜底闲聊与「助手会拒绝」这两个场景照样要能命中 fixture。
   it('每个演示场景都能命中 fixture 并以 done 收尾', async () => {
-    for (const { question } of MOCK_SCENARIOS) {
+    // client_request_id 必须逐场景唯一：Mock 现在按它做幂等重放（Task 11
+    // Step 3），复用同一个 id 会让第 2 个及之后的场景全部命中第 1 个场景
+    // 缓存下来的答案，而不是各自的 fixture——这与真实后端的行为一致。
+    for (const [index, { question }] of MOCK_SCENARIOS.entries()) {
       const response = await transport(
         {
           path: '/api/chat',
           method: 'POST',
-          body: { message: question, client_request_id: 'c1' },
+          body: { message: question, client_request_id: `scenario-${index}` },
           accept: 'text/event-stream',
         },
         new AbortController().signal,
@@ -335,5 +339,320 @@ describe('createMockTransport', () => {
     }
     const businessRoot = treePayload.roots.find((root) => root.path === '业务')
     expect(businessRoot?.children.map((child) => child.name)).not.toContain('售后')
+  })
+})
+
+describe('Mock 双语行为（Task 11 Step 8）', () => {
+  afterEach(() => {
+    setCredentialProvider(undefined)
+    setLocaleProvider(undefined)
+  })
+
+  it('demo/merchants 按 Accept-Language 返回不同的商家展示名', async () => {
+    const zh = await transport({ path: '/api/demo/merchants', method: 'GET' }, new AbortController().signal)
+    const zhPayload = (await zh.json()) as components['schemas']['DemoMerchantListResponse']
+    expect(zhPayload.merchants[0].display_name).toBe('Borough商家100')
+
+    setLocaleProvider(() => 'en-US')
+    const en = await transport({ path: '/api/demo/merchants', method: 'GET' }, new AbortController().signal)
+    const enPayload = (await en.json()) as components['schemas']['DemoMerchantListResponse']
+    expect(enPayload.merchants[0].display_name).toBe('Borough Merchant 100')
+    // merchant_id/token 是技术字段，不受语言影响。
+    expect(enPayload.merchants[0].merchant_id).toBe(zhPayload.merchants[0].merchant_id)
+    expect(enPayload.merchants[0].token).toBe(zhPayload.merchants[0].token)
+  })
+
+  it('每个响应都带 Content-Language，与请求的 Accept-Language 一致', async () => {
+    setLocaleProvider(() => 'en-US')
+    const response = await transport(
+      { path: '/api/demo/merchants', method: 'GET' },
+      new AbortController().signal,
+    )
+    expect(response.headers.get('Content-Language')).toBe('en-US')
+  })
+
+  it('/api/chat 按 Accept-Language 返回不同语言的回答正文与思考步骤，技术字段不变', async () => {
+    setCredentialProvider(() => ({ merchantToken: 'demo-token-100' }))
+    const isolated = createMockTransport({ chunkSizes: [16], stepDelayMs: 0 })
+
+    const zhResponse = await isolated(
+      {
+        path: '/api/chat',
+        method: 'POST',
+        body: { message: '你好', client_request_id: 'bilingual-zh' },
+        accept: 'application/json',
+      },
+      new AbortController().signal,
+    )
+    const zhPayload = (await zhResponse.json()) as components['schemas']['ChatResponse']
+
+    setLocaleProvider(() => 'en-US')
+    const enResponse = await isolated(
+      {
+        path: '/api/chat',
+        method: 'POST',
+        body: { message: '你好', client_request_id: 'bilingual-en' },
+        accept: 'application/json',
+      },
+      new AbortController().signal,
+    )
+    const enPayload = (await enResponse.json()) as components['schemas']['ChatResponse']
+
+    expect(enPayload.answer).not.toBe(zhPayload.answer)
+    expect(enPayload.thinking_steps?.[0]?.label).not.toBe(zhPayload.thinking_steps?.[0]?.label)
+    // 技术字段（answer_mode/category/analysis_sources）不因语言而变。
+    expect(enPayload.answer_mode).toBe(zhPayload.answer_mode)
+    expect(enPayload.category).toBe(zhPayload.category)
+    expect(enPayload.analysis_sources).toEqual(zhPayload.analysis_sources)
+  })
+
+  it('同一 client_request_id 幂等重放：不产生新消息，按重放时的语言重新渲染', async () => {
+    setCredentialProvider(() => ({ merchantToken: 'demo-token-100' }))
+    const isolated = createMockTransport({ chunkSizes: [16], stepDelayMs: 0 })
+
+    const first = await isolated(
+      {
+        path: '/api/chat',
+        method: 'POST',
+        body: { message: '你好', client_request_id: 'replay-1' },
+        accept: 'application/json',
+      },
+      new AbortController().signal,
+    )
+    const firstPayload = (await first.json()) as components['schemas']['ChatResponse']
+
+    const listBefore = await isolated(
+      { path: '/api/conversations', method: 'GET', auth: 'merchant' },
+      new AbortController().signal,
+    )
+    const before = (await listBefore.json()) as { items: Array<{ id: string }> }
+
+    setLocaleProvider(() => 'en-US')
+    const replay = await isolated(
+      {
+        path: '/api/chat',
+        method: 'POST',
+        body: { message: '你好', client_request_id: 'replay-1' },
+        accept: 'application/json',
+      },
+      new AbortController().signal,
+    )
+    const replayPayload = (await replay.json()) as components['schemas']['ChatResponse']
+
+    const listAfter = await isolated(
+      { path: '/api/conversations', method: 'GET', auth: 'merchant' },
+      new AbortController().signal,
+    )
+    const after = (await listAfter.json()) as { items: Array<{ id: string }> }
+
+    // 同一个回答 id/会话 id：命中的是幂等分支，不是重新生成了一轮。
+    expect(replayPayload.id).toBe(firstPayload.id)
+    expect(replayPayload.session_id).toBe(firstPayload.session_id)
+    // 重放只是换了语言渲染展示副本，不产生新会话/新消息。
+    expect(after.items).toEqual(before.items)
+    expect(replayPayload.answer).not.toBe(firstPayload.answer)
+  })
+
+  it('GET /api/conversations/{id} 按 Accept-Language 重新本地化 content 与 answer_payload，不是原样返回存量数据', async () => {
+    setCredentialProvider(() => ({ merchantToken: 'demo-token-100' }))
+    const isolated = createMockTransport({ chunkSizes: [16], stepDelayMs: 0 })
+
+    // 提交时是中文，写入历史的是源语言（未经翻译）。
+    const submitted = await isolated(
+      {
+        path: '/api/chat',
+        method: 'POST',
+        body: { message: '你好', client_request_id: 'detail-localize-1' },
+        accept: 'application/json',
+      },
+      new AbortController().signal,
+    )
+    const { session_id: sessionId } = (await submitted.json()) as components['schemas']['ChatResponse']
+
+    const zhDetail = await isolated(
+      { path: `/api/conversations/${sessionId}`, method: 'GET', auth: 'merchant' },
+      new AbortController().signal,
+    )
+    const zhPayload = (await zhDetail.json()) as components['schemas']['ConversationDetailResponse']
+    const zhAssistant = zhPayload.messages.find((m) => m.role === 'assistant')!
+
+    // 同一份历史，换一次请求的语言重新拉——这是 continueRoundInNewLocale
+    // （语言切换时命中仍在 PROCESSING 的轮次）实际依赖的路径：中止旧流之后
+    // 靠这个端点按新语言把结果找回来。
+    setLocaleProvider(() => 'en-US')
+    const enDetail = await isolated(
+      { path: `/api/conversations/${sessionId}`, method: 'GET', auth: 'merchant' },
+      new AbortController().signal,
+    )
+    const enPayload = (await enDetail.json()) as components['schemas']['ConversationDetailResponse']
+    const enAssistant = enPayload.messages.find((m) => m.role === 'assistant')!
+    const enUser = enPayload.messages.find((m) => m.role === 'user')!
+
+    // 正文按新语言重新渲染，技术字段（id/role/answer_mode/quality_status）不变。
+    expect(enUser.content).not.toBe(zhPayload.messages.find((m) => m.role === 'user')!.content)
+    expect(enAssistant.content).not.toBe(zhAssistant.content)
+    expect(enAssistant.id).toBe(zhAssistant.id)
+    expect(enAssistant.answer_payload?.answer_mode).toBe(zhAssistant.answer_payload?.answer_mode)
+    expect(enAssistant.answer_payload?.quality_status).toBe(zhAssistant.answer_payload?.quality_status)
+    // answer_payload 内部的展示文本（thinking_steps 标签）同样重新渲染。
+    if ((zhAssistant.answer_payload?.thinking_steps?.length ?? 0) > 0) {
+      expect(enAssistant.answer_payload?.thinking_steps?.[0]?.label).not.toBe(
+        zhAssistant.answer_payload?.thinking_steps?.[0]?.label,
+      )
+    }
+
+    // 切回中文，能拿回和最初一样的中文正文——不是"翻译一次就回不去了"。
+    setLocaleProvider(() => 'zh-CN')
+    const zhAgain = await isolated(
+      { path: `/api/conversations/${sessionId}`, method: 'GET', auth: 'merchant' },
+      new AbortController().signal,
+    )
+    const zhAgainPayload = (await zhAgain.json()) as components['schemas']['ConversationDetailResponse']
+    expect(zhAgainPayload.messages.find((m) => m.role === 'assistant')!.content).toBe(zhAssistant.content)
+  })
+
+  it('知识文档：请求 content_locale=en-US 但尚无译文时返回 MISSING 并回退源正文', async () => {
+    const adminTransport = createMockTransport()
+    setCredentialProvider(() => ({ adminToken: 'mock-admin-token' }))
+
+    const response = await adminTransport(
+      {
+        path: '/api/admin/knowledge/documents/index/运营手册.md?content_locale=en-US',
+        method: 'GET',
+        auth: 'admin',
+      },
+      new AbortController().signal,
+    )
+    const payload = (await response.json()) as {
+      content: string
+      content_locale: string
+      translation_status: string
+    }
+
+    expect(payload.translation_status).toBe('MISSING')
+    expect(payload.content_locale).toBe('zh-CN')
+    expect(payload.content).toBe('# 运营手册\n\n初始内容')
+  })
+
+  it('知识文档：保存译文（is_source_version=false）后按 content_locale 读回 CURRENT', async () => {
+    const adminTransport = createMockTransport()
+    setCredentialProvider(() => ({ adminToken: 'mock-admin-token' }))
+
+    const saved = await adminTransport(
+      {
+        path: '/api/admin/knowledge/documents/index/运营手册.md',
+        method: 'PUT',
+        auth: 'admin',
+        headers: { 'If-Match': '"1"' },
+        body: { content: '# Operations Manual', is_source_version: false, content_locale: 'en-US' },
+      },
+      new AbortController().signal,
+    )
+    expect(saved.status).toBe(200)
+    const savedPayload = (await saved.json()) as { translation_status: string; content_locale: string }
+    expect(savedPayload.translation_status).toBe('CURRENT')
+    expect(savedPayload.content_locale).toBe('en-US')
+
+    const readBack = await adminTransport(
+      {
+        path: '/api/admin/knowledge/documents/index/运营手册.md?content_locale=en-US',
+        method: 'GET',
+        auth: 'admin',
+      },
+      new AbortController().signal,
+    )
+    const readPayload = (await readBack.json()) as { content: string; translation_status: string }
+    expect(readPayload.content).toBe('# Operations Manual')
+    expect(readPayload.translation_status).toBe('CURRENT')
+
+    // 源正文没变，源版本读取（不带 content_locale）依旧是中文，版本号未递增。
+    const sourceReadBack = await adminTransport(
+      { path: '/api/admin/knowledge/documents/index/运营手册.md', method: 'GET', auth: 'admin' },
+      new AbortController().signal,
+    )
+    const sourcePayload = (await sourceReadBack.json()) as { content: string; version: string }
+    expect(sourcePayload.content).toBe('# 运营手册\n\n初始内容')
+    expect(sourcePayload.version).toBe('1')
+  })
+
+  it('知识文档：更新源正文（is_source_version=true）后，旧译文失效，读回退回 MISSING', async () => {
+    const adminTransport = createMockTransport()
+    setCredentialProvider(() => ({ adminToken: 'mock-admin-token' }))
+
+    await adminTransport(
+      {
+        path: '/api/admin/knowledge/documents/index/运营手册.md',
+        method: 'PUT',
+        auth: 'admin',
+        headers: { 'If-Match': '"1"' },
+        body: { content: '# Operations Manual', is_source_version: false, content_locale: 'en-US' },
+      },
+      new AbortController().signal,
+    )
+
+    const updatedSource = await adminTransport(
+      {
+        path: '/api/admin/knowledge/documents/index/运营手册.md',
+        method: 'PUT',
+        auth: 'admin',
+        headers: { 'If-Match': '"1"' },
+        body: { content: '# 运营手册\n\n更新后的正文', is_source_version: true },
+      },
+      new AbortController().signal,
+    )
+    expect(updatedSource.status).toBe(200)
+    const updatedPayload = (await updatedSource.json()) as { version: string; content_locale: string }
+    expect(updatedPayload.version).toBe('2')
+    expect(updatedPayload.content_locale).toBe('zh-CN')
+
+    const readBack = await adminTransport(
+      {
+        path: '/api/admin/knowledge/documents/index/运营手册.md?content_locale=en-US',
+        method: 'GET',
+        auth: 'admin',
+      },
+      new AbortController().signal,
+    )
+    const readPayload = (await readBack.json()) as { translation_status: string; content: string }
+    expect(readPayload.translation_status).toBe('MISSING')
+    expect(readPayload.content).toBe('# 运营手册\n\n更新后的正文')
+  })
+
+  it('/api/admin/analytics/chatbi/categories 按 Accept-Language 返回不同语言的 category_display_name，category 机器码不变', async () => {
+    const adminTransport = createMockTransport()
+    setCredentialProvider(() => ({ adminToken: 'mock-admin-token' }))
+
+    interface CategoriesPayload {
+      items: components['schemas']['ChatBiCategoryItem'][]
+    }
+
+    const zh = await adminTransport(
+      {
+        path: '/api/admin/analytics/chatbi/categories?start_date=2026-08-17&end_date=2026-08-23',
+        method: 'GET',
+        auth: 'admin',
+      },
+      new AbortController().signal,
+    )
+    const zhPayload = (await zh.json()) as CategoriesPayload
+
+    setLocaleProvider(() => 'en-US')
+    const en = await adminTransport(
+      {
+        path: '/api/admin/analytics/chatbi/categories?start_date=2026-08-17&end_date=2026-08-23',
+        method: 'GET',
+        auth: 'admin',
+      },
+      new AbortController().signal,
+    )
+    const enPayload = (await en.json()) as CategoriesPayload
+
+    expect(zhPayload.items[0].category_display_name).toBe('交易分析')
+    expect(enPayload.items[0].category_display_name).toBe('Trade analysis')
+    expect(zhPayload.items[1].category_display_name).toBe('未分类')
+    expect(enPayload.items[1].category_display_name).toBe('Uncategorized')
+    // category 是机器码技术字段，不受语言影响。
+    expect(enPayload.items[0].category).toBe(zhPayload.items[0].category)
+    expect(enPayload.items[1].category).toBe(zhPayload.items[1].category)
   })
 })

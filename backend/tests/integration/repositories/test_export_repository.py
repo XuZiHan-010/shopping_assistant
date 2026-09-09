@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.localization.locales import SourceLanguage
 from app.models.answer import Answer
 from app.models.conversation import Conversation
 
@@ -20,6 +21,7 @@ async def _answer_for_merchant(session: AsyncSession, merchant_id):
         request_digest="a" * 64,
         processing_status="SUCCEEDED",
         response_payload={},
+        response_locale=str(SourceLanguage.UND),
     )
     session.add(answer)
     await session.flush()

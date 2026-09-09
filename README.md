@@ -63,18 +63,18 @@ Borough 商家 AI 助手是一个面向电商商家的对话式 Data Agent。商
 
 ## 界面
 
-<img src="docs/images/01-assistant.png" alt="Borough 商家 AI 助手主界面">
+<img src="docs/images/zh/01-assistant.png" alt="Borough 商家 AI 助手主界面">
 
 <p align="center"><i>助手主界面：左栏每日经营日报与指标口径，中栏对话与 12 步质量轨迹，右栏行动建议与「猜你想问」</i></p>
 
 | Chat BI 运营看板 | 知识库维护后台 |
 | :---: | :---: |
-| <img src="docs/images/04-ops-dashboard.png" alt="Chat BI 运营看板"> | <img src="docs/images/03-knowledge-base.png" alt="知识库维护后台"> |
+| <img src="docs/images/zh/04-ops-dashboard.png" alt="Chat BI 运营看板"> | <img src="docs/images/zh/03-knowledge-base.png" alt="知识库维护后台"> |
 | 六项北极星指标、日趋势与分类下钻；样本不足时显示「样本不足」而不是伪造 0% | 固定三根目录树、业务域四板块、文档编辑与只读记忆 |
 
 <table>
 <tr>
-<td width="26%"><img src="docs/images/02-chart.png" alt="指标图表面板"></td>
+<td width="26%"><img src="docs/images/zh/02-chart.png" alt="指标图表面板"></td>
 <td>
 
 **指标图表**
@@ -85,7 +85,7 @@ Borough 商家 AI 助手是一个面向电商商家的对话式 Data Agent。商
 </td>
 </tr>
 <tr>
-<td width="26%"><img src="docs/images/05-mobile.png" alt="移动端布局"></td>
+<td width="26%"><img src="docs/images/zh/05-mobile.png" alt="移动端布局"></td>
 <td>
 
 **移动端**

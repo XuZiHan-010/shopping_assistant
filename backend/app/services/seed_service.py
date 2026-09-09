@@ -17,6 +17,9 @@ class DemoMerchantSeed:
     id: UUID
     merchant_code: str
     display_name: str
+    #: 固定的人工英文展示名（Task 8 §Step 6），`/api/demo/merchants` 按请求
+    #: 语言在这两列之间零 LLM 二选一，不猜测或调用模型生成。
+    display_name_en: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +53,7 @@ def default_merchants(*, merchant_count: int = 3) -> list[DemoMerchantSeed]:
                 id=merchant_id,
                 merchant_code=merchant_code,
                 display_name=f"Borough商家{number}",
+                display_name_en=f"Borough Merchant {number}",
             )
         )
     return merchants
@@ -74,6 +78,7 @@ async def seed_demo_merchants(
                     "id": merchant.id,
                     "merchant_code": merchant.merchant_code,
                     "display_name": merchant.display_name,
+                    "display_name_en": merchant.display_name_en,
                     "is_demo": True,
                     "status": "ACTIVE",
                 }
@@ -84,6 +89,7 @@ async def seed_demo_merchants(
             index_elements=[Merchant.merchant_code],
             set_={
                 "display_name": statement.excluded.display_name,
+                "display_name_en": statement.excluded.display_name_en,
                 "is_demo": True,
                 "status": "ACTIVE",
             },

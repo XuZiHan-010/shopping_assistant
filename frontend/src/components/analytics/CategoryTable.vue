@@ -1,37 +1,41 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
+
 import type { ChatBiCategoryRow } from '@/types/analytics'
 
 defineProps<{ rows: ChatBiCategoryRow[] }>()
 
-const INSUFFICIENT = '样本不足'
+const { t } = useI18n()
 
 function percent(value: number | null): string {
-  return value === null ? INSUFFICIENT : `${(value * 100).toFixed(1)}%`
+  return value === null ? t('categoryTable.insufficientSample') : `${(value * 100).toFixed(1)}%`
 }
 
 function seconds(value: number | null): string {
-  return value === null ? INSUFFICIENT : `${(value / 1000).toFixed(1)} 秒`
+  return value === null
+    ? t('categoryTable.insufficientSample')
+    : t('categoryTable.secondsValue', { value: (value / 1000).toFixed(1) })
 }
 </script>
 
 <template>
   <section class="category-table" aria-labelledby="category-table-title">
     <header>
-      <p class="category-table__eyebrow">分类下钻</p>
-      <h2 id="category-table-title">按问题分类查看表现</h2>
+      <p class="category-table__eyebrow">{{ t('categoryTable.eyebrow') }}</p>
+      <h2 id="category-table-title">{{ t('categoryTable.title') }}</h2>
     </header>
     <div class="category-table__scroll">
       <table>
         <thead>
           <tr>
-            <th scope="col">问题分类</th>
-            <th scope="col">问答量</th>
-            <th scope="col">采纳率</th>
-            <th scope="col">用户侧准确率</th>
-            <th scope="col">系统侧准确率</th>
-            <th scope="col">平均思考时长</th>
-            <th scope="col">命中率</th>
-            <th scope="col">失效率</th>
+            <th scope="col">{{ t('categoryTable.colCategory') }}</th>
+            <th scope="col">{{ t('categoryTable.colAnswerTotal') }}</th>
+            <th scope="col">{{ t('categoryTable.colAdoption') }}</th>
+            <th scope="col">{{ t('categoryTable.colUserAccuracy') }}</th>
+            <th scope="col">{{ t('categoryTable.colSystemAccuracy') }}</th>
+            <th scope="col">{{ t('categoryTable.colThinking') }}</th>
+            <th scope="col">{{ t('categoryTable.colHit') }}</th>
+            <th scope="col">{{ t('categoryTable.colFailure') }}</th>
           </tr>
         </thead>
         <tbody>
@@ -46,7 +50,7 @@ function seconds(value: number | null): string {
             <td>{{ percent(row.metrics.failureRate) }}</td>
           </tr>
           <tr v-if="rows.length === 0">
-            <td colspan="8" class="category-table__empty">当前窗口暂无可下钻的分类数据。</td>
+            <td colspan="8" class="category-table__empty">{{ t('categoryTable.empty') }}</td>
           </tr>
         </tbody>
       </table>

@@ -9,6 +9,7 @@
   "data_rows": null,
   "degraded": false,
   "degraded_reason": null,
+  "displayed_user_message": "",
   "export": null,
   "id": "6ae74465-a63a-5ba3-b74f-1d53cdca52aa",
   "metric_code": null,

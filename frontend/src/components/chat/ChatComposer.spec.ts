@@ -1,7 +1,20 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { describe, expect, it, vi } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { i18n } from '@/i18n'
+import { useLocaleStore } from '@/stores/locale'
 
 import ChatComposer from './ChatComposer.vue'
+
+function mountComposer() {
+  return mount(ChatComposer, { global: { plugins: [i18n] } })
+}
+
+beforeEach(() => {
+  setActivePinia(createPinia())
+  useLocaleStore().setLocale('zh-CN')
+})
 
 /**
  * happy-dom 不做真实排版，scrollHeight 恒为 0——自适应高度在这里只能靠桩来测。
@@ -22,7 +35,7 @@ function stubAutoHeight(textarea: HTMLTextAreaElement): void {
 
 describe('ChatComposer', () => {
   it('提交非空文本，并在提交后清空输入区', async () => {
-    const wrapper = mount(ChatComposer)
+    const wrapper = mountComposer()
     const textarea = wrapper.get('textarea')
 
     await textarea.setValue('查看昨天 GMV')
@@ -33,7 +46,7 @@ describe('ChatComposer', () => {
   })
 
   it('按 Enter 提交当前问题并清空输入区', async () => {
-    const wrapper = mount(ChatComposer)
+    const wrapper = mountComposer()
     const textarea = wrapper.get('textarea')
 
     await textarea.setValue('查看昨天 GMV')
@@ -44,7 +57,7 @@ describe('ChatComposer', () => {
   })
 
   it('按 Shift + Enter 时保留换行且不提交', async () => {
-    const wrapper = mount(ChatComposer)
+    const wrapper = mountComposer()
     const textarea = wrapper.get('textarea')
 
     await textarea.setValue('第一行')
@@ -55,7 +68,7 @@ describe('ChatComposer', () => {
   })
 
   it('输入法仍在组合文字时按 Enter 不提交', async () => {
-    const wrapper = mount(ChatComposer)
+    const wrapper = mountComposer()
     const textarea = wrapper.get('textarea')
 
     await textarea.setValue('测试')
@@ -66,7 +79,7 @@ describe('ChatComposer', () => {
   })
 
   it('输入框随内容长高，内容变短时缩回，提交清空后回到单行', async () => {
-    const wrapper = mount(ChatComposer)
+    const wrapper = mountComposer()
     const textarea = wrapper.get('textarea')
     stubAutoHeight(textarea.element as HTMLTextAreaElement)
 
@@ -85,12 +98,26 @@ describe('ChatComposer', () => {
   })
 
   it('附件控件可用并唤起隐藏的文件选择框', async () => {
-    const wrapper = mount(ChatComposer)
+    const wrapper = mountComposer()
     const picker = wrapper.get('input[type="file"]')
     const click = vi.spyOn(picker.element as HTMLInputElement, 'click')
 
     expect(wrapper.get('.chat-composer__attachment').attributes('disabled')).toBeUndefined()
     await wrapper.get('.chat-composer__attachment').trigger('click')
     expect(click).toHaveBeenCalledOnce()
+  })
+
+  it('en-US 下输入区、按钮和提示文案均为英文', () => {
+    useLocaleStore().setLocale('en-US')
+    const wrapper = mountComposer()
+
+    expect(wrapper.get('textarea').attributes('aria-label')).toBe('Ask a question')
+    expect(wrapper.get('textarea').attributes('placeholder')).toBe('Ask a business question…')
+    expect(wrapper.get('.chat-composer__attachment').attributes('aria-label')).toBe(
+      'Choose attachment',
+    )
+    expect(wrapper.get('.chat-composer__send').attributes('aria-label')).toBe('Send question')
+    expect(wrapper.text()).toContain('Enter to send')
+    expect(wrapper.text()).not.toMatch(/[一-龥]/)
   })
 })

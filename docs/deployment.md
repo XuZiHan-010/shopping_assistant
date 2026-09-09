@@ -6,6 +6,8 @@
 
 在同一个 Railway 项目中创建 PostgreSQL 和 Backend 两个 Service。Backend 的 Root Directory 为 `/backend`，使用其中的 `railway.json` 与 Dockerfile。将 Backend 的 `DATABASE_URL` 引用 PostgreSQL Service，例如 `${{Postgres.DATABASE_URL}}`。发布前的 `python -m alembic upgrade head` 由 `railway.json` 的 `deploy.preDeployCommand` 执行一次，健康检查为 `/api/health`。
 
+后端健康检查等待窗口由 `backend/railway.json` 的 `deploy.healthcheckTimeout` 设置为 **120 秒**，为冷启动预留时间；这不是单次 API 请求超时。启动入口 `python -m app.run` 已监听 `0.0.0.0` 并读取 Railway 注入的 `PORT`（本地缺省为 `8000`），无需固定为 `8080`。若仍检查失败，应查看同一次部署带时间戳的运行日志，核对启动耗时、实际监听端口及 `/api/health` 的响应；延长窗口不能修复启动异常或接口错误。
+
 字段名必须是 `preDeployCommand`：Railway 的配置 schema 里**没有** `releaseCommand`，写成后者不会报错，只会被静默忽略，导致迁移从不执行、线上库始终缺表。
 
 ## 前端服务
@@ -183,6 +185,58 @@ Railway 的 Config File Path 不跟随 Root Directory。即使 Service Root 已�
 - 超额频率返回 `RATE_LIMITED`；达到模型日预算后显示明确降级。
 - `GET /api/admin/ops/status` 仅接受 `X-Admin-Token`，不得返回 Token、Prompt、商家数据或连接串。
 - 本地或预发做一次 SIGTERM 验收：发起长 SSE 请求后执行 `docker stop <container-id>`，确认连接以 `done` 或 `error` 收尾，容器在 `backend/app/run.py::GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS`（30 秒）内退出。
+
+## 双语本地化（Bilingual Localization）
+
+### 本地化限制环境变量
+
+以下四个变量控制批量翻译通道 `LocalizationService.localize_many()` 的费用上限，与主 Agent 问答的 `MAX_LLM_CALLS_PER_REQUEST`/`MAX_LLM_TOKENS_PER_REQUEST` 完全独立（互不挤占预算，`llm_usage.purpose` 用 `AGENT`/`LOCALIZATION` 分别记账）。定义见 `backend/app/core/config.py`：
+
+| 变量 | 默认值 | 用途与约束 |
+| --- | --- | --- |
+| `LOCALIZATION_MAX_CALLS_PER_REQUEST` | `4` | 单次 HTTP 请求内允许的本地化 LLM 调用次数上限（1–20）。会话列表/详情按页翻译、聊天回答翻译等所有本地化调用点共用同一预算。 |
+| `LOCALIZATION_MAX_TOKENS_PER_REQUEST` | `12000` | 单次 HTTP 请求内本地化调用允许消耗的 token 总量上限（100–200000）。 |
+| `LOCALIZATION_MAX_BATCH_ITEMS` | `20` | 单次批量翻译调用最多打包的待译条目数（1–200）；超出的条目留给下一批调用，仍受上面的调用次数上限约束。 |
+| `LOCALIZATION_MAX_BATCH_CHARS` | `12000` | 单次批量翻译调用里所有条目文本长度之和的上限（100–200000）；单条本身超过此值永远凑不成一批，直接缺席（不抛异常，按条目降级）。 |
+
+超出任一预算的条目按 R7 降级为目标语言占位文案，**不回落源语言**；调用方据此把 `localization_degraded`/`localization_degraded_reason` 置入响应，前端对同一游标/分页参数重新请求即为重试，已成功条目命中机器缓存不会重复计费。
+
+### 英语 Smoke Test（零/低成本）
+
+部署后验证英语路径可用，优先走零 LLM 调用的路径，不需要真实模型费用：
+
+1. `GET /api/demo/merchants`（无需 Token）确认端点存活；
+2. 携带任一演示商家 Token、`Accept-Language: en-US` 调用 `POST /api/chat`，问题选一句英文问候语（如 `"hello"`）或英文范围外提问——两者都经零 LLM 前置闸门/CHAT 分支处理，验证响应 `quality_notes`/`degraded_reason`/错误 `message` 均渲染为英文，且不产生任何 `llm_usage` 记录；
+3. 携带同一 Token、`Accept-Language: en-US` 调用 `GET /api/conversations`，确认历史列表按英语渲染且已有中文历史正确回填 `source_locale`；
+4. 用 `X-Admin-Token` 调用一次 `GET /api/admin/knowledge/tree`，确认业务域名称按英语渲染（走确定性词典 `catalog.py`，零 LLM）；
+5. 若需要验证真正需要模型翻译的路径（跨语言知识召回、自由文本批量翻译等），必须先按 AGENTS.md R3 向用户说明会调用的接口、预计调用次数、模型（`deepseek-v4-flash`）与费用，取得明确同意后才执行——不属于本 Smoke Test 默认范围。
+
+### 数据库迁移与缓存说明
+
+本效果新增两个迁移，链接在既有单一 head 之后：
+
+- `20260831_0015_localization_tables.py`：创建 `machine_translation_cache`（机器译文缓存）与 `resource_localizations`（资源级人工译文）两张表；均按 `scope_kind`（`MERCHANT`/`GLOBAL`）+ `merchant_id` 的 CHECK 约束与按作用域拆分的表达式唯一索引强制隔离，避免 PostgreSQL 唯一索引中 `NULL` 互不相等导致 `GLOBAL` 行无限重复插入。
+- `20260831_0016_content_locale_metadata.py`：给 `messages`/`answers`/`knowledge_documents`/`merchant_memories` 各加一个内容语言分类列（历史行按迁移内冻结的确定性分类函数逐行回填，禁止用数据库默认值把历史内容一律标成 `zh-CN`），给 `merchants` 加人工维护列 `display_name_en`，给 `llm_usage` 加调用用途列 `purpose`（历史行按 `server_default` 回填为 `AGENT`）。
+
+迁移仍由 `railway.json` 的 `deploy.preDeployCommand`（`alembic upgrade head`）在发布阶段执行一次；两个新迁移都已验证支持 `alembic upgrade --sql`（离线 SQL 渲染），不依赖真实数据库连接即可静态核对。
+
+### 30 天过期清理
+
+`machine_translation_cache` 的每一行写入/覆盖时都把 `expires_at` 设为 `now() + interval '30 days'`（`LocalizationRepository.upsert_machine()`）。**读路径（`get_merchant_machine_many()`/`get_global_machine_many()`）当前不按 `expires_at` 过滤**——过期只影响是否被批量清理，不影响该行在被清理前继续被当作有效缓存命中；由于缓存键包含内容哈希，源文本一旦变化会产生新哈希、自然不会命中旧行，因此这不是正确性问题，只是存储卫生问题。
+
+批量清理由 `LocalizationRepository.purge_expired_machine()` 提供，并有专门的集成测试覆盖（`backend/tests/integration/repositories/test_localization_repository.py`）。**该方法目前没有被任何 Cron Service 或定时任务调用**——不同于 `seed_demo_rolling`/`chatbi_rollup` 已经各自配好独立 Cron，本效果尚未新增第三个 Cron Service 来定期执行它。上线前需要用户决定：
+
+- 在现有某个 Cron（如每日的 `chatbi_rollup`）收尾处追加一次调用，或
+- 新建第三个最小权限 Cron Service（只需 `DATABASE_URL`/`APP_ENV`），仿照 `backend/railway.chatbi-cron.json` 的模式，或
+- 暂不清理，接受缓存表随时间增长，后续按需再补。
+
+在决定并配置前，`machine_translation_cache` 会持续增长但不会造成翻译结果错误。
+
+### 回滚指引
+
+- **只回滚代码、不回滚迁移**：本效果的两个迁移是纯增量（新表 + 新增列），不修改任何既有列的语义或删除任何数据；只回退应用代码到迁移前版本即可安全共存于已迁移的数据库——旧代码不知道新列/新表存在，会继续按原有行为工作。
+- **确需回滚迁移**（例如新表结构本身有缺陷）：`alembic downgrade 20260823_0014` 会依次撤销 `20260831_0016`（先删除六个新增列——`messages.source_locale`、`answers.response_locale`、`knowledge_documents.source_locale`、`merchant_memories.source_locale`、`merchants.display_name_en`、`llm_usage.purpose`；`display_name_en`/`purpose` 之外的四个分类列因为已回填真实历史数据，降级会永久丢弃这些回填结果）和 `20260831_0015`（删除两张新表，连同其中已经产生的机器译文缓存和人工译文一起丢弃）。降级前必须确认没有依赖这些列/表的代码仍在运行。
+- **只想临时关闭翻译功能、不动数据库**：把四个 `LOCALIZATION_MAX_*` 中的 `LOCALIZATION_MAX_CALLS_PER_REQUEST` 设为最小值（`1`）不能完全禁用，因为它仍允许 1 次调用；真正的开关是上游是否发起翻译请求（前端语言切换与 `Accept-Language`），本效果没有提供单独的 `LOCALIZATION_ENABLED` 总开关。如需紧急止损，可临时不配置 `LLM_API_KEY`（主 Agent 与本地化共用同一把 DeepSeek Key），两条调用路径会一起进入现有的 LLM 不可用降级分支，而不是只关翻译。
 
 ## 单 worker 与多实例限制
 

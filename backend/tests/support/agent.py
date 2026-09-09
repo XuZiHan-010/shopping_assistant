@@ -9,6 +9,7 @@ from __future__ import annotations
 from uuid import UUID, uuid4
 
 from app.agent.graph import AgentRunResult
+from app.localization.locales import SupportedLocale
 from app.schemas.chat import (
     AnalysisSource,
     AnswerMode,
@@ -26,7 +27,14 @@ class DeterministicAgent:
     def __init__(self) -> None:
         self.calls = 0
 
-    async def run(self, message: str, session_id: UUID) -> AgentRunResult:
+    async def run(
+        self,
+        message: str,
+        session_id: UUID,
+        *,
+        locale: SupportedLocale = SupportedLocale.ZH_CN,
+    ) -> AgentRunResult:
+        del locale  # 测试替身：不需要按 locale 变化，`ChatService` 负责本地化展示副本。
         self.calls += 1
         response = ChatResponse(
             id=uuid4(),

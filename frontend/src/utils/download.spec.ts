@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
+import { AppError } from '@/api/errors'
+
 import { buildExportHref, exportExpiry } from './download'
 
 describe('buildExportHref', () => {
@@ -9,10 +11,19 @@ describe('buildExportHref', () => {
     )
   })
 
-  it('拒绝非导出路径，避免把服务端字符串直接变成跳转链接', () => {
-    expect(() => buildExportHref('https://api.example.test', 'https://attacker.test')).toThrow(
-      '导出链接格式无效',
-    )
+  it('拒绝非导出路径，避免把服务端字符串直接变成跳转链接；只暴露稳定 code/details，不硬编码中文异常文案', () => {
+    try {
+      buildExportHref('https://api.example.test', 'https://attacker.test')
+      expect.unreachable('buildExportHref 应该抛出错误')
+    } catch (error) {
+      expect(error).toBeInstanceOf(AppError)
+      const appError = error as AppError
+      expect(appError.code).toBe('CONTRACT')
+      expect(appError.details).toMatchObject({
+        reason: 'INVALID_EXPORT_URL',
+        url: 'https://attacker.test',
+      })
+    }
   })
 })
 

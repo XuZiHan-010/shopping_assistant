@@ -87,6 +87,22 @@ describe('AppError.fromErrorResponse', () => {
     expect(error.code).toBe('WIKI_READ_ONLY')
     expect(error.shouldReport).toBe(false)
   })
+
+  it('DAILY_REPORT_FEEDBACK_CONFLICT 已在已知错误码表内，不降级为 HTTP_ERROR', () => {
+    const error = AppError.fromErrorResponse(
+      {
+        code: 'DAILY_REPORT_FEEDBACK_CONFLICT',
+        message: '日报反馈已被其他请求处理',
+        request_id: 'r-5',
+        details: [],
+        retryable: false,
+      },
+      409,
+    )
+
+    expect(error.code).toBe('DAILY_REPORT_FEEDBACK_CONFLICT')
+    expect(error.shouldReport).toBe(false)
+  })
 })
 
 describe('AppError.fromNetwork', () => {

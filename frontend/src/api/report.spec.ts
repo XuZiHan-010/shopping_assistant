@@ -1,0 +1,74 @@
+import { afterEach, describe, expect, it } from 'vitest'
+
+import { getDailyReport } from './report'
+import { setChatTransport, type TransportRequest } from './transport'
+
+afterEach(() => {
+  setChatTransport(undefined)
+})
+
+describe('getDailyReport', () => {
+  it('GET /api/reports/daily 带商家鉴权，返回值经 Adapter 转换为 camelCase', async () => {
+    const requests: TransportRequest[] = []
+    setChatTransport(async (request) => {
+      requests.push(request)
+      return Response.json({
+        answer_id: '00000000-0000-0000-0000-000000000001',
+        report_date: '2026-08-20',
+        metrics: [{ metric_code: 'gmv', display_name: '成交 GMV', unit: '元', value: '200.00' }],
+        suggestions: ['建议一', '建议二'],
+        degraded: false,
+        degraded_reason: null,
+      })
+    })
+
+    const report = await getDailyReport(new AbortController().signal)
+
+    expect(requests).toEqual([
+      expect.objectContaining({ path: '/api/reports/daily', method: 'GET', auth: 'merchant' }),
+    ])
+    expect(report.answerId).toBe('00000000-0000-0000-0000-000000000001')
+    expect(report.metrics[0]).toEqual({
+      code: 'gmv',
+      displayName: '成交 GMV',
+      unit: '元',
+      value: '200.00',
+    })
+  })
+
+  it('降级时如实转出原因，不吞掉 degraded_reason', async () => {
+    setChatTransport(async () =>
+      Response.json({
+        answer_id: '00000000-0000-0000-0000-000000000002',
+        report_date: '2026-08-20',
+        metrics: [],
+        suggestions: ['近 7 日退款压力较低，可以继续保持履约和售后响应稳定。'],
+        degraded: true,
+        degraded_reason: '查询失败，暂无法生成经营数据摘要',
+      }),
+    )
+
+    const report = await getDailyReport(new AbortController().signal)
+
+    expect(report.degraded).toBe(true)
+    expect(report.degradedReason).toBe('查询失败，暂无法生成经营数据摘要')
+  })
+
+  it('后端按 Accept-Language 返回英文口径时原样透传，不在前端二次翻译', async () => {
+    setChatTransport(async () =>
+      Response.json({
+        answer_id: '00000000-0000-0000-0000-000000000003',
+        report_date: '2026-08-20',
+        metrics: [{ metric_code: 'gmv', display_name: 'GMV', unit: 'CNY', value: '200.00' }],
+        suggestions: ['Suggestion one', 'Suggestion two'],
+        degraded: false,
+        degraded_reason: null,
+      }),
+    )
+
+    const report = await getDailyReport(new AbortController().signal)
+
+    expect(report.metrics[0].displayName).toBe('GMV')
+    expect(report.suggestions).toEqual(['Suggestion one', 'Suggestion two'])
+  })
+})
