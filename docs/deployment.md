@@ -6,6 +6,8 @@
 
 在同一个 Railway 项目中创建 PostgreSQL 和 Backend 两个 Service。Backend 的 Root Directory 为 `/backend`，使用其中的 `railway.json` 与 Dockerfile。将 Backend 的 `DATABASE_URL` 引用 PostgreSQL Service，例如 `${{Postgres.DATABASE_URL}}`。发布前的 `python -m alembic upgrade head` 由 `railway.json` 的 `deploy.preDeployCommand` 执行一次，健康检查为 `/api/health`。
 
+后端健康检查等待窗口由 `backend/railway.json` 的 `deploy.healthcheckTimeout` 设置为 **120 秒**，为冷启动预留时间；这不是单次 API 请求超时。启动入口 `python -m app.run` 已监听 `0.0.0.0` 并读取 Railway 注入的 `PORT`（本地缺省为 `8000`），无需固定为 `8080`。若仍检查失败，应查看同一次部署带时间戳的运行日志，核对启动耗时、实际监听端口及 `/api/health` 的响应；延长窗口不能修复启动异常或接口错误。
+
 字段名必须是 `preDeployCommand`：Railway 的配置 schema 里**没有** `releaseCommand`，写成后者不会报错，只会被静默忽略，导致迁移从不执行、线上库始终缺表。
 
 ## 前端服务
