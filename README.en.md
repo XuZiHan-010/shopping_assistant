@@ -75,18 +75,18 @@ tenant isolation. No sign-up, no login.
 
 ## Screenshots
 
-<img src="docs/images/01-assistant.png" alt="Borough Merchant AI Assistant main view">
+<img src="docs/images/en/01-assistant.png" alt="Borough Merchant AI Assistant main view">
 
 <p align="center"><i>Main view: daily report and metric definition on the left, conversation and the 12-step quality trail in the middle, recommendations and suggested follow-ups on the right</i></p>
 
 | Chat BI dashboard | Knowledge base admin |
 | :---: | :---: |
-| <img src="docs/images/04-ops-dashboard.png" alt="Chat BI dashboard"> | <img src="docs/images/03-knowledge-base.png" alt="Knowledge base admin"> |
+| <img src="docs/images/en/04-ops-dashboard.png" alt="Chat BI dashboard"> | <img src="docs/images/en/03-knowledge-base.png" alt="Knowledge base admin"> |
 | Six north-star metrics, daily trend and category drill-down; an insufficient sample reads "insufficient sample" rather than a fabricated 0% | Fixed three-root tree, four business sections, document editing, read-only memory |
 
 <table>
 <tr>
-<td width="26%"><img src="docs/images/02-chart.png" alt="Metric chart panel"></td>
+<td width="26%"><img src="docs/images/en/02-chart.png" alt="Metric chart panel"></td>
 <td>
 
 **Metric chart**
@@ -99,7 +99,7 @@ never reaches the user.
 </td>
 </tr>
 <tr>
-<td width="26%"><img src="docs/images/05-mobile.png" alt="Mobile layout"></td>
+<td width="26%"><img src="docs/images/en/05-mobile.png" alt="Mobile layout"></td>
 <td>
 
 **Mobile**
