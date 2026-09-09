@@ -1,0 +1,32 @@
+name: Diagnose localization merge conflicts
+
+on:
+  push:
+    branches:
+      - chore/diagnose-localization-merge
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/bilingual-localization
+          fetch-depth: 0
+      - name: List merge conflicts against main
+        shell: bash
+        run: |
+          git config user.name 'GitHub Actions'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch origin main
+          git merge --no-commit --no-ff origin/main || true
+          echo '--- UNMERGED FILES ---'
+          git diff --name-only --diff-filter=U
+          echo '--- END UNMERGED FILES ---'
+          git merge --abort || true
