@@ -102,7 +102,7 @@
           "chat"
         ],
         "summary": "Post Chat",
-        "description": "默认返回 SSE；明确请求 JSON 时返回与 done 同构的响应。",
+        "description": "默认返回 SSE；明确请求 JSON 时返回与 done 同构的响应。\n\n`locale` 从 `Accept-Language` 解析而来（Task 2 的 `get_request_locale`）；\n`ChatRequest` 本身不带 locale 字段，显式传给 `ChatService.submit()`，图内\n节点只从强类型 `AgentState.locale` 读取（Task 6 Step 5）。",
         "operationId": "post_chat_api_chat_post",
         "requestBody": {
           "content": {
@@ -276,6 +276,7 @@
           "chat"
         ],
         "summary": "Get Conversation",
+        "description": "会话详情：消息按 `message_before` 游标分页（Task 7，§8.6.3），只翻译\n当前这一页——第一页固定取最新 `message_limit` 条,历史更早的内容要靠\n`next_message_cursor` 继续翻页才会被处理,不会因为打开一次会话就把整份\n历史一次性送进翻译预算。",
         "operationId": "get_conversation_api_conversations__conversation_id__get",
         "security": [
           {
@@ -291,6 +292,34 @@
               "type": "string",
               "format": "uuid",
               "title": "Conversation Id"
+            }
+          },
+          {
+            "name": "message_limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "default": 20,
+              "title": "Message Limit"
+            }
+          },
+          {
+            "name": "message_before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Message Before"
             }
           }
         ],
@@ -352,6 +381,7 @@
           "chat"
         ],
         "summary": "Delete Conversation",
+        "description": "删除会话时把派生的机器翻译缓存清理放进同一事务（Task 7 Step 6）：\n删除前先按会话全部历史（标题、消息正文、已保存 Answer payload 的思考\n步骤/质量说明/降级原因）计算商家作用域的源哈希集合，删除会话（级联删\nmessages/answers）后按这批哈希清理缓存，最后一次性提交。哈希若同时被\n该商家其它内容复用，删除缓存只会导致那部分内容之后重新翻译一次，不影\n响任何原始数据（`docs/backend-development-plan.md` §8.6.3 与 brief Step 6）。",
         "operationId": "delete_conversation_api_conversations__conversation_id__delete",
         "security": [
           {
@@ -464,6 +494,22 @@
               "minLength": 32,
               "maxLength": 128,
               "title": "Signature"
+            }
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/SupportedLocale"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Locale"
             }
           }
         ],
@@ -800,6 +846,24 @@
         ],
         "summary": "Get Knowledge Tree",
         "operationId": "get_knowledge_tree_api_admin_knowledge_tree_get",
+        "parameters": [
+          {
+            "name": "content_locale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/SupportedLocale"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Content Locale"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -850,6 +914,7 @@
           "admin-knowledge"
         ],
         "summary": "Get Document",
+        "description": "`content_locale` 缺省时行为与本字段引入前完全一致：原样返回源正文，\n不涉及任何人工译文查找或记忆机器翻译（Task 8 向后兼容）。",
         "operationId": "get_document_api_admin_knowledge_documents__document_path__get",
         "parameters": [
           {
@@ -859,6 +924,22 @@
             "schema": {
               "type": "string",
               "title": "Document Path"
+            }
+          },
+          {
+            "name": "content_locale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/SupportedLocale"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Content Locale"
             }
           }
         ],
@@ -2504,6 +2585,12 @@
             "format": "uuid",
             "title": "Session Id"
           },
+          "displayed_user_message": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Displayed User Message",
+            "default": ""
+          },
           "answer": {
             "type": "string",
             "title": "Answer"
@@ -2984,6 +3071,38 @@
             "type": "string",
             "format": "date-time",
             "title": "Updated At"
+          },
+          "next_message_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Message Cursor"
+          },
+          "has_more_messages": {
+            "type": "boolean",
+            "title": "Has More Messages",
+            "default": false
+          },
+          "localization_degraded": {
+            "type": "boolean",
+            "title": "Localization Degraded",
+            "default": false
+          },
+          "localization_degraded_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Localization Degraded Reason"
           }
         },
         "type": "object",
@@ -3015,6 +3134,22 @@
             "type": "integer",
             "minimum": 0.0,
             "title": "Offset"
+          },
+          "localization_degraded": {
+            "type": "boolean",
+            "title": "Localization Degraded",
+            "default": false
+          },
+          "localization_degraded_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Localization Degraded Reason"
           }
         },
         "type": "object",
@@ -3468,6 +3603,26 @@
           "version": {
             "type": "string",
             "title": "Version"
+          },
+          "content_locale": {
+            "type": "string",
+            "enum": [
+              "zh-CN",
+              "en-US",
+              "mixed",
+              "und"
+            ],
+            "title": "Content Locale"
+          },
+          "translation_status": {
+            "type": "string",
+            "enum": [
+              "SOURCE",
+              "CURRENT",
+              "STALE",
+              "MISSING"
+            ],
+            "title": "Translation Status"
           }
         },
         "type": "object",
@@ -3475,7 +3630,9 @@
           "path",
           "content",
           "read_only",
-          "version"
+          "version",
+          "content_locale",
+          "translation_status"
         ],
         "title": "KnowledgeDocumentResponse"
       },
@@ -3484,13 +3641,29 @@
           "content": {
             "type": "string",
             "title": "Content"
+          },
+          "is_source_version": {
+            "type": "boolean",
+            "title": "Is Source Version",
+            "default": true
+          },
+          "content_locale": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SupportedLocale"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
         "required": [
           "content"
         ],
-        "title": "KnowledgeDocumentUpdateRequest"
+        "title": "KnowledgeDocumentUpdateRequest",
+        "description": "`is_source_version=true`（默认）更新源标题/正文本身；`false` 改为保存\n一份人工译文，此时必须显式提供 `content_locale`——源语言可以是\n`mixed`/`und`，不能靠\"等于源语言之外的那个\"推断目标语言（Task 8 Step 4）。"
       },
       "KnowledgeTreeNode": {
         "properties": {
@@ -3879,6 +4052,15 @@
           "action"
         ],
         "title": "Recommendation"
+      },
+      "SupportedLocale": {
+        "type": "string",
+        "enum": [
+          "zh-CN",
+          "en-US"
+        ],
+        "title": "SupportedLocale",
+        "description": "API 响应可渲染的显示语言。"
       },
       "ThinkingStep": {
         "properties": {

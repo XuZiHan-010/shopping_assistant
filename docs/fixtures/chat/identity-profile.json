@@ -9,6 +9,7 @@
   "data_rows": [],
   "degraded": true,
   "degraded_reason": "当前版本尚未开放商家资料查询",
+  "displayed_user_message": "",
   "export": null,
   "id": "180b3336-d074-5498-a7f4-b6ed431ddec4",
   "metric_code": null,

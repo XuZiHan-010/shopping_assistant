@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { ChevronDown } from '@lucide/vue'
-import { onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
+
+import { i18n } from '@/i18n'
+
+// 直接读全局 `i18n` 单例而不是 `useI18n()`：与 `ConversationDrawer.vue`
+// 同一个理由，见那边的注释。
+const triggerAria = computed(() => i18n.global.t('merchantSwitcher.triggerAria'))
+const listAria = computed(() => i18n.global.t('merchantSwitcher.listAria'))
 
 const props = defineProps<{
   modelValue: string
@@ -71,7 +78,7 @@ defineExpose({ openAndFocus })
       class="merchant-switcher__trigger"
       type="button"
       data-testid="merchant-switcher"
-      aria-label="切换当前演示商家"
+      :aria-label="triggerAria"
       :aria-expanded="isOpen"
       aria-controls="merchant-switcher-options"
       @click="isOpen = !isOpen"
@@ -89,7 +96,7 @@ defineExpose({ openAndFocus })
       id="merchant-switcher-options"
       class="merchant-switcher__menu"
       role="listbox"
-      aria-label="演示商家"
+      :aria-label="listAria"
     >
       <li v-for="merchant in props.merchants" :key="merchant" role="presentation">
         <button

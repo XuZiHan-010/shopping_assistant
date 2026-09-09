@@ -53,6 +53,7 @@ class LlmUsage(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
     __table_args__ = (
         Index("ix_llm_usage_usage_date", "usage_date"),
         CheckConstraint("reserved_tokens >= 0", name="ck_llm_usage_reserved_tokens_nonnegative"),
+        CheckConstraint("purpose IN ('AGENT', 'LOCALIZATION')", name="ck_llm_usage_purpose"),
     )
 
     merchant_id: Mapped[UUID | None] = mapped_column(
@@ -95,6 +96,14 @@ class LlmUsage(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
     )
     failure_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
+    # 区分本次调用是 Chat Agent 主流程还是 Task 4 的 Localization 通道，供
+    # `/api/admin/ops/status` 分别报告两条预算，不把翻译费用隐藏在 Agent
+    # 预算描述里。
+    purpose: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        server_default=text("'AGENT'"),
+    )
 
 
 class LlmDailyBudget(UuidPrimaryKeyMixin, CreatedAtMixin, Base):

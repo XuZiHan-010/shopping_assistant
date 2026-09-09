@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
+from itertools import pairwise
+from typing import Final
 
 from app.llm.client import STRUCTURED_CALL_OPTIONS, LlmBudget, LlmClient
+from app.localization.catalog import localize_catalog_value
+from app.localization.locales import SupportedLocale
 from app.metrics.catalog import MetricPayload
-from app.prompts.answer import ANSWER_SYSTEM_PROMPT
+from app.prompts.answer import build_answer_system_prompt
 from app.schemas.answer import AnswerDraft
 from app.schemas.chat import Recommendation
 from app.services.quality_types import AttemptFailureKind, DraftAttempt
@@ -47,7 +51,228 @@ _UUID = re.compile(
 # 里（如果是新算出的数字会被数字校验拦住），也可能只是复述某一行却贴上「合计」
 # 类字眼，看起来像是对全部区间下了结论。见 docs/backend-development-plan.md 的
 # B5 本地校验清单第 6 条。
-_ADDITIVE_CLAIM_PHRASES = ("合计", "总计", "累计", "总和", "加总", "汇总")
+#
+# Task 5（双语化）：这份关键词过去只有中文，模型改说英文后（"totalled"/
+# "combined"……）完全绕过检查——不是文案缺陷，是校验本身对英文回答失效。
+# 中英文关键词统一从 `app.localization.catalog` 取（词表 > 正则），不再各写
+# 一套：中文短语走 `_ADDITIVE_CLAIM_PHRASES_ZH`，英文形式通过
+# `localize_catalog_value` 反查得到。
+#
+# 中文短语沿用原有的子串匹配（CJK 文本没有"词边界"这个概念，子串匹配本来
+# 就是正确做法，不改）；英文形式改用**词边界正则**而不是子串匹配——子串
+# 匹配曾经把 "totally"（"total" 的无关前缀）也判成合计断言，"summary"/
+# "consumer" 同理会误伤 "sum" 这种短词。词边界正则从根上关掉这一整类误判，
+# 而不是逐词挑"安全"的译文防守。
+_ADDITIVE_CLAIM_PHRASES_ZH = ("合计", "总计", "累计", "总和", "加总", "汇总")
+_ADDITIVE_CLAIM_PHRASES_EN: tuple[str, ...] = tuple(
+    dict.fromkeys(
+        phrase
+        for phrase in (
+            localize_catalog_value(zh_phrase, SupportedLocale.EN_US)
+            for zh_phrase in _ADDITIVE_CLAIM_PHRASES_ZH
+        )
+        if phrase
+    )
+)
+
+
+def _en_inflection_alternative(word: str) -> str:
+    """把英文词根展开成保守的屈折形式匹配组：只覆盖名词复数（-s）、动词过去式/
+    现在分词（-ed/-ing，含英式双写 -led/-ling）这几种规则变化，不追求覆盖全部
+    不规则英语语法——够用的目标是让 "totalled" 这类自然写法仍能触发，同时因为
+    要求整词匹配到词边界，"totally" 的 "-ly" 后缀不在允许的屈折形式里，不会
+    被误伤。
+    """
+
+    if word.endswith("e"):
+        stem = re.escape(word[:-1])
+        return rf"{re.escape(word)}s?|{stem}(?:ed|ing)"
+    return rf"{re.escape(word)}(?:s|ed|ing|led|ling)?"
+
+
+_ADDITIVE_CLAIM_EN_PATTERN: re.Pattern[str] | None = (
+    re.compile(
+        r"\b(?:"
+        + "|".join(_en_inflection_alternative(word) for word in _ADDITIVE_CLAIM_PHRASES_EN)
+        + r")\b",
+        re.IGNORECASE,
+    )
+    if _ADDITIVE_CLAIM_PHRASES_EN
+    else None
+)
+
+# Task 5：日期区间一致性校验。过去的日期/时长正则只负责「剥掉看起来像日期的
+# 数字，避免被数字校验误判成幻觉」，从不核对模型陈述的日期区间是否真的落在
+# 本次查询范围内——中英文都有这个缺口。这里新增两道独立检查：
+#
+# 1. 显式区间：从回答文本里抽取「起始日期 至/到/~/-/through/to 结束日期」
+#    这类表述（ISO、中文纪年、斜杠、英文月份写法都认），解析成 `date` 对象后
+#    与事实包里能确定的实际查询区间比对，区间以外即判定为编造范围；
+# 2. 相对时长：抽取「最近 N 天」/「last N days」这类表述，以事实包里最近的
+#    实际日期为锚点向前推 N 天，超出实际覆盖范围同样判定为编造窗口——这是
+#    计划 §Task 5 明确点名的目标（"日期/时长校验改为先抽取归一化时间区间
+#    （ISO 日期、`last N days`、`最近 N 天`）再与查询区间比对"），过去完全
+#    没有任何代码路径处理这类相对时长断言。
+_ISO_DATE_CAPTURE = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
+_CN_DATE_CAPTURE = re.compile(r"(?:(\d{4})\s*年\s*)?(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]")
+_SLASH_DATE_CAPTURE = re.compile(r"(?:(\d{4})\s*/\s*)?(\d{1,2})\s*/\s*(\d{1,2})\b")
+_EN_MONTH_DATE_CAPTURE = re.compile(
+    r"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b",
+    re.IGNORECASE,
+)
+_EN_MONTH_NUMBERS: dict[str, int] = {
+    "jan": 1,
+    "feb": 2,
+    "mar": 3,
+    "apr": 4,
+    "may": 5,
+    "jun": 6,
+    "jul": 7,
+    "aug": 8,
+    "sep": 9,
+    "oct": 10,
+    "nov": 11,
+    "dec": 12,
+}
+# 只在两个已识别的日期 token 之间、且中间**只有**这个连接词（允许两侧空白）时，
+# 才认定为一个显式区间；避免把文本里恰好相邻但语义无关的两个日期误判成区间。
+_RANGE_JOINER = re.compile(r"^\s*(?:至|到|~|-|through|to)\s*$", re.IGNORECASE)
+# 相对时长表述：只认「最近/过去 N 天」「last/past N days」这两种计划里点名的
+# 写法，不追求覆盖「周」「月」等更多单位——够用即可，不做成通用日期解析器。
+_EN_DURATION_CAPTURE = re.compile(r"\b(?:last|past)\s+(\d+)\s*days?\b", re.IGNORECASE)
+_CN_DURATION_CAPTURE = re.compile(r"(?:最近|过去)\s*(\d+)\s*天")
+# 两种语言共用同一条 issue 文案（同一个 issue 码的唯一渲染），不按草稿语言分叉；
+# 显式区间与相对时长两道检查也共用同一条文案——对用户来说都是「陈述的时间范围
+# 与实际查询不一致」，不需要按触发路径拆成两句话。
+_DATE_RANGE_ISSUE = "回答陈述的日期区间超出了本次查询的实际范围"
+
+
+def _catalog_text(message: str, locale: SupportedLocale) -> str:
+    """从 `app.localization.catalog` 查一句已登记的固定中文整句的目标语言译文。
+
+    `zh-CN` 原样返回；`en-US` 查不到时兜底原句而不是抛异常，宁可让极端情况
+    下混入一句未翻译的中文，也不能让本地化本身变成新的故障源。这是
+    `_localized_validation_message()`（`_validate()` 的 issue 文案）与
+    `_fallback()`（确定性兜底草稿里不带插值的固定短语，如两条建议的
+    `title`/`action`）共用的同一条查表逻辑。
+    """
+
+    if locale is SupportedLocale.ZH_CN:
+        return message
+    return localize_catalog_value(message, locale) or message
+
+
+def _localized_validation_message(message: str, locale: SupportedLocale) -> str:
+    """把 `_validate()` 产出的固定中文 issue 文案渲染成目标语言。
+
+    Task 6：这些 issue 最终经 `quality_loop.py` 的
+    `_REJECT_NOTE_TEMPLATES[locale].format(..., issues=...)` 拼进
+    `quality_notes`——不本地化就会在英文响应里混入中文（登记在
+    `app.localization.catalog._ANSWER_VALIDATION_MESSAGES`）。`zh-CN` 原样
+    返回；`en-US` 查不到时兜底原句而不是抛异常，宁可让极端情况下混入一句
+    未翻译的中文，也不能让本地校验本身变成新的故障源。
+    """
+
+    return _catalog_text(message, locale)
+
+
+# ---------------------------------------------------------------------------
+# Task 14 Step 7 finding A：`_fallback()` 产出的确定性兜底草稿过去完全不接受
+# `locale`，任何语言的请求耗尽质量循环重试后都会拿到硬编码中文——这是本次
+# 修复的核心缺口。这些模板都带插值（行数、指标名、数值……），不是固定整句，
+# 因此不进 `catalog.py`（那张表只做精确整句字典查找）；改用与
+# `quality_loop.py` 的 `_PASS_NOTE_TEMPLATES`/`_REJECT_NOTE_TEMPLATES` 完全
+# 相同的 `dict[SupportedLocale, str]` + `.format()` 模式，不发明新写法。
+# 不带插值的固定短语（两条建议各自的 `title`/`action`）则复用
+# `_catalog_text()`，登记进 `catalog.py` 的
+# `_ANSWER_SERVICE_FALLBACK_MESSAGES`，与 `_ANSWER_VALIDATION_MESSAGES`
+# 同一来源分组风格。
+# ---------------------------------------------------------------------------
+
+#: `metric_label` 本身**不带冠词**——8 个模板里有 4 个（对比两支/合计摘要/
+#: 单值）自带 "The {metric_label}"，若默认值再带一次 "the" 会产出
+#: "The the business metric ..." 这种双冠词语法错误（reviewer 2026-09-05
+#: 复核实测复现）；另外 2 个模板（无可汇总对比值/无可汇总数值）不自带冠词，
+#: 因此在各自模板串里显式补 "the {metric_label}"，而不是让默认值偷偷带上
+#: 冠词——同一个变量在 8 处调用点必须服从同一条语法角色约定，不能靠默认值
+#: 里藏一个冠词来"蒙混过关"某几个模板。截断/非加和两个模板用
+#: "of {metric_label} data" 复合名词结构，英语惯用法本就不加冠词
+#: （类比 "of sales data"），维持不变。
+_DEFAULT_METRIC_LABEL: Final[dict[SupportedLocale, str]] = {
+    SupportedLocale.ZH_CN: "经营指标",
+    SupportedLocale.EN_US: "business metric",
+}
+_FALLBACK_NO_COMPARISON_VALUE_TEMPLATES: Final[dict[SupportedLocale, str]] = {
+    SupportedLocale.ZH_CN: "本次查询未取得可汇总的{metric_label}数值，无法进行对比。",
+    SupportedLocale.EN_US: (
+        "This query did not return a summable value for the {metric_label}, so no "
+        "comparison can be made."
+    ),
+}
+_FALLBACK_COMPARISON_WITH_RATIO_TEMPLATES: Final[dict[SupportedLocale, str]] = {
+    SupportedLocale.ZH_CN: (
+        "本次查询的{metric_label}为 {current}{unit}，对比周期为 {baseline}{unit}，"
+        "变化 {ratio}%。"
+    ),
+    SupportedLocale.EN_US: (
+        "The {metric_label} for this query is {current}{unit}, versus "
+        "{baseline}{unit} for the comparison period — a change of {ratio}%."
+    ),
+}
+_FALLBACK_COMPARISON_NO_RATIO_TEMPLATES: Final[dict[SupportedLocale, str]] = {
+    SupportedLocale.ZH_CN: (
+        "本次查询的{metric_label}为 {current}{unit}；对比基期无数据或为零，"
+        "无法计算变化率。"
+    ),
+    SupportedLocale.EN_US: (
+        "The {metric_label} for this query is {current}{unit}; the comparison "
+        "baseline has no data or is zero, so the change rate cannot be "
+        "calculated."
+    ),
+}
+_FALLBACK_TRUNCATED_TEMPLATES: Final[dict[SupportedLocale, str]] = {
+    SupportedLocale.ZH_CN: (
+        "本次仅展示部分结果，共预览 {total_rows} 行{metric_label}数据，"
+        "不对预览行做合计。"
+    ),
+    SupportedLocale.EN_US: (
+        "This is a partial result: {total_rows} preview row(s) of "
+        "{metric_label} data. The previewed rows are not totalled."
+    ),
+}
+_FALLBACK_NON_ADDITIVE_TEMPLATES: Final[dict[SupportedLocale, str]] = {
+    SupportedLocale.ZH_CN: "本次查询返回 {total_rows} 行{metric_label}数据；该指标不做跨日合计。",
+    SupportedLocale.EN_US: (
+        "This query returned {total_rows} row(s) of {metric_label} data; this "
+        "metric is not totalled across days."
+    ),
+}
+_FALLBACK_SUMMARY_TEMPLATES: Final[dict[SupportedLocale, str]] = {
+    SupportedLocale.ZH_CN: (
+        "本次查询的{metric_label}合计 {total}{unit}；最新日期 {latest_label} 为 "
+        "{latest_value}{unit}；峰值 {peak_value}{unit} 出现在 {peak_label}。"
+    ),
+    SupportedLocale.EN_US: (
+        "The {metric_label} totals {total}{unit} for this query; the latest "
+        "date, {latest_label}, is {latest_value}{unit}; the peak of "
+        "{peak_value}{unit} occurred on {peak_label}."
+    ),
+}
+_FALLBACK_NO_VALUE_TEMPLATES: Final[dict[SupportedLocale, str]] = {
+    SupportedLocale.ZH_CN: "本次查询返回 {total_rows} 行数据，暂未形成可汇总的{metric_label}数值。",
+    SupportedLocale.EN_US: (
+        "This query returned {total_rows} row(s) of data; no summable value "
+        "for the {metric_label} is available yet."
+    ),
+}
+_FALLBACK_SINGLE_VALUE_TEMPLATES: Final[dict[SupportedLocale, str]] = {
+    SupportedLocale.ZH_CN: "本次查询的{metric_label}为 {value}{unit}。",
+    SupportedLocale.EN_US: "The {metric_label} for this query is {value}{unit}.",
+}
+_FALLBACK_ROW_COUNT_EVIDENCE_TEMPLATES: Final[dict[SupportedLocale, str]] = {
+    SupportedLocale.ZH_CN: "本次查询返回 {total_rows} 行数据。",
+    SupportedLocale.EN_US: "This query returned {total_rows} row(s) of data.",
+}
 
 
 @dataclass(frozen=True)
@@ -80,15 +305,16 @@ class AnswerService:
         *,
         previous: str = "",
         issues: tuple[str, ...] | list[str] = (),
+        locale: SupportedLocale = SupportedLocale.ZH_CN,
     ) -> DraftAttempt:
         user = _facts_json(facts)
         if previous and issues:
             user += "\n\n上一版输出：\n" + previous + "\n校验失败原因：" + "；".join(issues)
             user += "\n请修复所有问题，并重新只输出完整 JSON。"
         result = await llm.complete(
-            system=ANSWER_SYSTEM_PROMPT,
+            system=build_answer_system_prompt(locale),
             user=user,
-            fallback=self._fallback(facts).model_dump_json(),
+            fallback=self._fallback(facts, locale=locale).model_dump_json(),
             budget=budget,
             options=STRUCTURED_CALL_OPTIONS,
         )
@@ -102,77 +328,127 @@ class AnswerService:
             return DraftAttempt(None, result.text, None)
         return DraftAttempt(draft, result.text, None)
 
-    def validate_issues(self, draft: AnswerDraft, facts: AnswerFacts) -> list[str]:
-        return self._validate(draft, facts)
+    def validate_issues(
+        self,
+        draft: AnswerDraft,
+        facts: AnswerFacts,
+        *,
+        locale: SupportedLocale = SupportedLocale.ZH_CN,
+    ) -> list[str]:
+        return self._validate(draft, facts, locale=locale)
 
-    def fallback_draft(self, facts: AnswerFacts) -> AnswerDraft:
-        return self._fallback(facts)
+    def fallback_draft(
+        self, facts: AnswerFacts, *, locale: SupportedLocale = SupportedLocale.ZH_CN
+    ) -> AnswerDraft:
+        return self._fallback(facts, locale=locale)
 
     def facts_json(self, facts: AnswerFacts) -> str:
         return _facts_json(facts)
 
-    def _fallback(self, facts: AnswerFacts) -> AnswerDraft:
+    def _fallback(
+        self, facts: AnswerFacts, *, locale: SupportedLocale = SupportedLocale.ZH_CN
+    ) -> AnswerDraft:
         metric = facts.metric
         result = facts.query_result
-        metric_label = metric.display_name if metric is not None else "经营指标"
-        unit = metric.unit if metric is not None else ""
+        # `metric.display_name`/`metric.unit` 命中正式指标目录或字段注释时，
+        # 取值是 `catalog.py` 的 `_CONTRACT_METRIC_LABELS`/`_UNIT_LABELS` 已经
+        # 登记过的闭集中文词汇（如「退款金额」「元」）——不查表直接拼进模板，
+        # en-US 请求会在英文句式里嵌一段中文指标名，等于没修。查不到（如
+        # 商家自定义或大模型生成口径）时原样保留，与本文件其余 `_catalog_text`
+        # 调用点一致：宁可残留一个词，也不假装有译文。
+        metric_label = (
+            _catalog_text(metric.display_name, locale)
+            if metric is not None
+            else _DEFAULT_METRIC_LABEL[locale]
+        )
+        unit = _catalog_text(metric.unit, locale) if metric is not None else ""
         summary = self._derive_summary(facts)
         value = _first_metric_value(result, metric.metric_code if metric is not None else None)
         if result.comparison is not None:
-            answer = _comparison_answer(result.comparison, metric_label, unit)
+            answer = _comparison_answer(result.comparison, metric_label, unit, locale)
         elif result.truncated:
-            answer = (
-                f"本次仅展示部分结果，共预览 {result.total_rows} 行{metric_label}数据，"
-                "不对预览行做合计。"
+            answer = _FALLBACK_TRUNCATED_TEMPLATES[locale].format(
+                total_rows=result.total_rows, metric_label=metric_label
             )
         elif result.non_additive and len(result.rows) > 1:
-            answer = f"本次查询返回 {result.total_rows} 行{metric_label}数据；该指标不做跨日合计。"
+            answer = _FALLBACK_NON_ADDITIVE_TEMPLATES[locale].format(
+                total_rows=result.total_rows, metric_label=metric_label
+            )
         elif (
             summary.total is not None
             and summary.latest_label is not None
             and summary.peak_label is not None
         ):
-            answer = (
-                f"本次查询的{metric_label}合计 {summary.total}{unit}；"
-                f"最新日期 {summary.latest_label} 为 {summary.latest_value}{unit}；"
-                f"峰值 {summary.peak_value}{unit} 出现在 {summary.peak_label}。"
+            answer = _FALLBACK_SUMMARY_TEMPLATES[locale].format(
+                metric_label=metric_label,
+                total=summary.total,
+                unit=unit,
+                latest_label=summary.latest_label,
+                latest_value=summary.latest_value,
+                peak_value=summary.peak_value,
+                peak_label=summary.peak_label,
             )
         elif value is None:
-            answer = (
-                f"本次查询返回 {result.total_rows} 行数据，暂未形成可汇总的{metric_label}数值。"
+            answer = _FALLBACK_NO_VALUE_TEMPLATES[locale].format(
+                total_rows=result.total_rows, metric_label=metric_label
             )
         else:
-            answer = f"本次查询的{metric_label}为 {value}{unit}。"
+            answer = _FALLBACK_SINGLE_VALUE_TEMPLATES[locale].format(
+                metric_label=metric_label, value=value, unit=unit
+            )
         return AnswerDraft(
             answer=answer,
             recommendations=[
                 Recommendation(
-                    title="核对查询范围",
-                    evidence=f"本次查询返回 {result.total_rows} 行数据。",
-                    action="确认日期范围和筛选条件是否覆盖要分析的业务。",
+                    title=_catalog_text("核对查询范围", locale),
+                    evidence=_FALLBACK_ROW_COUNT_EVIDENCE_TEMPLATES[locale].format(
+                        total_rows=result.total_rows
+                    ),
+                    action=_catalog_text("确认日期范围和筛选条件是否覆盖要分析的业务。", locale),
                 ),
                 Recommendation(
-                    title="持续观察指标",
+                    title=_catalog_text("持续观察指标", locale),
                     evidence=answer,
-                    action="结合后续周期数据判断变化是否持续。",
+                    action=_catalog_text("结合后续周期数据判断变化是否持续。", locale),
                 ),
             ],
         )
 
-    def _validate(self, draft: AnswerDraft, facts: AnswerFacts) -> list[str]:
+    def _validate(
+        self,
+        draft: AnswerDraft,
+        facts: AnswerFacts,
+        *,
+        locale: SupportedLocale = SupportedLocale.ZH_CN,
+    ) -> list[str]:
         summary = self._derive_summary(facts)
         allowed_numbers = _allowed_numbers(facts.query_result, summary)
         raw_text = _draft_text(draft)
         issues: list[str] = []
         if _UUID.search(raw_text):
-            issues.append("回答含有内部标识符，不得出现在对商家的回答里")
+            issues.append(
+                _localized_validation_message(
+                    "回答含有内部标识符，不得出现在对商家的回答里", locale
+                )
+            )
         result = facts.query_result
         if (
             result.non_additive
             and len(result.rows) > 1
-            and any(phrase in raw_text for phrase in _ADDITIVE_CLAIM_PHRASES)
+            and (
+                any(phrase in raw_text for phrase in _ADDITIVE_CLAIM_PHRASES_ZH)
+                or (
+                    _ADDITIVE_CLAIM_EN_PATTERN is not None
+                    and _ADDITIVE_CLAIM_EN_PATTERN.search(raw_text) is not None
+                )
+            )
         ):
-            issues.append("非加和指标不能被回答草稿合计或汇总")
+            issues.append(
+                _localized_validation_message("非加和指标不能被回答草稿合计或汇总", locale)
+            )
+        range_issue = _date_range_issue(raw_text, facts) or _duration_range_issue(raw_text, facts)
+        if range_issue is not None:
+            issues.append(_localized_validation_message(range_issue, locale))
         # 日期是维度值，不是要与聚合结果逐项比对的业务数字；否则 2026-08-05
         # 会被拆成三个数字并把一份完全基于事实的草稿误判为幻觉。中文写法同理。
         text = _DURATION.sub("", _SLASH_DATE.sub("", _CN_DATE.sub("", _ISO_DATE.sub("", raw_text))))
@@ -180,9 +456,11 @@ class AnswerService:
             {number for number in _NUMBER.findall(text) if number not in allowed_numbers}
         )
         if unexpected:
-            issues.append(
-                "以下数字不在查询结果或事实摘要里，不得出现在回答中：" + "、".join(unexpected)
+            prefix = _localized_validation_message(
+                "以下数字不在查询结果或事实摘要里，不得出现在回答中：", locale
             )
+            joiner = "、" if locale is SupportedLocale.ZH_CN else ", "
+            issues.append(prefix + joiner.join(unexpected))
         return issues
 
     def _derive_summary(self, facts: AnswerFacts) -> FactSummary:
@@ -219,19 +497,23 @@ class AnswerService:
         )
 
 
-def _comparison_answer(comparison: ComparisonResult, metric_label: str, unit: str) -> str:
+def _comparison_answer(
+    comparison: ComparisonResult, metric_label: str, unit: str, locale: SupportedLocale
+) -> str:
     """D3 裁定：兜底文案必须如实说明环比/同比，基期算不出比例时不得省略说明（R7）。"""
 
     if comparison.current_value is None:
-        return f"本次查询未取得可汇总的{metric_label}数值，无法进行对比。"
+        return _FALLBACK_NO_COMPARISON_VALUE_TEMPLATES[locale].format(metric_label=metric_label)
     if comparison.change_ratio is not None:
-        return (
-            f"本次查询的{metric_label}为 {comparison.current_value}{unit}，"
-            f"对比周期为 {comparison.baseline_value}{unit}，变化 {comparison.change_ratio}%。"
+        return _FALLBACK_COMPARISON_WITH_RATIO_TEMPLATES[locale].format(
+            metric_label=metric_label,
+            current=comparison.current_value,
+            unit=unit,
+            baseline=comparison.baseline_value,
+            ratio=comparison.change_ratio,
         )
-    return (
-        f"本次查询的{metric_label}为 {comparison.current_value}{unit}；"
-        "对比基期无数据或为零，无法计算变化率。"
+    return _FALLBACK_COMPARISON_NO_RATIO_TEMPLATES[locale].format(
+        metric_label=metric_label, current=comparison.current_value, unit=unit
     )
 
 
@@ -375,6 +657,150 @@ def _date_parts(value: object) -> set[str]:
         # 模型写「8月」而不是「08月」，两种形态都要放行。
         parts.add(chunk.lstrip("0") or "0")
     return parts
+
+
+@dataclass(frozen=True)
+class _DateToken:
+    """回答文本里一个已识别日期片段的位置与拆解成分（年可能缺失）。"""
+
+    start: int
+    end: int
+    year: int | None
+    month: int
+    day: int
+
+
+def _find_date_tokens(text: str) -> list[_DateToken]:
+    """扫描文本里全部可识别的日期片段（ISO / 中文 / 斜杠 / 英文月份），按出现
+    位置排序——语言无关，四种写法用同一套逻辑并列扫描，不偏向任何一种。
+    """
+
+    tokens: list[_DateToken] = []
+    for match in _ISO_DATE_CAPTURE.finditer(text):
+        tokens.append(
+            _DateToken(match.start(), match.end(), int(match[1]), int(match[2]), int(match[3]))
+        )
+    for match in _EN_MONTH_DATE_CAPTURE.finditer(text):
+        month = _EN_MONTH_NUMBERS.get(match[1].lower())
+        if month is None:
+            continue
+        tokens.append(_DateToken(match.start(), match.end(), None, month, int(match[2])))
+    for match in _CN_DATE_CAPTURE.finditer(text):
+        year = int(match[1]) if match[1] else None
+        tokens.append(_DateToken(match.start(), match.end(), year, int(match[2]), int(match[3])))
+    for match in _SLASH_DATE_CAPTURE.finditer(text):
+        year = int(match[1]) if match[1] else None
+        tokens.append(_DateToken(match.start(), match.end(), year, int(match[2]), int(match[3])))
+    return sorted(tokens, key=lambda token: token.start)
+
+
+def _extract_stated_ranges(text: str) -> list[tuple[_DateToken, _DateToken]]:
+    """只把「两个日期 token 之间除了一个区间连接词外没有别的内容」视为显式区间。
+
+    要求两个 token 紧邻（中间只隔着 `_RANGE_JOINER` 认识的连接词）是刻意收紧的
+    条件：草稿里散落提到的两个不相关日期（如「8月11日为 3 件，8月17日为
+    15 件」）绝不能被当成「模型宣称的区间」，那只是在分别引用两个真实数据点。
+    """
+
+    tokens = _find_date_tokens(text)
+    ranges: list[tuple[_DateToken, _DateToken]] = []
+    for first, second in pairwise(tokens):
+        gap = text[first.end : second.start]
+        if _RANGE_JOINER.match(gap):
+            ranges.append((first, second))
+    return ranges
+
+
+def _resolve_date(token: _DateToken, fallback_year: int) -> date | None:
+    year = token.year if token.year is not None else fallback_year
+    try:
+        return date(year, token.month, token.day)
+    except ValueError:
+        return None
+
+
+def _reference_range(facts: AnswerFacts) -> tuple[date, date] | None:
+    """事实包里能确定的实际查询区间；确定不了（没有对比期、也没有日期维度列，
+    比如按类目分组的结果）时返回 `None`，调用方按「无法判断」直接放行（fail
+    open）——这道校验只在能拿到明确参照区间时才生效，不臆造一个默认范围。
+    """
+
+    comparison = facts.query_result.comparison
+    if comparison is not None:
+        return comparison.current_range.start, comparison.current_range.end
+    found: list[date] = []
+    for row in facts.query_result.rows:
+        for value in row.values():
+            parsed = _parse_business_date(value)
+            if parsed is not None:
+                found.append(parsed)
+    if not found:
+        return None
+    return min(found), max(found)
+
+
+def _date_range_issue(raw_text: str, facts: AnswerFacts) -> str | None:
+    """回答里显式陈述的日期区间必须落在本次查询的实际范围内，否则判定为编造
+    范围——语言无关：中英文、ISO、斜杠写法走同一套抽取与比对逻辑，产出同一条
+    issue 文案（两种语言共用同一个 issue 码，`quality_notes` 只是渲染差异）。
+    """
+
+    reference = _reference_range(facts)
+    if reference is None:
+        return None
+    ref_start, ref_end = reference
+    for first, second in _extract_stated_ranges(raw_text):
+        start = _resolve_date(first, ref_start.year)
+        end = _resolve_date(second, ref_start.year)
+        if start is None or end is None:
+            continue
+        if start > end:
+            start, end = end, start
+        if start < ref_start or end > ref_end:
+            return _DATE_RANGE_ISSUE
+    return None
+
+
+#: 正则对捕获的数字位数没有上限，模型幻觉出「最近 1000000 天」这类离谱数字时，
+#: `date - timedelta(days=days)` 一旦超出 `date` 能表示的公元 1~9999 年范围就会
+#: 抛出未捕获的 `OverflowError`，把质量循环直接崩掉（该异常不在 `compose_once`
+#: 的 try/except 覆盖范围内）。任何业务问答场景都不会真的问「最近一万天」，
+#: 超过这个上限直接当作「不是真实时长声明」跳过，而不是尝试解析后再崩溃——
+#: 与本函数一贯的 fail open 原则一致：宁可少校验一条，也不能让校验本身变成
+#: 新的故障源。10 年（3650 天）已经远超商家日常查询窗口，留足安全余量。
+_MAX_PLAUSIBLE_DURATION_DAYS: Final = 3650
+
+
+def _extract_stated_durations(text: str) -> list[int]:
+    """抽取「最近/过去 N 天」「last/past N days」这类相对时长表述，返回天数。
+
+    过滤掉超过 `_MAX_PLAUSIBLE_DURATION_DAYS` 的离谱数字——那不是真实的时长
+    声明，继续拿去做日期运算只会有 `OverflowError` 风险，见上方常量注释。
+    """
+
+    days: list[int] = [int(match[1]) for match in _EN_DURATION_CAPTURE.finditer(text)]
+    days.extend(int(match[1]) for match in _CN_DURATION_CAPTURE.finditer(text))
+    return [value for value in days if value <= _MAX_PLAUSIBLE_DURATION_DAYS]
+
+
+def _duration_range_issue(raw_text: str, facts: AnswerFacts) -> str | None:
+    """相对时长断言必须与实际查询覆盖的天数一致：以事实包里最近的实际日期为
+    锚点向前推 N 天，超出实际范围即判定为编造窗口——与 `_date_range_issue`
+    共用同一套「无法判断就放行」的 fail open 原则和同一条 issue 文案，只是
+    抽取的表述形态不同（相对时长而不是显式起止日期）。
+    """
+
+    reference = _reference_range(facts)
+    if reference is None:
+        return None
+    ref_start, ref_end = reference
+    for days in _extract_stated_durations(raw_text):
+        if days <= 0:
+            continue
+        claimed_start = ref_end - timedelta(days=days - 1)
+        if claimed_start < ref_start:
+            return _DATE_RANGE_ISSUE
+    return None
 
 
 def _display_value(value: object) -> str:

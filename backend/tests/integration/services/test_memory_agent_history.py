@@ -16,6 +16,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import Database
+from app.localization.locales import detect_source_language
 from app.models.answer import Answer
 from app.models.conversation import Conversation, Message
 from app.models.merchant import Merchant
@@ -60,6 +61,7 @@ async def _seed_round(
         role="USER",
         content=question,
         created_at=created,
+        source_locale=str(detect_source_language(question)),
     )
     session.add(message)
     await session.flush()
@@ -75,6 +77,7 @@ async def _seed_round(
             processing_status="SUCCEEDED",
             response_payload=payload,
             created_at=created,
+            response_locale=str(detect_source_language(answer_text)),
         )
     )
     await session.flush()

@@ -15,6 +15,7 @@ from app.api.dependencies import (
     get_database,
     get_merchant_context,
     get_merchant_repository,
+    get_request_locale,
     require_admin_token,
 )
 from app.core.config import Settings
@@ -26,6 +27,7 @@ from app.core.errors import (
 )
 from app.core.security import MerchantContext
 from app.db.session import Database
+from app.localization.locales import SupportedLocale
 from app.repositories.audit import AuditRepository
 from app.repositories.merchant import MerchantRepository
 from app.schemas.report import DailyReportRecomputeRequest, DailyReportResponse
@@ -44,10 +46,11 @@ async def get_daily_report(
     context: Annotated[MerchantContext, Depends(get_merchant_context)],
     _: Annotated[None, Depends(enforce_rate_limit)],
     service: Annotated[DailyReportService, Depends(get_daily_report_service)],
+    locale: Annotated[SupportedLocale, Depends(get_request_locale)],
 ) -> DailyReportResponse:
     """返回当前已验证商家的业务时区昨日经营日报。"""
 
-    return await service.get_or_create(context.merchant_id)
+    return await service.get_or_create(context.merchant_id, locale=locale)
 
 
 @admin_router.post(
@@ -63,6 +66,7 @@ async def recompute_daily_report(
     merchants: Annotated[MerchantRepository, Depends(get_merchant_repository)],
     service: Annotated[DailyReportService, Depends(get_daily_report_service)],
     _admin: Annotated[None, Depends(require_admin_token)],
+    locale: Annotated[SupportedLocale, Depends(get_request_locale)],
 ) -> DailyReportResponse:
     """管理员显式替换一个演示商家的历史日报缓存。"""
 
@@ -76,7 +80,7 @@ async def recompute_daily_report(
     if not oldest_allowed <= payload.report_date <= today:
         raise InvalidRequestError("report_date 必须位于最近 180 个业务日内")
 
-    response = await service.recompute(payload.merchant_id, payload.report_date)
+    response = await service.recompute(payload.merchant_id, payload.report_date, locale=locale)
     await AuditRepository(database).record_admin_action(
         merchant_id=payload.merchant_id,
         event_type="DAILY_REPORT_RECOMPUTED",

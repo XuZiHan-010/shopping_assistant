@@ -18,6 +18,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ExportLinkExpiredError, MerchantScopeViolationError
+from app.localization.locales import SourceLanguage
 from app.models.analytics import Order, Product
 from app.models.answer import Answer
 from app.models.conversation import Conversation
@@ -41,6 +42,7 @@ async def _answer_for_merchant(session: AsyncSession, merchant_id: UUID) -> Answ
         request_digest="b" * 64,
         processing_status="SUCCEEDED",
         response_payload={},
+        response_locale=str(SourceLanguage.UND),
     )
     session.add(answer)
     await session.flush()

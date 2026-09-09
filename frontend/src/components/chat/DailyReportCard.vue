@@ -1,7 +1,13 @@
 <script setup lang="ts">
 import { Check, CircleAlert, ClipboardCheck } from '@lucide/vue'
+import { useI18n } from 'vue-i18n'
 
+import { useLocaleStore } from '@/stores/locale'
 import type { DailyReport } from '@/types/report'
+import { formatDate } from '@/utils/localizedFormat'
+
+const { t } = useI18n()
+const localeStore = useLocaleStore()
 
 defineProps<{
   report?: DailyReport
@@ -13,11 +19,13 @@ const emit = defineEmits<{ adopt: [] }>()
 </script>
 
 <template>
-  <section v-if="report" class="daily-report" aria-label="每日经营日报">
+  <section v-if="report" class="daily-report" :aria-label="t('dailyReportCard.sectionAria')">
     <header class="daily-report__header">
       <ClipboardCheck :size="17" aria-hidden="true" />
-      <h2>每日经营日报</h2>
-      <time :datetime="report.reportDate">{{ report.reportDate }}</time>
+      <h2>{{ t('dailyReportCard.title') }}</h2>
+      <time :datetime="report.reportDate">{{
+        formatDate(report.reportDate, localeStore.locale)
+      }}</time>
     </header>
 
     <p v-if="report.degraded" class="daily-report__degraded">
@@ -44,7 +52,9 @@ const emit = defineEmits<{ adopt: [] }>()
       @click="emit('adopt')"
     >
       <Check :size="16" aria-hidden="true" />
-      <span>{{ adopted ? '已采纳本期建议' : '采纳本期建议' }}</span>
+      <span>{{
+        adopted ? t('dailyReportCard.adoptDone') : t('dailyReportCard.adoptDefault')
+      }}</span>
     </button>
   </section>
 </template>

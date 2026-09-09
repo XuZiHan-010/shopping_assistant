@@ -210,6 +210,50 @@ async def test_daily_budget_exhaustion_says_so_instead_of_blaming_this_request()
     assert not any("本次请求的模型预算" in note for note in outcome.notes)
 
 
+def test_quality_loop_messages_are_registered_in_the_bilingual_catalog() -> None:
+    """Task 5：这些整句提示必须是 `catalog.py` 能查到译文的"词表键"，
+    英文渲染由 Task 6 接线；这里只守住"值没有和词典登记项悄悄漂移"。
+    """
+
+    from app.localization.catalog import localize_catalog_value
+    from app.localization.locales import SupportedLocale
+    from app.services import quality_loop
+
+    messages = (
+        quality_loop._MSG_DAILY_BUDGET_EXCEEDED,
+        quality_loop._MSG_EMPTY_MODEL_OUTPUT,
+        quality_loop._MSG_UNPARSEABLE_JSON,
+        quality_loop._MSG_NO_INDEPENDENT_REVIEW,
+        quality_loop._MSG_MAX_RETRIES_REACHED,
+        *quality_loop._DEGRADE_NOTES.values(),
+    )
+    for message in messages:
+        assert localize_catalog_value(message, SupportedLocale.EN_US) is not None, message
+
+
+def test_review_service_messages_are_registered_in_the_bilingual_catalog() -> None:
+    from app.localization.catalog import localize_catalog_value
+    from app.localization.locales import SupportedLocale
+    from app.services import review_service
+
+    messages = (
+        review_service._MSG_REVIEWER_UNAVAILABLE,
+        review_service._MSG_REVIEWER_EMPTY_OUTPUT,
+        review_service._MSG_REVIEWER_UNPARSEABLE,
+    )
+    for message in messages:
+        assert localize_catalog_value(message, SupportedLocale.EN_US) is not None, message
+
+
+def test_graph_degrade_reason_messages_are_registered_in_the_bilingual_catalog() -> None:
+    from app.agent import graph
+    from app.localization.catalog import localize_catalog_value
+    from app.localization.locales import SupportedLocale
+
+    for message in graph._DEGRADE_REASON_MESSAGES.values():
+        assert localize_catalog_value(message, SupportedLocale.EN_US) is not None, message
+
+
 @pytest.mark.asyncio
 async def test_exhausted_attempts_return_the_deterministic_summary_as_validation_degrade() -> None:
     """轮次用尽必须落在 VALIDATION：说成「服务不可用」会把排查方向带到上游去。"""

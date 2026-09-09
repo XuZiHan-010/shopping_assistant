@@ -286,6 +286,10 @@ export function toChatAnswer(raw: RawChatResponse): ChatAnswer {
   return {
     id: raw.id,
     sessionId: raw.session_id,
+    // 展示层的本地化镜像，不是语义不变量——即使值恰好是空字符串，Store 也会
+    // 回退到消息的原始文本（`ChatMessage.sourceText`），不应该让整条回答因此
+    // 校验失败。
+    displayedUserMessage: raw.displayed_user_message,
     answer: raw.answer,
     mode: raw.answer_mode,
     category: raw.category ?? undefined,
@@ -312,6 +316,14 @@ export function toConversationAnswer(
   return {
     id: raw.answer_id,
     sessionId,
+    // 不填 displayedUserMessage：这里的 `content` 是助手自己的回答正文
+    // （调用方 `api/chat.ts::getConversation` 传进来的是当前这条 ASSISTANT
+    // 消息的 `item.content`），不是配对的用户消息，填进 displayedUserMessage
+    // 会是语义错误的值（历史消息的用户气泡另有它自己的 `content`，由
+    // `stores/chat.ts::mergeHistoryMessages` 直接使用，不经过这个字段）。
+    // 该字段留空，消费方（`stores/chat.ts` 的 `answer.displayedUserMessage
+    // || question.text`）天然把 undefined 当"没有更新"处理，不需要在这里
+    // 编造一个值。
     answer: content,
     mode: raw.answer_mode,
     createdAt,

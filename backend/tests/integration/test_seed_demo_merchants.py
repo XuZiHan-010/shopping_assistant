@@ -21,3 +21,12 @@ async def test_seed_creates_three_merchants_without_duplicates(
     assert second.created == 0
     assert second.existing == 3
     assert count == 3
+
+    persisted = await db_session.scalars(
+        select(Merchant.display_name_en).order_by(Merchant.merchant_code)
+    )
+    assert list(persisted) == [
+        "Borough Merchant 100",
+        "Borough Merchant 101",
+        "Borough Merchant 102",
+    ]

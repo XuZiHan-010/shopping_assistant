@@ -1,18 +1,21 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import type { NorthStarMetrics } from '@/types/analytics'
 
 const props = defineProps<{ metrics: NorthStarMetrics }>()
 
-const INSUFFICIENT = '样本不足'
+const { t } = useI18n()
 
 function percent(value: number | null): string {
-  return value === null ? INSUFFICIENT : `${(value * 100).toFixed(1)}%`
+  return value === null ? t('northStarCards.insufficientSample') : `${(value * 100).toFixed(1)}%`
 }
 
 function seconds(value: number | null): string {
-  return value === null ? INSUFFICIENT : `${(value / 1000).toFixed(1)} 秒`
+  return value === null
+    ? t('northStarCards.insufficientSample')
+    : t('northStarCards.secondsValue', { value: (value / 1000).toFixed(1) })
 }
 
 /**
@@ -22,45 +25,51 @@ function seconds(value: number | null): string {
 const cards = computed(() => [
   {
     key: 'adoption',
-    label: '回复采纳率',
+    label: t('northStarCards.adoptionLabel'),
     value: percent(props.metrics.adoptionRate),
-    hint: '商家点击采纳的回答占比',
+    hint: t('northStarCards.adoptionHint'),
+    empty: props.metrics.adoptionRate === null,
   },
   {
     key: 'user-accuracy',
-    label: '用户侧准确率',
+    label: t('northStarCards.userAccuracyLabel'),
     value: percent(props.metrics.userAccuracyRate),
-    hint: '点赞 /（点赞 + 点踩）',
+    hint: t('northStarCards.userAccuracyHint'),
+    empty: props.metrics.userAccuracyRate === null,
   },
   {
     key: 'system-accuracy',
-    label: '系统侧准确率',
+    label: t('northStarCards.systemAccuracyLabel'),
     value: percent(props.metrics.systemAccuracyRate),
-    hint: 'Reviewer 一次通过率',
+    hint: t('northStarCards.systemAccuracyHint'),
+    empty: props.metrics.systemAccuracyRate === null,
   },
   {
     key: 'thinking',
-    label: '平均思考时长',
+    label: t('northStarCards.thinkingLabel'),
     value: seconds(props.metrics.avgThinkingMs),
-    hint: '一轮问答从提问到成稿',
+    hint: t('northStarCards.thinkingHint'),
+    empty: props.metrics.avgThinkingMs === null,
   },
   {
     key: 'hit',
-    label: '问题命中率',
+    label: t('northStarCards.hitLabel'),
     value: percent(props.metrics.hitRate),
-    hint: '业务提问中命中数据或知识的占比',
+    hint: t('northStarCards.hitHint'),
+    empty: props.metrics.hitRate === null,
   },
   {
     key: 'failure',
-    label: '回答失效率',
+    label: t('northStarCards.failureLabel'),
     value: percent(props.metrics.failureRate),
-    hint: '降级或质量未通过的占比',
+    hint: t('northStarCards.failureHint'),
+    empty: props.metrics.failureRate === null,
   },
 ])
 </script>
 
 <template>
-  <ul class="north-star" aria-label="Chat BI 北极星指标">
+  <ul class="north-star" :aria-label="t('northStarCards.sectionAria')">
     <li
       v-for="card in cards"
       :key="card.key"
@@ -68,10 +77,7 @@ const cards = computed(() => [
       data-testid="north-star-card"
     >
       <p class="north-star__label">{{ card.label }}</p>
-      <p
-        class="north-star__value"
-        :class="{ 'north-star__value--empty': card.value === INSUFFICIENT }"
-      >
+      <p class="north-star__value" :class="{ 'north-star__value--empty': card.empty }">
         {{ card.value }}
       </p>
       <p class="north-star__hint">{{ card.hint }}</p>

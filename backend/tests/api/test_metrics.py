@@ -86,6 +86,30 @@ async def test_known_metric_returns_the_full_definition(seeded_client: AsyncClie
 
 
 @pytest.mark.asyncio
+async def test_known_metric_returns_english_definition_with_accept_language_header(
+    seeded_client: AsyncClient,
+) -> None:
+    """Task 8：展示名/单位/业务口径/负责人均出自 `METRIC_SEED`（闭集），经
+    `app.localization.catalog` 零 LLM 渲染；`metric_code`/`sql_definition`/
+    `source_table` 等技术字段保持不变。"""
+
+    response = await seeded_client.get(
+        "/api/metrics/gmv",
+        headers={**MERCHANT_ONE_AUTH, "Accept-Language": "en-US"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["metric_code"] == "gmv"
+    assert payload["display_name"] == "Transaction GMV"
+    assert payload["unit"] == "yuan"
+    assert payload["definition"] == "Sum of paid order amounts during the period."
+    assert payload["owner"] == "Business Analytics Team"
+    assert payload["sql_definition"].startswith("SUM(")
+    assert payload["source_table"] == "orders"
+
+
+@pytest.mark.asyncio
 async def test_deprecated_metric_still_returns_its_definition(seeded_client: AsyncClient) -> None:
     """废弃指标要能被口径面板看到并标成 DEPRECATED，而不是和拼错的指标码一样 404。"""
 

@@ -105,6 +105,46 @@ class Settings(BaseSettings):
             "QUESTION_PREFILTER_MIN_SCORE", "question_prefilter_min_score"
         ),
     )
+    # 本地化批量翻译通道的独立预算，与上面 llm_max_calls_per_request/
+    # llm_max_tokens_per_request（主 Agent 流程）互不共享：翻译是 P1 增量
+    # 能力，不应该挤占聊天问答本身的预算，也方便运维分开看两条费用曲线
+    # （`llm_usage.purpose` 已经区分 AGENT / LOCALIZATION）。
+    localization_max_calls_per_request: int = Field(
+        default=4,
+        ge=1,
+        le=20,
+        validation_alias=AliasChoices(
+            "LOCALIZATION_MAX_CALLS_PER_REQUEST", "localization_max_calls_per_request"
+        ),
+    )
+    localization_max_tokens_per_request: int = Field(
+        default=12_000,
+        ge=100,
+        le=200_000,
+        validation_alias=AliasChoices(
+            "LOCALIZATION_MAX_TOKENS_PER_REQUEST", "localization_max_tokens_per_request"
+        ),
+    )
+    # 单次批量翻译调用最多打包多少条待译文本；超出的条目留给下一批调用，
+    # 受上面的单请求调用次数上限约束。
+    localization_max_batch_items: int = Field(
+        default=20,
+        ge=1,
+        le=200,
+        validation_alias=AliasChoices(
+            "LOCALIZATION_MAX_BATCH_ITEMS", "localization_max_batch_items"
+        ),
+    )
+    # 单次批量翻译调用里所有条目文本长度之和的上限；单条本身超过这个上限则
+    # 永远凑不成一批，直接缺席（不抛异常）。
+    localization_max_batch_chars: int = Field(
+        default=12_000,
+        ge=100,
+        le=200_000,
+        validation_alias=AliasChoices(
+            "LOCALIZATION_MAX_BATCH_CHARS", "localization_max_batch_chars"
+        ),
+    )
     rate_limit_per_minute: int = Field(default=10, ge=1, le=10_000)
     trusted_proxy_hops: int = Field(default=0, ge=0, le=4)
     trusted_proxy_ips: str = ""

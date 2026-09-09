@@ -26,6 +26,8 @@ from app.intent.models import QueryIntent
 from app.intent.service import IntentService
 from app.knowledge.retrieval import KnowledgeResult, KnowledgeRetrieval, KnowledgeSource
 from app.llm.client import LlmBudget, LlmClient
+from app.localization.catalog import localize_catalog_value
+from app.localization.locales import SupportedLocale
 from app.metrics.catalog import MetricCatalog, MetricPayload
 from app.schemas.chat import (
     AnalysisSource,
@@ -85,15 +87,45 @@ class SessionHistoryLike(Protocol):
     async def has_assistant_message(self, merchant_id: UUID, conversation_id: UUID) -> bool: ...
 
 
+def _text(zh: str, en: str, locale: SupportedLocale) -> str:
+    """两语言字面量的最小选取器：graph.py 里绝大多数文案是固定、非参数化的
+    整句，不值得为每一句都单独登记进 `app.localization.catalog`（那张表是给
+    「多处业务复用同一句」的场景设计的）。调用点直接内联中英文原句，locale
+    在这里做最后一步选取，改文案时中英文永远在同一处、不会漂移。"""
+
+    return en if locale is SupportedLocale.EN_US else zh
+
+
 #: 只在「查询服务根本没注入」时用（查询被拒时 `degraded_reason` 取
 #: `UnsupportedQueryError.reason`，那条更具体）。不写「将在某阶段接入」——受控查询
 #: 本身已经交付，这么说会让用户以为功能还没上线，而实际是这次请求没能查成。
-_QUERY_SERVICE_UNAVAILABLE: Final[str] = "经营数据查询服务当前不可用，本次未执行查询"
+_QUERY_SERVICE_UNAVAILABLE: Final[dict[SupportedLocale, str]] = {
+    SupportedLocale.ZH_CN: "经营数据查询服务当前不可用，本次未执行查询",
+    SupportedLocale.EN_US: (
+        "The business data query service is currently unavailable; no query was "
+        "executed this time."
+    ),
+}
 #: 闸门拒答文案：说明范围而非报错，避免用户把设计内的拒绝当成系统故障（R7、design.md D7）。
-_PREFILTER_REJECTION_MESSAGE: Final[str] = (
-    "我是 Borough 商家 AI 助手，只能回答与您店铺经营相关的问题，"
-    "例如成交额、订单、退款、商品或平台规则。换个和经营相关的问法试试？"
-)
+#: Task 5 登记的中文原句已经原样保留在这里（`zh-CN` 分支），与
+#: `app.localization.catalog._PREFILTER_REJECTION_MESSAGES` 的词典 key 逐字一致；
+#: Task 6 在这里补上按 locale 选取的英文分支，不改变中文原句本身。
+_PREFILTER_REJECTION_MESSAGES: Final[dict[SupportedLocale, str]] = {
+    SupportedLocale.ZH_CN: (
+        "我是 Borough 商家 AI 助手，只能回答与您店铺经营相关的问题，"
+        "例如成交额、订单、退款、商品或平台规则。换个和经营相关的问法试试？"
+    ),
+    SupportedLocale.EN_US: (
+        "I'm the Borough Merchant AI Assistant, and I can only answer questions "
+        "related to your store's operations, such as GMV, orders, refunds, "
+        "products, or platform rules. Please try rephrasing your question to "
+        "relate to your business."
+    ),
+}
+#: 向后兼容：历史上以模块级常量形式存在的中文原句，供仍按旧写法直接比对
+#: 字面量的调用点（如 catalog 的登记注释）使用，值与
+#: `_PREFILTER_REJECTION_MESSAGES[SupportedLocale.ZH_CN]` 逐字相同。
+_PREFILTER_REJECTION_MESSAGE: Final[str] = _PREFILTER_REJECTION_MESSAGES[SupportedLocale.ZH_CN]
 GRAPH_NODES: Final[tuple[str, ...]] = (
     "load_context",
     "retrieve_knowledge_index",
@@ -108,19 +140,55 @@ GRAPH_NODES: Final[tuple[str, ...]] = (
     "suggest_questions",
     "persist_answer",
 )
-_STEP_LABELS: Final[dict[str, str]] = {
-    "load_context": "识别商家与会话上下文",
-    "retrieve_knowledge_index": "读取业务知识索引",
-    "prefilter_question": "判定问题范围",
-    "classify_intent": "识别问题类型与业务域",
-    "understand_intent": "结构化理解问题",
-    "validate_intent": "校验查询意图",
-    "retrieve_knowledge_detail": "读取业务知识正文",
-    "query_data": "查询经营数据",
-    "compose_answer": "整理回答",
-    "quality_loop": "校验并复核回答质量",
-    "suggest_questions": "生成推荐问题",
-    "persist_answer": "保存本轮回答",
+_STEP_LABELS: Final[dict[str, dict[SupportedLocale, str]]] = {
+    "load_context": {
+        SupportedLocale.ZH_CN: "识别商家与会话上下文",
+        SupportedLocale.EN_US: "Identifying merchant and conversation context",
+    },
+    "retrieve_knowledge_index": {
+        SupportedLocale.ZH_CN: "读取业务知识索引",
+        SupportedLocale.EN_US: "Loading the business knowledge index",
+    },
+    "prefilter_question": {
+        SupportedLocale.ZH_CN: "判定问题范围",
+        SupportedLocale.EN_US: "Determining question scope",
+    },
+    "classify_intent": {
+        SupportedLocale.ZH_CN: "识别问题类型与业务域",
+        SupportedLocale.EN_US: "Classifying question type and business domain",
+    },
+    "understand_intent": {
+        SupportedLocale.ZH_CN: "结构化理解问题",
+        SupportedLocale.EN_US: "Structuring the question intent",
+    },
+    "validate_intent": {
+        SupportedLocale.ZH_CN: "校验查询意图",
+        SupportedLocale.EN_US: "Validating the query intent",
+    },
+    "retrieve_knowledge_detail": {
+        SupportedLocale.ZH_CN: "读取业务知识正文",
+        SupportedLocale.EN_US: "Loading business knowledge details",
+    },
+    "query_data": {
+        SupportedLocale.ZH_CN: "查询经营数据",
+        SupportedLocale.EN_US: "Querying business data",
+    },
+    "compose_answer": {
+        SupportedLocale.ZH_CN: "整理回答",
+        SupportedLocale.EN_US: "Composing the answer",
+    },
+    "quality_loop": {
+        SupportedLocale.ZH_CN: "校验并复核回答质量",
+        SupportedLocale.EN_US: "Validating and reviewing answer quality",
+    },
+    "suggest_questions": {
+        SupportedLocale.ZH_CN: "生成推荐问题",
+        SupportedLocale.EN_US: "Generating suggested questions",
+    },
+    "persist_answer": {
+        SupportedLocale.ZH_CN: "保存本轮回答",
+        SupportedLocale.EN_US: "Saving this answer",
+    },
 }
 
 
@@ -155,6 +223,7 @@ class MerchantQaGraph:
         prefilter_enabled: bool = False,
         prefilter_min_score: int = 3,
         session_history: SessionHistoryLike | None = None,
+        localization_budget: LlmBudget | None = None,
     ) -> None:
         self._retrieval = retrieval
         self._intent_service = IntentService(intent_service_llm)
@@ -180,10 +249,24 @@ class MerchantQaGraph:
         self._visualization_service = visualization_service or VisualizationService()
         self._node_timer = node_timer
         self._history_questions = history_questions
+        #: 跨语言知识召回查询规范化调用专用的独立预算——与本图其余节点共享的
+        #: `state["budget"]`（AGENT 用途）区分开，不挤占问答本身的调用额度
+        #: （与 `Settings.localization_max_calls_per_request` 同一原则，见
+        #: `app.core.config`）。未注入时给一个「0 次调用」的哑对象：
+        #: `KnowledgeRetrieval` 只有在真正拿到 `localizer` 时才会用到它，
+        #: 而没注入 `localizer` 的既有构造点（裸构造、大量既有单测）永远不会
+        #: 走到这条路径，这里的默认值只是让类型保持非空、不引入运行时分支。
+        self._localization_budget = localization_budget or LlmBudget(0, 0)
         self._graph = self._build_graph()
 
-    async def run(self, message: str, session_id: UUID) -> AgentRunResult:
-        state = await self._graph.ainvoke(self._initial_state(message, session_id))
+    async def run(
+        self,
+        message: str,
+        session_id: UUID,
+        *,
+        locale: SupportedLocale = SupportedLocale.ZH_CN,
+    ) -> AgentRunResult:
+        state = await self._graph.ainvoke(self._initial_state(message, session_id, locale))
         final_state = cast(AgentState, state)
         response = self._response(final_state)
         return AgentRunResult(
@@ -238,11 +321,15 @@ class MerchantQaGraph:
 
         return wrapper
 
-    def _initial_state(self, message: str, session_id: UUID) -> AgentState:
+    def _initial_state(
+        self, message: str, session_id: UUID, locale: SupportedLocale
+    ) -> AgentState:
         return {
             "request_id": str(uuid4()),
             "session_id": session_id,
             "question": message,
+            "locale": locale,
+            "retrieval_queries": [],
             "knowledge_index": None,
             "knowledge_detail": None,
             "prefilter_decision": None,
@@ -270,7 +357,8 @@ class MerchantQaGraph:
 
     @staticmethod
     def _step(state: AgentState, node: str) -> dict[str, object]:
-        return {"steps": [*state["steps"], ThinkingStep(label=_STEP_LABELS[node], node=node)]}
+        label = _STEP_LABELS[node][state["locale"]]
+        return {"steps": [*state["steps"], ThinkingStep(label=label, node=node)]}
 
     async def _load_context(self, state: AgentState) -> dict[str, object]:
         return self._step(state, "load_context")
@@ -312,7 +400,7 @@ class MerchantQaGraph:
             result["intent"] = QueryIntent(
                 answer_mode=AnswerMode.INVALID, category=QuestionCategory.UNKNOWN
             )
-            result["candidate_answer"] = _PREFILTER_REJECTION_MESSAGE
+            result["candidate_answer"] = _PREFILTER_REJECTION_MESSAGES[state["locale"]]
             # 只记分数、阈值与会话标识，不记问题原文或商家标识——运营靠这条日志
             # 发现误拒该调阈值还是补语料，不需要也不该看到问题内容（R4 日志脱敏约束）。
             logger.info(
@@ -364,20 +452,47 @@ class MerchantQaGraph:
     async def _retrieve_knowledge_detail(self, state: AgentState) -> dict[str, object]:
         initial = _required(state["initial_intent"])
         intent = _required(state["intent"])
-        detail = await self._retrieval.load_domain(initial.category, initial.intent_keywords)
+        locale = state["locale"]
+        detail, queries = await self._retrieval.load_domain_with_cross_language_retrieval(
+            initial.category,
+            initial.intent_keywords,
+            question=state["question"],
+            locale=locale,
+            budget=self._localization_budget,
+        )
         notes = list(state["quality_notes"])
         if detail.has_incomplete:
-            notes.append("命中的知识资料尚未完整，回答仅基于现有内容")
+            notes.append(
+                _text(
+                    "命中的知识资料尚未完整，回答仅基于现有内容",
+                    "The matched knowledge material is incomplete; the answer is based "
+                    "only on what is currently available.",
+                    locale,
+                )
+            )
         if not detail.matched:
-            notes.append("未命中与当前问题相关的知识资料")
+            notes.append(
+                _text(
+                    "未命中与当前问题相关的知识资料",
+                    "No knowledge material relevant to this question was matched.",
+                    locale,
+                )
+            )
         elif detail.source is KnowledgeSource.MEMORY_FALLBACK:
-            notes.append("团队知识库未命中，本次依据该商家的历史记忆作答")
+            notes.append(
+                _text(
+                    "团队知识库未命中，本次依据该商家的历史记忆作答",
+                    "The team knowledge base had no match; this answer is based on this "
+                    "merchant's historical memory instead.",
+                    locale,
+                )
+            )
         # 口径检索放在正文层之后：三级检索的第三级要靠知识正文生成候选口径，
         # 而索引层只有目录词汇。节点顺序由计划 §10 固定，正文层在此才可用。
         metric: MetricPayload | None = None
         if intent.answer_mode is AnswerMode.METRIC:
             metric = (
-                _generated_metric_payload(intent)
+                _generated_metric_payload(intent, locale)
                 if intent.generated_metric_plan is not None
                 else await self._catalog.resolve(intent, detail.text, state["budget"])
             )
@@ -386,6 +501,7 @@ class MerchantQaGraph:
             "knowledge_detail": detail,
             "metric_definition": metric,
             "quality_notes": notes,
+            "retrieval_queries": queries,
         }
 
     async def _query_data(self, state: AgentState) -> dict[str, object]:
@@ -424,6 +540,7 @@ class MerchantQaGraph:
     async def _compose_answer(self, state: AgentState) -> dict[str, object]:
         intent = _required(state["intent"])
         detail = state["knowledge_detail"]
+        locale = state["locale"]
         if _is_table_only_detail(intent):
             # 参考实现要求纯明细正文必须为空。查询、表格、截断和导出仍由后续节点
             # 正常生成；这里不能塞进「已完成」之类的兜底文字，也不能调用回答模型。
@@ -436,7 +553,7 @@ class MerchantQaGraph:
         # 数据。查到了还说「查询将在后续阶段接入」，就是一边给结果一边否认查询
         # 发生过——用户会连旁边的真实数字一起不信（AGENTS.md R7）。
         queried = state["query_result"] is not None
-        answer = "已完成结构化理解。"
+        answer = _text("已完成结构化理解。", "Structured understanding complete.", locale)
         if queried and intent.answer_mode in {AnswerMode.METRIC, AnswerMode.DETAIL}:
             facts = AnswerFacts(
                 question=state["question"],
@@ -458,25 +575,52 @@ class MerchantQaGraph:
                 }
         if intent.answer_mode is AnswerMode.METRIC:
             answer = (
-                "已按识别到的指标口径和时间范围查询经营数据，结果见下方数据与查询计划；"
-                "对数字的解读与图表将在后续阶段补齐。"
+                _text(
+                    "已按识别到的指标口径和时间范围查询经营数据，结果见下方数据与查询计划；"
+                    "对数字的解读与图表将在后续阶段补齐。",
+                    "Business data has been queried using the identified metric definition "
+                    "and time range; see the data and query plan below. Interpretation and "
+                    "charting will be added in a later stage.",
+                    locale,
+                )
                 if queried
                 # 降级分支说「尚未执行」是真话，保留；但不能承诺「将在某阶段接入」——
                 # 受控查询本身已经交付了，这次没有数据是本次请求的问题，
                 # 具体原因在 degraded_reason 里。
-                else "已识别指标和查询范围，本次尚未执行经营数据查询。"
+                else _text(
+                    "已识别指标和查询范围，本次尚未执行经营数据查询。",
+                    "The metric and query range have been identified, but no business "
+                    "data query was executed this time.",
+                    locale,
+                )
             )
         elif intent.answer_mode is AnswerMode.DETAIL:
             answer = (
-                "已按识别到的明细范围查询经营数据，结果见下方明细与查询计划；"
-                "对明细的解读与导出将在后续阶段补齐。"
+                _text(
+                    "已按识别到的明细范围查询经营数据，结果见下方明细与查询计划；"
+                    "对明细的解读与导出将在后续阶段补齐。",
+                    "Business data has been queried using the identified detail range; "
+                    "see the details and query plan below. Interpretation and export will "
+                    "be added in a later stage.",
+                    locale,
+                )
                 if queried
-                else "已识别明细查询意图，本次尚未执行经营数据查询。"
+                else _text(
+                    "已识别明细查询意图，本次尚未执行经营数据查询。",
+                    "The detail query intent has been identified, but no business data "
+                    "query was executed this time.",
+                    locale,
+                )
             )
         elif intent.answer_mode is AnswerMode.RULE:
-            answer = _knowledge_answer(detail)
+            answer = _knowledge_answer(detail, locale)
         elif intent.answer_mode is AnswerMode.INVALID:
-            answer = "该请求包含不受支持或不安全的查询字段，无法执行。"
+            answer = _text(
+                "该请求包含不受支持或不安全的查询字段，无法执行。",
+                "This request contains an unsupported or unsafe query field and cannot "
+                "be executed.",
+                locale,
+            )
         return {**self._step(state, "compose_answer"), "candidate_answer": answer}
 
     async def _quality_loop(self, state: AgentState) -> dict[str, object]:
@@ -484,7 +628,7 @@ class MerchantQaGraph:
         if facts is None or self._answer_llm is None:
             return self._step(state, "quality_loop")
         outcome = await self._quality_loop_service.run(
-            facts, self._answer_llm, self._reviewer_llm, state["budget"]
+            facts, self._answer_llm, self._reviewer_llm, state["budget"], locale=state["locale"]
         )
         return {
             **self._step(state, "quality_loop"),
@@ -495,7 +639,7 @@ class MerchantQaGraph:
             "quality_notes": [*state["quality_notes"], *outcome.notes],
             "degraded": state["degraded"] or outcome.status is QualityStatus.DEGRADED,
             "degraded_reason": (
-                _quality_degrade_reason(outcome.reason)
+                _quality_degrade_reason(outcome.reason, state["locale"])
                 if outcome.reason is not None
                 else state["degraded_reason"]
             ),
@@ -503,7 +647,7 @@ class MerchantQaGraph:
 
     async def _suggest_questions(self, state: AgentState) -> dict[str, object]:
         intent = _required(state["intent"])
-        suggested = suggestions_for(intent.category, intent.answer_mode)
+        suggested = suggestions_for(intent.category, intent.answer_mode, state["locale"])
         current = suggested.current
         if self._history_questions is not None and self._merchant_id is not None:
             try:
@@ -517,6 +661,9 @@ class MerchantQaGraph:
                 logger.warning("读取历史推荐问题失败，已回落到静态推荐", exc_info=True)
             else:
                 if history:
+                    # 商家历史高频问题是过去真实提问的原文快照（可能来自任一语言
+                    # 的历史轮次），不是本模块能翻译的固定词条——按 Task 6 Step 6
+                    # 的边界，这里不为它触发任何额外翻译调用，原样展示。
                     current = history
         return {
             **self._step(state, "suggest_questions"),
@@ -530,13 +677,21 @@ class MerchantQaGraph:
 
     def _response(self, state: AgentState) -> ChatResponse:
         intent = _required(state["intent"])
+        locale = state["locale"]
         if intent.answer_mode is AnswerMode.METRIC:
-            metric = state["metric_definition"] or _unverified_metric(intent.metric)
+            metric = state["metric_definition"] or _unverified_metric(intent.metric, locale)
             outcome = _query_outcome(
                 state,
-                fallback_query_plan="已校验结构化查询意图，尚未执行数据查询。",
-                fallback_note="当前未执行经营数据查询。",
-                fallback_reason=_QUERY_SERVICE_UNAVAILABLE,
+                fallback_query_plan=_text(
+                    "已校验结构化查询意图，尚未执行数据查询。",
+                    "The structured query intent has been validated, but no data query "
+                    "was executed yet.",
+                    locale,
+                ),
+                fallback_note=_text(
+                    "当前未执行经营数据查询。", "No business data query was executed.", locale
+                ),
+                fallback_reason=_QUERY_SERVICE_UNAVAILABLE[locale],
             )
             notes = list(outcome.notes)
             if metric.generated and metric.notice is not None:
@@ -580,16 +735,25 @@ class MerchantQaGraph:
                 truncated=outcome.truncated,
                 visualization=visualization or Visualization(enabled=False),
                 recommendations=state["recommendations"]
-                or _metric_recommendations(outcome, metric),
+                or _metric_recommendations(outcome, metric, locale),
             )
 
         if intent.answer_mode is AnswerMode.DETAIL:
             export_id = uuid4()
             outcome = _query_outcome(
                 state,
-                fallback_query_plan="已校验明细查询意图，尚未执行数据查询。",
-                fallback_note="当前未执行经营明细查询。",
-                fallback_reason=_QUERY_SERVICE_UNAVAILABLE,
+                fallback_query_plan=_text(
+                    "已校验明细查询意图，尚未执行数据查询。",
+                    "The detail query intent has been validated, but no data query was "
+                    "executed yet.",
+                    locale,
+                ),
+                fallback_note=_text(
+                    "当前未执行经营明细查询。",
+                    "No business detail query was executed.",
+                    locale,
+                ),
+                fallback_reason=_QUERY_SERVICE_UNAVAILABLE[locale],
             )
             return ChatResponse(
                 id=uuid4(),
@@ -620,7 +784,7 @@ class MerchantQaGraph:
                 recommendations=(
                     []
                     if _is_table_only_detail(intent)
-                    else state["recommendations"] or _detail_recommendations(outcome)
+                    else state["recommendations"] or _detail_recommendations(outcome, locale)
                 ),
             )
 
@@ -641,13 +805,32 @@ class MerchantQaGraph:
                 thinking_steps=state["steps"],
                 quality_status=QualityStatus.DEGRADED,
                 quality_attempts=0,
-                quality_notes=[*state["quality_notes"], "当前未执行商家资料查询。"],
+                quality_notes=[
+                    *state["quality_notes"],
+                    _text(
+                        "当前未执行商家资料查询。",
+                        "No merchant profile query was executed.",
+                        locale,
+                    ),
+                ],
                 analysis_sources=[AnalysisSource.FALLBACK],
                 degraded=True,
-                degraded_reason="当前版本尚未开放商家资料查询",
+                degraded_reason=_text(
+                    "当前版本尚未开放商家资料查询",
+                    "Merchant profile queries are not yet available in the current "
+                    "version.",
+                    locale,
+                ),
                 suggestions=state["suggestions"],
                 suggestion_alternates=state["suggestion_alternates"],
-                query_plan=QueryPlanSummary(summary="已校验身份资料查询意图，尚未执行数据查询。"),
+                query_plan=QueryPlanSummary(
+                    summary=_text(
+                        "已校验身份资料查询意图，尚未执行数据查询。",
+                        "The identity profile query intent has been validated, but no "
+                        "data query was executed yet.",
+                        locale,
+                    )
+                ),
                 data_rows=[],
                 total_rows=0,
                 truncated=False,
@@ -712,12 +895,30 @@ def _is_table_only_detail(intent: QueryIntent) -> bool:
     return intent.answer_mode is AnswerMode.DETAIL and not intent.analysis_requested
 
 
-def _quality_degrade_reason(reason: DegradeReason) -> str:
-    return {
-        DegradeReason.UPSTREAM: "回答生成或独立复核暂不可用，已返回受控数据摘要。",
-        DegradeReason.BUDGET: "模型预算已达上限，已返回受控数据摘要。",
-        DegradeReason.VALIDATION: "回答未通过质量校验，已返回受控数据摘要。",
-    }[reason]
+#: Task 5：写入 `degraded_reason` 单值字段的整句说明，与
+#: `app.localization.catalog._GRAPH_DEGRADE_REASON_MESSAGES` 的词典 key 逐字
+#: 一致——`DegradeReason -> 词表键` 这层映射本身已经是这个字典表达的结构，
+#: 值改成通过 catalog 反查即可验证已登记，不需要另建一层间接。
+#: 保持 `dict[DegradeReason, str]`（zh-CN 原句）这个形状不变：
+#: `tests/unit/services/test_quality_loop.py::
+#: test_graph_degrade_reason_messages_are_registered_in_the_bilingual_catalog`
+#: 直接遍历 `.values()` 逐个喂给 `localize_catalog_value()`，改成嵌套 dict
+#: 会让那条已有测试类型报错。
+_DEGRADE_REASON_MESSAGES: Final[dict[DegradeReason, str]] = {
+    DegradeReason.UPSTREAM: "回答生成或独立复核暂不可用，已返回受控数据摘要。",
+    DegradeReason.BUDGET: "模型预算已达上限，已返回受控数据摘要。",
+    DegradeReason.VALIDATION: "回答未通过质量校验，已返回受控数据摘要。",
+}
+
+
+def _quality_degrade_reason(reason: DegradeReason, locale: SupportedLocale) -> str:
+    message = _DEGRADE_REASON_MESSAGES[reason]
+    if locale is SupportedLocale.ZH_CN:
+        return message
+    # catalog 已登记这三句的英文译文（Task 5 §来源 graph.py 一节），
+    # `localize_catalog_value()` 不命中时兜底原句而不是抛异常——宁可让极端
+    # 情况下混入一句未翻译的中文，也不能让 degraded_reason 本身渲染失败。
+    return localize_catalog_value(message, locale) or message
 
 
 def _response_quality(state: AgentState, outcome: _QueryOutcome) -> QualityStatus:
@@ -781,7 +982,9 @@ def _query_outcome(
     )
 
 
-def _metric_recommendations(outcome: _QueryOutcome, metric: MetricPayload) -> list[Recommendation]:
+def _metric_recommendations(
+    outcome: _QueryOutcome, metric: MetricPayload, locale: SupportedLocale
+) -> list[Recommendation]:
     """METRIC 的 `recommendations`：查到了就不能再说「尚未执行」。
 
     这两条建议本身不是 B5 的「有洞察的分析」——它们不解读数字，只核对范围和
@@ -794,61 +997,146 @@ def _metric_recommendations(outcome: _QueryOutcome, metric: MetricPayload) -> li
             # 用户看不懂内部阶段代号，也不该被告诉「功能还没上线」——受控查询已经
             # 交付，这次没有数据是本次请求的问题，具体原因在 degraded_reason 里。
             Recommendation(
-                title="本次没有取到经营数据",
-                evidence="已完成结构化意图校验，但尚未执行经营数据查询。",
-                action="按上方降级说明调整问题后重试。",
+                title=_text(
+                    "本次没有取到经营数据", "No business data was retrieved this time", locale
+                ),
+                evidence=_text(
+                    "已完成结构化意图校验，但尚未执行经营数据查询。",
+                    "The structured intent has been validated, but no business data "
+                    "query was executed.",
+                    locale,
+                ),
+                action=_text(
+                    "按上方降级说明调整问题后重试。",
+                    "Adjust your question per the degradation notice above and try "
+                    "again.",
+                    locale,
+                ),
             ),
             Recommendation(
-                title="核对指标口径",
-                evidence=f"已识别指标代码：{metric.metric_code}。",
-                action="确认日期范围和维度后再查询。",
+                title=_text("核对指标口径", "Verify the metric definition", locale),
+                evidence=_text(
+                    f"已识别指标代码：{metric.metric_code}。",
+                    f"Identified metric code: {metric.metric_code}.",
+                    locale,
+                ),
+                action=_text(
+                    "确认日期范围和维度后再查询。",
+                    "Confirm the date range and dimensions before querying again.",
+                    locale,
+                ),
             ),
         ]
     return [
         Recommendation(
-            title="核对查询范围",
-            evidence=f"本次查询返回 {outcome.total_rows} 行数据。",
-            action="确认日期范围和维度是否覆盖你想了解的口径。",
+            title=_text("核对查询范围", "Verify the query scope", locale),
+            evidence=_text(
+                f"本次查询返回 {outcome.total_rows} 行数据。",
+                f"This query returned {outcome.total_rows} rows.",
+                locale,
+            ),
+            action=_text(
+                "确认日期范围和维度是否覆盖你想了解的口径。",
+                "Confirm whether the date range and dimensions cover what you want "
+                "to know.",
+                locale,
+            ),
         ),
         Recommendation(
-            title="核对指标口径",
-            evidence=f"已识别指标代码：{metric.metric_code}。",
-            action="如口径与预期不符，请调整问题后重新查询。",
+            title=_text("核对指标口径", "Verify the metric definition", locale),
+            evidence=_text(
+                f"已识别指标代码：{metric.metric_code}。",
+                f"Identified metric code: {metric.metric_code}.",
+                locale,
+            ),
+            action=_text(
+                "如口径与预期不符，请调整问题后重新查询。",
+                "If the definition does not match your expectation, adjust your "
+                "question and query again.",
+                locale,
+            ),
         ),
     ]
 
 
-def _detail_recommendations(outcome: _QueryOutcome) -> list[Recommendation]:
+def _detail_recommendations(
+    outcome: _QueryOutcome, locale: SupportedLocale
+) -> list[Recommendation]:
     """DETAIL 的 `recommendations`：同上，查到了就不能再说「尚未执行」。"""
 
     if not outcome.succeeded:
         return [
             Recommendation(
-                title="本次没有取到明细数据",
-                evidence="已完成结构化意图校验，但尚未执行经营明细查询。",
-                action="按上方降级说明调整问题后重试。",
+                title=_text(
+                    "本次没有取到明细数据", "No detail data was retrieved this time", locale
+                ),
+                evidence=_text(
+                    "已完成结构化意图校验，但尚未执行经营明细查询。",
+                    "The structured intent has been validated, but no business detail "
+                    "query was executed.",
+                    locale,
+                ),
+                action=_text(
+                    "按上方降级说明调整问题后重试。",
+                    "Adjust your question per the degradation notice above and try "
+                    "again.",
+                    locale,
+                ),
             ),
             Recommendation(
-                title="补充筛选条件",
-                evidence="当前没有可展示的明细数据。",
-                action="补充日期或商品条件后再查询。",
+                title=_text("补充筛选条件", "Add more filter conditions", locale),
+                evidence=_text(
+                    "当前没有可展示的明细数据。",
+                    "There is currently no detail data to display.",
+                    locale,
+                ),
+                action=_text(
+                    "补充日期或商品条件后再查询。",
+                    "Add a date or product filter and query again.",
+                    locale,
+                ),
             ),
         ]
-    scope_evidence = (
-        f"本次预览返回 {outcome.total_rows} 行，已达到预览上限，可能还有更多记录。"
-        if outcome.truncated
-        else f"本次预览返回 {outcome.total_rows} 行，已覆盖本次查询的全部结果。"
+    scope_evidence = _text(
+        (
+            f"本次预览返回 {outcome.total_rows} 行，已达到预览上限，可能还有更多记录。"
+            if outcome.truncated
+            else f"本次预览返回 {outcome.total_rows} 行，已覆盖本次查询的全部结果。"
+        ),
+        (
+            f"This preview returned {outcome.total_rows} rows and hit the preview "
+            "limit; there may be more records."
+            if outcome.truncated
+            else f"This preview returned {outcome.total_rows} rows, covering the "
+            "full result of this query."
+        ),
+        locale,
     )
     return [
         Recommendation(
-            title="核对查询范围",
+            title=_text("核对查询范围", "Verify the query scope", locale),
             evidence=scope_evidence,
-            action="确认筛选条件是否覆盖你想查看的记录。",
+            action=_text(
+                "确认筛选条件是否覆盖你想查看的记录。",
+                "Confirm whether the filter conditions cover the records you want to "
+                "see.",
+                locale,
+            ),
         ),
         Recommendation(
-            title="导出完整明细",
-            evidence="预览行数受上限约束，导出可拿到完整明细文件。",
-            action="如需完整明细用于外部处理，可使用导出功能。",
+            title=_text("导出完整明细", "Export the full detail file", locale),
+            evidence=_text(
+                "预览行数受上限约束，导出可拿到完整明细文件。",
+                "The preview row count is capped; use export to get the full detail "
+                "file.",
+                locale,
+            ),
+            action=_text(
+                "如需完整明细用于外部处理，可使用导出功能。",
+                "Use the export feature if you need the full detail file for "
+                "external processing.",
+                locale,
+            ),
         ),
     ]
 
@@ -873,29 +1161,66 @@ def _json_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
     return converted
 
 
-def _knowledge_answer(detail: KnowledgeResult | None) -> str:
-    """将受控检索结果写入规则回答，保留可核验的文档来源。"""
+def _knowledge_answer(detail: KnowledgeResult | None, locale: SupportedLocale) -> str:
+    """将受控检索结果写入规则回答，保留可核验的文档来源。
+
+    `hit.content`（知识文档正文本身）刻意不在这里翻译——知识库内容的双语版本
+    是 Task 8 的范围（人工可编辑的双版本文档），这里只负责翻译「壳」文案
+    （引导语、来源标签、未命中提示），绝不改写或覆盖检索到的原文。
+    """
 
     if detail is None or not detail.matched:
-        return "未命中与当前问题相关的知识资料，暂不能依据知识库给出规则结论。"
+        return _text(
+            "未命中与当前问题相关的知识资料，暂不能依据知识库给出规则结论。",
+            "No knowledge material relevant to this question was matched; a "
+            "rule-based conclusion cannot be given from the knowledge base yet.",
+            locale,
+        )
 
     hits = detail.hits
+    source_label = _text("来源", "Source", locale)
+    # Task 14 Step 7 finding B：标签本身（"来源"/"Source"）已经按 locale 选取，
+    # 但分隔符过去硬编码成中文全角冒号「：」，en-US 请求会得到
+    # "Source：xxx" 这种中英混杂的分隔符。分隔符与标签同源、同一 `_text()`
+    # 选取方式，不额外发明新写法。
+    source_separator = _text("：", ": ", locale)
     excerpts = [
-        f"- {hit.content.strip()}\n  来源：{hit.source_path}" for hit in hits if hit.content.strip()
+        f"- {hit.content.strip()}\n  {source_label}{source_separator}{hit.source_path}"
+        for hit in hits
+        if hit.content.strip()
     ]
     if not excerpts:
-        return "未命中可展示正文的知识资料，暂不能依据知识库给出规则结论。"
-    return "根据知识库检索到的资料：\n" + "\n".join(excerpts)
+        return _text(
+            "未命中可展示正文的知识资料，暂不能依据知识库给出规则结论。",
+            "No displayable knowledge material was matched; a rule-based "
+            "conclusion cannot be given from the knowledge base yet.",
+            locale,
+        )
+    intro = _text(
+        "根据知识库检索到的资料：",
+        "Based on material retrieved from the knowledge base:",
+        locale,
+    )
+    return intro + "\n" + "\n".join(excerpts)
 
 
-def _unverified_metric(metric_code: str | None) -> MetricPayload:
+def _unverified_metric(metric_code: str | None, locale: SupportedLocale) -> MetricPayload:
     return MetricPayload(
         metric_code=metric_code or "unknown_metric",
-        display_name="待确认指标",
+        display_name=_text("待确认指标", "Metric pending confirmation", locale),
         unit="",
-        definition="未命中正式指标目录，口径需人工确认后才能作为正式口径使用。",
+        definition=_text(
+            "未命中正式指标目录，口径需人工确认后才能作为正式口径使用。",
+            "This metric was not found in the official catalog; its definition "
+            "requires manual confirmation before it can be treated as official.",
+            locale,
+        ),
+        # `source` 不是最终展示文案：`MetricDefinitionSource._missing_()`
+        # （见 `app.schemas.chat`）把这个固定中文标记兼容映射成
+        # `METRIC_CATALOG` 协议枚举值，响应里只暴露枚举值本身（英文协议码），
+        # 这句原文永远不会直接展示给用户，故不参与本地化。
         source="Borough 指标目录",
-        owner="经营分析组",
+        owner=_text("经营分析组", "Business Analytics Team", locale),
         status=MetricStatus.UNVERIFIED.value,
         generated=False,
         notice=None,
@@ -909,35 +1234,64 @@ def _unverified_metric(metric_code: str | None) -> MetricPayload:
 # 受控临时分组指标只支持这两个类别（由 whitelist.py 强制），用字典而非
 # `"交易" if ... else "退款"` 的二选一三元表达式，未来若类别枚举出错会直接
 # KeyError 而不是把未知类别静默归到「退款」。
-_GENERATED_METRIC_CATEGORY_LABELS: Final[dict[str, tuple[str, str]]] = {
-    "TRADE": ("交易", "orders"),
-    "REFUND": ("退款", "refunds"),
+_GENERATED_METRIC_CATEGORY_LABELS: Final[dict[str, dict[SupportedLocale, str]]] = {
+    "TRADE": {SupportedLocale.ZH_CN: "交易", SupportedLocale.EN_US: "order"},
+    "REFUND": {SupportedLocale.ZH_CN: "退款", SupportedLocale.EN_US: "refund"},
+}
+#: 上面用于组合成句（"按{category_label}明细..."）的单数形式；`definition`
+#: 文案单独用复数形式更符合英文表达习惯，不复用同一份映射。
+_GENERATED_METRIC_CATEGORY_LABELS_PLURAL_EN: Final[dict[str, str]] = {
+    "TRADE": "orders",
+    "REFUND": "refunds",
+}
+_GENERATED_METRIC_SOURCE_TABLES: Final[dict[str, str]] = {
+    "TRADE": "orders",
+    "REFUND": "refunds",
 }
 
 
-def _generated_metric_payload(intent: QueryIntent) -> MetricPayload:
+def _generated_metric_payload(intent: QueryIntent, locale: SupportedLocale) -> MetricPayload:
     """为受控临时分组指标生成可展示的、待核验的口径载荷。
 
-    展示名称与单位来自已校验的结构化计划；实际数值只来自
-    ``AnalyticsRepository.generated_metric`` 的交易/退款固定模板。
+    展示名称与单位来自已校验的结构化计划（`plan.name`/`plan.unit`）——它们是
+    模型在回答提示词已被要求使用目标语言的前提下生成的自由文本，不在这里
+    二次翻译；实际数值只来自 ``AnalyticsRepository.generated_metric`` 的
+    交易/退款固定模板。
     """
 
     plan = intent.generated_metric_plan
     assert plan is not None
     category = intent.category
-    category_label, source_table = _GENERATED_METRIC_CATEGORY_LABELS[category.value]
+    category_label = _GENERATED_METRIC_CATEGORY_LABELS[category.value][locale]
+    source_table = _GENERATED_METRIC_SOURCE_TABLES[category.value]
     dimensions = tuple(item for item in (plan.group_by, plan.filter_column) if item is not None)
     return MetricPayload(
         metric_code=f"generated_{category.value.lower()}_metric",
         display_name=plan.name,
         unit=plan.unit,
-        definition=f"按{category_label}明细的后端固定聚合模板计算。",
+        definition=_text(
+            f"按{category_label}明细的后端固定聚合模板计算。",
+            "Computed by the backend's fixed aggregation template over "
+            f"{_GENERATED_METRIC_CATEGORY_LABELS_PLURAL_EN[category.value]} details.",
+            locale,
+        ),
         source=MetricDefinitionSource.AI_GENERATED.value,
-        owner="待认领",
+        owner=_text("待认领", "Unassigned", locale),
         status=MetricStatus.UNVERIFIED.value,
         generated=True,
-        notice="展示名称和单位由模型提出，聚合口径已由后端固定模板执行，仍需人工确认。",
-        sql_definition="由后端受控聚合模板生成，不接受模型提供的 SQL 或公式。",
+        notice=_text(
+            "展示名称和单位由模型提出，聚合口径已由后端固定模板执行，仍需人工确认。",
+            "The display name and unit were proposed by the model; the aggregation "
+            "was executed by the backend's fixed template and still requires manual "
+            "confirmation.",
+            locale,
+        ),
+        sql_definition=_text(
+            "由后端受控聚合模板生成，不接受模型提供的 SQL 或公式。",
+            "Generated by the backend's controlled aggregation template; no SQL or "
+            "formula supplied by the model is accepted.",
+            locale,
+        ),
         dimensions=dimensions,
         source_database="public",
         source_table=source_table,

@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ArrowUp, Paperclip } from '@lucide/vue'
 import { nextTick, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
 
 const props = withDefaults(
   defineProps<{
@@ -79,8 +82,8 @@ function handleKeydown(event: KeyboardEvent): void {
       <button
         class="chat-composer__attachment"
         type="button"
-        aria-label="选择附件"
-        title="选择附件"
+        :aria-label="t('chatComposer.attachmentAria')"
+        :title="t('chatComposer.attachmentAria')"
         @click="openAttachmentPicker"
       >
         <Paperclip :size="18" aria-hidden="true" />
@@ -99,22 +102,22 @@ function handleKeydown(event: KeyboardEvent): void {
         name="merchant-question"
         rows="1"
         autocomplete="off"
-        aria-label="输入问题"
-        placeholder="输入经营问题…"
+        :aria-label="t('chatComposer.inputAria')"
+        :placeholder="t('chatComposer.inputPlaceholder')"
         @keydown="handleKeydown"
       ></textarea>
       <button
         class="chat-composer__send"
         type="submit"
-        :aria-label="busy ? '上一轮回答仍在进行中' : '发送问题'"
+        :aria-label="busy ? t('chatComposer.sendBusyAria') : t('chatComposer.sendReadyAria')"
         :disabled="!message.trim() || busy"
       >
         <ArrowUp :size="18" aria-hidden="true" />
       </button>
     </div>
     <div class="chat-composer__footnote">
-      <span>Enter 发送 · Shift + Enter 换行</span>
-      <span>支持图片、PDF、Excel、CSV</span>
+      <span>{{ t('chatComposer.hintSubmit') }}</span>
+      <span>{{ t('chatComposer.hintAttachments') }}</span>
     </div>
   </form>
 </template>

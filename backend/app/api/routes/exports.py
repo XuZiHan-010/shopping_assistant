@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Query, Response
 
 from app.api.dependencies import get_export_service
 from app.core.errors import error_responses
+from app.localization.locales import SupportedLocale
 from app.services.export_service import ExportService
 
 router = APIRouter(tags=["exports"])
@@ -24,12 +25,18 @@ async def download_export(
     expires_at: Annotated[int, Query(ge=0)],
     signature: Annotated[str, Query(min_length=32, max_length=128)],
     service: Annotated[ExportService, Depends(get_export_service)],
+    # 这条端点是浏览器直接打开的签名 URL，没有 `Accept-Language`；导出语言
+    # 只能来自这个由 `ExportService.create()` 签发时写入的查询参数,并且必须
+    # 经签名验证——见 `ExportService.download()`/`_signature()`。旧签名不带
+    # 这个参数时保持 `None`，`ExportService` 按 zh-CN 解释（Task 8 Step 7）。
+    locale: Annotated[SupportedLocale | None, Query()] = None,
 ) -> Response:
     content = await service.download(
         export_id=export_id,
         merchant_id=merchant_id,
         expires_at=expires_at,
         signature=signature,
+        locale=locale or SupportedLocale.ZH_CN,
     )
     return Response(
         # ExportService.download() 已经在字符串开头拼好了 BOM(`﻿`)；这里
@@ -41,5 +48,6 @@ async def download_export(
             "Content-Disposition": 'attachment; filename="borough-detail-export.csv"',
             "Referrer-Policy": "no-referrer",
             "Cache-Control": "no-store",
+            "Content-Language": str(locale or SupportedLocale.ZH_CN),
         },
     )

@@ -84,4 +84,33 @@ describe('Chat BI 管理员 API', () => {
       },
     ])
   })
+
+  it('后端按 Accept-Language 返回英文分类展示名时原样透传（Task 11）', async () => {
+    setChatTransport(async () =>
+      Response.json({
+        start_date: '2026-08-17',
+        end_date: '2026-08-23',
+        items: [
+          {
+            category: 'TRADE',
+            category_display_name: 'Trade analytics',
+            answer_total: 4,
+            adoption_rate: null,
+            user_accuracy_rate: null,
+            system_accuracy_rate: null,
+            avg_thinking_ms: null,
+            hit_rate: null,
+            failure_rate: null,
+          },
+        ],
+      }),
+    )
+
+    const categories = await getChatBiCategories(
+      { startDate: '2026-08-17', endDate: '2026-08-23' },
+      new AbortController().signal,
+    )
+
+    expect(categories[0]?.displayName).toBe('Trade analytics')
+  })
 })

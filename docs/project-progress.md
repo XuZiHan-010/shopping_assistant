@@ -2,7 +2,40 @@
 
 > 本文件只保留当前可继续开发的事实快照，不追加每日流水账。
 
-**最后更新：2026-09-08**
+**最后更新：2026-09-09**
+
+> **2026-09-09 `feature/bilingual-localization` 合并进 `main`（用户已明确要求，R2）**：把该分支
+> 40+ 次提交（含 2026-08-31/09-05/09-06/09-08 以下几条记录描述的全部工作）合并进 `main`。
+> `main` 自身在分支分叉后新增的改动集中在 `df3d949`（图表摘要格式化 + `useEChart` 时序整改，见
+> 下一条记录）——两侧独立修复了同一批文件（`format.ts`/`chart.ts`/`ChatMessage.spec.ts`/
+> `InsightPanels.spec.ts`/`transport.ts`/`ConfirmDeleteDialog.vue`/本文件），逐个手工核对语义后
+> 合并，而不是简单二选一：`format.ts`/`chart.ts` 保留 `main` 的负零修正与 `formatCell` 统一入口，
+> 同时套用 `feature` 分支的 locale 参数与中英文双语句式；`ChatMessage.spec.ts` 保留 `main` 的
+> 冻结时钟（顺带修好了此前两条因真实挂钟时间超过 fixture 硬编码 `expires_at` 而失败的
+> `download-export` 测试）与 `feature` 分支的 `mountWithI18n`/`mountMessage` 帮手；
+> `ConfirmDeleteDialog.vue` 删掉了 `main` 一侧遗留的重复未 i18n 段落。合并前用
+> `git merge-tree` 预演确认只有这 7 个文件真正冲突（`docs/project-progress.md`、
+> `frontend/src/api/mock/transport.ts`、`ChatMessage.spec.ts`、`InsightPanels.spec.ts`、
+> `ConfirmDeleteDialog.vue`、`utils/chart.ts`、`utils/format.ts`、`views/AssistantView.vue`——
+> 实际 8 个，`merge-tree` 预演未把本文件自身计入），其余全部干净自动合并。
+>
+> `npm install` 后（合并把 `vue-i18n` 等依赖带进 `package.json`，此前工作区 `node_modules`
+> 没有）暴露出另外 5 个失败：`chart.spec.ts`/`format.spec.ts` 各 2 处、`TrendChart.timing.spec.ts`
+> 1 处——均为 `main` 自己在 `df3d949` 新增的测试，调用 `summarizeChart()`/`formatCell()` 时用的是
+> 该函数当时（`main` 尚无 `locale` 概念）的旧签名，或者（`TrendChart.timing.spec.ts`）直接
+> `mount()` 一个现在依赖 `useI18n()` 的组件却没装 i18n 插件；逐一补上缺失的 `locale`/`i18n`
+> 参数修复，均为测试文件改动，不涉及生产代码。
+>
+> **最终验证**：前端 Vitest 51 files / 535 tests **全部通过**，`npm run lint` 干净；
+> `npm run typecheck` 剩 7 个错误——与 `feature/bilingual-localization` 分支自己在
+> 2026-09-05 记录里登记的既有基线（Task 11 起的 `mountX` 测试辅助函数泛型推断问题）逐条比对
+> 完全一致，合并没有新增或减少，本次未处理。后端 `uv run ruff check .`、`uv run mypy app`
+> 均全绿；`uv run pytest`：**1128 passed, 261 skipped**（跳过的全部是需要真实 PostgreSQL 的
+> 集成测试，本机 Docker 未启动——这批新增的本地化专属不变量测试同样落在这个既有环境缺口里，
+> `feature` 分支 2026-09-06 记录已登记为"从未在真实库上验证过"，本次合并未改变这一状态，
+> 留作后续单独处理）。未调用真实 LLM。
+
+**上一次更新：2026-09-08**
 
 > **2026-09-08 图表摘要格式与 useEChart 时序整改**：完成
 > `plans/2026-09-08-chart-summary-format-remediation.md` 的四项任务。`formatCell` 现会将
@@ -20,7 +53,101 @@
 > （commit `016a9de`）；`feature/bilingual-localization` 分支（中英文全栈本地化，此前从未
 > 推送）也已首次推送到 `origin`，含一处新修复：`AssistantView.vue` 的每日经营日报此前未监听
 > `localeStore.locale`，切换展示语言不会重新拉取日报，已补上与 `chatStore` 一致的 watch
-> （该分支尚未合并回 `main`，未创建 PR）。
+> （该分支尚未合并回 `main`，未创建 PR——见上方 2026-09-09 记录，现已合并）。
+
+> **2026-09-06 本地首次真实 PostgreSQL 全量回归 + 两处真实缺陷修复（`feature/bilingual-localization`
+> 分支，commit `2010f24`）**：用户要求启动本地前后端自行验收，本机 Docker 起来后顺带做了一次自查。
+> 本分支最近一次真正跑通 `REQUIRE_INTEGRATION_DB=1 pytest` 是 2026-08-24（`docs/project-progress.md`
+> 历史记录），此后 Task 8 后续修复、Task 14、整分支复审全部工作**从未被集成测试在真实库上验证过**——
+> 测试库不可达时套件默认静默跳过（不带该环境变量），这正是上条 2026-09-05 记录里"①"项标注的既有
+> 环境约束。本次库真实可用后第一次跑通全量，发现并修复：
+> ① `app/repositories/knowledge.py`：`KnowledgeRepository.upsert_by_source_path()`/
+> `insert_if_absent_by_source_path()` 直接构造 `KnowledgeDocument` 时漏填 `source_locale`，撞上
+> 迁移加的 NOT NULL 约束；这条写路径只有 `scripts/import_wiki.py` 和应用启动时的
+> `seed_wiki_documents()` 会真正执行，是"NOT NULL 列缺写入"这类缺陷（Task 8/整分支复审已修复过
+> 3 次，均在 `messages`/`answers`/`KnowledgeAdminRepository` 三处）第 4 次出现，且是这条写路径
+> 有史以来第一次真正跑到真实数据库。
+> ② `app/localization/payloads.py`：会话详情/列表翻译降级时统一展示目标语言占位文案，对 `mixed`
+> 源语言（如中文问题夹杂 "GMV" 缩写）也不例外，导致用户自己的原话被替换成"翻译暂不可用，请重试"——
+> 用真实接口手工复现后确认。经用户明确决策后修复：`app/localization/locales.py` 新增
+> `dominant_script()`，按汉字/英文字母数量粗略判定 `mixed` 文本的"主体语言"；只有主体语言与目标
+> 展示语言一致时（如中文问题夹 "GMV"，对中文读者展示原文仍可读）才在降级时展示原文，且不再计入
+> `localization_degraded`（读者看到的已是完整可读内容，没有"重试"的必要）；主体语言与目标不一致
+> （如系统提示文案"LLM 未配置或暂不可用……"对英文读者而言主体仍是不可读的中文）或源语言明确是
+> 另一种受支持语言时，继续展示占位文案，避免把未翻译的外语原文误当译文静默展示。
+> 同时补齐 8 处测试夹具（`test_chat.py`/`test_exports.py`/`test_chatbi_rollup.py`/
+> `test_export_repository.py`/`test_export_service.py`/`test_memory_agent_history.py`）直接构造
+> `KnowledgeDocument`/`Answer`/`Message` 时漏填 `source_locale`/`response_locale` 的缺陷——纯测试
+> 代码，不影响生产路径，但意味着这些测试从写下起就没有真正在真实库上跑通过。
+> 全量 `REQUIRE_INTEGRATION_DB=1 pytest`：**1388 passed**，仅 1 个失败
+> （`test_committed_wiki_seed_matches_reference_wiki_byte_for_byte`）——已定位为参考 Wiki 目录
+> `yshopping-merchant-ai 4/` 本身不在这次使用的 git worktree 里（只存在于主项目目录，R8 只读参考
+> 项目未被 worktree 检出），不是代码缺陷，主项目目录下运行会通过。ruff/mypy 全绿。本地前后端已
+> 用 `app/run.py`（Windows 下 `uvicorn` CLI/`fastapi dev` 均不可用，见下一段）+ `npm run dev` 跑通，
+> `GET /api/reports/daily`、`GET /api/conversations`、前端首页均已实测 200。
+>
+> Windows 本地启动踩坑记录（供下次直接复用，不算缺陷）：`uv run fastapi dev` 因缺 `fastapi[standard]`
+> 不可用；`uv run uvicorn app.main:app` 因 app 是工厂函数需加 `--factory` 并指向 `create_app`；
+> 直接起 uvicorn 即便这样仍会因 Windows 默认 `ProactorEventLoop` 与 psycopg 异步模式不兼容而数据库
+> 降级——正确入口是项目已有的 `uv run python -m app.run`（内部用 `app/core/runtime.py` 的
+> `loop_factory()` 显式传给 `uvicorn.run(loop=...)`）。
+>
+> 上条 2026-09-05 记录"明确尚未做"的①已被本条部分兑现（翻译/本地化专属不变量首次在真实 PostgreSQL
+> 上跑通），②③④⑤仍未处理，不重复记录。
+>
+> **2026-09-05 全栈中英文显示与 AI 内容本地化（`feature/bilingual-localization` 分支，14 个 Task 全部完成）**：
+> 按 `plans/2026-08-31-full-stack-bilingual-localization.md` 用 subagent-driven-development 逐 Task
+> 实现+独立审查+发现问题修复再复审，14 个 Task 全部通过审查收尾（Task 1-8 后端本地化基础设施、
+> Task 9 前端 i18n、Task 10A-10D 四个前端页面迁移、Task 11 前端 API/Store 层联动、Task 12 契约
+> 再生成、Task 13 端到端测试、Task 14 全量验证+真实模型付费验收）。核心能力：`SupportedLocale`
+> (`zh-CN`/`en-US`) 驱动响应显示语言，`SourceLanguage`（多出 `mixed`/`und`）驱动内容源语言探测；
+> 确定性词典（`app/localization/catalog.py`，零 LLM）覆盖闭集词汇，自由文本经受费用防护的
+> `LocalizationService.localize_many()`（源语言命中/受保护 token/词典命中/人工译文命中/机器缓存
+> 命中/LLM 批量调用的优先级级联，超预算按条目降级为目标语言占位、任何情况下不回落源语言）；
+> 机器译文缓存与资源级人工译文均按 `merchant_id`/`GLOBAL` 强制隔离；前端 `vue-i18n` + 双语消息
+> 目录 + `LanguageSwitcher.vue` + `useLocaleStore()`（localStorage 持久化）覆盖三个既有路由；
+> 历史会话按游标分页翻译、降级页可同游标重试；知识文档源版本与人工译文版本独立编辑、按源版本
+> 隔离过期；CSV 导出语言由创建时签名固化。
+>
+> **真实模型付费验收（用户已按 R3 明确同意）**：Docker/PostgreSQL 全程不可用（与本文件历次记录
+> 一致），绕开 API/DB 层，用真实 `wiki_seed.json`/`METRIC_SEED` 构造内存版检索/指标目录，`MerchantQaGraph`
+> 与 `LocalizationService` 均接真实 `DeepSeekLlmClient`（`deepseek-v4-flash`）。14 个验收场景（6 种
+> Chat 模式各 1 条英语问题、2 条中文问/英语答、2 条历史批量翻译、1 条跨语言知识召回、1 条翻译失败
+> 按条目降级、1 条英文 CSV 导出零调用、1 条英文范围内提问零 LLM）**实际消耗真实调用 26 次（20 次
+> AGENT + 6 次 LOCALIZATION）、31,583 token**，远低于已披露的上限（本地化 ≤48、Agent 单请求 ≤10）。
+> 14 个场景全部实际执行；9 个干净通过、3 个（RULE/跨语言知识召回相关）因知识正文本身未注册人工英译、
+> 按既有设计正确保留中文原文（非缺陷，计入通过）、1 个因无真实附件上传通道模型改判为 CHAT（诚实的
+> 真实模型结果，非缺陷）、**1 个真实 FAIL**：**真实模型跑出此前任何 Fake 测试都无法触达的真实缺陷**：
+> `AnswerService.fallback_draft()`（质量循环耗尽重试后的确定性兜底路径）此前完全硬编码中文、
+> 无 `locale` 参数，英语请求校验连续失败两次后最终 `answer` 会渲染成中文，违反本项目"英语模式
+> 零中文残留"的完成定义。已当场立项修复：给 `fallback_draft()`/`_fallback()` 补齐 `locale` 参数
+> （沿用同文件既有的 `dict[SupportedLocale, str]` 模板模式），并顺带发现修复：模板插值用的
+> `metric.display_name`/`.unit` 本身是闭集中文常量，不经 `_catalog_text()` 转换会在英文句子里
+> 露出中文指标名。修复本身零真实 LLM 调用（`FakeLlmClient`），独立审查发现修复引入一处英文冠词
+> 重复的语法小问题（"The the business metric..."，不违反零中文要求但不够地道），已按全部 8 处
+> 用法逐一核对修复。另发现 2 个纯格式问题（知识来源标签硬编码中文全角冒号"："、`quality_loop.py`
+> 多条校验意见用中文全角"；"拼接——后者是 Task 6 复核时已登记的既有已知项，本轮只是首次真实复现）。
+>
+> **明确尚未做、需要后续单独处理**：① **本效果新增的翻译/本地化专属不变量从未在真实 PostgreSQL
+> 上跑过**（源正文不改、历史语言回填、人工译文过期判定、跨商家缓存隔离反例、游标分页重试——均只
+> 有 Fake 仓储单测和真实模型验收覆盖，本机 Docker 全程不可用，是本效果之外、贯穿本项目全程的既有
+> 环境约束）；② `LocalizationRepository.purge_expired_machine()`（30 天缓存过期清理）没有任何
+> Cron/定时任务调用（不是正确性问题——缓存键按内容哈希，过期未清理的行只是闲置存储不会被误命中——
+> 但"过期清理生效"在运维意义上目前是假的），`docs/deployment.md`"双语本地化"节给出三个方案选项，
+> 用户/运维需选一个；③ `npm run format:check` 在 20 个文件上有真实 Prettier 格式漂移（纯格式，非
+> 逻辑），系 Task 9-13 期间累积、此前没有任何一个 Task 的门禁跑过 `format:check`；④ `npm run typecheck`
+> 有 7 个错误，6 个是 Task 11 起已知的既有基线（`mountX` 测试辅助函数类型），第 7 个是 Task 12
+> 自己引入却未被 Task 12 自身发现的回归（`adapters/chat.spec.ts` 的 `enOrNull()` 返回类型），
+> 均为纯测试文件类型错误、零生产运行时影响（`vue-tsc -b` 的构建路径不含 spec 文件），已定位好
+> 一行修复方案但按范围未执行；⑤ `AGENTS.md` §7.2/§7.5/§8.8、`docs/deployment.md`、`.gitignore`
+> （移除 `plans/` 整目录忽略规则）已同步更新；本文件的这条快照是唯一的最终收口记录。
+>
+> 全过程一次工作区污染事故（一个已跑偏的实现代理在自己会话内错误执行了 stash 操作，把此前已经
+> 安全 stash 隔离、未采纳的另一次跑偏尝试内容重新带回工作区，混入本应只改 3 个文档文件的改动里）
+> 已被发现、可逆地 stash 保留、清理干净后重新派发，未造成任何代码/文档丢失，过程详见 SDD 账本
+> `.superpowers/sdd/2026-08-31-full-stack-bilingual-localization/progress.md`。全部提交当时仍
+> 停留在 `feature/bilingual-localization` 分支本地；合并/推送/发布已在 2026-09-09（见上方记录）
+> 经用户明确许可执行。
 
 > **2026-08-26 零 LLM 问题范围前置闸门**：新增 `openspec/changes/add-question-prefilter-gate`
 > 完整规划与实现——对外部署下，此前每个问题（含明显无关提问，如「CNN 和 RNN 的区别」）都会
@@ -609,6 +736,10 @@ savepoint 隔离，统计查询失败只会回落静态推荐，不会污染主�
 
 ## 风险与约束
 
+- **双语本地化（`feature/bilingual-localization` 分支）的翻译/隔离专属不变量从未在真实 PostgreSQL
+  上验证**：源正文不改、历史语言回填、人工译文过期判定、跨商家缓存隔离反例、游标分页重试等均只有
+  Fake 仓储单测覆盖；`LocalizationRepository.purge_expired_machine()`（30 天缓存过期清理）尚无
+  Cron 调用；详见本文件顶部 2026-09-05 条目与 `docs/deployment.md`"双语本地化"节。
 - **主工作副本当前有大量未提交改动**（2026-08-24 发现）：`git status` 约 60 个文件为
   `M`/`??`，涵盖 D1/D3 能力与全新的 Chat BI 衡量看板，均只存在于工作树里，不在任何提交或
   远端分支上。查看这些能力「是否已完成」时不能只看本文件的文字描述，要先跑 `git status`/

@@ -158,6 +158,13 @@ class ChatResponse(BaseModel):
 
     id: UUID
     session_id: UUID
+    # 用户本轮问题按当前请求 `Accept-Language` 渲染的显示副本；原文仍完整保存在
+    # `messages.content`，这里只是展示层的本地化镜像（Task 6）。由 `ChatService`
+    # 在持久化之外每次请求都重新计算，幂等重放时也按当前请求的 locale 重新赋值，
+    # 不随存量 `response_payload` 一起被旧语言锁死。默认空串只是历史构造点（测试
+    # 替身、Agent 内部构造的中间响应）的形状占位；`ChatService` 返回给调用方之前
+    # 总会用真实值覆盖。
+    displayed_user_message: str = Field(default="", max_length=4_000)
     # 纯 DETAIL 以精确空串表示「只出表格」。其它回答模式仍由模型校验强制非空。
     answer: str
     answer_mode: AnswerMode
@@ -295,6 +302,11 @@ class ConversationListResponse(BaseModel):
     items: list[ConversationSummary]
     limit: int = Field(ge=1, le=100)
     offset: int = Field(ge=0)
+    # Task 7（§8.6.3）：本页任意一条会话标题未能在预算内翻译完成时为 true，
+    # 该条目改用目标语言占位文案而不是回落源语言原文；未降级时固定
+    # false/null，与 R7 的显式降级要求一致。
+    localization_degraded: bool = False
+    localization_degraded_reason: str | None = None
 
 
 class ConversationMessage(BaseModel):
@@ -329,3 +341,17 @@ class ConversationDetailResponse(BaseModel):
     messages: list[ConversationMessage]
     created_at: datetime
     updated_at: datetime
+    # Task 7（§8.6.3）：消息游标分页。`messages` 只是当前这一页（第一页为最新
+    # `message_limit` 条，页内按时间正序排列）；`next_message_cursor` 非空时
+    # 指向更早一页，为空代表已经翻到最早一条。
+    next_message_cursor: str | None = None
+    has_more_messages: bool = False
+    # 本页任意条目（消息正文、思考步骤标签、质量说明、降级原因、会话标题）
+    # 未能在预算内翻译完成时为 true，改用目标语言占位文案；对同一游标重新
+    # GET 即为重试，已成功条目命中缓存不重复调用模型。绝不回落源语言原文。
+    # 同一字段也用于另一种"本页不完整"信号：`message_limit` 为奇数时分页
+    # 边界可能把一轮 USER/ASSISTANT 拆到两页，正常情况下会被跨页续接自动
+    # 修复且不置位；仅当续接也未能确认配对（数据异常）时才置为 true，
+    # `localization_degraded_reason` 会说明是这一种情况而不是翻译预算耗尽。
+    localization_degraded: bool = False
+    localization_degraded_reason: str | None = None

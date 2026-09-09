@@ -9,7 +9,7 @@
 import type { components } from '@/api/generated'
 
 import { resolveApiBaseUrl } from './client'
-import { buildAuthHeaders } from './credentials'
+import { buildAuthHeaders, buildLocaleHeaders } from './credentials'
 import { AppError, toAppError } from './errors'
 
 export interface TransportRequest {
@@ -117,6 +117,10 @@ export function createFetchTransport(): ChatTransport {
     const base = resolveApiBaseUrl()
     const headers: Record<string, string> = {
       ...buildAuthHeaders(req.auth ?? 'merchant'),
+      // 覆盖流式（`accept: 'text/event-stream'`）与非流式请求同一条路径——
+      // /api/chat 的 SSE POST 也是从这里发出的 fetch，不需要在 sse.ts 里
+      // 单独再装配一次请求头（前端方案 Task 11 Step 5）。
+      ...buildLocaleHeaders(),
       ...req.headers,
       'X-Request-Id': crypto.randomUUID(),
     }

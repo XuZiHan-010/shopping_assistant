@@ -1,12 +1,18 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import type { KnowledgeTreeNode } from '@/api/adapters/knowledge'
+import { useLocaleStore } from '@/stores/locale'
+import { displayNodeName } from '@/utils/knowledgeTree'
 
 const props = withDefaults(defineProps<{ roots: KnowledgeTreeNode[]; selectedPath?: string }>(), {
   selectedPath: '',
 })
 const emit = defineEmits<{ select: [path: string]; 'create-domain': [] }>()
+
+const { t } = useI18n()
+const localeStore = useLocaleStore()
 
 interface FlattenedNode {
   node: KnowledgeTreeNode
@@ -25,17 +31,17 @@ const nodes = computed<FlattenedNode[]>(() => {
 </script>
 
 <template>
-  <nav class="knowledge-tree" aria-label="知识库目录">
+  <nav class="knowledge-tree" :aria-label="t('knowledgeTree.navAria')">
     <div class="knowledge-tree__header">
-      <p class="knowledge-tree__title">知识目录</p>
+      <p class="knowledge-tree__title">{{ t('knowledgeTree.title') }}</p>
       <button
         type="button"
         data-testid="create-domain"
-        title="新建业务域"
-        aria-label="新建业务域"
+        :title="t('knowledgeTree.createDomainAria')"
+        :aria-label="t('knowledgeTree.createDomainAria')"
         @click="emit('create-domain')"
       >
-        + 业务域
+        {{ t('knowledgeTree.createDomainLabel') }}
       </button>
     </div>
     <ul>
@@ -49,8 +55,8 @@ const nodes = computed<FlattenedNode[]>(() => {
           @click="emit('select', item.node.path)"
         >
           <span>{{ item.node.nodeType === 'directory' ? '▣' : '▤' }}</span
-          >{{ item.node.name }}
-          <small v-if="item.node.readOnly">只读</small>
+          >{{ displayNodeName(item.node, localeStore.locale) }}
+          <small v-if="item.node.readOnly">{{ t('knowledgeTree.readOnlyBadge') }}</small>
         </button>
       </li>
     </ul>

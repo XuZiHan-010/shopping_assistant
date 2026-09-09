@@ -14,6 +14,7 @@
   ],
   "degraded": false,
   "degraded_reason": null,
+  "displayed_user_message": "",
   "export": null,
   "id": "b24375c9-1f09-5951-bbc4-09c4f4338ffc",
   "metric_code": "gmv",

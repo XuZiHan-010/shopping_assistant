@@ -22,6 +22,7 @@ from app.core.errors import (
 )
 from app.core.security import MerchantContext
 from app.db.session import Database
+from app.localization.locales import SupportedLocale
 from app.models.answer import Answer
 from app.models.conversation import Conversation, Message
 from app.models.merchant import Merchant
@@ -58,16 +59,29 @@ class CountingAgent(DeterministicAgent):
 class SlowCountingAgent(DeterministicAgent):
     """把 Agent 拉长，好让两个并发请求真的在 INSERT 上撞车。"""
 
-    async def run(self, message: str, session_id: UUID) -> AgentRunResult:
+    async def run(
+        self,
+        message: str,
+        session_id: UUID,
+        *,
+        locale: SupportedLocale = SupportedLocale.ZH_CN,
+    ) -> AgentRunResult:
         await asyncio.sleep(0.2)
-        return await super().run(message, session_id)
+        return await super().run(message, session_id, locale=locale)
 
 
 class ExplodingAgent:
     def __init__(self, error: BaseException) -> None:
         self.error = error
 
-    async def run(self, message: str, session_id: UUID) -> AgentRunResult:
+    async def run(
+        self,
+        message: str,
+        session_id: UUID,
+        *,
+        locale: SupportedLocale = SupportedLocale.ZH_CN,
+    ) -> AgentRunResult:
+        del locale
         raise self.error
 
 
@@ -82,7 +96,14 @@ class DetailExportAgent:
     def __init__(self, *, degraded: bool = False) -> None:
         self._degraded = degraded
 
-    async def run(self, message: str, session_id: UUID) -> AgentRunResult:
+    async def run(
+        self,
+        message: str,
+        session_id: UUID,
+        *,
+        locale: SupportedLocale = SupportedLocale.ZH_CN,
+    ) -> AgentRunResult:
+        del locale
         from datetime import UTC, datetime
 
         from app.schemas.chat import ChatResponse, ExportInfo
@@ -150,11 +171,17 @@ class BlockingAgent(DeterministicAgent):
         self.started = asyncio.Event()
         super().__init__()
 
-    async def run(self, message: str, session_id: UUID) -> AgentRunResult:
+    async def run(
+        self,
+        message: str,
+        session_id: UUID,
+        *,
+        locale: SupportedLocale = SupportedLocale.ZH_CN,
+    ) -> AgentRunResult:
         self.calls += 1
         self.started.set()
         await asyncio.Event().wait()
-        return await super().run(message, session_id)
+        return await super().run(message, session_id, locale=locale)
 
 
 async def seed_merchants(session: AsyncSession) -> None:
@@ -297,6 +324,58 @@ async def test_final_failure_replays_the_stored_error(
 
     assert excinfo.value.code is ErrorCode.MERCHANT_SCOPE_VIOLATION
     assert excinfo.value.status_code == 403
+    assert agent.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_final_failure_replay_renders_a_localized_message_per_request_locale(
+    db_session: AsyncSession,
+) -> None:
+    """Task 6 Step 9：同一失败 `client_request_id` 先中文、后英语重放，
+    `code` 相同、`message` 语言不同，业务执行次数（Agent 调用次数）仍为 1。
+
+    真实 PostgreSQL 版本的 `tests/unit/services/test_chat_service.py::
+    test_failed_final_replay_renders_a_localized_message_but_runs_the_agent_once`
+    ——这里额外核实持久化的 `error_payload` 只存了稳定的 `code` +
+    `message_params`，没有存某次请求当时渲染出来的整句 `message`。
+    """
+    await seed_merchants(db_session)
+    request = ChatRequest(message="昨天总 GMV 是多少？", client_request_id="request-locale-final")
+    failing = build_service(db_session, ExplodingAgent(MerchantScopeViolationError()))
+
+    with pytest.raises(MerchantScopeViolationError):
+        await failing.submit(CONTEXT, request, request_id="request-1")
+
+    answer = await db_session.scalar(select(Answer))
+    assert answer is not None
+    assert answer.processing_status == "FAILED_FINAL"
+    assert answer.error_payload is not None
+    assert answer.error_payload["code"] == "MERCHANT_SCOPE_VIOLATION"
+    assert "message_params" in answer.error_payload
+    assert "message" not in answer.error_payload
+
+    from app.localization.locales import SupportedLocale
+
+    agent = CountingAgent()
+    retried = build_service(db_session, agent)
+    with pytest.raises(AppError) as zh_excinfo:
+        await retried.submit(
+            CONTEXT, request, request_id="request-2", locale=SupportedLocale.ZH_CN
+        )
+    with pytest.raises(AppError) as en_excinfo:
+        await retried.submit(
+            CONTEXT, request, request_id="request-3", locale=SupportedLocale.EN_US
+        )
+
+    assert zh_excinfo.value.code is ErrorCode.MERCHANT_SCOPE_VIOLATION
+    assert en_excinfo.value.code is ErrorCode.MERCHANT_SCOPE_VIOLATION
+    assert zh_excinfo.value.message == "无权访问该商家资源"
+    assert (
+        en_excinfo.value.message
+        == "You do not have permission to access this merchant's resources."
+    )
+    assert zh_excinfo.value.message != en_excinfo.value.message
+    # 两次重放都没有真正重跑 Agent——业务执行次数仍为 1（第一次 request-1）。
     assert agent.calls == 0
 
 

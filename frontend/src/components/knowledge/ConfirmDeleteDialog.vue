@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
+
 withDefaults(
   defineProps<{
     name: string
@@ -25,22 +29,26 @@ const emit = defineEmits<{ confirm: []; cancel: [] }>()
       aria-modal="true"
       aria-labelledby="confirm-delete-title"
     >
-      <h2 id="confirm-delete-title">删除知识节点</h2>
+      <h2 id="confirm-delete-title">{{ t('confirmDeleteDialog.title') }}</h2>
       <p class="confirm-delete-dialog__target">
         <strong>{{ name }}</strong>
         <span>{{ path }}</span>
       </p>
       <p v-if="isDomain" class="confirm-delete-dialog__warning">
-        该业务域及其全部文档将被级联删除，此操作不可撤销。
+        {{ t('confirmDeleteDialog.domainWarning') }}
       </p>
-      <p v-else class="confirm-delete-dialog__warning">该文档将被删除，此操作不可撤销。</p>
+      <p v-else class="confirm-delete-dialog__warning">
+        {{ t('confirmDeleteDialog.documentWarning') }}
+      </p>
       <p v-if="errorMessage" class="confirm-delete-dialog__error" role="alert">
         {{ errorMessage }}
       </p>
       <footer>
-        <button type="button" data-testid="cancel" @click="emit('cancel')">取消</button>
+        <button type="button" data-testid="cancel" @click="emit('cancel')">
+          {{ t('confirmDeleteDialog.cancel') }}
+        </button>
         <button type="button" data-testid="confirm" :disabled="pending" @click="emit('confirm')">
-          {{ pending ? '删除中…' : '确认删除' }}
+          {{ pending ? t('confirmDeleteDialog.confirmPending') : t('confirmDeleteDialog.confirm') }}
         </button>
       </footer>
     </section>

@@ -16,19 +16,51 @@ describe('resolveApiBaseUrl', () => {
     // 有同源回退时，生产漏配会让请求打到静态服务器上拿 404，
     // 表现成「接口坏了」而不是「配置漏了」。
     expect(() => resolveApiBaseUrl(value)).toThrow(ApiConfigError)
-    expect(() => resolveApiBaseUrl(value)).toThrow(/VITE_API_BASE_URL/)
+
+    try {
+      resolveApiBaseUrl(value)
+      expect.unreachable('resolveApiBaseUrl 应该抛出 ApiConfigError')
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiConfigError)
+      expect((error as ApiConfigError).code).toBe('CONFIG')
+      expect((error as ApiConfigError).reason).toBe('MISSING_BASE_URL')
+    }
   })
 
-  it('拒绝相对路径', () => {
-    expect(() => resolveApiBaseUrl('/api')).toThrow(ApiConfigError)
+  it('拒绝相对路径，reason 稳定为 INVALID_BASE_URL 并带上原始值', () => {
+    try {
+      resolveApiBaseUrl('/api')
+      expect.unreachable('resolveApiBaseUrl 应该抛出 ApiConfigError')
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiConfigError)
+      expect((error as ApiConfigError).reason).toBe('INVALID_BASE_URL')
+      expect((error as ApiConfigError).value).toBe('/api')
+    }
   })
 
-  it('拒绝非 http(s) 协议', () => {
-    expect(() => resolveApiBaseUrl('ftp://api.example.com')).toThrow(/http/)
+  it('拒绝非 http(s) 协议，reason 稳定为 UNSUPPORTED_PROTOCOL', () => {
+    try {
+      resolveApiBaseUrl('ftp://api.example.com')
+      expect.unreachable('resolveApiBaseUrl 应该抛出 ApiConfigError')
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiConfigError)
+      expect((error as ApiConfigError).reason).toBe('UNSUPPORTED_PROTOCOL')
+      expect((error as ApiConfigError).value).toBe('ftp://api.example.com')
+    }
   })
 
-  it('错误信息是中文，可直接展示给用户', () => {
-    expect(() => resolveApiBaseUrl('')).toThrow(/缺少|配置/)
+  it('只暴露稳定的 code/reason/value，不把展示文案编进异常消息——具体语言由 errorCopy 按当前 locale 翻译', () => {
+    try {
+      resolveApiBaseUrl('')
+      expect.unreachable('resolveApiBaseUrl 应该抛出 ApiConfigError')
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiConfigError)
+      const configError = error as ApiConfigError
+      expect(configError.code).toBe('CONFIG')
+      expect(typeof configError.reason).toBe('string')
+      // details 是 describeError/errorCopy 消费的稳定结构化数据，不是拼好的中文句子。
+      expect(configError.details).toEqual({ reason: 'MISSING_BASE_URL', value: undefined })
+    }
   })
 })
 

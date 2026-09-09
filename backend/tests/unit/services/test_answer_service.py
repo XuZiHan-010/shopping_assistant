@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from decimal import Decimal
 
@@ -530,6 +531,130 @@ def test_fallback_reports_total_latest_and_peak_for_additive_time_series() -> No
     assert "峰值 15" in draft.answer
 
 
+_HAN = re.compile("[一-鿿]")
+
+
+def test_fallback_draft_renders_english_when_locale_is_en_us() -> None:
+    """Task 14 Step 7 finding A：`fallback_draft()` 过去完全不接受 `locale`
+    参数，任何语言的请求耗尽质量循环重试后都会拿到硬编码中文兜底文案。这里
+    直接对 `AnswerService.fallback_draft(facts, locale=EN_US)` 的产出做断言：
+    `answer` 正文和两条 `Recommendation` 的 `title`/`evidence`/`action` 六个
+    字段都不得残留汉字。"""
+
+    from app.localization.locales import SupportedLocale
+    from app.services.answer_service import AnswerService
+
+    draft = AnswerService().fallback_draft(_trend_facts(), locale=SupportedLocale.EN_US)
+
+    assert not _HAN.search(draft.answer), draft.answer
+    assert "18" in draft.answer
+    assert "2026-08-17" in draft.answer
+    assert "15" in draft.answer
+    for recommendation in draft.recommendations:
+        assert not _HAN.search(recommendation.title), recommendation.title
+        assert not _HAN.search(recommendation.evidence), recommendation.evidence
+        assert not _HAN.search(recommendation.action), recommendation.action
+
+
+def test_fallback_draft_still_renders_chinese_by_default() -> None:
+    """回归防线：新增 `locale` 参数不能悄悄改变既有零参数调用点的默认语言。"""
+
+    from app.services.answer_service import AnswerService
+
+    draft = AnswerService().fallback_draft(_trend_facts())
+
+    assert "合计 18" in draft.answer
+    assert draft.recommendations[0].title == "核对查询范围"
+    assert draft.recommendations[1].title == "持续观察指标"
+
+
+def test_fallback_uses_a_single_article_when_metric_is_unresolved_on_summary_branch() -> None:
+    """回归测试（reviewer 2026-09-05 复核发现的 Important 缺口）：
+    `_DEFAULT_METRIC_LABEL[EN_US]` 曾经自带 "the"（"the business metric"），
+    撞上 4 个模板（对比两支/合计摘要/单值）自己已经拼了 "The {metric_label}"，
+    产出 "The the business metric totals ..." 这种双冠词语法错误——只在
+    `facts.metric is None`（指标解析完全失败）时才会触发，两条既有 en-US
+    测试都用真实 `MetricPayload` 夹具，从未覆盖到这条路径，是真实的测试
+    覆盖缺口。这里直接把 `_trend_facts()`（走 summary 分支）的 `metric`
+    换成 `None`，断言渲染结果只有一个冠词。"""
+
+    from app.localization.locales import SupportedLocale
+    from app.services.answer_service import AnswerService
+
+    facts = replace(_trend_facts(), metric=None)
+
+    draft = AnswerService().fallback_draft(facts, locale=SupportedLocale.EN_US)
+
+    assert "the the" not in draft.answer.lower()
+    assert "The business metric totals 18" in draft.answer
+
+
+def test_fallback_uses_a_single_article_when_metric_is_unresolved_on_comparison_branch() -> None:
+    """同一个双冠词风险在对比分支上独立可复现：`result.comparison is not None`
+    的判定完全不依赖 `facts.metric`，指标解析失败时对比类问题同样会落到这条
+    兜底分支。"""
+
+    from app.localization.locales import SupportedLocale
+    from app.services.answer_service import AnswerService
+
+    facts = replace(_comparison_facts(), metric=None)
+
+    draft = AnswerService().fallback_draft(facts, locale=SupportedLocale.EN_US)
+
+    assert "the the" not in draft.answer.lower()
+    assert "The business metric for this query is 150.00" in draft.answer
+
+
+def test_fallback_english_truncated_branch_has_correct_grammar_and_no_han() -> None:
+    """补齐 reviewer Minor 建议里点名的"仅靠代码审查、从未跑过"的截断分支：
+    真实（非 None）指标下 en-US 的截断兜底文案既不残留汉字，也不因为
+    "of {metric_label} data" 这种复合名词结构被误加冠词。"""
+
+    from app.localization.locales import SupportedLocale
+    from app.services.answer_service import AnswerService
+
+    facts = _trend_facts()
+    draft = AnswerService().fallback_draft(
+        replace(facts, query_result=replace(facts.query_result, truncated=True)),
+        locale=SupportedLocale.EN_US,
+    )
+
+    assert not _HAN.search(draft.answer), draft.answer
+    assert "preview row(s) of Return count data" in draft.answer
+    assert "of the Return count data" not in draft.answer
+
+
+def test_fallback_english_non_additive_branch_has_correct_grammar_and_no_han() -> None:
+    """同上，补齐非加和指标分支。"""
+
+    from app.localization.locales import SupportedLocale
+    from app.services.answer_service import AnswerService
+
+    draft = AnswerService().fallback_draft(_non_additive_facts(), locale=SupportedLocale.EN_US)
+
+    assert not _HAN.search(draft.answer), draft.answer
+    assert "row(s) of Return rate data" in draft.answer
+    assert "not totalled across days" in draft.answer
+
+
+def test_fallback_english_comparison_no_ratio_branch_has_correct_grammar_and_no_han() -> None:
+    """补齐对比分支里「基期算不出比例」这条子分支：只有 `change_ratio=None` 才
+    会走 `_FALLBACK_COMPARISON_NO_RATIO_TEMPLATES`，与「有比例」子分支是两条
+    不同模板，需要各自覆盖。"""
+
+    from app.localization.locales import SupportedLocale
+    from app.services.answer_service import AnswerService
+
+    draft = AnswerService().fallback_draft(
+        _comparison_facts(change_ratio=None), locale=SupportedLocale.EN_US
+    )
+
+    assert not _HAN.search(draft.answer), draft.answer
+    assert "the the" not in draft.answer.lower()
+    assert "The Transaction GMV for this query is 150.00" in draft.answer
+    assert "cannot be calculated" in draft.answer
+
+
 def test_fallback_refuses_to_total_a_non_additive_metric() -> None:
     from app.services.answer_service import AnswerService
 
@@ -737,3 +862,328 @@ def test_fallback_explains_when_the_baseline_makes_the_ratio_uncomputable() -> N
 
     assert "无法计算变化率" in draft.answer
     assert "%" not in draft.answer
+
+
+# ---------------------------------------------------------------------------
+# Task 5：语言无关的本地校验——聚合断言与日期区间一致性对英文回答同样生效。
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def service():
+    from app.services.answer_service import AnswerService
+
+    return AnswerService()
+
+
+def _draft_with_answer(answer: str):
+    from app.schemas.answer import AnswerDraft
+    from app.schemas.chat import Recommendation
+
+    return AnswerDraft(
+        answer=answer,
+        recommendations=[
+            Recommendation(title="Note", evidence=answer, action="Review the range."),
+            Recommendation(title="Check", evidence=answer, action="Confirm the date range."),
+        ],
+    )
+
+
+def _facts_without_total():
+    """非加和指标、多行结果——聚合断言检查的结构前提，与语言无关。"""
+
+    from app.services.answer_service import AnswerFacts
+
+    return AnswerFacts(
+        question="What are the refund amounts for the last 7 days?",
+        metric=MetricPayload(
+            metric_code="refund_amount",
+            display_name="Refund amount",
+            unit="CNY",
+            definition="The refund amount of refund records, not summable across the period.",
+            source="Borough Metric Catalog",
+            owner="Business Analytics",
+            status="ACTIVE",
+            generated=False,
+            notice=None,
+        ),
+        query_result=QueryResult(
+            columns=(
+                ResultColumn("date", "Date", "DIMENSION"),
+                ResultColumn("refund_amount", "Refund amount", "METRIC"),
+            ),
+            rows=[
+                {"date": "2026-08-05", "refund_amount": Decimal("4000.00")},
+                {"date": "2026-08-06", "refund_amount": Decimal("4500.00")},
+                {"date": "2026-08-07", "refund_amount": Decimal("3500.00")},
+            ],
+            total_rows=3,
+            truncated=False,
+            source_tables=("refunds",),
+            plan_steps=("Aggregate refund amount by day",),
+            export_spec=None,
+            notes=(),
+            non_additive=True,
+        ),
+    )
+
+
+def test_additive_claim_check_catches_english_total_claim(service) -> None:
+    """英文 total/combined 之类的合计断言必须与中文『合计』受同等校验。"""
+
+    issues = service.validate_issues(
+        draft=_draft_with_answer("Refunds totalled 12,000 CNY over the last 7 days"),
+        facts=_facts_without_total(),
+    )
+
+    assert issues, "英文合计断言必须触发非加和指标校验"
+    assert any("非加和" in issue for issue in issues)
+
+
+def test_additive_claim_phrases_all_six_zh_phrases_resolve_to_a_non_empty_en_value() -> None:
+    """全分支复审 Finding 5：`_ADDITIVE_CLAIM_PHRASES_EN` 是模块导入时通过
+    `localize_catalog_value()` 反查 `_ADDITIVE_CLAIM_PHRASES_ZH` 六个短语算出
+    来的，任何一个短语在 `app.localization.catalog` 里的登记被误删都会让它
+    静默从结果里消失——不会在任何地方报错，只是这个非加和指标幻觉校验在
+    `en-US` 下悄悄少了一条防线，比 `zh-CN` 弱。
+
+    这里没有直接断言 `len(_ADDITIVE_CLAIM_PHRASES_EN) == len(_ADDITIVE_CLAIM_PHRASES_ZH)`
+    ——实测当前是 5 对 6，原因是"合计"和"总计"在 catalog 里都合法地译成同一个
+    英文词 `total`，构造 `_ADDITIVE_CLAIM_PHRASES_EN` 时用的
+    `dict.fromkeys()` 会把这个重复去掉，这是正确的去重行为，不是覆盖缺口。
+    真正需要钉死的不变式是"六个中文短语各自都能在 catalog 里查到非空英文
+    译文"，直接对六个源短语逐一断言,不受去重是否发生、去重掉几个的影响。
+    """
+
+    from app.localization.catalog import localize_catalog_value
+    from app.localization.locales import SupportedLocale
+    from app.services.answer_service import _ADDITIVE_CLAIM_PHRASES_ZH
+
+    resolved = {
+        zh_phrase: localize_catalog_value(zh_phrase, SupportedLocale.EN_US)
+        for zh_phrase in _ADDITIVE_CLAIM_PHRASES_ZH
+    }
+    missing = [zh_phrase for zh_phrase, en_phrase in resolved.items() if not en_phrase]
+
+    assert not missing, f"以下中文合计断言短语在 catalog 中缺少英文译文: {missing}"
+
+
+def _facts_for_last_3_days():
+    """真实查询区间只有 2026-08-05 至 2026-08-07 这 3 天。
+
+    刻意让草稿会用到的数字（1、7）都能在事实包里找到"看似合法"的出处
+    （行内数值 1、日期成分 7），这样如果日期区间一致性校验没有真正生效，
+    通用的"数字未出现在事实包"校验也不会意外把这条用例救回来——确保这条
+    测试只在日期区间比对本身工作时才会通过。
+    """
+
+    from app.services.answer_service import AnswerFacts
+
+    return AnswerFacts(
+        question="What is the refund amount for the last 3 days?",
+        metric=MetricPayload(
+            metric_code="refund_amount",
+            display_name="Refund amount",
+            unit="CNY",
+            definition="The refund amount of refund records.",
+            source="Borough Metric Catalog",
+            owner="Business Analytics",
+            status="ACTIVE",
+            generated=False,
+            notice=None,
+        ),
+        query_result=QueryResult(
+            columns=(
+                ResultColumn("date", "Date", "DIMENSION"),
+                ResultColumn("refund_amount", "Refund amount", "METRIC"),
+            ),
+            rows=[
+                {"date": "2026-08-05", "refund_amount": Decimal("1")},
+                {"date": "2026-08-06", "refund_amount": Decimal("2")},
+                {"date": "2026-08-07", "refund_amount": Decimal("7")},
+            ],
+            total_rows=3,
+            truncated=False,
+            source_tables=("refunds",),
+            plan_steps=("Aggregate refund amount by day",),
+            export_spec=None,
+            notes=(),
+            non_additive=False,
+        ),
+    )
+
+
+def test_date_consistency_check_understands_english_ranges(service) -> None:
+    """英文 "from X to Y" 日期区间必须与实际查询范围比对，而不是被直接放行。"""
+
+    issues = service.validate_issues(
+        draft=_draft_with_answer("From Aug 1 to Aug 7 the refund amount rose"),
+        facts=_facts_for_last_3_days(),
+    )
+
+    assert issues, "陈述的日期区间超出实际查询范围（2026-08-05~07）应当被拦下"
+
+
+def test_date_consistency_check_allows_a_range_contained_in_the_facts(service) -> None:
+    """区间落在事实包范围内时不该被误判——中英文校验必须一样宽松，不只是一样严格。"""
+
+    issues = service.validate_issues(
+        draft=_draft_with_answer("From Aug 5 to Aug 7 the refund amount rose"),
+        facts=_facts_for_last_3_days(),
+    )
+
+    assert issues == []
+
+
+def test_date_consistency_check_still_works_for_chinese_ranges(service) -> None:
+    """中文『8月1日至8月7日』式显式区间同样要与实际范围比对——校验逻辑双语共用。"""
+
+    issues = service.validate_issues(
+        draft=_draft_with_answer("8月1日至8月7日退款金额有所上升"),
+        facts=_facts_for_last_3_days(),
+    )
+
+    assert issues, "中文显式区间超出实际范围同样应当被拦下"
+
+
+# ---------------------------------------------------------------------------
+# 复核 Finding 1：聚合断言的英文匹配改成词边界正则，不能再用子串 `in` 判断——
+# 子串匹配曾经把 "totally"（"total" 的无关前缀）也判成合计断言。
+# ---------------------------------------------------------------------------
+
+
+def test_additive_claim_check_does_not_misfire_on_an_unrelated_word_sharing_a_prefix(
+    service,
+) -> None:
+    """"totally" 与 "total" 共享前缀但语义无关，词边界匹配不能把它误判成合计
+    断言——这正是子串匹配版本会产生的假阳性（reviewer Finding 1）。
+    """
+
+    issues = service.validate_issues(
+        draft=_draft_with_answer("Refund amounts look totally normal, nothing to report."),
+        facts=_facts_without_total(),
+    )
+
+    assert issues == []
+
+
+def test_additive_claim_check_still_treats_combined_as_a_signal_word(service) -> None:
+    """"combined" 作为独立触发词，即使出现在 "combined with" 这类连接短语里
+    也会命中——这是已知的、有意接受的残余误判风险（reviewer 标记为 Minor）：
+    区分"回答把多天数值合并成一个结论"和"combined with 式无关连接词"需要
+    语义理解，超出词边界正则能覆盖的范围，不在本任务治理目标内，这里只是
+    把当前行为显式锁定成一条可读的回归测试。
+    """
+
+    issues = service.validate_issues(
+        draft=_draft_with_answer(
+            "Combined with strong marketing, refund rates for each day stayed low"
+        ),
+        facts=_facts_without_total(),
+    )
+
+    assert any("非加和" in issue for issue in issues)
+
+
+# ---------------------------------------------------------------------------
+# 复核 Finding 2：相对时长断言（"last N days"/"最近 N 天"）过去完全没有任何
+# 代码路径与实际查询区间比对，是与"两个显式日期 token 需要紧邻"这条已知局限
+# 完全不同的、未披露的缺口。
+# ---------------------------------------------------------------------------
+
+
+def _facts_for_a_3_day_window_with_a_thirty_value():
+    """与 `_facts_for_last_3_days` 同样的 3 天真实窗口（2026-08-05~07），但
+    第三天的指标值恰好是 30——这样草稿里出现的 "30" 本身就能在事实包里找到
+    "看似合法"的出处，通用的"数字未出现在事实包"校验不会意外把
+    "最近 30 天"这类越界时长断言的测试用例救回来，确保测试只在相对时长
+    一致性逻辑本身生效时才会通过。
+    """
+
+    from app.services.answer_service import AnswerFacts
+
+    return AnswerFacts(
+        question="What is the refund amount for the last 3 days?",
+        metric=MetricPayload(
+            metric_code="refund_amount",
+            display_name="Refund amount",
+            unit="CNY",
+            definition="The refund amount of refund records.",
+            source="Borough Metric Catalog",
+            owner="Business Analytics",
+            status="ACTIVE",
+            generated=False,
+            notice=None,
+        ),
+        query_result=QueryResult(
+            columns=(
+                ResultColumn("date", "Date", "DIMENSION"),
+                ResultColumn("refund_amount", "Refund amount", "METRIC"),
+            ),
+            rows=[
+                {"date": "2026-08-05", "refund_amount": Decimal("1")},
+                {"date": "2026-08-06", "refund_amount": Decimal("2")},
+                {"date": "2026-08-07", "refund_amount": Decimal("30")},
+            ],
+            total_rows=3,
+            truncated=False,
+            source_tables=("refunds",),
+            plan_steps=("Aggregate refund amount by day",),
+            export_spec=None,
+            notes=(),
+            non_additive=False,
+        ),
+    )
+
+
+def test_date_consistency_check_flags_a_mismatched_relative_duration_in_english(service) -> None:
+    """"over the last 30 days" 远超实际只查到的 3 天范围，必须被拦下。"""
+
+    issues = service.validate_issues(
+        draft=_draft_with_answer("Over the last 30 days, the refund amount rose"),
+        facts=_facts_for_a_3_day_window_with_a_thirty_value(),
+    )
+
+    assert issues, "宣称的 30 天窗口远超实际查询到的 3 天范围，应当被拦下"
+
+
+def test_date_consistency_check_flags_a_mismatched_relative_duration_in_chinese(service) -> None:
+    """中文『最近30天』式相对时长同样要与实际范围比对——校验逻辑双语共用。"""
+
+    issues = service.validate_issues(
+        draft=_draft_with_answer("最近30天退款金额呈上升趋势"),
+        facts=_facts_for_a_3_day_window_with_a_thirty_value(),
+    )
+
+    assert issues, "宣称的 30 天窗口远超实际查询到的 3 天范围，应当被拦下"
+
+
+def test_date_consistency_check_allows_a_relative_duration_that_matches_the_facts(
+    service,
+) -> None:
+    """陈述的时长与实际查询覆盖的天数一致时不该被误判。"""
+
+    issues = service.validate_issues(
+        draft=_draft_with_answer("Over the last 3 days, the refund amount rose"),
+        facts=_facts_for_last_3_days(),
+    )
+
+    assert issues == []
+
+
+def test_date_consistency_check_does_not_crash_on_an_absurdly_large_hallucinated_duration(
+    service,
+) -> None:
+    """模型幻觉出「最近 1000 万天」这类离谱数字时，`date - timedelta(...)` 一旦
+    超出 `date` 能表示的公元 1~9999 年范围就会抛出未捕获的 `OverflowError`
+    （复核 Finding：这个异常不在 `compose_once` 的 try/except 覆盖范围内，
+    会直接崩掉质量循环）。这条离谱声明本身不是真实时长表述，校验应当稳妥地
+    跳过它（不产出这条 issue，也绝不能抛异常），而不是尝试解析后再崩溃。
+    """
+
+    issues = service.validate_issues(
+        draft=_draft_with_answer("Over the last 10000000 days, the refund amount rose"),
+        facts=_facts_for_last_3_days(),
+    )
+
+    assert isinstance(issues, list)

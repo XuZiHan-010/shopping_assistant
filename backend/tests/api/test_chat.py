@@ -8,6 +8,7 @@
 import asyncio
 import json
 import random
+import re
 from collections.abc import Iterator
 from uuid import UUID, uuid4
 
@@ -22,6 +23,7 @@ from app.api.routes import chat as chat_route
 from app.core.config import Settings
 from app.core.errors import IdempotencyKeyReusedError
 from app.core.security import MerchantContext
+from app.localization.locales import SupportedLocale
 from app.main import create_app
 from app.models.knowledge import KnowledgeDocument
 from app.schemas.chat import ChatRequest
@@ -30,6 +32,28 @@ from tests.conftest import MERCHANT_ONE_AUTH
 from tests.support.agent import DeterministicAgent
 
 pytestmark = pytest.mark.asyncio
+
+_HAN_PATTERN = re.compile("[一-鿿]")
+
+
+def contains_han(text: str) -> bool:
+    return bool(_HAN_PATTERN.search(text))
+
+
+def collect_visible_strings(value: object) -> list[str]:
+    """递归收集响应体里所有字符串叶子节点，供 Task 6 的中文残留断言使用。"""
+
+    found: list[str] = []
+    if isinstance(value, str):
+        found.append(value)
+    elif isinstance(value, dict):
+        for item in value.values():
+            found.extend(collect_visible_strings(item))
+    elif isinstance(value, list | tuple):
+        for item in value:
+            found.extend(collect_visible_strings(item))
+    return found
+
 
 MERCHANT_ID = UUID("00000000-0000-0000-0000-000000000031")
 SESSION_ID = UUID("00000000-0000-0000-0000-000000000032")
@@ -52,8 +76,9 @@ class StubChatService:
         request: ChatRequest,
         *,
         request_id: str,
+        locale: SupportedLocale = SupportedLocale.ZH_CN,
     ) -> ChatExecution:
-        del context, request_id
+        del context, request_id, locale
         self.calls += 1
         if self._delay:
             await asyncio.sleep(self._delay)
@@ -82,8 +107,9 @@ class CancelAwareService:
         request: ChatRequest,
         *,
         request_id: str,
+        locale: SupportedLocale = SupportedLocale.ZH_CN,
     ) -> ChatExecution:
-        del context, request, request_id
+        del context, request, request_id, locale
         self.started.set()
         try:
             await asyncio.Event().wait()
@@ -498,6 +524,7 @@ async def test_end_to_end_prefilter_rejection_persists_and_replays_in_conversati
                 content="下单、支付与履约的交易流程说明。",
                 source="test-seed",
                 source_path="业务/交易/业务流程/交易流程.md",
+                source_locale=str(SupportedLocale.ZH_CN),
             )
         )
         await session.commit()
@@ -546,3 +573,49 @@ async def test_end_to_end_stream_stays_readable_as_an_async_byte_stream(
     assert [name for name, _ in events][-1] == "done"
     assert events[-1][1]["answer_mode"] == "CHAT"
     assert events[-1][1]["category"] == "UNKNOWN"
+
+
+async def test_english_chat_localizes_every_visible_field(
+    postgres_client: AsyncClient,
+) -> None:
+    """Task 6 Step 1（brief 原文场景的 HTTP 等价物）：`Accept-Language: en-US`
+    时，`ChatService`/`MerchantQaGraph` 负责本地化的每个字段都必须是英语。
+
+    这个夹具环境按 R3 不配置真实 LLM Key，所以走的是既有
+    `test_end_to_end_chat_persists_and_replays_by_client_request_id` 同一条
+    "模型未配置" CHAT + degraded 降级路径，只是换成英语请求头。
+
+    `degraded_reason`/`quality_notes` 里"模型未配置"这句整句文案的产出方
+    是 `app/intent/service.py`（Task 6 的 Files 列表未包含该文件，也不在
+    Task 6 的职责范围内），至今仍只有中文——这是本任务已知且披露的差距，
+    不在这里断言，避免断言一条注定失败、且失败原因与本任务无关的用例。
+    图层等价测试
+    `tests/unit/agent/test_graph.py::test_english_locale_produces_a_response_with_no_han_characters`
+    用可配置的 FakeLlmClient 走完整流程，真正验证了"整份响应零汉字残留"，
+    这里只验证 Task 6 明确负责、且在这条降级路径上仍会经过的字段：
+    `displayed_user_message`、SSE/思考步骤标签、建议问题、Content-Language
+    响应头。
+    """
+
+    headers = {**MERCHANT_ONE_AUTH, "Accept-Language": "en-US", "Accept": "application/json"}
+    payload = {"message": "最近7天退款金额", "client_request_id": "locale-en-1"}
+
+    response = await postgres_client.post("/api/chat", headers=headers, json=payload)
+
+    assert response.status_code == 200
+    assert response.headers["content-language"] == "en-US"
+    body = response.json()
+    assert body["answer_mode"] == "CHAT"
+    assert body["degraded"] is True
+    # 用户原问题的展示副本必须存在——这个夹具没有配置真实 LLM，
+    # `ChatService._localize_display_message()` 会 fail open 回退原文
+    # （不伪造译文），因此这里只断言字段存在且是字符串，不断言具体译文；
+    # 真正的译文断言在图层单测里用可配置的 Fake LLM 验证。
+    assert isinstance(body["displayed_user_message"], str)
+    assert body["displayed_user_message"] != ""
+    step_labels = [step["label"] for step in body["thinking_steps"]]
+    assert step_labels, "thinking_steps 不应为空"
+    assert not any(contains_han(label) for label in step_labels)
+    assert not any(contains_han(text) for text in body["suggestions"])
+    for group in body["suggestion_alternates"]:
+        assert not any(contains_han(text) for text in group)

@@ -1,11 +1,16 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import { resolveApiBaseUrl } from '@/api/client'
 import { columnLabel } from '@/constants/columnLabels'
+import { useLocaleStore } from '@/stores/locale'
 import type { DataResult, ExportInfo } from '@/types/chat'
 import { buildExportHref, exportExpiry } from '@/utils/download'
 import { formatCell } from '@/utils/format'
+
+const { t } = useI18n()
+const localeStore = useLocaleStore()
 
 const props = defineProps<{
   data: DataResult
@@ -35,12 +40,18 @@ const exportHref = computed(() => {
 </script>
 
 <template>
-  <section class="detail-table" data-testid="detail-table" aria-label="经营明细">
+  <section
+    class="detail-table"
+    data-testid="detail-table"
+    :aria-label="t('detailTable.sectionAria')"
+  >
     <div class="detail-table__head">
       <p v-if="data.truncated" class="detail-table__notice">
-        共 {{ data.totalRows }} 行，已展示前 {{ data.rows.length }} 行，完整数据请下载 CSV。
+        {{ t('detailTable.truncatedNotice', { total: data.totalRows, shown: data.rows.length }) }}
       </p>
-      <p v-else class="detail-table__notice">共 {{ data.totalRows }} 行。</p>
+      <p v-else class="detail-table__notice">
+        {{ t('detailTable.fullNotice', { total: data.totalRows }) }}
+      </p>
       <a
         v-if="exportHref"
         :href="exportHref"
@@ -48,25 +59,31 @@ const exportHref = computed(() => {
         target="_blank"
         rel="noopener"
         data-testid="download-export"
-        >下载明细 CSV（链接 {{ expiry?.minutesRemaining }} 分钟后过期）</a
+        >{{ t('detailTable.downloadLink', { minutes: expiry?.minutesRemaining }) }}</a
       >
       <p v-else-if="exportInfo" class="detail-table__expired">
-        下载链接已过期，重新提问可生成新的导出。
+        {{ t('detailTable.expiredNotice') }}
       </p>
     </div>
     <div class="detail-table__scroll">
       <table>
         <caption>
-          经营明细
+          {{
+            t('detailTable.caption')
+          }}
         </caption>
         <thead>
           <tr>
-            <th v-for="column in columns" :key="column" scope="col">{{ columnLabel(column) }}</th>
+            <th v-for="column in columns" :key="column" scope="col">
+              {{ columnLabel(column, localeStore.locale) }}
+            </th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="(row, index) in data.rows" :key="index">
-            <td v-for="column in columns" :key="column">{{ formatCell(row[column]) }}</td>
+            <td v-for="column in columns" :key="column">
+              {{ formatCell(row[column], localeStore.locale) }}
+            </td>
           </tr>
         </tbody>
       </table>

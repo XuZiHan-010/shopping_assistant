@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import { triggerChatBiRollup } from '@/api/analytics'
 import CategoryTable from '@/components/analytics/CategoryTable.vue'
 import NorthStarCards from '@/components/analytics/NorthStarCards.vue'
+import LanguageSwitcher from '@/components/layout/LanguageSwitcher.vue'
 import AdminTokenDialog from '@/components/knowledge/AdminTokenDialog.vue'
 import { useAnalyticsStore } from '@/stores/analytics'
 
 const TrendChart = defineAsyncComponent(() => import('@/components/analytics/TrendChart.vue'))
 
+const { t } = useI18n()
 const analyticsStore = useAnalyticsStore()
 const authorizationError = ref('')
 const refreshError = ref('')
@@ -25,7 +28,8 @@ async function authorize(token: string): Promise<void> {
   try {
     await analyticsStore.load()
   } catch (error) {
-    authorizationError.value = error instanceof Error ? error.message : '管理员令牌验证失败。'
+    authorizationError.value =
+      error instanceof Error ? error.message : t('opsDashboardView.tokenVerificationFailed')
     analyticsStore.signOut()
   }
 }
@@ -48,7 +52,8 @@ async function refreshRollup(): Promise<void> {
     await triggerChatBiRollup(analyticsStore.window, new AbortController().signal)
     await analyticsStore.load()
   } catch (error) {
-    refreshError.value = error instanceof Error ? error.message : '重刷汇总失败，请稍后重试。'
+    refreshError.value =
+      error instanceof Error ? error.message : t('opsDashboardView.refreshFailed')
   } finally {
     refreshing.value = false
   }
@@ -63,9 +68,12 @@ onMounted(() => {
 <template>
   <main class="ops-dashboard">
     <template v-if="!analyticsStore.adminToken">
+      <div class="ops-dashboard__pre-auth-actions">
+        <LanguageSwitcher />
+      </div>
       <AdminTokenDialog
-        title="Chat BI 运营看板"
-        eyebrow="BOROUGH · ANALYTICS OPS"
+        :title="t('opsDashboardView.title')"
+        :eyebrow="t('opsDashboardView.eyebrow')"
         @submit="authorize"
       />
       <p v-if="authorizationError" class="ops-dashboard__authorization-error" role="alert">
@@ -75,17 +83,24 @@ onMounted(() => {
     <template v-else>
       <header class="ops-dashboard__header">
         <div>
-          <p class="ops-dashboard__eyebrow">BOROUGH · ANALYTICS OPS</p>
-          <h1>Chat BI 运营看板</h1>
-          <p class="ops-dashboard__caption">用可解释的汇总指标持续观察问答体验与质量。</p>
+          <p class="ops-dashboard__eyebrow">{{ t('opsDashboardView.eyebrow') }}</p>
+          <h1>{{ t('opsDashboardView.title') }}</h1>
+          <p class="ops-dashboard__caption">{{ t('opsDashboardView.caption') }}</p>
         </div>
-        <button type="button" class="ops-dashboard__signout" @click="analyticsStore.signOut">
-          退出后台
-        </button>
+        <div class="ops-dashboard__header-actions">
+          <LanguageSwitcher />
+          <button type="button" class="ops-dashboard__signout" @click="analyticsStore.signOut">
+            {{ t('opsDashboardView.signOut') }}
+          </button>
+        </div>
       </header>
 
-      <section class="ops-dashboard__controls" aria-label="看板窗口与汇总操作">
-        <div class="ops-dashboard__windows" role="group" aria-label="统计窗口">
+      <section class="ops-dashboard__controls" :aria-label="t('opsDashboardView.controlsAria')">
+        <div
+          class="ops-dashboard__windows"
+          role="group"
+          :aria-label="t('opsDashboardView.windowsAria')"
+        >
           <button
             v-for="days in windows"
             :key="days"
@@ -94,7 +109,7 @@ onMounted(() => {
             :class="{ 'ops-dashboard__window--active': analyticsStore.windowDays === days }"
             @click="selectWindow(days)"
           >
-            最近 {{ days }} 天
+            {{ t('opsDashboardView.windowLabel', { days }) }}
           </button>
         </div>
         <button
@@ -103,13 +118,13 @@ onMounted(() => {
           :disabled="refreshing"
           @click="refreshRollup"
         >
-          {{ refreshing ? '正在重刷…' : '重刷汇总' }}
+          {{ refreshing ? t('opsDashboardView.refreshing') : t('opsDashboardView.refresh') }}
         </button>
       </section>
 
       <p v-if="displayedError" class="ops-dashboard__error" role="alert">{{ displayedError }}</p>
       <p v-if="analyticsStore.loading" class="ops-dashboard__loading" aria-live="polite">
-        正在加载 Chat BI 数据…
+        {{ t('opsDashboardView.loading') }}
       </p>
 
       <section
@@ -181,6 +196,12 @@ onMounted(() => {
   font-size: var(--font-size-control);
 }
 
+.ops-dashboard__header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
 .ops-dashboard__signout,
 .ops-dashboard__windows button,
 .ops-dashboard__refresh {
@@ -238,6 +259,13 @@ onMounted(() => {
 .ops-dashboard__authorization-error {
   width: min(100%, 31rem);
   margin: calc(-1 * var(--space-6)) auto 0;
+}
+
+.ops-dashboard__pre-auth-actions {
+  display: flex;
+  justify-content: flex-end;
+  width: min(100%, 31rem);
+  margin: 0 auto var(--space-4);
 }
 
 .ops-dashboard__loading {

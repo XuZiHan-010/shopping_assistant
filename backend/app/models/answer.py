@@ -38,6 +38,10 @@ class Answer(UuidPrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, Base):
             "elapsed_ms IS NULL OR elapsed_ms >= 0",
             name="ck_answers_elapsed_ms_nonnegative",
         ),
+        CheckConstraint(
+            "response_locale IN ('zh-CN', 'en-US', 'mixed', 'und')",
+            name="ck_answers_response_locale",
+        ),
         UniqueConstraint(
             "merchant_id",
             "client_request_id",
@@ -71,6 +75,11 @@ class Answer(UuidPrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, Base):
     response_payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     error_payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     elapsed_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # 回答正文本身使用的语言。新生成的回答正常只写 `zh-CN`/`en-US`；历史行允许
+    # `mixed`/`und`——由迁移按 `response_payload` 中的人类可读字段分类回填,不得
+    # 伪造成 `zh-CN`。应用层不额外收窄这个 CHECK 允许的取值域,避免和迁移的回填
+    # 结果冲突。
+    response_locale: Mapped[str] = mapped_column(String(16), nullable=False)
 
 
 class Feedback(UuidPrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, Base):

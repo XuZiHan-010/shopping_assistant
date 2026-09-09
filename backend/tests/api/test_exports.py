@@ -16,6 +16,7 @@ from fastapi import FastAPI
 from httpx import AsyncClient
 
 from app.api.dependencies import _DEV_EXPORT_SIGNING_SECRET
+from app.localization.locales import SourceLanguage
 from app.models.analytics import Product
 from app.models.answer import Answer
 from app.models.conversation import Conversation
@@ -42,6 +43,7 @@ async def _seed_export(app: FastAPI, *, formula_title: bool = False) -> str:
             request_digest="c" * 64,
             processing_status="SUCCEEDED",
             response_payload={},
+            response_locale=str(SourceLanguage.UND),
         )
         session.add(answer)
         session.add(
@@ -140,6 +142,7 @@ async def test_expired_link_is_rejected_with_410(
             request_digest="d" * 64,
             processing_status="SUCCEEDED",
             response_payload={},
+            response_locale=str(SourceLanguage.UND),
         )
         session.add(answer)
         await session.flush()
