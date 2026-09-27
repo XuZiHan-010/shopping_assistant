@@ -1,0 +1,131 @@
+name: N1 契约与安全验证
+
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: n1-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      TEST_DATABASE_URL: postgresql+psycopg://borough:borough_local@127.0.0.1:55432/borough_test
+      REQUIRE_INTEGRATION_DB: "1"
+      LLM_API_KEY: ""
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: borough
+          POSTGRES_PASSWORD: borough_local
+          POSTGRES_DB: borough_test
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U borough -d borough_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - run: uv sync --frozen
+      - name: 安全硬门禁（缺库或 skip 必须失败）
+        run: uv run --frozen pytest tests/eval/test_security_gate.py -q
+      - name: 后端回归（时序哨兵在独立任务运行）
+        run: uv run --frozen pytest -m "not security_timing" -q
+      - run: uv run --frozen ruff check .
+      - run: uv run --frozen mypy app
+
+  security-timing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      TEST_DATABASE_URL: postgresql+psycopg://borough:borough_local@127.0.0.1:55432/borough_test
+      REQUIRE_INTEGRATION_DB: "1"
+      REQUIRE_SECURITY_TIMING: "1"
+      LLM_API_KEY: ""
+    # 独立 runner / 服务容器，不能与迁移回归共享数据库。
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: borough
+          POSTGRES_PASSWORD: borough_local
+          POSTGRES_DB: borough_test
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U borough -d borough_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          python-version: "3.12"
+      - run: uv sync --frozen
+      - run: uv run --frozen pytest -m security_timing -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run codegen:check
+      - run: npm run typecheck
+      - run: npm run test -- src/api/adapters/session.spec.ts
+
+  shop:
+    # 顾客端（Next.js）。浏览器 E2E（npm run test:e2e）需要一次性 PostgreSQL 库，本地按
+    # shop/playwright.config.ts 头注释运行，不放进这个无数据库的 job。
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: shop
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: shop/package-lock.json
+      - run: npm ci
+      - run: npm run codegen:check
+      - run: npm run tokens:check
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test

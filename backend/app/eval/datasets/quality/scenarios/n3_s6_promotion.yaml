@@ -1,0 +1,59 @@
+# 场景 S6：滞销告警 → 折扣券闭环（PRD M6、D4，N3 阶段 C Task 4）——质量回归登记。
+#
+# 放在 `quality/scenarios/` 子目录，理由同其余 N2/N3 场景登记文件。
+#
+# 只登记**依赖模型质量**的那一段：商家问"这个商品该怎么处理" → Agent 建议折扣促销 →
+# 起草折扣券。护栏数字本身（20% 上限、护栏收紧后复检）是确定性代码，由
+# `tests/unit/services/v2/test_guardrails.py`、
+# `tests/integration/v2/test_draft_apply_pricing_promotions.py` 覆盖；rubric 判断的是
+# 措辞是否符合 M6（不承诺超过护栏上限的方案、不在起草说明里编造未经核实的成本结论）。
+# 顾客端券列表可见性由后端 `list_coupons`/`CouponRow.is_active` 保证，真实模型跑这条用例
+# 属于另行授权的人工验收（R3），不进默认测试。
+
+- id: QLT-S6-001
+  introduced_in: N3
+  role: MERCHANT
+  skill: pricing-promotions
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: answer_quality
+  turns:
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/merchant/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json:
+          client_request_id: eval-qlt-s6-001
+          message: 这个商品卖得很慢，帮我出一张折扣券促销一下。
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: degraded
+      expected: false
+
+- id: QLT-S6-002
+  introduced_in: N3
+  role: MERCHANT
+  skill: pricing-promotions
+  risk: QUALITY
+  locale: en-US
+  form: ENDPOINT
+  rubric_id: answer_quality
+  turns:
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/merchant/chat
+        headers: {Accept: application/json, Accept-Language: en-US}
+        json:
+          client_request_id: eval-qlt-s6-002
+          message: This item is moving slowly, please draft a discount coupon for it.
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: degraded
+      expected: false

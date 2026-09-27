@@ -20,14 +20,21 @@ from app.core.rate_limit import SlidingWindowRateLimiter
 from app.db.session import Database
 from app.knowledge.wiki_seed import seed_wiki_documents
 from app.localization.locales import parse_accept_language
+from app.services.session_reconciliation import reconcile_demo_issuers
+from app.skills.registry import DEFAULT_ROOTS, SkillRegistry
+from app.skills.tool import skill_tools
+from app.tools.customer import build_customer_tools
+from app.tools.merchant import build_merchant_tools
+from app.tools.registry import build_tool_registry
 
 _REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 
-# 跨域放行的请求头。两套凭证走两个不同的头：商家用 Authorization，
-# 管理员用 X-Admin-Token，后端据此区分调用方，详见 AGENTS.md §10.2.1。
+# 跨域放行的请求头。商家 Bearer 走 Authorization，管理员走 X-Admin-Token，
+# v2 顾客/商家会话走 X-Session-Id，后端据此区分调用方，详见 AGENTS.md §八。
 _ALLOWED_HEADERS = [
     "Authorization",
     "X-Admin-Token",
+    "X-Session-Id",
     "Accept",
     "Content-Type",
     "X-Request-Id",
@@ -56,20 +63,18 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        database_ready = False
         try:
             await resolved_database.connect_with_retry()
-            database_ready = True
-        except Exception as exc:
-            logger.warning(
-                "database_startup_degraded",
-                exception_type=type(exc).__name__,
-            )
-        if database_ready:
+            # 先于其他启动任务执行，且失败即中止启动：对账没跑成，被移除的演示
+            # Token 换出的商家会话就仍然有效，宁可起不来也不带着这个缺口对外服务。
+            revoked = await reconcile_demo_issuers(resolved_database, resolved_settings)
+            logger.info("session_issuers_reconciled", revoked_sessions=revoked)
             created = await seed_wiki_documents(resolved_database)
             logger.info("wiki_seed_imported", created=created)
-        yield
-        await resolved_database.dispose()
+            yield
+        finally:
+            # 连接、对账或种子导入失败也必须释放连接池。
+            await resolved_database.dispose()
 
     app = FastAPI(
         title="Borough 商家 AI 助手 API",
@@ -83,10 +88,32 @@ def create_app(
         resolved_settings.rate_limit_per_minute, clock=monotonic
     )
     app.state.metrics = OperationalMetrics()
+    # 工具注册表自检在这里执行：错误的工具定义让服务起不来，而不是在某次提问时才暴露（§6.9）。
+    # N2 模块 C 登记商家工具面，`n2-trade-closed-loop` Task 6 登记顾客工具面；两面互不相交。
+    # Skill 注册表同样在启动期扫描白名单目录并自检（PRD A4）：格式、长度或路径不合格让服务起不来。
+    # 索引非空的角色才会得到 `load_skill` 工具；两端都为空时工具面与 N2 相同。
+    app.state.skill_registry = SkillRegistry.from_roots(
+        DEFAULT_ROOTS, max_chars=resolved_settings.skill_max_chars
+    )
+    app.state.tool_registry = build_tool_registry(
+        (
+            *build_merchant_tools(
+                resolved_database,
+                business_timezone=resolved_settings.business_timezone,
+                alias_secret=(
+                    resolved_settings.buyer_alias_secret or "development-buyer-alias-secret"
+                ).encode(),
+                export_signing_secret=resolved_settings.export_signing_secret,
+                export_url_ttl_minutes=resolved_settings.export_url_ttl_minutes,
+            ),
+            *build_customer_tools(resolved_database),
+            *skill_tools(app.state.skill_registry),
+        )
+    )
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[str(resolved_settings.frontend_origin).rstrip("/")],
+        allow_origins=resolved_settings.cors_allowed_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=_ALLOWED_HEADERS,

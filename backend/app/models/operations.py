@@ -136,10 +136,33 @@ class ExportFile(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
         ForeignKey("merchants.id", ondelete="CASCADE"),
         nullable=False,
     )
-    answer_id: Mapped[UUID] = mapped_column(
+    #: v1 总在 `Answer` 行落库后才创建导出，恒非空；v2 工具循环内的 `create_export`
+    #: 在 `Answer` 行落库前写入（`ToolContext.answer_id` 是本轮预分配的真实值，
+    #: 但写入这一刻外键还看不到它），因此放宽为可空（迁移 `20260925_0036`）。
+    answer_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("answers.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
     )
     export_spec: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class OperationEvidenceNonce(Base):
+    """界面操作证据的一次性消费记录（§8.7.9）。
+
+    没有 `merchant_id`：nonce 本身不是经营数据，主体绑定写在**签名载荷**里并在验证时比对；
+    把商家写进这张表只会多一处可被伪造输入影响的判定。
+    """
+
+    __tablename__ = "operation_evidence_nonces"
+    __table_args__ = (
+        CheckConstraint("expires_at > issued_at", name="ck_operation_evidence_nonces_window"),
+        Index("ix_operation_evidence_nonces_expires_at", "expires_at"),
+    )
+
+    purpose: Mapped[str] = mapped_column(String(64), primary_key=True)
+    nonce: Mapped[str] = mapped_column(String(64), primary_key=True)
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

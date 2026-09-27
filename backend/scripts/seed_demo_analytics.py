@@ -10,42 +10,24 @@ from __future__ import annotations
 import argparse
 import asyncio
 from datetime import UTC, date, datetime
-from urllib.parse import urlparse
 
-from sqlalchemy import delete
+from sqlalchemy import delete, text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analytics.dates import business_today
 from app.analytics.demo_data import DEMO_ANALYTICS_SEED_BASE, build_demo_dataset
-from app.core.config import AppEnvironment, Settings, get_settings
+from app.analytics.seed_safety import assert_local_database_url, reject_production
+from app.core.config import get_settings
 from app.core.runtime import configure_event_loop_policy
 from app.db.session import Database
+from app.jobs.seed_demo_rolling import _require_demo_merchants
+from app.models.after_sales import AfterSale, AfterSaleLine
 from app.models.analytics import Order, OrderItem, Product, Refund, ReturnRecord, SupportTicket
+from app.models.drafts import ChangeLedger, Draft
+from app.models.events import FulfillmentEvent, InventoryEvent
+from app.models.memory_v2 import CustomerSignal, DailyBrief
+from app.models.promotion import Coupon
 from app.services.seed_service import default_merchants
-
-_DELETE_ORDER = (SupportTicket, ReturnRecord, Refund, OrderItem, Order, Product)
-_LOCAL_DATABASE_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "postgres"})
-
-
-def assert_local_database_url(database_url: str) -> None:
-    """全量重建只允许连接本机或本地 Compose PostgreSQL。"""
-
-    try:
-        hostname = urlparse(database_url).hostname
-    except ValueError as error:
-        raise RuntimeError("全量演示 Seed 只能连接本机数据库") from error
-    if hostname is None or hostname.lower() not in _LOCAL_DATABASE_HOSTS:
-        raise RuntimeError("全量演示 Seed 只能连接本机数据库")
-
-
-def reject_production(settings: Settings) -> None:
-    """本脚本开头会 DELETE 掉六张经营表里该商家的**全部**数据再重写。
-
-    与 `scripts/seed_demo_data.py` 同一道护栏：一个填错的 `DATABASE_URL`
-    在生产上就是一次破坏性操作，而不是「多了一批演示数据」。
-    """
-
-    if settings.app_env is AppEnvironment.PRODUCTION:
-        raise RuntimeError("生产环境禁止运行演示 Seed")
 
 
 def default_end_date(now: datetime, *, timezone: str) -> date:
@@ -59,35 +41,58 @@ def default_end_date(now: datetime, *, timezone: str) -> date:
     return business_today(now, timezone=timezone)
 
 
+async def seed_analytics(session: AsyncSession, *, days: int, end_date: date) -> int:
+    """全量重灌只面向三商家专用库，先检查商家集合，再改写任何事实。"""
+
+    await _require_demo_merchants(session)
+    if days < 1:
+        raise ValueError("days 必须大于 0")
+    # 事件账本拒绝 DELETE；本地专用库经三商家精确校验后，可显式 TRUNCATE 重建。
+    await session.execute(
+        text("TRUNCATE TABLE after_sale_events, fulfillment_events, inventory_events")
+    )
+    for model in (ChangeLedger, Draft, Coupon, DailyBrief, CustomerSignal):
+        await session.execute(delete(model))
+    for model in (SupportTicket, ReturnRecord, Refund, AfterSaleLine, AfterSale):
+        await session.execute(delete(model))
+    written = 0
+    for index, merchant in enumerate(default_merchants()):
+        for model in (OrderItem, Order, Product):
+            await session.execute(delete(model).where(model.merchant_id == merchant.id))
+        dataset = build_demo_dataset(
+            merchant_id=merchant.id,
+            end_date=end_date,
+            days=days,
+            seed=DEMO_ANALYTICS_SEED_BASE + index,
+        )
+        for model, rows in (
+            (Product, dataset.products),
+            (Order, dataset.orders),
+            (OrderItem, dataset.order_items),
+            (Refund, dataset.refunds),
+            (ReturnRecord, dataset.returns),
+            (SupportTicket, dataset.tickets),
+            (InventoryEvent, dataset.inventory_events),
+            (FulfillmentEvent, dataset.fulfillment_events),
+        ):
+            if rows:
+                await session.execute(model.__table__.insert(), rows)
+                written += len(rows)
+    return written
+
+
 async def _seed(days: int, end_date: date) -> int:
     settings = get_settings()
     assert_local_database_url(settings.database_url)
     reject_production(settings)
     database = Database(settings)
-    written = 0
-    async with database.session() as session:
-        for index, merchant in enumerate(default_merchants()):
-            for model in _DELETE_ORDER:
-                await session.execute(delete(model).where(model.merchant_id == merchant.id))
-            dataset = build_demo_dataset(
-                merchant_id=merchant.id,
-                end_date=end_date,
-                days=days,
-                seed=DEMO_ANALYTICS_SEED_BASE + index,
-            )
-            for model, rows in (
-                (Product, dataset.products),
-                (Order, dataset.orders),
-                (OrderItem, dataset.order_items),
-                (Refund, dataset.refunds),
-                (ReturnRecord, dataset.returns),
-                (SupportTicket, dataset.tickets),
-            ):
-                if rows:
-                    await session.execute(model.__table__.insert(), rows)
-                    written += len(rows)
-        await session.commit()
-    return written
+    try:
+        async with database.session() as session:
+            written = await seed_analytics(session, days=days, end_date=end_date)
+            await session.commit()
+        return written
+    finally:
+        await database.dispose()
 
 
 def _dry_run(days: int, end_date: date) -> None:
@@ -110,6 +115,8 @@ def _dry_run(days: int, end_date: date) -> None:
                 dataset.refunds,
                 dataset.returns,
                 dataset.tickets,
+                dataset.inventory_events,
+                dataset.fulfillment_events,
             )
         )
         total += rows

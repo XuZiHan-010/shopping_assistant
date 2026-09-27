@@ -53,3 +53,4 @@ Thumbs.db
 # 也不被构建消费，占仓库一半体积。保留在本地即可。
 yshopping-merchant-ai 4/
 yshopping-prototype/
+vendor/

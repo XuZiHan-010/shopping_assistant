@@ -1,0 +1,91 @@
+# N3 阶段 C Task 0：业绩洞察 Skill 的触发用例。
+# 2 条正确触发 + 1 条误触发 + 1 条边界反例，格式复用 `app/eval/cases.py::EvalCase`。
+# 本文件只被 `load_skill_cases()` 校验形状，真实的触发判定由未来评测运行器（N4/N5）执行。
+
+- id: performance-insights-hit1
+  introduced_in: N3
+  role: MERCHANT
+  skill: performance-insights
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: skill_trigger
+  turns:
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/merchant/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json: {message: 这周销售额为什么下滑了, client_request_id: skill-perf-hit1}
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: tool_calls_include
+      expected: load_skill:performance-insights
+
+- id: performance-insights-hit2
+  introduced_in: N3
+  role: MERCHANT
+  skill: performance-insights
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: skill_trigger
+  turns:
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/merchant/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json: {message: 哪个品类贡献了本月大部分的净成交额增长, client_request_id: skill-perf-hit2}
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: tool_calls_include
+      expected: load_skill:performance-insights
+
+- id: performance-insights-miss1
+  introduced_in: N3
+  role: MERCHANT
+  skill: performance-insights
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: skill_trigger
+  turns:
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/merchant/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json: {message: 帮我把这个商品的库存加 60 件, client_request_id: skill-perf-miss1}
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: tool_calls_exclude
+      expected: load_skill:performance-insights
+
+- id: performance-insights-boundary1
+  introduced_in: N3
+  role: MERCHANT
+  skill: performance-insights
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: skill_trigger
+  turns:
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/merchant/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json: {message: 今天的销售额是多少, client_request_id: skill-perf-boundary1}
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: tool_calls_exclude
+      expected: load_skill:performance-insights

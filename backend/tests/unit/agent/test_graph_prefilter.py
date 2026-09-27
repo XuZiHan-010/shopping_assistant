@@ -69,9 +69,9 @@ def _metric_intent_response() -> str:
 
 def test_graph_nodes_include_prefilter_between_index_and_classify() -> None:
     assert len(GRAPH_NODES) == 12
-    assert GRAPH_NODES.index("prefilter_question") == GRAPH_NODES.index(
-        "retrieve_knowledge_index"
-    ) + 1
+    assert (
+        GRAPH_NODES.index("prefilter_question") == GRAPH_NODES.index("retrieve_knowledge_index") + 1
+    )
     assert GRAPH_NODES.index("prefilter_question") == GRAPH_NODES.index("classify_intent") - 1
 
 
@@ -176,9 +176,7 @@ async def test_prefilter_disabled_by_default_matches_pre_existing_behavior() -> 
 
     llm = FakeLlmClient(
         responses=[
-            json.dumps(
-                {"answer_mode": "METRIC", "category": "TRADE", "intent_keywords": ["GMV"]}
-            ),
+            json.dumps({"answer_mode": "METRIC", "category": "TRADE", "intent_keywords": ["GMV"]}),
             _metric_intent_response(),
         ]
     )

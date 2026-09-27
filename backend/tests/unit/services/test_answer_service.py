@@ -1055,7 +1055,7 @@ def test_date_consistency_check_still_works_for_chinese_ranges(service) -> None:
 def test_additive_claim_check_does_not_misfire_on_an_unrelated_word_sharing_a_prefix(
     service,
 ) -> None:
-    """"totally" 与 "total" 共享前缀但语义无关，词边界匹配不能把它误判成合计
+    """ "totally" 与 "total" 共享前缀但语义无关，词边界匹配不能把它误判成合计
     断言——这正是子串匹配版本会产生的假阳性（reviewer Finding 1）。
     """
 
@@ -1068,7 +1068,7 @@ def test_additive_claim_check_does_not_misfire_on_an_unrelated_word_sharing_a_pr
 
 
 def test_additive_claim_check_still_treats_combined_as_a_signal_word(service) -> None:
-    """"combined" 作为独立触发词，即使出现在 "combined with" 这类连接短语里
+    """ "combined" 作为独立触发词，即使出现在 "combined with" 这类连接短语里
     也会命中——这是已知的、有意接受的残余误判风险（reviewer 标记为 Minor）：
     区分"回答把多天数值合并成一个结论"和"combined with 式无关连接词"需要
     语义理解，超出词边界正则能覆盖的范围，不在本任务治理目标内，这里只是
@@ -1137,7 +1137,7 @@ def _facts_for_a_3_day_window_with_a_thirty_value():
 
 
 def test_date_consistency_check_flags_a_mismatched_relative_duration_in_english(service) -> None:
-    """"over the last 30 days" 远超实际只查到的 3 天范围，必须被拦下。"""
+    """ "over the last 30 days" 远超实际只查到的 3 天范围，必须被拦下。"""
 
     issues = service.validate_issues(
         draft=_draft_with_answer("Over the last 30 days, the refund amount rose"),

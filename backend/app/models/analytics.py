@@ -11,10 +11,12 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import (
     CheckConstraint,
+    Computed,
     Date,
     DateTime,
     ForeignKey,
@@ -22,8 +24,11 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
+    Text,
     UniqueConstraint,
+    text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -48,6 +53,10 @@ class Product(_MerchantScopedMixin, UuidPrimaryKeyMixin, CreatedAtMixin, Updated
             "status IN ('ONLINE', 'OFFLINE', 'AUDITING', 'REJECTED')",
             name="ck_products_status",
         ),
+        CheckConstraint("stock_on_hand >= 0", name="ck_products_stock_on_hand_nonneg"),
+        CheckConstraint("stock_reserved >= 0", name="ck_products_stock_reserved_nonneg"),
+        CheckConstraint("stock_reserved <= stock_on_hand", name="ck_products_reserved_le_on_hand"),
+        CheckConstraint("content_version >= 1", name="ck_products_content_version_positive"),
         UniqueConstraint("merchant_id", "product_code", name="uq_products_merchant_code"),
         Index("ix_products_merchant_business_date", "merchant_id", "business_date"),
         Index("ix_products_merchant_category", "merchant_id", "category"),
@@ -61,6 +70,18 @@ class Product(_MerchantScopedMixin, UuidPrimaryKeyMixin, CreatedAtMixin, Updated
     price: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False)
     listed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    short_description: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    detail_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attributes: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
+    image_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    stock_on_hand: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    stock_reserved: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    stock_available: Mapped[int] = mapped_column(
+        Integer, Computed("stock_on_hand - stock_reserved", persisted=True), nullable=False
+    )
+    low_stock_threshold: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    content_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    source_locale: Mapped[str] = mapped_column(String(8), nullable=False, server_default="zh-CN")
 
 
 class Order(_MerchantScopedMixin, UuidPrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, Base):
@@ -70,10 +91,50 @@ class Order(_MerchantScopedMixin, UuidPrimaryKeyMixin, CreatedAtMixin, UpdatedAt
             "order_status IN ('CREATED', 'PAID', 'SHIPPED', 'COMPLETED', 'CANCELLED', 'CLOSED')",
             name="ck_orders_status",
         ),
+        CheckConstraint(
+            "payment_status IN ('PENDING','PAID','CLOSED')", name="ck_orders_payment_status"
+        ),
+        CheckConstraint(
+            "fulfillment_status IN "
+            "('NOT_SHIPPED','SHIPPED','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERED')",
+            name="ck_orders_fulfillment_status",
+        ),
+        CheckConstraint(
+            "payment_status <> 'PENDING' OR fulfillment_status = 'NOT_SHIPPED'",
+            name="ck_orders_unpaid_not_shipped",
+        ),
+        CheckConstraint(
+            "(payment_status = 'CLOSED') = (close_reason IS NOT NULL)",
+            name="ck_orders_closed_reason",
+        ),
+        CheckConstraint(
+            "lifecycle_origin IN ('LEGACY_V1','V2')", name="ck_orders_lifecycle_origin"
+        ),
+        CheckConstraint(
+            "(order_status = 'CREATED' AND payment_status = 'PENDING' "
+            "AND fulfillment_status = 'NOT_SHIPPED' AND close_reason IS NULL) OR "
+            "(order_status = 'PAID' AND payment_status = 'PAID' "
+            "AND fulfillment_status = 'NOT_SHIPPED' AND close_reason IS NULL) OR "
+            "(order_status = 'SHIPPED' AND payment_status = 'PAID' "
+            "AND fulfillment_status IN ('SHIPPED','IN_TRANSIT','OUT_FOR_DELIVERY') "
+            "AND close_reason IS NULL) OR "
+            "(order_status = 'COMPLETED' AND payment_status = 'PAID' "
+            "AND fulfillment_status = 'DELIVERED' AND close_reason IS NULL) OR "
+            "(order_status = 'CANCELLED' AND payment_status = 'CLOSED' "
+            "AND fulfillment_status = 'NOT_SHIPPED' AND close_reason = 'CUSTOMER_CANCEL') OR "
+            "(order_status = 'CLOSED' AND payment_status = 'CLOSED' "
+            "AND fulfillment_status = 'NOT_SHIPPED' AND close_reason = 'TIMEOUT')",
+            name="ck_orders_legacy_status_consistent",
+        ),
         UniqueConstraint("merchant_id", "order_no", name="uq_orders_merchant_no"),
         Index("ix_orders_merchant_business_date", "merchant_id", "business_date"),
         Index("ix_orders_merchant_status", "merchant_id", "order_status"),
         Index("ix_orders_merchant_address_city", "merchant_id", "address_city_name"),
+        Index(
+            "ix_orders_v2_pending_placed_at",
+            "placed_at",
+            postgresql_where=text("payment_status = 'PENDING' AND lifecycle_origin = 'V2'"),
+        ),
     )
 
     order_no: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -86,11 +147,37 @@ class Order(_MerchantScopedMixin, UuidPrimaryKeyMixin, CreatedAtMixin, UpdatedAt
     paid_amount: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
     placed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    payment_status: Mapped[str] = mapped_column(String(16), nullable=False)
+    fulfillment_status: Mapped[str] = mapped_column(String(24), nullable=False)
+    after_sale_status: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="NONE"
+    )
+    close_reason: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    lifecycle_origin: Mapped[str] = mapped_column(String(16), nullable=False)
+    source_timezone: Mapped[str] = mapped_column(
+        String(64), nullable=False, server_default="Asia/Shanghai"
+    )
+    #: v2 订单使用的券；历史订单为空（交易计划 Task 3，迁移 0031）。
+    coupon_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("coupons.id", ondelete="RESTRICT", name="fk_orders_coupon_id"),
+        nullable=True,
+    )
+    #: 与 `payment_status = 'CLOSED'` 成对写入；历史关闭订单为空。
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class OrderItem(_MerchantScopedMixin, UuidPrimaryKeyMixin, CreatedAtMixin, Base):
     __tablename__ = "order_items"
     __table_args__ = (
+        CheckConstraint(
+            "discount_amount >= 0 AND line_total >= 0", name="ck_order_items_nonnegative_amounts"
+        ),
+        CheckConstraint(
+            "line_total = unit_price * quantity - discount_amount",
+            name="ck_order_items_price_snapshot",
+        ),
+        CheckConstraint("item_amount = line_total", name="ck_order_items_legacy_amount_consistent"),
         Index("ix_order_items_merchant_business_date", "merchant_id", "business_date"),
         Index("ix_order_items_order", "order_id"),
     )
@@ -107,6 +194,11 @@ class OrderItem(_MerchantScopedMixin, UuidPrimaryKeyMixin, CreatedAtMixin, Base)
     )
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     item_amount: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
+    unit_price: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
+    discount_amount: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
+    line_total: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
+    #: 下单时的商品名称快照（v2 必填，由结账写入）；历史行为空。
+    title_snapshot: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
 
 class Refund(_MerchantScopedMixin, UuidPrimaryKeyMixin, CreatedAtMixin, Base):
@@ -124,6 +216,9 @@ class Refund(_MerchantScopedMixin, UuidPrimaryKeyMixin, CreatedAtMixin, Base):
         PG_UUID(as_uuid=True),
         ForeignKey("order_items.id", ondelete="CASCADE"),
         nullable=False,
+    )
+    after_sale_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("after_sales.id", ondelete="SET NULL"), nullable=True
     )
     refund_amount: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
     refund_reason: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -151,6 +246,9 @@ class ReturnRecord(_MerchantScopedMixin, UuidPrimaryKeyMixin, CreatedAtMixin, Ba
         ForeignKey("order_items.id", ondelete="CASCADE"),
         nullable=False,
     )
+    after_sale_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("after_sales.id", ondelete="SET NULL"), nullable=True
+    )
     return_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     return_reason: Mapped[str] = mapped_column(String(64), nullable=False)
     return_status: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -168,6 +266,7 @@ class SupportTicket(
             name="ck_support_tickets_status",
         ),
         UniqueConstraint("merchant_id", "ticket_no", name="uq_support_tickets_merchant_no"),
+        UniqueConstraint("after_sale_id", name="uq_support_tickets_after_sale_id"),
         Index("ix_support_tickets_merchant_business_date", "merchant_id", "business_date"),
     )
 
@@ -176,6 +275,9 @@ class SupportTicket(
         PG_UUID(as_uuid=True),
         ForeignKey("orders.id", ondelete="SET NULL"),
         nullable=True,
+    )
+    after_sale_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("after_sales.id", ondelete="SET NULL"), nullable=True
     )
     ticket_status: Mapped[str] = mapped_column(String(16), nullable=False)
     ticket_reason: Mapped[str] = mapped_column(String(64), nullable=False)

@@ -8,7 +8,7 @@ import { useLocaleStore } from '@/stores/locale'
 
 import KnowledgeTree from './KnowledgeTree.vue'
 
-function mountTree(props: Record<string, unknown>) {
+function mountTree(props: InstanceType<typeof KnowledgeTree>['$props']) {
   return mount(KnowledgeTree, { props, global: { plugins: [i18n] } })
 }
 

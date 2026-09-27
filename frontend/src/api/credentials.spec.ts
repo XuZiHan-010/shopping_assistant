@@ -54,6 +54,20 @@ describe('buildAuthHeaders', () => {
       expect.objectContaining({ code: 'AUTH_REQUIRED' }),
     )
   })
+
+  it('merchant-session 作用域只带 X-Session-Id，不带 Authorization', () => {
+    setCredentialProvider(() => ({ merchantToken: 'tk', sessionId: 'sid' }))
+    const headers = buildAuthHeaders('merchant-session')
+    expect(headers).toEqual({ 'X-Session-Id': 'sid' })
+    expect(headers).not.toHaveProperty('Authorization')
+  })
+
+  it('会话缺失时拒绝构造请求头，而不是发出注定 401 的请求', () => {
+    setCredentialProvider(() => ({ merchantToken: 'tk' }))
+    expect(() => buildAuthHeaders('merchant-session')).toThrow(
+      expect.objectContaining({ code: 'AUTH_REQUIRED' }),
+    )
+  })
 })
 
 describe('locale provider', () => {

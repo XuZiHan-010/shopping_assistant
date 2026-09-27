@@ -17,6 +17,7 @@ from app.llm.client import (
     LlmDailyBudgetExceededError,
     LlmFailureKind,
     LlmResult,
+    LlmTurn,
     LlmUnavailableError,
 )
 from app.llm.fake import FakeLlmClient
@@ -228,7 +229,7 @@ async def test_complete_raises_and_sets_cap_hit_when_reserve_rejected() -> None:
         _RecordUsageCall(
             repository.reserve_calls[0].usage_date,
             "req-1",
-            "deepseek-v4-flash",
+            "deepseek-flash",
             0,
             0,
             0,
@@ -425,3 +426,56 @@ async def test_remaining_subtracts_snapshot_from_daily_budget() -> None:
     guard = _guard(repository, StubInnerClient(), settings=_settings(llm_daily_budget_tokens=1_000))
 
     assert await guard.remaining() == 600
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("degraded", [False, True])
+async def test_converse_unknown_usage_keeps_reservation(degraded: bool) -> None:
+    repository = FakeLlmBudgetRepository(reserve_returns=[200])
+    inner = FakeLlmClient(
+        turns=[
+            LlmTurn(
+                text="ok",
+                tool_calls=[],
+                stop_reason="ERROR" if degraded else "END_TURN",
+                tokens=0,
+                degraded=degraded,
+                usage_known=False,
+            )
+        ]
+    )
+    await _guard(repository, inner).converse(
+        messages=[],
+        tools=[],
+        budget=LlmBudget(max_calls=2, max_tokens=1000),
+    )
+    assert repository.reconcile_calls == []
+    row = repository.record_usage_calls[-1]
+    assert row.usage_known is False
+    assert row.reserved_tokens == repository.reserve_calls[0].tokens
+
+
+@pytest.mark.asyncio
+async def test_converse_known_zero_usage_releases_reservation() -> None:
+    repository = FakeLlmBudgetRepository(reserve_returns=[200])
+    inner = FakeLlmClient(
+        turns=[
+            LlmTurn(
+                text=None,
+                tool_calls=[],
+                stop_reason="ERROR",
+                tokens=0,
+                degraded=True,
+                usage_known=True,
+                failure_kind=LlmFailureKind.HTTP_401,
+            )
+        ]
+    )
+    await _guard(repository, inner).converse(
+        messages=[],
+        tools=[],
+        budget=LlmBudget(max_calls=2, max_tokens=1000),
+    )
+    assert repository.reconcile_calls[-1].delta == -repository.reserve_calls[0].tokens
+    assert repository.record_usage_calls[-1].usage_known is True
+    assert repository.record_usage_calls[-1].failure_kind == "HTTP_401"

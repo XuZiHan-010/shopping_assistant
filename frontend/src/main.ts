@@ -5,7 +5,6 @@ import '@/assets/styles.css'
 import { i18n } from '@/i18n'
 import { setCredentialProvider, setLocaleProvider } from '@/api/credentials'
 import { useAuthStore } from '@/stores/auth'
-import { useAnalyticsStore } from '@/stores/analytics'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { useLocaleStore } from '@/stores/locale'
 import App from './App.vue'
@@ -26,9 +25,14 @@ useLocaleStore(pinia).restore()
 // 拿不到。
 setCredentialProvider(() => ({
   merchantToken: useAuthStore(pinia).selected?.token,
-  // 两个管理员页面都只把令牌留在各自 Pinia 内存 store；transport 只认一个
-  // `adminToken` 凭证来源，因此在请求瞬间取当前已授权页面持有的那一个。
-  adminToken: useAnalyticsStore(pinia).adminToken || useKnowledgeStore(pinia).adminToken,
+  // 管理员令牌只留在知识库后台页面的 Pinia 内存 store 里（Chat BI 看板与其
+  // `useAnalyticsStore` 已随两页合并下线，2026-09-27）；transport 在请求瞬间
+  // 取当前已授权页面持有的这一个。
+  adminToken: useKnowledgeStore(pinia).adminToken,
+  // v2 商家会话 ID，只在内存；由 `stores/auth.ts` 的 `openSession`/
+  // `selectAndOpenSession` 写入，`buildAuthHeaders('merchant-session')` 在
+  // 请求瞬间读取，本文件不缓存它。
+  sessionId: useAuthStore(pinia).sessionId ?? undefined,
 }))
 
 // 与凭证同一模式：transport.ts / sse.ts 都不直接 import `useLocaleStore`，

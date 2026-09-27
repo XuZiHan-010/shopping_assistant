@@ -2,15 +2,49 @@
 
 本手册只描述部署操作；不会在本地或 Railway 自动写入真实密钥。
 
-## 服务与构建
+> **状态说明（2026-09-20）**：现网仍是既有 `frontend` + `backend` + PostgreSQL 拓扑；下文原有操作
+> 在标题标注“现网 v1”的地方只描述该基线。新 PRD 的目标拓扑为五类服务，须随 N1–N5 逐步实施，
+> 不能把目标表误报为已部署事实。
+
+## 目标服务拓扑（N1–N5）
+
+| Service | Root Directory | 当前状态 |
+| --- | --- | --- |
+| `shop` | `/shop` | Next.js 顾客端，代码与镜像配置已在仓库（`shop/Dockerfile`、`shop/railway.json`）；Railway 服务尚未创建，控制台操作归 `n5-budget-ops-and-railway` |
+| `merchant` | `/frontend` | 现有 Vue 前端；服务显示名最终改为 `merchant` |
+| `backend` | `/backend` | 现有 FastAPI；N1 起增加 v2 契约与实现 |
+| `postgres` | Railway Database | 现有主库；N1 增量迁移 |
+| `cron` | `/backend` | 现有多个 Cron 配置待在平台落地，N5 收口 |
+
+默认不新增通用 Worker、Redis 或对象存储。Backend 继续公开，浏览器直连；`shop` 与 `merchant`
+各自使用精确 Origin，CORS 允许头至少包含 `Authorization`、`Accept`、`Content-Type`、
+`X-Request-Id`、`X-Session-Id`、`X-Admin-Token`。后端已通过 `FRONTEND_ORIGIN`（商家端）与 `SHOP_ORIGIN`（顾客端，可选）支持两个精确 Origin，二者都禁止 `*`、路径、查询与凭据；`SHOP_ORIGIN` 未配置时 CORS 只放行商家端，因此上线 `shop` 前必须先在 Backend 配好它。
+
+## 顾客端服务 `shop`（N2）
+
+Root Directory 为 `/shop`，Config File Path 显式填 `/shop/railway.json`（Railway 的配置文件路径不跟随 Root Directory）。
+镜像为 Node 多阶段构建（`shop/Dockerfile`，Next.js standalone 输出），监听 Railway 注入的 `PORT`，
+健康检查路径 `/health`（不查库、不调后端、不调 LLM）。
+
+- **构建变量**：`NEXT_PUBLIC_API_BASE_URL`（必填，Backend 公网地址）在构建期内联进浏览器产物；漏配时页面响亮失败，
+  不回退同源 `/api`。可选 `NEXT_PUBLIC_DEFAULT_SHOP_SLUG` 只用于落地页的演示入口。
+- **构建期不读仓库根**：构建上下文里没有 `docs/` 与 `frontend/`。OpenAPI 类型（`src/api/generated.ts`）、
+  设计 token（`src/styles/tokens.css`）与 logo（`public/borough-logo.svg`）都是提交进仓库的副本，
+  由 `npm run codegen:check`、`npm run tokens:check` 在本地与 CI 保证没有过期；这两个检查**不要**放进 Docker 构建。
+- **Backend 侧**：`SHOP_ORIGIN` 填 `shop` 的精确 Origin（含协议，不含路径与尾斜杠，不得为 `*`）。
+- 会话 ID 只存浏览器内存，不写 URL、`localStorage`、`sessionStorage` 或 cookie，也不进构建产物与日志。
+
+## 服务与构建（现网 v1）
 
 在同一个 Railway 项目中创建 PostgreSQL 和 Backend 两个 Service。Backend 的 Root Directory 为 `/backend`，使用其中的 `railway.json` 与 Dockerfile。将 Backend 的 `DATABASE_URL` 引用 PostgreSQL Service，例如 `${{Postgres.DATABASE_URL}}`。发布前的 `python -m alembic upgrade head` 由 `railway.json` 的 `deploy.preDeployCommand` 执行一次，健康检查为 `/api/health`。
 
 字段名必须是 `preDeployCommand`：Railway 的配置 schema 里**没有** `releaseCommand`，写成后者不会报错，只会被静默忽略，导致迁移从不执行、线上库始终缺表。
 
-## 前端服务
+## 商家前端服务（现网 v1）
 
-在同一个 Railway 项目中创建 Frontend Service，并由用户在 Railway 控制台将其 Service Root 设为 `/frontend`。前端使用 Dockerfile 构建，镜像采用 Node 多阶段构建，最终运行镜像为 `caddy:2-alpine`；健康检查路径为 `/health.html`。
+现网 Service 名为 Frontend；目标拓扑中对应 `merchant`。Root Directory 为 `/frontend`。前端使用
+Dockerfile 构建，镜像采用 Node 多阶段构建，最终运行镜像为 `caddy:2-alpine`；健康检查路径为
+`/health.html`。
 
 Caddy 不代理 `/api`。因此前端域名下不存在任何 API 路径，这是刻意的架构设计；浏览器应使用构建期注入的后端公网地址直接请求 API。
 
@@ -40,7 +74,7 @@ Railway 的 Config File Path 不跟随 Root Directory。即使 Service Root 已�
 
 可通过携带 `X-Admin-Token` 的 `/api/admin/ops/status` 查看当前演示部署模式。演示 Token 只授予演示数据访问权；商家数据隔离仍由后端强制注入 `merchant_id` 保证。
 
-## 上线顺序
+## 上线顺序（现网 v1 单前端）
 
 前端 API 地址在构建期固化，而后端 CORS 又必须获知前端 Origin；同时后端首次启动前已要求提供 `FRONTEND_ORIGIN`。因此，用户需在 Railway 控制台按以下顺序完成双侧部署：
 
@@ -54,6 +88,9 @@ Railway 的 Config File Path 不跟随 Root Directory。即使 Service Root 已�
 
 这不是可互换的顺序：首次后端启动需要一个有效的精确 Origin，前端又需要已部署后端的公网地址；待前端实际域名确定后，必须替换临时 Origin 并再次部署后端。
 
+N2 部署 `shop` 时必须把该流程升级为两个精确 Origin；具体环境变量名与解析方式须先在 N1 的部署契约
+中定稿，不能直接把第二个域名塞进当前单值 `FRONTEND_ORIGIN`。
+
 ## 必填环境变量
 
 | 变量 | 用途与约束 |
@@ -62,20 +99,28 @@ Railway 的 Config File Path 不跟随 Root Directory。即使 Service Root 已�
 | `DATABASE_URL` | 引用 Railway PostgreSQL，不手填连接串。 |
 | `FRONTEND_ORIGIN` | 精确 Origin；不得为 `*` 或含路径、查询、凭据。 |
 | `DEMO_DEPLOYMENT_MODE=true` | 对外演示时必填；显式允许生产环境访问 `/api/demo/merchants`。非演示生产部署不设置或设为 `false`，端点保持关闭。 |
+| `SESSION_TTL_SECONDS` | 会话凭证的有效期，默认 `86400` 秒；允许范围 `300`–`2592000`。 |
+| `BUYER_ALIAS_SECRET` | 生产环境必填的稳定高熵密钥，用于派生店铺范围内的顾客脱敏别名；不得使用占位值，轮换会改变既有别名。 |
+| `DEMO_CUSTOMER_IDENTITIES` | 仅后端读取的 JSON 映射（`shop_slug` → 演示 `buyer_key`）；不得发送到浏览器、日志或 API 响应。 |
 | `LLM_API_KEY` | DeepSeek 密钥；配置时必须同时配置 `ADMIN_TOKEN`。 |
+| `LLM_BASE_URL` | 固定为 `https://api.deepseek.com`。Anthropic 协议适配器使用 `https://api.deepseek.com/anthropic`。 |
+| `LLM_MODEL` | 新配置默认 `deepseek-flash`；不得再使用已退役的 `deepseek-v4-flash` 或 `deepseek-chat`。**既有部署里若仍是旧值，须手动改**——默认值变化不会覆盖已设置的环境变量。 |
+| `LLM_PROTOCOL` | `openai`（默认）或 `anthropic`，只决定 v2 `converse()` 走哪种 DeepSeek 协议；v1 `complete()` 固定走 OpenAI 兼容协议。改默认值须以双协议真实冒烟为据（后端计划 §6.17）。 |
+| `LLM_THINKING` | `disabled`（默认）或 `enabled`，每次请求都显式发送；开启后成本、延迟与推理内容回放要求都不同，须以实测为据。 |
 | `ADMIN_TOKEN` | 运维端点凭据，生产环境至少 16 字符且非占位值。 |
 | `EXPORT_SIGNING_SECRET` | CSV 导出签名密钥，生产环境必填且非占位值。 |
 | `TRUSTED_PROXY_HOPS=1` | Railway 单层代理。 |
 | `TRUSTED_PROXY_IPS` | **留空，不填任何值。** Railway 不发布稳定的边界代理地址；配置具体值会在重新部署后静默失效并导致限流退化，因此本项目明确不配置该变量。 |
 | `RATE_LIMIT_PER_MINUTE` | 单 Token 与可信 IP 的每分钟上限。 |
 | `LLM_DAILY_BUDGET_TOKENS` | **全局**每日模型 token 预算——`llm_daily_budget` 表只按 `usage_date` 聚合，不分商家、不分访客，公开演示时所有人共用这一个池子，它是唯一的总量闸门。默认 `500000` = 单请求上限 `25000` × 20，最坏情况也保证 20 个完整问题；按真实模型实测（每问约 6000 token）实际约 80 个。耗尽后所有人收到 `LLM_BUDGET_EXCEEDED` 的可见降级，不会静默继续扣费。 |
-| `LLM_MAX_OUTPUT_TOKENS_PER_CALL` | 默认 `8000`（字段允许的上限）。**推理模型不得低于此值**：`deepseek-v4-flash` 单次结构化意图的 `reasoning_tokens` 就要 1400–2200，设为 1024 时正文返回空串，三次重试全废、回落 CHAT 模式；2026-08-22 真实模型验收又发现环比/同比这类需要更多推理步骤的回答生成在 `4096` 下同样会把预算耗尽在推理上、正文吐空，因此把默认值提到上限。这是上限不是花费。 |
+| `LLM_MAX_OUTPUT_TOKENS_PER_CALL` | 默认 `8000`（字段允许的上限）。**推理模型不得低于此值**：2026-08-22 使用当时模型别名的验收中，单次结构化意图 `reasoning_tokens` 达 1400–2200，设为 1024 时正文返回空串；环比/同比回答在 `4096` 下也曾耗尽输出预算。因此保留 8000 上限。迁移到 `deepseek-flash` 后须重新测量，不能把历史数据当作当前模型承诺。 |
 | `MAX_LLM_TOKENS_PER_REQUEST` | 默认 `25000`，覆盖一轮问答最坏 10 次模型请求。 |
 | `MAX_LLM_CALLS_PER_REQUEST` | 默认 `10`。最坏调用路径为 classify 2（业务关键词收到 `INVALID/UNKNOWN` 时重试 1 次）+ understand 3（意图服务自带 2 次重试）+ 指标口径 1 + （回答生成 + 独立复核）× 2 = 10 次，四个调用点共用同一个单请求预算。设低于 10 会让意图重试把质量循环挤成「预算耗尽」降级，把排查方向带偏。 |
 | `QUALITY_MAX_ATTEMPTS` | 回答质量循环的最大轮次，代码支持 1–3，默认 `2`。与 `MAX_LLM_CALLS_PER_REQUEST` 联动：每加一轮最多多 2 次模型请求；若设为 `3`，完整最坏路径为 12 次，必须同步提高调用上限。 |
 | `LLM_TIMEOUT_SECONDS` | 默认 `90`。推理模型出一次意图耗时明显；超时会被 `DeepSeekLlmClient` 吞成 fallback + degraded，表现为「模型没理解」而不是「超时」，很难查。 |
 
-现有代码已强制精确 CORS、生产 JSON 日志、`create_app()` 不启用 Debug，以及数据库连接重试。B8 附件功能尚未实现，不得把正式附件写入容器临时磁盘。
+现有代码已强制单个精确 CORS Origin、生产 JSON 日志、`create_app()` 不启用 Debug，以及数据库连接
+重试。附件功能不在当前范围，不得为其引入容器临时磁盘或对象存储。
 
 ### Railway 转发头信任策略与回退条件
 
@@ -93,10 +138,11 @@ Railway 的 Config File Path 不跟随 Root Directory。即使 Service Root 已�
 
 | 入口 | 用途 | 触发方式 |
 | --- | --- | --- |
-| `python -m app.jobs.seed_demo_rolling` | 唯一常态入口：补齐所有漏跑业务日、清理 180 天窗口外事实，历史分区一行不改写。 | 独立 Cron Service，每日 `10 16 * * *`（UTC，等于 Asia/Shanghai 00:10） |
-| `backend/scripts/seed_demo_analytics.py --force-full-rebuild` | 一次性整体重置：先 DELETE 六张经营表该商家全部行再重写。 | 仅本机或本地 Compose；线上禁止执行 |
+| `python -m app.jobs.seed_demo_rolling` | 唯一常态入口：补齐所有漏跑业务日、清理 180 天窗口外的旧经营行，历史分区一行不改写；追加写事件账本继续留存审计记录。 | 独立 Cron Service，每日 `10 16 * * *`（UTC，等于 Asia/Shanghai 00:10） |
+| `backend/scripts/seed_demo_analytics.py --force-full-rebuild` | 一次性整体重置：只在本地且商家 UUID 集合恰好为三家固定商家时重建经营行及事件账本。 | 仅本机或本地 Compose；线上禁止执行 |
+| `python -m scripts.seed_demo_scenarios --seed` | 在本地生成 S1–S4 顾客与商家双端场景。 | 全量经营 Seed 之后手工执行 |
 
-全量重灌会连同已落库 `answers` 引用的数据依据一起抹掉，因此它已改为必须显式传 `--force-full-rebuild`，缺参数时直接非零退出；它还会按 `DATABASE_URL` 主机白名单拒绝非本机地址，`APP_ENV` 的生产环境拒绝规则仍作为第二道护栏保留。
+全量重灌会连同已落库 `answers` 引用的数据依据一起抹掉，也会在本地重建三张事件账本，因此必须显式传 `--force-full-rebuild`，缺参数时直接非零退出；它还会按 `DATABASE_URL` 主机白名单拒绝非本机地址，`APP_ENV` 的生产环境拒绝规则仍作为第二道护栏保留。
 
 滚动任务的护栏（任一不满足即在写入前失败）：
 
@@ -138,6 +184,21 @@ Railway 的 Config File Path 不跟随 Root Directory。即使 Service Root 已�
 4. 首次部署后在 **Deployments** 手工触发一次，确认退出码为 0；
 5. 验收：打开 `/ops-dashboard`，选「最近 7 天」，六张卡应能出数（分母不足的仍显示「样本不足」，属正确行为）。
 
+## v2 会话：演示 Token 撤销与来源状态清理
+
+**撤销某个演示 Token**：本版没有公开撤销端点。从 Railway Variables 的 `DEMO_MERCHANT_TOKENS` 删掉该 Token 并重启 Backend，
+启动时 `app/services/session_reconciliation.py` 会把配置与已签发商家会话按 SHA-256 指纹对账，撤销已移除 Token
+换出的全部商家会话；日志只输出 `session_issuers_reconciled revoked_sessions=<行数>`，不含 Token 或指纹。
+对账失败会中止启动，不会带着未撤销的会话对外服务。
+
+**过期访客来源状态清理**：`python -m app.jobs.purge_guest_provenance` 删除「已过期且从未绑定身份」的访客会话留下的
+`conversation_provenance` 行，不删业务对话，不碰已绑定或商家会话，重复执行只删 0 行。
+
+- 只读取 `JobSettings`（`DATABASE_URL`、`APP_ENV` 等 6 个字段），不注入任何 Web 服务密钥；不跑 Alembic 迁移；
+- 已新增 `backend/railway.provenance-cron.json`，每日 `45 16 * * *`（UTC），排在 Chat BI rollup 之后 15 分钟；
+- **Cron Service 尚未创建**，创建步骤同上一节，Config as code 改填 `railway.provenance-cron.json`，
+  Variables 只加 `DATABASE_URL` 与 `APP_ENV=production`。
+
 ## 演示前数据检查清单
 
 以下命令仅用于本地演示库。执行前必须确认 `DATABASE_URL` 指向本地测试库，并确认不会与滚动 Seed Cron 并发执行。完整 `pytest` 会清空经营数据和知识库数据；如需演示，应在全量测试后重新恢复。
@@ -168,13 +229,19 @@ Railway 的 Config File Path 不跟随 Root Directory。即使 Service Root 已�
    uv run python -m scripts.seed_demo_analytics --force-full-rebuild
    ```
 
-5. 恢复镜像知识种子（共 21 篇，且不会覆盖后台已维护的同路径文档）：
+5. 补齐 S1–S4 的确定性场景数据：
+
+   ```powershell
+   uv run python -m scripts.seed_demo_scenarios --seed
+   ```
+
+6. 恢复镜像知识种子（共 21 篇，且不会覆盖后台已维护的同路径文档）：
 
    ```powershell
    uv run python -m scripts.import_wiki --root "../yshopping-merchant-ai 4/yshopping-merchant-ai/runtime/llm-wiki"
    ```
 
-6. 校验数据量和日期窗口：`orders` 应为数千行，`business_date` 应连续覆盖 180 天并截止于当前业务日；`knowledge_documents` 应为 21 篇种子文档（`index/README.md` 一篇、十个业务分类各两篇）。如确需本机强制覆盖同路径的后台维护内容，才传入 `--overwrite`；该开关会丢失这些后台改动，线上不得使用。
+7. 校验数据量和日期窗口：经营历史 `orders` 应为数千行，`business_date` 应连续覆盖 180 天并截止于当前业务日；另有 S1–S4 场景行。`knowledge_documents` 应为 21 篇种子文档（`index/README.md` 一篇、十个业务分类各两篇）。如确需本机强制覆盖同路径的后台维护内容，才传入 `--overwrite`；该开关会丢失这些后台改动，线上不得使用。
 
 ## 运维验收
 
@@ -207,7 +274,7 @@ Railway 的 Config File Path 不跟随 Root Directory。即使 Service Root 已�
 2. 携带任一演示商家 Token、`Accept-Language: en-US` 调用 `POST /api/chat`，问题选一句英文问候语（如 `"hello"`）或英文范围外提问——两者都经零 LLM 前置闸门/CHAT 分支处理，验证响应 `quality_notes`/`degraded_reason`/错误 `message` 均渲染为英文，且不产生任何 `llm_usage` 记录；
 3. 携带同一 Token、`Accept-Language: en-US` 调用 `GET /api/conversations`，确认历史列表按英语渲染且已有中文历史正确回填 `source_locale`；
 4. 用 `X-Admin-Token` 调用一次 `GET /api/admin/knowledge/tree`，确认业务域名称按英语渲染（走确定性词典 `catalog.py`，零 LLM）；
-5. 若需要验证真正需要模型翻译的路径（跨语言知识召回、自由文本批量翻译等），必须先按 AGENTS.md R3 向用户说明会调用的接口、预计调用次数、模型（`deepseek-v4-flash`）与费用，取得明确同意后才执行——不属于本 Smoke Test 默认范围。
+5. 若需要验证真正需要模型翻译的路径（跨语言知识召回、自由文本批量翻译等），必须先按 AGENTS.md R3 向用户说明会调用的接口、预计调用次数、模型（默认 `deepseek-flash`）与费用，取得明确同意后才执行——不属于本 Smoke Test 默认范围。
 
 ### 数据库迁移与缓存说明
 

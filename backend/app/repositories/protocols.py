@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Protocol, TypeVar
+from typing import Any, Protocol, TypeVar
 from uuid import UUID
 
 ConversationT = TypeVar("ConversationT", covariant=True)
@@ -26,4 +26,15 @@ class AuditRepositoryProtocol(Protocol):
         resource_type: str,
         resource_id: str,
         request_id: str,
+    ) -> None: ...
+
+    async def record_event(
+        self,
+        *,
+        merchant_id: UUID | None,
+        event_type: str,
+        resource_type: str | None = None,
+        resource_id: str | None = None,
+        request_id: str,
+        metadata: dict[str, Any] | None = None,
     ) -> None: ...

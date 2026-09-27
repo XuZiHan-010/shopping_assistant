@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.analytics.dates import business_today
 from app.analytics.demo_data import (
     DEMO_ANALYTICS_SEED_BASE,
+    _event_row,
     build_demo_catalog,
     build_demo_dataset,
 )
@@ -22,6 +23,7 @@ from app.core.runtime import configure_event_loop_policy
 from app.core.seed_config import SeedSettings
 from app.db.session import Database
 from app.models.analytics import Order, OrderItem, Product, Refund, ReturnRecord, SupportTicket
+from app.models.events import FulfillmentEvent, InventoryEvent
 from app.models.merchant import Merchant
 from app.services.seed_service import default_merchants
 
@@ -54,7 +56,26 @@ async def _catalog(session: AsyncSession, merchant_id: UUID, seed: int) -> list[
         .mappings()
         .all()
     )
-    return [dict(row) for row in sorted(persisted, key=lambda row: str(row["product_code"]))]
+    catalog = [dict(row) for row in sorted(persisted, key=lambda row: str(row["product_code"]))]
+    initial_events = [
+        _event_row(
+            merchant_id=merchant_id,
+            subject_id=product["id"],
+            event_type="INITIAL_STOCK",
+            occurred_at=product["listed_at"],
+            dedupe_key=f"demo:initial-stock:{product['id']}",
+            payload={"quantity": product["stock_on_hand"], "origin": "DEMO_SEED"},
+        )
+        for product in catalog
+        if product["stock_on_hand"] > 0
+    ]
+    if initial_events:
+        await session.execute(
+            insert(InventoryEvent)
+            .values(initial_events)
+            .on_conflict_do_nothing(index_elements=[InventoryEvent.dedupe_key])
+        )
+    return catalog
 
 
 async def roll_forward(
@@ -78,7 +99,10 @@ async def roll_forward(
         await _require_demo_merchants(session)
         for index, merchant in enumerate(default_merchants()):
             latest = await session.scalar(
-                select(func.max(Order.business_date)).where(Order.merchant_id == merchant.id)
+                select(func.max(Order.business_date)).where(
+                    Order.merchant_id == merchant.id,
+                    Order.lifecycle_origin == "LEGACY_V1",
+                )
             )
             start = (
                 latest + timedelta(days=1)
@@ -101,15 +125,29 @@ async def roll_forward(
                     (Refund, dataset.refunds),
                     (ReturnRecord, dataset.returns),
                     (SupportTicket, dataset.tickets),
+                    (FulfillmentEvent, dataset.fulfillment_events),
                 ):
                     if rows:
                         await session.execute(insert(model).values(rows))
                         written += len(rows)
             cutoff = business_day - timedelta(days=window_days - 1)
-            for model in (SupportTicket, ReturnRecord, Refund):
+            legacy_orders = select(Order.id).where(
+                Order.merchant_id == merchant.id, Order.lifecycle_origin == "LEGACY_V1"
+            )
+            legacy_items = select(OrderItem.id).where(OrderItem.order_id.in_(legacy_orders))
+            await session.execute(
+                delete(SupportTicket).where(
+                    SupportTicket.merchant_id == merchant.id,
+                    SupportTicket.business_date < cutoff,
+                    SupportTicket.order_id.in_(legacy_orders),
+                )
+            )
+            for model in (ReturnRecord, Refund):
                 await session.execute(
                     delete(model).where(
-                        model.merchant_id == merchant.id, model.business_date < cutoff
+                        model.merchant_id == merchant.id,
+                        model.business_date < cutoff,
+                        model.order_item_id.in_(legacy_items),
                     )
                 )
             # OrderItem/Order 不能只按自己的 business_date 删：外键是 ON DELETE
@@ -122,6 +160,7 @@ async def roll_forward(
                 delete(OrderItem).where(
                     OrderItem.merchant_id == merchant.id,
                     OrderItem.business_date < cutoff,
+                    OrderItem.order_id.in_(legacy_orders),
                     ~exists().where(Refund.order_item_id == OrderItem.id),
                     ~exists().where(ReturnRecord.order_item_id == OrderItem.id),
                 )
@@ -130,6 +169,7 @@ async def roll_forward(
                 delete(Order).where(
                     Order.merchant_id == merchant.id,
                     Order.business_date < cutoff,
+                    Order.lifecycle_origin == "LEGACY_V1",
                     ~exists().where(OrderItem.order_id == Order.id),
                 )
             )

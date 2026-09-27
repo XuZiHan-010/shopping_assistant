@@ -69,6 +69,9 @@ class ChatBiRepository:
             .outerjoin(Feedback, Feedback.answer_id == Answer.id)
             .where(
                 Answer.processing_status == "SUCCEEDED",
+                # 下方口径按 v1 回答结构解析（如 `analysis_sources` 是字符串数组）；
+                # v2 回答接入前需先定口径，现阶段只统计 v1。
+                Answer.surface.is_(None),
                 stat_date >= start_date,
                 stat_date <= end_date,
             )

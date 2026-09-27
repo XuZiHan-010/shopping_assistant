@@ -54,6 +54,7 @@ def _settings(app_env: AppEnvironment) -> Settings:
         database_url="postgresql://user:pass@localhost:5432/borough",
         frontend_origin="http://localhost:5173",  # type: ignore[arg-type]
         export_signing_secret="test-export-signing-secret",
+        buyer_alias_secret="test-buyer-alias-secret-value",
     )
 
 

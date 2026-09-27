@@ -7,7 +7,7 @@ import { useLocaleStore } from '@/stores/locale'
 
 import DocumentEditor from './DocumentEditor.vue'
 
-function mountEditor(props: Record<string, unknown>) {
+function mountEditor(props: InstanceType<typeof DocumentEditor>['$props']) {
   return mount(DocumentEditor, { props, global: { plugins: [i18n] } })
 }
 

@@ -1,0 +1,58 @@
+# 场景 S5：业绩下滑归因（PRD M3、D19，N3 阶段 C Task 1）——质量回归登记。
+#
+# 放在 `quality/scenarios/` 子目录，理由同 `n2_s3_inventory_restock.yaml`：
+# `scripts/eval_quality_smoke.py` 与 `tests/eval/baseline_comparison.py` 只加载根目录（非递归）。
+#
+# 只登记**依赖模型质量**的那一段：商家问"为什么这周下滑" → Agent 用 attribute_change 归因 →
+# 组织带分项贡献、数据截至时间与"线索"措辞的回答。归因数字本身（分项贡献、绝对值/占比选择、
+# 等长可比周期）是确定性代码产出，由 `tests/unit/services/v2/test_attribution.py` 覆盖；
+# rubric 判断的是措辞是否符合 D19（不滥用因果词、缺数据时如实说明）。
+# 真实模型跑这条用例属于另行授权的人工验收（R3），不进默认测试。
+
+- id: QLT-S5-001
+  introduced_in: N3
+  role: MERCHANT
+  skill: performance-insights
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: answer_quality
+  turns:
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/merchant/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json:
+          client_request_id: eval-qlt-s5-001
+          message: 这周净成交额为什么下滑了，是哪个品类拖累的？
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: degraded
+      expected: false
+
+- id: QLT-S5-002
+  introduced_in: N3
+  role: MERCHANT
+  skill: performance-insights
+  risk: QUALITY
+  locale: en-US
+  form: ENDPOINT
+  rubric_id: answer_quality
+  turns:
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/merchant/chat
+        headers: {Accept: application/json, Accept-Language: en-US}
+        json:
+          client_request_id: eval-qlt-s5-002
+          message: Why did net GMV drop this week, and which category is responsible?
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: degraded
+      expected: false

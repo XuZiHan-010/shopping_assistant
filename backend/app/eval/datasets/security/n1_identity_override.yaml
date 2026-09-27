@@ -1,0 +1,70 @@
+# 身份覆盖类（IDENTITY）：请求体里塞 merchant_id / role，身份仍必须只来自会话或
+# 已验证的 Bearer Token。v2 契约全部模型 `extra="forbid"`，多余字段一律 422 拒绝
+# （不是静默忽略），三条用例分别打三个不同的会话签发端点。
+
+- id: SEC-IDENTITY-001
+  introduced_in: N1
+  role: CUSTOMER
+  skill: session
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: anonymous
+      request:
+        method: POST
+        path: /api/v2/shop/sessions
+        json:
+          shop_slug: borough-api-100
+          merchant_id: "00000000-0000-0000-0000-0000000001a2"
+  assertions:
+    - type: http_status
+      expected: 422
+    - type: error_code
+      expected: INVALID_REQUEST
+    - type: no_side_effect
+      table: agent_sessions
+
+- id: SEC-IDENTITY-002
+  introduced_in: N1
+  role: MERCHANT
+  skill: session
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: merchant_a_bearer
+      request:
+        method: POST
+        path: /api/v2/merchant/sessions
+        json:
+          role: ADMIN
+  assertions:
+    - type: http_status
+      expected: 422
+    - type: error_code
+      expected: INVALID_REQUEST
+    - type: no_side_effect
+      table: agent_sessions
+
+- id: SEC-IDENTITY-003
+  introduced_in: N1
+  role: MERCHANT
+  skill: session
+  risk: SECURITY
+  locale: en-US
+  form: ENDPOINT
+  turns:
+    - actor: merchant_a_bearer
+      request:
+        method: POST
+        path: /api/v2/merchant/sessions
+        json:
+          merchant_id: "00000000-0000-0000-0000-0000000001a2"
+  assertions:
+    - type: http_status
+      expected: 422
+    - type: error_code
+      expected: INVALID_REQUEST
+    - type: no_side_effect
+      table: agent_sessions

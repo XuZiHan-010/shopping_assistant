@@ -7,7 +7,8 @@ export default defineConfig({
   testDir: './e2e',
   // 首屏门禁依赖 production preview 的独立构建目录、API 基址和 idle 冻结，
   // 只能由 playwright.first-paint.config.ts 运行；常规 Mock E2E 不得混入它。
-  testIgnore: ['**/real-api/**', '**/first-paint.spec.ts'],
+  // S3 验收需要真实后端与一次性库，只能由 playwright.s3.config.ts 运行。
+  testIgnore: ['**/real-api/**', '**/s3/**', '**/s4/**', '**/n3/**', '**/first-paint.spec.ts'],
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 2 : 0,

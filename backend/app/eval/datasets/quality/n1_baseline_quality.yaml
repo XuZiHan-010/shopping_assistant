@@ -1,0 +1,151 @@
+# N1 Task 7 步骤 1–2：v1 冻结基线一侧的真实模型质量评测（R3 已授权，deepseek-flash）。
+#
+# 只测**双方共有的旧能力**（A2）：v1 商家 Chat 是当前唯一现成的真实端到端链路，
+# v2 工具循环尚不存在，对照评测（Task 7 步骤 3）要等 N2 才能执行。
+# message 文本全部取自既有 FakeLLM 测试里已验证会通过零 LLM 前置闸门的真实用例
+# （`tests/api/test_chat.py`），locale 差异只通过 `Accept-Language` 控制展示语言，
+# 不臆造未经验证的问法，避免真实调用被前置闸门白白拒绝。
+
+- id: QLT-001
+  introduced_in: N1
+  role: MERCHANT
+  skill: chat_metric
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: answer_quality
+  turns:
+    - actor: merchant_a_bearer
+      request:
+        method: POST
+        path: /api/chat
+        headers: {Accept-Language: zh-CN}
+        json: {message: 今天销售额, client_request_id: eval-qlt-001}
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: answer_mode
+      expected: METRIC
+    - type: response_field
+      path: degraded
+      expected: false
+
+- id: QLT-002
+  introduced_in: N1
+  role: MERCHANT
+  skill: chat_metric
+  risk: QUALITY
+  locale: en-US
+  form: ENDPOINT
+  rubric_id: answer_quality
+  turns:
+    - actor: merchant_a_bearer
+      request:
+        method: POST
+        path: /api/chat
+        headers: {Accept-Language: en-US}
+        json: {message: 今天销售额, client_request_id: eval-qlt-002}
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: answer_mode
+      expected: METRIC
+    - type: response_field
+      path: degraded
+      expected: false
+
+- id: QLT-003
+  introduced_in: N1
+  role: MERCHANT
+  skill: chat_metric
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: answer_quality
+  turns:
+    - actor: merchant_a_bearer
+      request:
+        method: POST
+        path: /api/chat
+        headers: {Accept-Language: zh-CN}
+        json: {message: 最近7天退款金额, client_request_id: eval-qlt-003}
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: answer_mode
+      expected: METRIC
+    - type: response_field
+      path: degraded
+      expected: false
+
+- id: QLT-004
+  introduced_in: N1
+  role: MERCHANT
+  skill: chat_metric
+  risk: QUALITY
+  locale: en-US
+  form: ENDPOINT
+  rubric_id: answer_quality
+  turns:
+    - actor: merchant_a_bearer
+      request:
+        method: POST
+        path: /api/chat
+        headers: {Accept-Language: en-US}
+        json: {message: "昨天总 GMV 是多少？", client_request_id: eval-qlt-004}
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: answer_mode
+      expected: METRIC
+    - type: response_field
+      path: degraded
+      expected: false
+
+- id: QLT-005
+  introduced_in: N1
+  role: MERCHANT
+  skill: chat_greeting
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: greeting_quality
+  turns:
+    - actor: merchant_a_bearer
+      request:
+        method: POST
+        path: /api/chat
+        headers: {Accept-Language: zh-CN}
+        json: {message: 你好, client_request_id: eval-qlt-005}
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: answer_mode
+      expected: CHAT
+
+- id: QLT-006
+  introduced_in: N1
+  role: MERCHANT
+  skill: chat_greeting
+  risk: QUALITY
+  locale: en-US
+  form: ENDPOINT
+  rubric_id: greeting_quality
+  turns:
+    - actor: merchant_a_bearer
+      request:
+        method: POST
+        path: /api/chat
+        headers: {Accept-Language: en-US}
+        json: {message: hi, client_request_id: eval-qlt-006}
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: answer_mode
+      expected: CHAT

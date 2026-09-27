@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.order_status_mapping import from_legacy_status
 from app.models.analytics import Order, OrderItem, Product, Refund, ReturnRecord, SupportTicket
 from app.repositories.analytics import AnalyticsRepository
 
@@ -48,6 +49,11 @@ async def _order(
         order_no=f"ORDER-{uuid4().hex[:12]}",
         buyer_key=buyer_key,
         order_status=status,
+        payment_status=from_legacy_status(status)[0],
+        fulfillment_status=from_legacy_status(status)[1],
+        close_reason=from_legacy_status(status)[2],
+        after_sale_status="NONE",
+        lifecycle_origin="LEGACY_V1",
         total_amount=paid_amount if paid_amount else Decimal("30.00"),
         paid_amount=paid_amount,
         placed_at=NOW,
@@ -62,6 +68,9 @@ async def _order(
         product_id=product_id,
         quantity=1,
         item_amount=paid_amount,
+        unit_price=(paid_amount),
+        discount_amount=(paid_amount) * ((1) - 1),
+        line_total=(paid_amount),
     )
     session.add(item)
     await session.flush()

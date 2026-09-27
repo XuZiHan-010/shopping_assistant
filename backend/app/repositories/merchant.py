@@ -44,6 +44,22 @@ class MerchantRepository:
             for merchant_id, display_name, display_name_en in result.all()
         ]
 
+    async def get_active_by_shop_slug(self, shop_slug: str) -> UUID | None:
+        """公开 `shop_slug` 到可信 `merchant_id` 的唯一映射入口（PRD §9 SEC3）。
+
+        当前没有独立的店铺表，`merchant_code` 本身就是稳定、唯一、
+        小写连字符格式的商家标识，两者复用同一列，不新建冗余字段。
+        """
+
+        return cast(
+            UUID | None,
+            await self._session.scalar(
+                select(Merchant.id).where(
+                    Merchant.merchant_code == shop_slug, Merchant.status == "ACTIVE"
+                )
+            ),
+        )
+
     async def get_display_name(self, merchant_id: UUID) -> str | None:
         """管理端按 id 取商家展示名；不筛 is_demo，管理员操作对象可以是任意商家。"""
 

@@ -238,7 +238,7 @@ structlog · pytest · Ruff · mypy (strict)
 
 **Data and infrastructure**　PostgreSQL 16 · Docker · Caddy · Railway (frontend / backend / cron)
 
-**Model**　DeepSeek (OpenAI-compatible chat completions), default `deepseek-v4-flash`
+**Model**　DeepSeek (OpenAI-compatible chat completions), default `deepseek-flash`
 
 ## Getting Started
 
@@ -314,7 +314,7 @@ costs nothing. To connect the real DeepSeek API:
 ```text
 LLM_API_KEY=<deepseek-api-key>
 LLM_BASE_URL=https://api.deepseek.com
-LLM_MODEL=deepseek-v4-flash
+LLM_MODEL=deepseek-flash
 LLM_ENABLED=true
 ```
 

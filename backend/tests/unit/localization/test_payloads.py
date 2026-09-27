@@ -304,9 +304,7 @@ async def test_detail_degrade_shows_original_for_mixed_source_language() -> None
 
 
 @pytest.mark.asyncio
-async def test_detail_degrade_still_placeholders_mixed_text_whose_dominant_script_differs() -> (
-    None
-):
+async def test_detail_degrade_still_placeholders_mixed_text_whose_dominant_script_differs() -> None:
     """`mixed` 源语言不是无条件展示原文：主体语言是中文的文案（只夹了英文
     缩写 "LLM"）对英文读者来说仍然不可读，翻译失败必须继续展示占位文案，
     而不是把这句读者看不懂的中文原样甩给他们。"""

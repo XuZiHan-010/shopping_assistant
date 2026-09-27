@@ -17,13 +17,14 @@ from pydantic import BaseModel
 from app.analytics.contract import UnknownFieldError, detail_spec
 from app.core.errors import (
     ExportLinkExpiredError,
+    GuardrailRejectedError,
     MerchantScopeViolationError,
     ResourceNotFoundError,
 )
 from app.intent.models import CrossBusinessPlan, GeneratedMetricPlan
 from app.localization.catalog import localize_catalog_value
 from app.localization.locales import SupportedLocale
-from app.repositories.analytics import AnalyticsRepository, DetailResult
+from app.repositories.analytics import MAX_EXPORT_ROWS, AnalyticsRepository, DetailResult
 from app.repositories.export import ExportRepository
 from app.schemas.chat import ExportInfo, QuestionCategory
 from app.services.safe_query import ExportSpec
@@ -54,14 +55,19 @@ class ExportService:
         self,
         *,
         merchant_id: UUID,
-        answer_id: UUID,
+        answer_id: UUID | None,
         spec: ExportSpec,
         locale: SupportedLocale = SupportedLocale.ZH_CN,
         now: datetime | None = None,
     ) -> ExportInfo:
         """创建阶段把 `locale` 固化进 `spec` 并纳入签名（Task 8）：
         `/api/exports/{id}` 是浏览器直接打开的签名 URL，不带 `Accept-Language`，
-        导出语言只能在这里、由发起下载链接的这次请求的显示语言一次性决定。"""
+        导出语言只能在这里、由发起下载链接的这次请求的显示语言一次性决定。
+
+        `answer_id` 可为 `None`（N3 阶段 C）：v2 `create_export` 工具在工具循环
+        执行期间创建导出记录，此时本轮 `Answer` 行尚未落库，传真实值会触发外键
+        违反——这里的对象生命周期决定了导出记录不能强依赖一个尚不存在的回答行。
+        v1 路径继续总是传入真实 `answer_id`，行为不变。"""
 
         spec = replace(spec, locale=locale)
         issued_at = now or datetime.now(UTC)
@@ -151,6 +157,16 @@ class ExportService:
                 filters=dict(spec.filters),
                 start=spec.start,
                 end=spec.end,
+            )
+        if result.truncated or len(result.rows) > MAX_EXPORT_ROWS:
+            raise GuardrailRejectedError(
+                details=[
+                    {
+                        "reason": "EXPORT_ROW_LIMIT",
+                        "limit": MAX_EXPORT_ROWS,
+                        "remediation": "请缩小导出日期范围后重试",
+                    }
+                ]
             )
         return _to_csv(result, spec.locale)
 

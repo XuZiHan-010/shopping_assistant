@@ -14,6 +14,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analytics.contract import METRIC_SPECS
+from app.domain.order_status_mapping import from_legacy_status
 from app.intent.models import GeneratedMetricPlan
 from app.models.analytics import Order, OrderItem, Product, Refund, ReturnRecord
 from app.repositories.analytics import AnalyticsRepository
@@ -47,6 +48,11 @@ async def _fixture_rows(session: AsyncSession, merchant_id: UUID) -> UUID:
             order_no=f"NO-{uuid4().hex[:10]}",
             buyer_key=f"buyer-{index}",
             order_status="COMPLETED",
+            payment_status=from_legacy_status("COMPLETED")[0],
+            fulfillment_status=from_legacy_status("COMPLETED")[1],
+            close_reason=from_legacy_status("COMPLETED")[2],
+            after_sale_status="NONE",
+            lifecycle_origin="LEGACY_V1",
             total_amount=Decimal("100.00") * quantity,
             paid_amount=Decimal("100.00") * quantity,
             placed_at=datetime(2026, 8, 3, 2, 0, tzinfo=UTC),
@@ -62,6 +68,9 @@ async def _fixture_rows(session: AsyncSession, merchant_id: UUID) -> UUID:
             product_id=product.id,
             quantity=quantity,
             item_amount=Decimal("100.00") * quantity,
+            unit_price=(Decimal("100.00") * quantity),
+            discount_amount=(Decimal("100.00") * quantity) * ((quantity) - 1),
+            line_total=(Decimal("100.00") * quantity),
         )
         session.add(item)
         await session.flush()
@@ -267,6 +276,11 @@ async def _fixture_cross_category_order(session: AsyncSession, merchant_id: UUID
         order_no=f"NO-{uuid4().hex[:10]}",
         buyer_key="buyer-cross-category",
         order_status="COMPLETED",
+        payment_status=from_legacy_status("COMPLETED")[0],
+        fulfillment_status=from_legacy_status("COMPLETED")[1],
+        close_reason=from_legacy_status("COMPLETED")[2],
+        after_sale_status="NONE",
+        lifecycle_origin="LEGACY_V1",
         total_amount=Decimal("300.00"),
         paid_amount=Decimal("300.00"),
         placed_at=datetime(2026, 8, 3, 2, 0, tzinfo=UTC),
@@ -285,6 +299,9 @@ async def _fixture_cross_category_order(session: AsyncSession, merchant_id: UUID
                 product_id=product.id,
                 quantity=1,
                 item_amount=amount,
+                unit_price=(amount),
+                discount_amount=(amount) * ((1) - 1),
+                line_total=(amount),
             )
         )
     await session.flush()
@@ -461,6 +478,11 @@ async def _fixture_category_order_with_excluded_status(
         order_no=f"NO-{uuid4().hex[:10]}",
         buyer_key="buyer-qualifying",
         order_status="COMPLETED",
+        payment_status=from_legacy_status("COMPLETED")[0],
+        fulfillment_status=from_legacy_status("COMPLETED")[1],
+        close_reason=from_legacy_status("COMPLETED")[2],
+        after_sale_status="NONE",
+        lifecycle_origin="LEGACY_V1",
         total_amount=Decimal("100.00"),
         paid_amount=Decimal("100.00"),
         placed_at=datetime(2026, 8, 3, 2, 0, tzinfo=UTC),
@@ -472,6 +494,11 @@ async def _fixture_category_order_with_excluded_status(
         order_no=f"NO-{uuid4().hex[:10]}",
         buyer_key="buyer-excluded",
         order_status="CANCELLED",
+        payment_status=from_legacy_status("CANCELLED")[0],
+        fulfillment_status=from_legacy_status("CANCELLED")[1],
+        close_reason=from_legacy_status("CANCELLED")[2],
+        after_sale_status="NONE",
+        lifecycle_origin="LEGACY_V1",
         total_amount=Decimal("500.00"),
         paid_amount=Decimal("500.00"),
         placed_at=datetime(2026, 8, 3, 2, 0, tzinfo=UTC),
@@ -489,6 +516,9 @@ async def _fixture_category_order_with_excluded_status(
                 product_id=qualifying_product.id,
                 quantity=1,
                 item_amount=Decimal("100.00"),
+                unit_price=(Decimal("100.00")),
+                discount_amount=(Decimal("100.00")) * ((1) - 1),
+                line_total=(Decimal("100.00")),
             ),
             OrderItem(
                 merchant_id=merchant_id,
@@ -497,6 +527,9 @@ async def _fixture_category_order_with_excluded_status(
                 product_id=excluded_product.id,
                 quantity=1,
                 item_amount=Decimal("500.00"),
+                unit_price=(Decimal("500.00")),
+                discount_amount=(Decimal("500.00")) * ((1) - 1),
+                line_total=(Decimal("500.00")),
             ),
         ]
     )
@@ -560,6 +593,11 @@ async def _generated_metric_row(
         buyer_key=f"buyer-{spu_id}",
         address_city_name=city,
         order_status=order_status,
+        payment_status=from_legacy_status(order_status)[0],
+        fulfillment_status=from_legacy_status(order_status)[1],
+        close_reason=from_legacy_status(order_status)[2],
+        after_sale_status="NONE",
+        lifecycle_origin="LEGACY_V1",
         total_amount=paid_amount,
         paid_amount=paid_amount,
         placed_at=datetime(2026, 8, 3, 2, 0, tzinfo=UTC),
@@ -574,6 +612,9 @@ async def _generated_metric_row(
         product_id=product.id,
         quantity=2,
         item_amount=paid_amount,
+        unit_price=(paid_amount),
+        discount_amount=(paid_amount) * ((2) - 1),
+        line_total=(paid_amount),
     )
     session.add(item)
     await session.flush()

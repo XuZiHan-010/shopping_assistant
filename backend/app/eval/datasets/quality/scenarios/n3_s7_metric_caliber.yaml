@@ -1,0 +1,59 @@
+# 场景 S7：净成交额口径问答（PRD M8，N3 阶段 C Task 6）——质量回归登记。
+#
+# 放在 `quality/scenarios/` 子目录，理由同其余 N2/N3 场景登记文件。
+#
+# N3 用关键词检索（`app.agent.prefilter.tokenize` + `KnowledgeRetrieval.load_domain`）跑通；
+# N4 换成混合检索后此场景必须回归通过（计划 Task 6 步骤 3 明确要求）。
+# 只登记**依赖模型质量**的那一段：商家问"怎么算" → Agent 检索口径文档并组织带引用的回答。
+# 数字与口径本身（业务口径、SQL 口径并列、UNVERIFIED 标注）是确定性代码产出，由
+# `tests/unit/tools/merchant/test_definitions.py`、
+# `tests/integration/v2/test_merchant_chat_definitions.py` 覆盖；rubric 判断的是回答是否
+# 引用了检索到的文档、有没有自拟公式。真实模型跑这条用例属于另行授权的人工验收（R3）。
+
+- id: QLT-S7-001
+  introduced_in: N3
+  role: MERCHANT
+  skill: rules-metric-caliber
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: answer_quality
+  turns:
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/merchant/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json:
+          client_request_id: eval-qlt-s7-001
+          message: 净成交额是怎么算出来的？
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: degraded
+      expected: false
+
+- id: QLT-S7-002
+  introduced_in: N3
+  role: MERCHANT
+  skill: rules-metric-caliber
+  risk: QUALITY
+  locale: en-US
+  form: ENDPOINT
+  rubric_id: answer_quality
+  turns:
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/merchant/chat
+        headers: {Accept: application/json, Accept-Language: en-US}
+        json:
+          client_request_id: eval-qlt-s7-002
+          message: How is net GMV calculated?
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: degraded
+      expected: false

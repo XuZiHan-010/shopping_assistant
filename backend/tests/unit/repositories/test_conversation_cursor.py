@@ -46,7 +46,7 @@ def test_cursor_round_trips_the_encoded_boundary() -> None:
 
 
 def test_cursor_is_opaque_base64_not_a_readable_boundary_literal() -> None:
-    """"不透明"指调用方不能从游标字面值直接读出 UUID/时间戳——这里只断言
+    """ "不透明"指调用方不能从游标字面值直接读出 UUID/时间戳——这里只断言
     它不是 `created_at`/`message_id` 的明文拼接，不代表游标本身是加密的
     （§8.6.3 用的词是"不透明"，不是"加密"，见 brief Step 4）。"""
 
@@ -63,9 +63,7 @@ def test_cursor_rejects_reuse_across_conversations() -> None:
     cursor = _make_cursor()
 
     with pytest.raises(InvalidRequestError) as exc_info:
-        _decode_message_cursor(
-            cursor, merchant_id=MERCHANT_ONE, conversation_id=CONVERSATION_TWO
-        )
+        _decode_message_cursor(cursor, merchant_id=MERCHANT_ONE, conversation_id=CONVERSATION_TWO)
     assert exc_info.value.code.value == "INVALID_REQUEST"
     assert exc_info.value.status_code == 422
 
@@ -74,9 +72,7 @@ def test_cursor_rejects_reuse_across_merchants() -> None:
     cursor = _make_cursor()
 
     with pytest.raises(InvalidRequestError):
-        _decode_message_cursor(
-            cursor, merchant_id=MERCHANT_TWO, conversation_id=CONVERSATION_ONE
-        )
+        _decode_message_cursor(cursor, merchant_id=MERCHANT_TWO, conversation_id=CONVERSATION_ONE)
 
 
 def test_cursor_rejects_a_tampered_payload() -> None:
@@ -91,9 +87,7 @@ def test_cursor_rejects_a_tampered_payload() -> None:
     ).decode("ascii")
 
     with pytest.raises(InvalidRequestError):
-        _decode_message_cursor(
-            tampered, merchant_id=MERCHANT_ONE, conversation_id=CONVERSATION_ONE
-        )
+        _decode_message_cursor(tampered, merchant_id=MERCHANT_ONE, conversation_id=CONVERSATION_ONE)
 
 
 def test_cursor_rejects_garbage_input() -> None:

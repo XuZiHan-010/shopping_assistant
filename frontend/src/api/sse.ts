@@ -11,6 +11,7 @@ import type { components } from '@/api/generated'
 import type { SupportedLocale } from '@/i18n'
 import type { ThinkingStep } from '@/types/chat'
 
+import { parseFinalResponse, type ChatTurnEnvelope } from './chatTurnEnvelope'
 import { AppError } from './errors'
 
 type RawChatResponse = components['schemas']['ChatResponse']
@@ -23,7 +24,7 @@ export interface SseFrame {
 
 export type ChatStreamEvent =
   | { type: 'step'; step: ThinkingStep }
-  | { type: 'done'; raw: RawChatResponse }
+  | { type: 'done'; raw: RawChatResponse; envelope: ChatTurnEnvelope }
   | { type: 'error'; error: RawErrorResponse }
 
 /**
@@ -109,7 +110,13 @@ function parseFrame(raw: string): SseFrame | null {
 // 事件类型只来自 event: 行，不从 data JSON 里再读一个 type 键（后端方案 §8.4）。
 function toStreamEvent(frame: SseFrame): ChatStreamEvent | null {
   if (frame.event === 'step') return { type: 'step', step: JSON.parse(frame.data) }
-  if (frame.event === 'done') return { type: 'done', raw: JSON.parse(frame.data) }
+  if (frame.event === 'done') {
+    const raw = JSON.parse(frame.data) as RawChatResponse
+    // 与 v2 `turn_complete`（`chatV2.ts`）共用同一个「这是最终响应」解析点，
+    // 不各自实现一套（Task 6：前端只保留一处最终响应解析）。v1 完整领域对象
+    // 仍由下游的 `toChatAnswer(raw)` 单独取，本函数只加一份公共 envelope。
+    return { type: 'done', raw, envelope: parseFinalResponse(raw) }
+  }
   if (frame.event === 'error') return { type: 'error', error: JSON.parse(frame.data) }
   return null
 }

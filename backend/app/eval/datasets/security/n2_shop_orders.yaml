@@ -1,0 +1,244 @@
+# 顾客订单（N2 模块 B Task 3–5）：`/api/v2/shop/orders` 及其详情、事件、支付、取消。
+#
+# 攻击面：
+# - 访客直接下单 / 读订单——403 CUSTOMER_BINDING_REQUIRED，订单表无副作用；
+# - 商家会话调用顾客订单端点——403 SESSION_ROLE_MISMATCH 并写审计；
+# - 请求体夹带身份或金额字段——422，`extra="forbid"` 拒绝，订单表无副作用（D13：金额只由后端算）；
+# - 已绑定顾客读 / 付 / 取消**同店另一顾客**或**别家店**的订单——统一 403 RESOURCE_FORBIDDEN、
+#   写审计、订单表无副作用（R5：不存在与不属于本人逐字段一致）。
+#
+# `introduced_in: N2`——与其余 N2 用例同一过渡态，`CURRENT_MILESTONE` 推进留给 N2 收尾。
+
+- id: SEC-ORDER-001
+  introduced_in: N2
+  role: CUSTOMER
+  skill: v2_shop_orders
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: customer_a
+      request:
+        method: POST
+        path: /api/v2/shop/orders
+        json:
+          client_request_id: eval-sec-order-001
+  assertions:
+    - type: http_status
+      expected: 403
+    - type: error_code
+      expected: CUSTOMER_BINDING_REQUIRED
+    - type: no_side_effect
+      table: orders
+
+- id: SEC-ORDER-002
+  introduced_in: N2
+  role: MERCHANT
+  skill: v2_shop_orders
+  risk: SECURITY
+  locale: en-US
+  form: ENDPOINT
+  turns:
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/shop/orders
+        json:
+          client_request_id: eval-sec-order-002
+  assertions:
+    - type: http_status
+      expected: 403
+    - type: error_code
+      expected: SESSION_ROLE_MISMATCH
+    - type: audit_written
+      event_type: SESSION_ROLE_MISMATCH
+    - type: no_side_effect
+      table: orders
+
+- id: SEC-ORDER-003
+  introduced_in: N2
+  role: CUSTOMER
+  skill: v2_shop_orders
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  # 已绑定顾客在请求体里夹带 buyer_key 与金额：结构上就被拒绝，不会写出订单。
+  turns:
+    - actor: customer_a
+      primitive:
+        name: session.bind_actor
+        args:
+          buyer_key: eval-order-buyer-a
+    - actor: customer_a
+      request:
+        method: POST
+        path: /api/v2/shop/orders
+        json:
+          client_request_id: eval-sec-order-003
+          buyer_key: eval-someone-else
+          total_cents: 1
+  assertions:
+    - type: http_status
+      expected: 422
+    - type: error_code
+      expected: INVALID_REQUEST
+    - type: no_side_effect
+      table: orders
+
+- id: SEC-ORDER-004
+  introduced_in: N2
+  role: CUSTOMER
+  skill: v2_shop_orders
+  risk: SECURITY
+  locale: en-US
+  form: ENDPOINT
+  # 同店另一顾客的订单详情：与不存在同一个 403，并写审计。
+  turns:
+    - actor: customer_a
+      primitive:
+        name: session.bind_actor
+        args:
+          buyer_key: eval-order-buyer-a
+    - actor: customer_a
+      primitive:
+        name: trade.seed_foreign_order
+        args:
+          other_buyer_key: eval-order-buyer-b
+    - actor: customer_a
+      request:
+        method: GET
+        path: /api/v2/shop/orders/{state:foreign_order_id}
+  assertions:
+    - type: http_status
+      expected: 403
+    - type: error_code
+      expected: RESOURCE_FORBIDDEN
+    - type: audit_written
+      event_type: RESOURCE_SCOPE_VIOLATION
+
+- id: SEC-ORDER-005
+  introduced_in: N2
+  role: CUSTOMER
+  skill: v2_shop_orders
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  # 别家店的订单履约事件：跨店同一个 403。
+  turns:
+    - actor: customer_a
+      primitive:
+        name: session.bind_actor
+        args:
+          buyer_key: eval-order-buyer-a
+    - actor: customer_a
+      primitive:
+        name: trade.seed_foreign_order
+        args:
+          other_merchant_id: "00000000-0000-0000-0000-0000000001a2"
+          other_buyer_key: eval-order-buyer-a
+    - actor: customer_a
+      request:
+        method: GET
+        path: /api/v2/shop/orders/{state:foreign_order_id}/events
+  assertions:
+    - type: http_status
+      expected: 403
+    - type: error_code
+      expected: RESOURCE_FORBIDDEN
+    - type: audit_written
+      event_type: RESOURCE_SCOPE_VIOLATION
+
+- id: SEC-ORDER-006
+  introduced_in: N2
+  role: CUSTOMER
+  skill: v2_shop_orders
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  # 替别人付款：403，订单与库存都不动。
+  turns:
+    - actor: customer_a
+      primitive:
+        name: session.bind_actor
+        args:
+          buyer_key: eval-order-buyer-a
+    - actor: customer_a
+      primitive:
+        name: trade.seed_foreign_order
+        args:
+          other_buyer_key: eval-order-buyer-b
+    - actor: customer_a
+      request:
+        method: POST
+        path: /api/v2/shop/orders/{state:foreign_order_id}/pay
+        json:
+          client_request_id: eval-sec-order-006
+  assertions:
+    - type: http_status
+      expected: 403
+    - type: error_code
+      expected: RESOURCE_FORBIDDEN
+    - type: audit_written
+      event_type: RESOURCE_SCOPE_VIOLATION
+    - type: no_side_effect
+      table: orders
+    - type: no_side_effect
+      table: products
+
+- id: SEC-ORDER-007
+  introduced_in: N2
+  role: CUSTOMER
+  skill: v2_shop_orders
+  risk: SECURITY
+  locale: en-US
+  form: ENDPOINT
+  # 替别人取消：403，不释放别人的占用。
+  turns:
+    - actor: customer_a
+      primitive:
+        name: session.bind_actor
+        args:
+          buyer_key: eval-order-buyer-a
+    - actor: customer_a
+      primitive:
+        name: trade.seed_foreign_order
+        args:
+          other_buyer_key: eval-order-buyer-b
+    - actor: customer_a
+      request:
+        method: POST
+        path: /api/v2/shop/orders/{state:foreign_order_id}/cancel
+        json:
+          client_request_id: eval-sec-order-007
+  assertions:
+    - type: http_status
+      expected: 403
+    - type: error_code
+      expected: RESOURCE_FORBIDDEN
+    - type: audit_written
+      event_type: RESOURCE_SCOPE_VIOLATION
+    - type: no_side_effect
+      table: orders
+    - type: no_side_effect
+      table: products
+
+- id: SEC-ORDER-008
+  introduced_in: N2
+  role: MERCHANT
+  skill: v2_shop_orders
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  # 商家会话读顾客订单列表：跨角色 403 并写审计。
+  turns:
+    - actor: merchant_a
+      request:
+        method: GET
+        path: /api/v2/shop/orders
+  assertions:
+    - type: http_status
+      expected: 403
+    - type: error_code
+      expected: SESSION_ROLE_MISMATCH
+    - type: audit_written
+      event_type: SESSION_ROLE_MISMATCH

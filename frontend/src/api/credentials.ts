@@ -22,12 +22,19 @@ import { AppError } from './errors'
  */
 const FALLBACK_LOCALE: SupportedLocale = 'zh-CN'
 
-/** 请求要携带的凭证种类。`'none'` 用于不需要鉴权的公开接口（如演示商家列表）。 */
-export type AuthScope = 'merchant' | 'admin' | 'none'
+/**
+ * 请求要携带的凭证种类。`'none'` 用于不需要鉴权的公开接口（如演示商家列表）。
+ * `'merchant-session'` 是 v2 会话模式：换取会话后的商家端点只带 `X-Session-Id`，
+ * 不再带 `Authorization`（`AGENTS.md` §8.3：每个端点只属于一个作用域）；
+ * v1 与仅有的一条 `POST /api/v2/merchant/sessions` 换取端点仍用 `'merchant'`。
+ */
+export type AuthScope = 'merchant' | 'merchant-session' | 'admin' | 'none'
 
 export interface CredentialSet {
   merchantToken?: string
   adminToken?: string
+  /** v2 商家会话 ID，只进内存；由 `stores/auth.ts` 换取会话后注入。 */
+  sessionId?: string
 }
 
 export type CredentialProvider = () => CredentialSet
@@ -45,6 +52,7 @@ export function setCredentialProvider(fn: CredentialProvider | undefined): void 
 
 const SCOPE_LABEL: Record<Exclude<AuthScope, 'none'>, string> = {
   merchant: '商家登录',
+  'merchant-session': '商家会话',
   admin: '管理员登录',
 }
 
@@ -67,6 +75,16 @@ export function buildAuthHeaders(scope: AuthScope): Record<string, string> {
       throw new AppError('AUTH_REQUIRED', `缺少${SCOPE_LABEL.merchant}凭证，请重新选择商家。`)
     }
     return { Authorization: `Bearer ${credentials.merchantToken}` }
+  }
+
+  if (scope === 'merchant-session') {
+    if (!credentials.sessionId) {
+      throw new AppError(
+        'AUTH_REQUIRED',
+        `缺少${SCOPE_LABEL['merchant-session']}，请重新选择商家。`,
+      )
+    }
+    return { 'X-Session-Id': credentials.sessionId }
   }
 
   if (!credentials.adminToken) {

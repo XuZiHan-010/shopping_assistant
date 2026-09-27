@@ -10,8 +10,11 @@ import random
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
-from uuid import UUID
+from typing import cast
+from uuid import NAMESPACE_URL, UUID, uuid5
 from zoneinfo import ZoneInfo
+
+from app.domain.order_status_mapping import from_legacy_status
 
 BUSINESS_TIMEZONE = ZoneInfo("Asia/Shanghai")
 
@@ -38,6 +41,82 @@ class DemoDataset:
     refunds: list[dict[str, object]]
     returns: list[dict[str, object]]
     tickets: list[dict[str, object]]
+    inventory_events: list[dict[str, object]]
+    fulfillment_events: list[dict[str, object]]
+
+
+def _event_row(
+    *,
+    merchant_id: UUID,
+    subject_id: UUID,
+    event_type: str,
+    occurred_at: datetime,
+    dedupe_key: str,
+    payload: dict[str, object],
+) -> dict[str, object]:
+    return {
+        "id": uuid5(NAMESPACE_URL, f"borough-demo:{merchant_id}:{dedupe_key}"),
+        "merchant_id": merchant_id,
+        "subject_id": subject_id,
+        "event_type": event_type,
+        "occurred_at": occurred_at,
+        "dedupe_key": dedupe_key,
+        "payload": payload,
+        "created_at": occurred_at,
+    }
+
+
+def _legacy_fulfillment_events(order: dict[str, object]) -> list[dict[str, object]]:
+    """与 M3 历史回填使用相同状态、时间及推定标记。"""
+
+    merchant_id = cast(UUID, order["merchant_id"])
+    order_id = cast(UUID, order["id"])
+    placed_at = cast(datetime, order["placed_at"])
+    paid_at = order["paid_at"]
+    status = order["order_status"]
+    events = []
+
+    def add(
+        event_type: str,
+        occurred_at: datetime,
+        *,
+        inferred: bool = False,
+        close_reason: str | None = None,
+    ) -> None:
+        payload: dict[str, object] = {"origin": "LEGACY_V1_BACKFILL"}
+        if inferred:
+            payload["time_inferred"] = True
+        if close_reason is not None:
+            payload["close_reason"] = close_reason
+        events.append(
+            _event_row(
+                merchant_id=merchant_id,
+                subject_id=order_id,
+                event_type=event_type,
+                occurred_at=occurred_at,
+                dedupe_key=f"legacy:{order_id}:{event_type}",
+                payload=payload,
+            )
+        )
+
+    add("ORDER_PLACED", placed_at)
+    if status in {"PAID", "SHIPPED", "COMPLETED"}:
+        assert isinstance(paid_at, datetime)
+        add("PAYMENT_CONFIRMED", paid_at)
+    if status in {"SHIPPED", "COMPLETED"}:
+        assert isinstance(paid_at, datetime)
+        add("SHIPPED", paid_at + timedelta(hours=6), inferred=True)
+    if status == "COMPLETED":
+        assert isinstance(paid_at, datetime)
+        add("DELIVERED", paid_at + timedelta(days=3), inferred=True)
+    if status in {"CANCELLED", "CLOSED"}:
+        add(
+            "ORDER_CLOSED",
+            placed_at + timedelta(minutes=30),
+            inferred=True,
+            close_reason=cast(str, order["close_reason"]),
+        )
+    return events
 
 
 def _utc_moment(business_day: date, hour: int, minute: int) -> datetime:
@@ -74,6 +153,19 @@ def build_demo_catalog(*, merchant_id: UUID, seed: int) -> list[dict[str, object
     products: list[dict[str, object]] = []
     for index in range(24):
         listed_day = DEMO_CATALOG_EPOCH + timedelta(days=rng.randrange(180))
+        listed_at = _utc_moment(listed_day, 10, 0)
+        attributes: dict[str, dict[str, str]] = {
+            "材质": {"value": "棉质", "source": "DEMO", "updated_at": listed_at.isoformat()},
+            "产地": {"value": "中国", "source": "DEMO", "updated_at": listed_at.isoformat()},
+        }
+        if index == 2:
+            del attributes["产地"]
+        description = (
+            "Borough 精选演示商品。面料舒适，适合日常使用。"
+            "尺寸与保养信息经演示商家核对，可用于完整商品导购。"
+        ) * 3
+        if index == 4:
+            description = "简短说明。"
         products.append(
             {
                 "id": _row_id(rng),
@@ -85,7 +177,18 @@ def build_demo_catalog(*, merchant_id: UUID, seed: int) -> list[dict[str, object
                 "category": _CATEGORIES[index % len(_CATEGORIES)],
                 "price": _money(rng.uniform(39, 899)),
                 "status": "ONLINE" if index % 8 else "AUDITING",
-                "listed_at": _utc_moment(listed_day, 10, 0),
+                "listed_at": listed_at,
+                "short_description": "Borough 精选演示商品",
+                "detail_description": description,
+                "attributes": attributes,
+                "image_url": None if index == 5 else f"/demo/products/{index + 1:02d}.png",
+                "stock_on_hand": 3 if index == 3 else 100,
+                "stock_reserved": 0,
+                "low_stock_threshold": 5,
+                "content_version": 1,
+                "source_locale": "zh-CN",
+                "created_at": listed_at,
+                "updated_at": listed_at,
             }
         )
     return products
@@ -109,6 +212,18 @@ def build_demo_dataset(
     refunds: list[dict[str, object]] = []
     returns: list[dict[str, object]] = []
     tickets: list[dict[str, object]] = []
+    inventory_events = [
+        _event_row(
+            merchant_id=merchant_id,
+            subject_id=cast(UUID, product["id"]),
+            event_type="INITIAL_STOCK",
+            occurred_at=cast(datetime, product["listed_at"]),
+            dedupe_key=f"demo:initial-stock:{product['id']}",
+            payload={"quantity": product["stock_on_hand"], "origin": "DEMO_SEED"},
+        )
+        for product in products
+    ]
+    fulfillment_events: list[dict[str, object]] = []
 
     for offset in range(days):
         business_day = start_date + timedelta(days=offset)
@@ -140,24 +255,39 @@ def build_demo_dataset(
                         "product_id": product["id"],
                         "quantity": quantity,
                         "item_amount": amount,
+                        "unit_price": product["price"],
+                        "discount_amount": Decimal("0.00"),
+                        "line_total": amount,
                     }
                 )
 
-            orders.append(
-                {
-                    "id": order_id,
-                    "merchant_id": merchant_id,
-                    "business_date": business_day,
-                    "order_no": f"NO{business_day:%Y%m%d}{sequence:03d}",
-                    "buyer_key": f"buyer-{rng.randrange(1, 240):03d}",
-                    "address_city_name": _CITIES[rng.randrange(len(_CITIES))],
-                    "order_status": status,
-                    "total_amount": total,
-                    "paid_amount": total if paid else Decimal("0.00"),
-                    "placed_at": _utc_moment(business_day, rng.randrange(0, 24), rng.randrange(60)),
-                    "paid_at": _utc_moment(business_day, 12, 0) if paid else None,
-                }
-            )
+            placed_at = _utc_moment(business_day, rng.randrange(0, 11), rng.randrange(60))
+            for item_row in item_rows:
+                item_row["created_at"] = placed_at
+            payment_status, fulfillment_status, close_reason = from_legacy_status(status)
+            order = {
+                "id": order_id,
+                "merchant_id": merchant_id,
+                "business_date": business_day,
+                "order_no": f"NO{business_day:%Y%m%d}{sequence:03d}",
+                "buyer_key": f"buyer-{rng.randrange(1, 240):03d}",
+                "address_city_name": _CITIES[rng.randrange(len(_CITIES))],
+                "order_status": status,
+                "total_amount": total,
+                "paid_amount": total if paid else Decimal("0.00"),
+                "placed_at": placed_at,
+                "paid_at": _utc_moment(business_day, 12, 0) if paid else None,
+                "payment_status": payment_status,
+                "fulfillment_status": fulfillment_status,
+                "after_sale_status": "NONE",
+                "close_reason": close_reason,
+                "lifecycle_origin": "LEGACY_V1",
+                "source_timezone": "Asia/Shanghai",
+                "created_at": placed_at,
+                "updated_at": placed_at,
+            }
+            orders.append(order)
+            fulfillment_events.extend(_legacy_fulfillment_events(order))
             order_items.extend(item_rows)
 
             if not paid:
@@ -180,6 +310,7 @@ def build_demo_dataset(
 
             if rng.random() < 0.10:
                 ticket_day = business_day
+                opened_at = _utc_moment(ticket_day, rng.randrange(9, 21), 0)
                 tickets.append(
                     {
                         "id": _row_id(rng),
@@ -189,12 +320,23 @@ def build_demo_dataset(
                         "order_id": order_id,
                         "ticket_status": _TICKET_STATUSES[rng.randrange(len(_TICKET_STATUSES))],
                         "ticket_reason": _TICKET_REASONS[rng.randrange(len(_TICKET_REASONS))],
-                        "opened_at": _utc_moment(ticket_day, rng.randrange(9, 21), 0),
+                        "opened_at": opened_at,
+                        "created_at": opened_at,
+                        "updated_at": opened_at,
                     }
                 )
                 ticket_sequence += 1
 
-    return DemoDataset(products, orders, order_items, refunds, returns, tickets)
+    return DemoDataset(
+        products,
+        orders,
+        order_items,
+        refunds,
+        returns,
+        tickets,
+        inventory_events,
+        fulfillment_events,
+    )
 
 
 def _refund_row(
@@ -204,6 +346,7 @@ def _refund_row(
     rng: random.Random,
 ) -> dict[str, object]:
     status = "REFUNDED" if rng.random() < 0.8 else "PENDING"
+    occurred_at = _utc_moment(business_day, 15, 0)
     return {
         "id": _row_id(rng),
         "merchant_id": merchant_id,
@@ -212,7 +355,8 @@ def _refund_row(
         "refund_amount": Decimal(str(item["item_amount"])),
         "refund_reason": _REFUND_REASONS[rng.randrange(len(_REFUND_REASONS))],
         "refund_status": status,
-        "refunded_at": _utc_moment(business_day, 15, 0) if status == "REFUNDED" else None,
+        "refunded_at": occurred_at if status == "REFUNDED" else None,
+        "created_at": occurred_at,
     }
 
 
@@ -223,6 +367,7 @@ def _return_row(
     rng: random.Random,
 ) -> dict[str, object]:
     status = _RETURN_STATUSES[rng.randrange(len(_RETURN_STATUSES))]
+    occurred_at = _utc_moment(business_day, 16, 0)
     return {
         "id": _row_id(rng),
         "merchant_id": merchant_id,
@@ -232,5 +377,6 @@ def _return_row(
         "return_reason": _RETURN_REASONS[rng.randrange(len(_RETURN_REASONS))],
         "return_status": status,
         "logistics_status": _LOGISTICS_STATUSES[rng.randrange(len(_LOGISTICS_STATUSES))],
-        "returned_at": _utc_moment(business_day, 16, 0) if status != "REQUESTED" else None,
+        "returned_at": occurred_at if status != "REQUESTED" else None,
+        "created_at": occurred_at,
     }

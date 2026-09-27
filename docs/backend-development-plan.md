@@ -1,10 +1,12 @@
-# Borough 后端开发计划
+# Borough 双端 Agent 平台后端开发计划
 
 > 适用对象：后端开发人员、全栈开发人员、coding agent  
-> 产品名称：Borough 商家 AI 助手  
+> 产品名称：Borough 双端 Agent 电商平台
 > 目标技术栈：Python 3.12 + FastAPI + PostgreSQL  
 > 产品范围：以 `docs/PRD.md` 为准  
 > 工程规则：以根目录 `AGENTS.md` 为准
+> 状态说明：B0–B9 与 P0/P1/P2 是旧单端路线的历史实施编号，只用于解释现有代码；
+> 新需求排期统一使用 PRD N1–N5。未被新 PRD 保留的旧待办不得继续实施。
 
 ---
 
@@ -14,13 +16,11 @@
 
 1. `AGENTS.md`
 2. `docs/PRD.md`
-3. `yshopping-merchant-ai 4/yshopping-merchant-ai/docs/architecture.md`
-4. `yshopping-merchant-ai 4/yshopping-merchant-ai/docs/architecture-detail.md`
-5. 旧项目 Agent、Intent、Query、Answer、Reviewer 和 Wiki Service
-6. 旧项目对应测试
-7. `yshopping-merchant-ai 4/yshopping-merchant-ai/runtime/llm-wiki/`
+3. `docs/specs/2026-09-18-anthropic-fusion-decisions.md`
+4. `docs/project-progress.md`
 
-重构时复用业务契约、安全规则和可观察行为，不逐行翻译 Java。优先提取可独立测试的 Deep Module。
+只在 PRD 明确保留某项历史行为时查阅只读参考项目；参考实现不再反向产生 Borough 需求。
+重构时优先复用已验证的 Borough 业务契约、安全规则与测试资产。
 
 > **旧项目有一处安全反例，读到时不要沿用。** `MerchantQaLangGraph.loadMerchant()` 的注释写着"默认本地商家为 100，也支持前端透传 merchantId"——它信任前端传入的商家 ID。新实现的商家身份只能来自 Token 解析，见 §6.1 与 §15。
 
@@ -68,17 +68,10 @@
 
 限流在 MVP 使用进程内计数器实现，不引入额外依赖，也不依赖 Redis。
 
-### 3.2 附件与数据处理
+### 3.2 数据处理
 
-P1 使用：
-
-| 依赖 | 用途 |
-| --- | --- |
-| `polars` | CSV 和表格处理 |
-| `openpyxl` | Excel |
-| `pymupdf` | PDF |
-| `pillow` | 图片检查 |
-| S3 SDK | 对象存储 |
+本版保留 CSV 导出与现有表格处理依赖，不建设附件上传、PDF/图片解析、OCR 或对象存储。
+历史环境中已存在的附件相关依赖不构成继续开发附件能力的授权；未来重启时须先修改 PRD。
 
 ### 3.3 测试与质量
 
@@ -213,7 +206,74 @@ Repository 不调用 LLM，也不返回开放的任意 SQL 执行能力。
 
 ### 5.5 External Client
 
-LLM、对象存储和未来 Doris 客户端必须通过协议接口注入，测试使用 Fake 实现。
+LLM 和未来确有证据后引入的外部客户端必须通过协议接口注入，测试使用 Fake 实现。
+
+### 5.6 N 路线分层增量
+
+§5.1–§5.5 的分层职责**不变**。本节只定义 N 路线新增的 **Agent 内核模块**住在哪里、
+与冻结基线什么关系，以及这些模块允许依赖谁；N1–N5 仍会按既有分层新增 API、Service、Repository、
+ORM 与前端代码，不能误读成“全部新能力只放 Agent Layer”。**它管 N2–N5 的新内核；任何新内核模块
+开工前先读本节。**
+
+#### 与冻结 LangGraph 的关系：并存，不替换
+
+O4 裁定 `backend/app/agent/graph.py` 的 12 节点图**冻结为只读评测基线**，不再承接新能力、
+不部署为新生产主流程。因此：
+
+| | 冻结基线 | 新工具循环 |
+| --- | --- | --- |
+| 入口 | v1 `POST /api/chat` | v2 `POST /api/v2/shop/chat`、`/api/v2/merchant/chat` |
+| 代码 | `app/agent/graph.py`、`state.py`、`prefilter.py` | `app/agent/loop/`（新建） |
+| 状态 | `AgentState` TypedDict，12 个固定节点 | `LoopState`，轮次驱动 |
+| 变更 | **只读**。只允许修依赖版本与安全补丁 | 正常演进 |
+
+两者**不共享代码路径**，只共享下层设施：`app/llm/`（客户端与预算）、`app/services/safe_query.py`、
+`app/repositories/`、`app/knowledge/`、`app/metrics/`。
+
+> **不要试图"把新能力加进 graph.py"或"让新循环复用 GRAPH_NODES"。** 冻结的价值在于它是
+> 可对照的评测基线——一旦被改动，N2 之后就再也没有"旧实现在同一题上怎么答"的参照。
+> 新循环走通后，两者在同一评测集上的对比报告是 N2 的交付物之一。
+
+#### 新模块目录与依赖方向
+
+```text
+app/
+  tools/          A3 工具注册表与四类闸门          ← 新建
+  skills/         A4 Skill 定义与按需加载          ← 新建
+  agent/loop/     A2 工具调用循环与预算            ← 新建
+  memory/         A6 记忆抽取、过滤与两层结构       ← 新建
+  eval/           E1–E4 评测集、评分与安全门禁      ← 新建
+  knowledge/      A7 混合召回与索引版本（扩展既有）  ← 扩展
+  agent/graph.py  冻结基线                        ← 只读
+```
+
+依赖只允许自上而下，**同层之间不得互相 import**：
+
+```text
+loop  →  skills  →  tools  →  services / repositories / knowledge / metrics
+  ↓                   ↓
+memory              llm（LlmClient / LlmBudget / LlmCostGuard）
+```
+
+具体禁止项：
+
+- `tools/` **不得** import `loop/` 或 `skills/`——工具必须能脱离循环单独测试；
+- `skills/` **不得**直接 import `repositories/`——数据访问一律经 `tools/`；
+- `memory/` **不得** import `loop/`——记忆抽取是异步后置流程，不能反向拉起循环；
+- 任何新模块**不得** import `app/agent/graph.py` 或 `app/agent/state.py`；
+- `eval/` 可以 import 任何模块，但**不得被任何生产模块 import**。
+
+#### 与既有资产的衔接（不新造轮子）
+
+| 新模块要用的能力 | 复用既有 | 不要另起一套 |
+| --- | --- | --- |
+| 模型调用 | `app.llm.client.LlmClient` Protocol；v2 工具循环用其子协议 `ConversationalLlmClient`（§6.17） | 不新增第二个客户端协议 |
+| 单请求预算 | `app.llm.client.LlmBudget`（`charge_call()` / `charge()`） | 不在循环里自己数次数 |
+| 每日预算与降级归因 | `app.llm.guard.LlmCostGuard`、`LlmFailureKind` | 不自定义失败分类 |
+| 工具参数校验 | `app/intent/` 的 Pydantic 模式（R4：模型只输出结构化意图） | 不接受自由字符串参数 |
+| 受控查询 | `app.services.safe_query` | 工具内不得拼 SQL |
+| 限流与可信 IP | `app.core.rate_limit`、`app.core.client_ip` | — |
+| 降级语义 | 在 `app.services.quality_types` 的单一共享枚举上复用 `UPSTREAM` / `VALIDATION` / `BUDGET`，并为新循环补 `LIMIT` / `TIMEOUT` | 不在 loop 内另写字符串或第二套枚举 |
 
 ---
 
@@ -234,7 +294,10 @@ class MerchantContext:
     is_admin: bool
 ```
 
-**MVP 没有 user 概念。** 不建 `users` 表，Token 直接映射到商家，会话与反馈归属到商家。管理员身份由独立的 `ADMIN_TOKEN` 判定（**P0 起即需要**，用于 B7 的运维端点；P1 的知识库后台复用同一变量），走独立请求头 `X-Admin-Token`，不是用户行；真实用户体系留到 P2 的 SSO。
+**v1 没有 user 概念。** Token 直接映射到商家；管理员由独立 `ADMIN_TOKEN` 判定并走
+`X-Admin-Token`。N1 将增加顾客/商家会话基础设施：商家 Bearer Token 只用于换取会话，
+顾客和商家后续都用带不可变角色的 `X-Session-Id`，下游从会话解析 `merchant_id` / `buyer_key`。
+真实注册登录、SSO 与 `users` 表不在本版范围。
 
 业务时区不是本模块的字段。全局固定为 `Asia/Shanghai`，由配置提供，见 §7.2。
 
@@ -252,7 +315,7 @@ class MerchantContext:
 - 缺少或非法 Token 返回 401；
 - 访问其他商家资源返回 403 且产生审计记录；
 - 管理员令牌未配置时管理接口返回 403；
-- 导出、附件和会话隔离。
+- 导出、双端会话、草稿、售后与记忆隔离。
 
 > **不要照搬旧实现的这一处。** 参考项目 `MerchantQaLangGraph.loadMerchant()` 的注释写着"默认本地商家为 100，也支持前端透传 merchantId"——旧实现信任前端传入的商家 ID。这正是本模块要消除的漏洞，读旧代码时不要沿用。
 
@@ -281,6 +344,7 @@ generated_metric_plan
 ### 规则
 
 - `answer_mode` 使用枚举；
+- `needs_attachment` 是 v1 遗留字段，本版恒为 `false`；v2 契约不得继续携带；
 - metric 使用**英文 `metric_code` 枚举**，不接受中文指标名——模型输出的中文变体（空格、简繁、同义词）会造成漏命中；
 - dimension、filter field 使用白名单；
 - **三套白名单（指标、维度、筛选）在本阶段建立**，不留到查询阶段，否则本阶段的验收无法执行；
@@ -494,6 +558,742 @@ alternates   # 同业务域的其余候选组，供前端"换一换"本地轮换
 
 ---
 
+> **以下 §6.9–§6.15 是 N 路线新内核的模块边界。** §6.1–§6.8 描述的是 v1 冻结基线的模块，
+> 两组模块并存且不互相 import（§5.6）。新模块开工前先读 §5.6 的依赖方向表。
+
+## 6.9 Tool Registry
+
+对应 PRD A3。工具是新内核唯一的数据出入口——循环与 Skill 都不直接碰 Repository。
+
+### 输入
+
+- `SessionContext`（由会话解析，含不可变 `role`、`merchant_id`，顾客侧另有 `buyer_key`）；
+- 工具名与**未经校验**的模型输出参数。
+
+### 输出
+
+```python
+class ToolRole(StrEnum):
+    CUSTOMER = "CUSTOMER"
+    MERCHANT = "MERCHANT"
+    MCP_READONLY = "MCP_READONLY"   # 商家工具集的只读子集，见 A8
+
+
+class WritePolicy(StrEnum):
+    READ_ONLY = "READ_ONLY"
+    CUSTOMER_DIRECT = "CUSTOMER_DIRECT"          # 购物车绝对数量等天然幂等写
+    CUSTOMER_CONFIRMATION = "CUSTOMER_CONFIRMATION"  # 下单、售后等界面确认证据
+    MERCHANT_DRAFT = "MERCHANT_DRAFT"            # 商家经营变更只生成草稿
+
+
+@dataclass(frozen=True)
+class ToolSpec:
+    name: str
+    roles: frozenset[ToolRole]
+    args_model: type[BaseModel]      # 必须是 Pydantic 模型，extra="forbid"
+    write_policy: WritePolicy
+    parallelizable: bool
+
+
+@dataclass(frozen=True)
+class ToolResult:
+    ok: bool
+    payload: object | None            # 结构化结果，供后端确定性代码消费
+    display: ToolDisplay              # 脱敏展示信息，唯一允许进 SSE 的部分
+    reason_code: ErrorCode | None     # 失败时的公开稳定原因码，不用自由字符串
+```
+
+`ToolDisplay` 只含工具名、状态、耗时、行数与可公开摘要。**`payload` 永不进 SSE**，
+`display` 永不含原始参数、SQL 或完整结果行（`docs/PRD.md` §11.3；精确的 `tool_call` /
+`tool_result` 事件字段由 §8.7 的 v2 SSE 契约定义，该节尚待写入，见 §8.0.1）。
+
+N2 落地补充（2026-09-22，实现与本节核对后回写；上面五个字段与四个类型名不变，只追加）：
+
+- `ToolSpec` 追加 `description`（给模型的工具说明）、`executor`、`provenance_refs`（哪些参数引用了
+  必须先在本对话出现过的对象，及其对象类型）、`option_source`（选项闸门的合法值来源）、`guardrail`、
+  `draft_kind`（仅 `MERCHANT_DRAFT`）。executor 签名固定为 `(ToolContext, args) -> ...`，
+  `ToolContext` 携带 `SessionContext`、`conversation_id`、`request_id`，注册时用类型注解自检；
+- executor 的返回类型随 `WritePolicy` 固定，注册时同样按注解自检：`READ_ONLY` / `CUSTOMER_DIRECT`
+  返回 `ToolOutput`；`MERCHANT_DRAFT` 只能返回 `DraftProposal`，由审批闸门交给草稿端口落草稿行，
+  executor 在类型上就拿不到「直接写目标对象」这条路；`CUSTOMER_CONFIRMATION` 只能返回
+  `ConfirmationPreview`，真正的写入走带界面确认证据的端点（§8.7.9），循环内不执行；
+- **`ToolDisplay` 与 §8.7.5 一一对应**（2026-09-23 自查修正）：字段为 `tool_name`、`call_id`、
+  `status: ToolDisplayStatus`、`duration_ms`、`row_count`，**没有任何自由文本字段**；`tool_call` /
+  `tool_result` 载荷由 `ToolDisplay.call_event(locale)` / `result_event(locale)` 投影，摘要只取契约
+  固定的双语短句，并经 `ToolCallDisplay` / `ToolResultDisplay` 校验器再核一次。首版曾让 executor
+  自写摘要进 display（实测「补货 37 件」把参数带进了 SSE），已撤销；
+- `ToolResult` 追加 `outcome: ToolOutcome`（`SUCCEEDED` / `DRAFT_CREATED` / `AWAITING_CONFIRMATION` /
+  `REJECTED` / `INVALID_ARGUMENTS`，比对外状态细，映射见 `app.tools.types.DISPLAY_STATUS`）、
+  `summary`（工具给模型的说明，可含参数，不进 SSE）与 `guardrail`；
+- `ToolResult.reason_code` 维持 `ErrorCode`：护栏失败为 `GUARDRAIL_REJECTED`，参数校验失败或工具名
+  不存在为 `INVALID_REQUEST`，需界面确认为 `CONFIRMATION_REQUIRED`。具体护栏规则码（如
+  `DISCOUNT_EXCEEDS_LIMIT`）、当前限制与修正方法放在 `ToolResult.guardrail`，形状复用 §8.7 已有的
+  `GuardrailCheckResult`，经工具消息交给模型转述给商家，不进 SSE；
+- **工具名不存在**是模型的错误，返回 `INVALID_REQUEST` 的 `ToolResult` 交还模型修正，不终止回合、
+  不写审计；**真实存在但不属于当前角色工具面**的工具才是安全事件；
+- 进入四类闸门前还有两道致命前置检查：工具不在当前角色工具面；模型参数的顶层键出现
+  `merchant_id` / `buyer_key`（企图经参数改写身份）。其余 Pydantic 校验失败不是安全事件，返回
+  `INVALID_REQUEST` 的 `ToolResult`，不含原始校验信息；
+- 来源状态的主体键：访客为 `GUEST_SESSION` + 内部 `session_record_id`；已绑定顾客与商家为
+  `BOUND_PRINCIPAL` + `app.core.session.principal_digest()`（与幂等域同一摘要）。店铺即 `merchant_id`。
+
+N3 阶段 C 落地补充（2026-09-27，图表可视化，§8.7.11）：
+
+- `ToolOutput`/`ToolResult` 追加 `chart_data: object | None = None`——**不经过
+  `_tool_message()` 序列化，不进 LLM 看到的工具结果消息**，只供 `LoopOutcome.tool_results`
+  的消费方（`merchant_chat.py::_to_response()`）读取后构造 `MerchantChatResponse.visualization`；
+  `payload` 与 `chart_data` 因此明确分工：`payload` 是"给模型引用的汇总数字"，
+  `chart_data` 是"给图表用的完整数据点"，二者可以同时存在、互不影响对方的可见范围；
+- 只有 `query_metrics`/`attribute_change` 两个工具会填充这个字段，其余工具恒为 `None`；
+- 该字段不改变 `_check_policy()`/`_check_executor()` 的既有校验规则（不是新的
+  `WritePolicy` 分支，`READ_ONLY` 工具的返回类型仍是 `ToolOutput`，只是多了一个可选属性）。
+
+### 四类闸门
+
+按 A3 沿用蓝图四类，执行顺序固定，**前一道不过不进下一道**：
+
+| # | 闸门 | 判定 | 不通过 |
+| --- | --- | --- | --- |
+| 1 | **来源闸门** | 对象是否在**本对话**中由工具返回过 | 终止回合 |
+| 2 | **选项闸门** | 参数是否在后端给出的合法选项集合内 | 终止回合 |
+| 3 | **护栏闸门** | 业务限制（折扣幅度、调价幅度、库存、时效） | 返回公开原因码 |
+| 4 | **审批/确认闸门** | 按 `WritePolicy` 校验：顾客直接幂等写、顾客界面确认、商家草稿审批分别处理 | — |
+
+**来源状态的隔离键是「登录主体 + 店铺 + 对话 ID」**（D8④、O2），带版本号防并发覆盖。
+一个对话里取得的对象访问资格**不得扩散到其他对话**；新建对话时来源状态从空开始。
+
+### 规则
+
+- 工具参数一律经 Pydantic 校验（R4），模型**不输出 SQL、不选数据源、不定指标公式**；
+- `merchant_id` / `buyer_key` 由注册表从 `SessionContext` **强制注入**。
+  **模型可见的 `args_model`** 不得出现这两个字段；内部 executor 明确接收 `SessionContext`，
+  不得靠全局变量，也不得把可信身份重新拼回模型参数；
+- `parallelizable=true` 只允许与 `write_policy=READ_ONLY` 组合，注册时发现矛盾即失败；
+- `MERCHANT_DRAFT` 只生成草稿；`CUSTOMER_CONFIRMATION` 必须验证服务端签发、一次性、短期有效且
+  绑定主体/资源/请求摘要的界面确认证据；`CUSTOMER_DIRECT` 只允许 PRD 明确列出的天然幂等操作。
+  购物车、结账和顾客售后不得被错误套进商家草稿审批（PRD SEC6）；
+- **身份、权限、安全拦截是致命错误，必须终止整个回合**（A2），
+  返回 HTTP 401 / 403，**不得包装成 `ToolResult` 让模型继续尝试**；
+- 失败披露分两类（A3、O5）：业务护栏对授权商家给出原因码、当前限制与修正方法；
+  安全闸门对**所有角色**只给中性说明，具体规则与内部闸门名**只写安全日志**；
+- 前端不得展示内部异常类名或原始校验信息；
+- 角色决定可见工具面：顾客会话看不到商家工具，反之亦然；MCP 凭证只能看到只读子集。
+
+### 必测
+
+- 模型可见 `args_model` 中出现 `merchant_id` / `buyer_key` 时注册即失败；内部 executor 必须接收
+  `SessionContext`（注册表自检）；
+- `parallelizable=true` 与非 `READ_ONLY` 组合注册失败；四种 `WritePolicy` 各有正反例；
+- 顾客会话调用商家工具 → 403 + 审计，且**不产生 `ToolResult`**；
+- 来源闸门：A 对话取得的商品 id 在 B 对话中使用 → 拒绝；
+- 来源状态并发写 → 版本号裁决，只有一方生效；
+- 护栏失败对商家可见原因码与修正方法，安全闸门失败只返回中性说明；
+- 商家经营写工具**只产生草稿行，不修改目标对象**；顾客直接写与确认写分别验证自己的幂等/证据边界；
+- `display` 中不含参数、SQL 与完整结果行。
+
+---
+
+## 6.10 Agent Loop
+
+对应 PRD A2。**这是新内核的主循环，与冻结的 `graph.py` 并存不替换（§5.6）。**
+
+### 输入
+
+- `SessionContext`、用户消息、`conversation_id`；
+- 已加载的 Skill 集合（§6.11）与可见工具面（§6.9）。
+
+### 输出
+
+```python
+@dataclass
+class LoopLimits:
+    """A2 要求五项上限同时生效，不只设固定轮数。"""
+    max_turns: int          # 循环轮数
+    max_tool_calls: int     # 工具调用总次数
+    max_llm_calls: int      # 取 AGENT_LOOP_MAX_LLM_CALLS，构造本回合的 LlmBudget
+    wall_clock_seconds: float
+    max_tokens: int         # 复用 LlmBudget.max_tokens，取 MAX_LLM_TOKENS_PER_REQUEST
+    quality_max_attempts: int  # N2 追加：预算公式的加数，取 AGENT_LOOP_QUALITY_MAX_ATTEMPTS
+
+
+@dataclass
+class LoopOutcome:
+    answer: str
+    tool_calls: list[ToolDisplay]
+    stop_reason: Literal["COMPLETED", "MAX_TURNS", "MAX_TOOL_CALLS",
+                         "BUDGET", "WALL_CLOCK", "UPSTREAM", "CANCELLED", "FATAL"]
+    degraded: bool
+    degraded_reason: DegradeReason | None  # 单一共享枚举，含 LIMIT / TIMEOUT / CANCELLED
+    quality_status: QualityStatus          # PASSED / DEGRADED / FAILED / NOT_RUN，供 §8.7.6 降级字段
+    quality_attempts: int
+    quality_notes: list[str]
+    llm_calls: int                         # 本回合实际发生的 LLM 调用（含 Reviewer），供评测对照
+```
+
+N2 落地补充（2026-09-22，实现与本节核对后回写）：
+
+- `DegradeReason` 即 `app/services/quality_types.py` 的既有枚举，**只追加** `LIMIT`、`TIMEOUT`、
+  `CANCELLED` 三个成员，v1 不产生它们，v1 行为不变；
+- `UPSTREAM`（模型调用失败或返回降级回合）与 `CANCELLED`（客户端断开）是原清单漏掉的两种真实停止原因；
+- `FATAL` 不由循环返回：致命错误以 `FatalToolError` 抛出、终止回合（§6.9），`FATAL` 留给路由层落库时记录；
+- 触顶映射：`MAX_TURNS` / `MAX_TOOL_CALLS` → `LIMIT`，`WALL_CLOCK` → `TIMEOUT`，
+  `BUDGET`（调用次数或 token）→ `BUDGET`，确定性校验或 Reviewer 最终不通过 → `VALIDATION`；
+- `run_loop(on_event=...)` 在回合进行中逐个发出 `ToolCallStarted`（闸门之前）与 `ToolCallFinished`（带 `ToolDisplay`），供路由推送 `tool_call` / `tool_result` SSE；
+- `FatalToolError` 抛出前由循环填入 `completed_tool_calls`（已完成的 `ToolDisplay`）与 `llm_calls`，供路由层把已完成部分落库；
+- 模型最终回答（或重新生成的回答）为空白时按 `UPSTREAM` 降级，不当作完成（R7）；
+- 最后一个允许的轮次若仍请求工具，**不执行**这批调用（没有后续轮次消费其结果，只剩副作用），直接按 `MAX_TURNS` 停止；
+  一批调用会使工具总数越过 `max_tool_calls` 时整批不执行，按 `MAX_TOOL_CALLS` 停止。
+
+### LLM 调用预算必须重算
+
+`docs/project-progress.md` 记录过一条教训：**两套重试是乘加关系**。v1 最坏路径是 10 次
+（`MAX_INTENT_RETRIES=2` 使 understand 最坏 3 次，`QUALITY_MAX_ATTEMPTS=2` 每轮最多 2 次），
+`MAX_LLM_CALLS_PER_REQUEST` 恰好配成 10。**工具循环引入新的加数，必须重新计算，
+不能沿用 10。** 新公式：
+
+```text
+max_llm_calls  >=  max_turns                       # 每轮一次决策调用
+                 + compaction_max_calls             # 摘要压缩策略触发时（§6.12）
+                 + 2 * quality_max_attempts - 1      # 每次质量尝试 = 生成 + 独立 Reviewer，
+                                                     # 第一次生成就是最后一轮决策，已计入 max_turns
+```
+
+N2 实现选择「最终作答直接由最后一轮决策产生」，所以第一次质量尝试的生成不重复计数（见下段）。
+按默认值：`8 + 1 + (2 × 2 − 1) = 12`，与 `AGENT_LOOP_MAX_LLM_CALLS` 默认值一致。
+式中的 `quality_max_attempts` 取 v2 专用的 `AGENT_LOOP_QUALITY_MAX_ATTEMPTS`（默认 2），**不复用** v1 的
+`QUALITY_MAX_ATTEMPTS`：共用一个字段时，v1 调到 3 轮会让 v2 拒绝启动（2026-09-23 自查修正）。
+（2026-09-22 前本式写作 `+ 2 * quality_max_attempts`，按默认值得 13，与默认 12 自相矛盾；
+实施计划写作 `+ 1 + quality_max_attempts`，只在 `quality_max_attempts=2` 时与上式相等。两处均已按本式统一。）
+
+`compaction_max_calls` 由配置 `COMPACTION_MAX_CALLS` 提供，默认 1：N2 循环不发起压缩调用，
+这 1 次是给 N4 摘要压缩（§6.12）预留的额度，现在就计入公式，N4 接入时不必重算默认值。
+
+`SessionRole` 只在 `app.core.session` 定义 `CUSTOMER | MERCHANT`；`ToolRole` 是工具可见面枚举，
+两者不是第二套登录角色。注册表用一张穷尽映射把 `SessionRole` 转成对应工具面，MCP 凭证直接进入
+`MCP_READONLY`，不得伪造 `SessionContext` 或复用浏览器会话。
+
+若最终作答直接由最后一轮决策产生，不能再重复计一次；若实现选择在循环结束后单独生成，则把那一次明确
+加回公式。预算测试必须构造“每轮都调用工具、每次质量尝试都生成且复核、压缩达到上限”的最坏路径，
+断言恰好不越界；不得只按配置字段做算术单测。
+
+新增配置项（沿用无前缀命名，R6）：
+
+```text
+AGENT_LOOP_MAX_TURNS            默认 8
+AGENT_LOOP_MAX_TOOL_CALLS       默认 16
+AGENT_LOOP_WALL_CLOCK_SECONDS   默认 60
+AGENT_LOOP_MAX_LLM_CALLS        默认 12   # = 8 + 1(压缩预留) + (2 × 2 − 1)
+AGENT_LOOP_QUALITY_MAX_ATTEMPTS 默认 2    # v2 专用，不复用 v1 的 QUALITY_MAX_ATTEMPTS
+COMPACTION_MAX_CALLS            默认 1    # N4 摘要压缩预留，N2 循环不使用
+```
+
+**v2 循环用独立的 `AGENT_LOOP_MAX_LLM_CALLS`，不复用也不改动 v1 的
+`MAX_LLM_CALLS_PER_REQUEST=10`。** v1 的 10 是按其自身最坏路径精确配出的；
+让两条链路共用一个上限，任一侧加码都会在不知情时改变另一侧行为。
+`Settings` 启动时校验上式，不满足即拒绝启动。
+
+**任何一项加码都要重算这条路径并同步 `AGENT_LOOP_MAX_LLM_CALLS`**，否则预算耗尽会以
+「模型不听话」的面目出现，实际是配置算错。改这四个值的 PR 必须附上重算过程。
+
+### 规则
+
+- 五项上限**同时**生效，任一触顶即停止并按 `stop_reason` 如实披露，**不得静默截断**；
+- 触顶不是错误：返回已获得的部分结果并标注 `LIMIT` 或 `TIMEOUT`（R7），不伪装成完整回答；
+- **只有 `write_policy=READ_ONLY and parallelizable` 且互不依赖的工具可并行**；有写操作或有依赖一律串行；
+- 致命错误（身份、权限、安全拦截）**立即终止整个回合**，不重试、不降级、不进 Reviewer；
+- **确定性校验必须先于 LLM Reviewer 执行，安全不依赖 Reviewer**（A2、Q16）；
+- 循环与 `graph.py` 不共享代码，只共享 `LlmClient` / `LlmBudget` / `LlmCostGuard` / `safe_query`；
+- 客户端断开时取消循环，停止后续 LLM 调用（直接关系费用），但已完成内容仍完整落库（§8.4）。
+
+### 必测
+
+- 五项上限各一条触顶用例，`stop_reason` 与降级字段正确；
+- 预算耗尽 → 同一 `client_request_id` 重试仍返回 `LLM_BUDGET_EXCEEDED` 且**不调用 LLM**；
+- 权限失败终止回合且**不产生 `ToolResult`**、不进 Reviewer；
+- 并行只发生在只读且互不依赖的工具之间；含写操作的批次强制串行；
+- 确定性校验不通过时，**不调用 LLM Reviewer 就已拦截**；
+- 与冻结基线在共有旧能力上的对照报告可复现（N2 交付物）。
+
+---
+
+## 6.11 Skill Loader
+
+对应 PRD A4。顾客端 5 个、商家端 7 个，索引 + 按需加载。
+
+### 输入
+
+- Skill 索引（稳定排序、确定性序列化，供 A9 前缀缓存）；
+- 本轮消息与会话角色。
+
+### 输出
+
+```python
+@dataclass(frozen=True)
+class SkillSpec:
+    name: str
+    version: str                  # 版本化
+    roles: frozenset[ToolRole]
+    body: str                     # 只读白名单资源
+    max_chars: int
+```
+
+### 规则
+
+- Skill 是**可信、版本化、只读**的白名单资源——它是提示词的一部分，不是用户数据；
+- **加载器不能访问任意路径**：只从编译期确定的白名单目录读取，
+  路径拼接前做规范化与前缀校验（复用 `app/knowledge/path_policy.py` 的同类思路）；
+- 限制**单个 Skill 长度**与**单回合加载数量**，超限拒绝加载并记录，不静默截断；
+- 角色不匹配的 Skill 不进入候选集；
+- Skill 正文是本系统资产，**不需要** A11 围栏；工具返回的第三方文本需要。
+
+### 必测
+
+- 正确触发、误触发（不该加载时没加载）；
+- **多 Skill 冲突**：两个 Skill 给出相反指令时的裁决可预期；
+- 更新 Skill 后的回归；
+- 加载器路径逃逸尝试（`../`、绝对路径、符号链接）一律拒绝；
+- 单回合加载数与单个长度触顶的行为。
+
+### N3 阶段 A 落地补充（2026-09-24，`plans/2026-09-21-n3-skill-loader.md`）
+
+以下均为后端内部形状，**不进 §8 契约**、不进 SSE 与响应：
+
+- **`SkillSpec` 追加两字段**：`description: str`（索引展示）与 `source: str`（R8 来源说明，Borough 新写的填 `borough`）。
+  frontmatter 只接受 `name / description / version / source` 四个键且全部必填，`yaml.safe_load` 解析；
+  `version` 为数字版本号（`1` 或 `1.2`），按字符串保存。类型定义在 `app/skills/spec.py`，循环只依赖这个模块。
+- **白名单与路径**：根目录固定为 `app/skills/customer`、`app/skills/merchant`（`Path(__file__).resolve()`，启动时即绝对路径）；
+  **启动期**一次性扫描直接子目录，目录名须匹配 `^[a-z][a-z0-9-]{1,63}$` 且等于 frontmatter `name`，符号链接与 Windows junction
+  逐级拒绝，`resolve()` 后再核前缀；没有 `SKILL.md` 的子目录拒绝（不静默跳过）。**运行期 `load()` 只查内存表**，不碰文件系统；
+  名字不合格式、属于其他角色或不存在，一律同一种拒绝。不复用 `knowledge/path_policy.py`，只沿用同类思路。
+- **上限**：`SKILL_MAX_CHARS`（默认 8000，范围 500–64000）超限拒绝加载、不截断；`SKILL_MAX_PER_TURN`（默认 3，范围 1–8）
+  经 `LoopLimits.max_skill_loads` 进入循环。
+- **索引**：按名字排序、确定性序列化（A9）；非空时带固定索引头，写明冲突裁决顺序
+  **「Borough 安全与业务规则 > 更具体的 Skill > 更一般的 Skill」**，且声明 Skill 不能放宽上文规则、不能授予工具列表之外的能力。
+  两端 `system_prompt` = 原 `SYSTEM_PROMPT` + 空行 + 本端索引；索引为空时与 N2 **逐字节相同**。
+- **`load_skill` 工具**（`app/skills/tool.py`，由 `create_app()` 装配注册，`app/tools` 不 import 它）：`READ_ONLY`、可并行，
+  参数只有 `name`，合法取值由**护栏**从当前会话角色的索引给出——拼错、编造的名字或他端 Skill 以
+  `GuardrailRejection(code="SKILL_NOT_IN_INDEX")` 交还模型修正，回合继续、不写安全审计、不占单回合加载额度
+  （与编造不存在的工具名同一处理）。不用选项闸门：它失败即整轮 403 + 安全审计，而 Skill 只读、按角色分表、
+  名字本就公开在提示词里，判成越权没有安全收益、只会让用户对话白白失败（2026-09-25 自查整改）。executor 内仍保留
+  `FatalToolError(gate="options")` 作闸门被绕过时的纵深防御。只有索引非空的角色能看到它；两端都为空时不注册。
+- **受信通道**（`app/agent/loop/runner.py`）：工具名为 `load_skill`、结果成功、`payload` 类型为 `SkillSpec` 且属于当前会话角色，
+  四者同时成立才免 A11 围栏，消息固定为 `<skill name="…" version="…">\n{body}\n</skill>`；其他工具返回的文本即便伪造 `<skill>`
+  标记、甚至返回 `SkillSpec` 对象，照常围栏。单回合第 `max_skill_loads + 1` 次调用不执行，换成 `ToolOutcome.REJECTED`
+  结果告知模型已达上限并写日志，**回合继续**。`LoopOutcome` 追加 `loaded_skills: list[str]` 与 `skill_limit_hit: bool`。
+- **数字校验**：确定性数字校验（`agent/loop/checks.py`）**不把** Skill 正文当来源——它是做法说明，示例数字若能作证，
+  模型照抄示例（「满 199 减 20」）就能骗过 R4 校验。
+- **来源与模式**：只加载了 Skill 的回合没有查过数据，两端 `analysis_sources` 仍为 `NONE`、模式仍为 `CHAT`；`load_skill` 调用本身照实进 `tool_calls`。
+- **回归框架**（`app/eval/skill_cases.py`，属评测侧，生产代码不 import）：Skill 目录可放 `cases.yaml`（`EvalCase` 格式，`skill` 字段必须等于目录名）；
+  `stale_skill_cases()` 对比上次运行记录的版本号给出必须重跑的 Skill。记录的持久化归评测流水线（N4/N5）。
+
+---
+
+## 6.12 Context Compactor
+
+对应 PRD A5。**两种策略都要实现用于对比，但生产选定一种确定策略**（Q19）。
+
+### 输出
+
+```python
+class CompactionStrategy(StrEnum):
+    TOOL_RESULT_PRUNING = "TOOL_RESULT_PRUNING"   # 工具结果清理
+    SUMMARIZATION = "SUMMARIZATION"                # 摘要压缩（消耗 LLM 调用）
+```
+
+### 规则
+
+- 压缩后**必须保留**三项：工具来源、数据截至时间、草稿版本。丢了任一项，
+  后续回答就无法满足 M3「必须返回数据截至时间与来源」和 D9「批准绑定草案版本」；
+- **旧对话摘要是模型生成内容，不得升级为事实来源**——它只能影响语气与上下文理解，
+  不能充当数字、规则或状态的依据（与 D18① 同一条原则）；
+- **身份保存在服务端可信上下文，不反复塞进提示词**；
+- `SUMMARIZATION` 策略的 LLM 调用计入 `compaction_max_calls`，见 §6.10 的预算公式；
+- 两策略在同一评测集上的对比报告是 N4 交付物；选定后另一策略保留在 `eval/` 供回归。
+
+### 必测
+
+- 压缩前后，工具来源 / 数据截至时间 / 草稿版本三项无损；
+- 摘要内容不会被下游当作事实来源引用（断言引用链只指向工具结果）；
+- 提示词中不出现 `merchant_id` / `buyer_key` 原值；
+- `SUMMARIZATION` 触发时预算正确扣减且不突破总上限。
+
+---
+
+## 6.13 Memory Pipeline
+
+对应 PRD A6，顾客侧规则见 C7、商家侧见 M11。
+
+### 规则
+
+- **回合结束后异步抽取**，只读对话文字（不读工具结果），**失败不影响主回答**；
+- 本版不引入通用 Worker / Redis 队列。主事务只追加幂等 outbox 任务行，现有 `cron` Service 用
+  短批次、`FOR UPDATE SKIP LOCKED`、租约超时与重试上限处理；不得用进程内 `BackgroundTasks`
+  冒充可靠异步交付，也不得让 Web 请求等待真实抽取完成；
+- 幂等任务 + 租户隔离 + 重试上限 + **单独预算**（不与主回合共享 `LlmBudget`，
+  参照既有 `localization_max_calls_per_request` 的独立预算做法）；
+- **写入前后双重过滤**：拒绝手机号、身份证、银行卡、地址、邮箱等标识信息，
+  以及健康、宗教、政治等敏感推断；
+- 商家侧两层：`FACT`（带来源，可逐条删除）与 `SUMMARY`（可重建文档，删来源后重建）；
+  顾客侧只做事实型，按**顾客 + 店铺**隔离，保留 180 天且**仅被读取不续期**；
+- **两层都不得回答规则、替代知识库或充当经营数字来源**；
+- 团队知识与记忆是**单向边界**：记忆绝不升级写回团队知识库；
+- **不预设「更便宜的模型足够」**——抽取模型须经敏感信息误写率与事实准确率评测后选择（A6）；
+  真实调用遵守 R3。
+
+### 必测
+
+- 抽取任务失败不影响主回答已落库；
+- 同一回合重复触发只产生一条记忆（幂等）；
+- 双重过滤的每类敏感信息各一条反例；
+- 顾客记忆跨店铺不可见、跨顾客不可见；
+- 商家删除 `FACT` 来源后 `SUMMARY` 被标记重建；
+- 记忆预算耗尽不影响主回合预算。
+
+---
+
+## 6.14 Hybrid Retrieval
+
+对应 PRD A7，是 §6.5 Knowledge Retrieval 的演进，**不是另起一套**。
+
+### 规则
+
+- 混合召回 = 关键词 + pgvector 向量；**先建关键词基线**，再选嵌入模型；
+- **不锁死 `bge-m3`**：选较小的多语种模型并实测 Railway 部署内存与镜像体积后决定；
+- 重排（rerank）**须证明收益**才保留，否则不引入；
+- 索引更新走版本化原子切换（状态机见 `docs/PRD.md` §7.6）：
+  构建中 → 验证中 → 已就绪 →（原子切换）→ 生效；
+  失败时**优先继续使用上一生效版本并标记陈旧**，无可用旧版本才降级为关键词检索并显式标注（R7）；
+- 知识文档正文是外部文本，进提示词前须按 A11 围栏。
+
+### 必测
+
+- 索引切换是原子的，不存在「一半新一半旧」的检索结果；
+- 构建失败时旧索引仍可用且被标记陈旧；
+- 无可用旧索引时降级为关键词检索，且 `analysis_sources` 如实标注降级；
+- 检索指标可复现：Recall@k、MRR / nDCG、引用正确率、回答忠实度。
+
+---
+
+## 6.15 Eval Runner
+
+对应 PRD E1–E4。**`eval/` 可以 import 任何生产模块，但不得被任何生产模块 import**（§5.6）。
+
+### 实现（N1，骨架 + 安全硬门禁；来自 `plans/2026-09-21-n1-eval-harness.md` Task 1–6）
+
+```text
+backend/app/eval/
+  cases.py              EvalCase / Assertion / load_cases() / validate_coverage() / summarize()
+  primitives.py          安全原语白名单（PRIMITIVES 字典），按名称调用，不接受任意函数
+  security_harness.py    安全集执行器：真实 ASGI + 真实 PostgreSQL + 白名单原语的统一调度
+  graders/assertions.py  第一层：http_status / error_code / audit_written / no_side_effect
+  graders/llm_judge.py   第二层：grade_with_rubric()，签名结构上不接受候选身份参数
+  runner.py              QualityRunner：断言先跑，失败即短路，不调用裁判
+  report.py              render_report()：脱敏（密钥环境变量取值、手机号、buyer_key 等字段名）
+  datasets/security/*.yaml  N1 四类 CROSS/SQLI/IDENTITY/BUYERKEY，每类 ≥3 条，共 13 条
+  baseline/FROZEN.md      LangGraph 基线冻结记录（O4）
+backend/tests/eval/
+  test_eval_harness.py   Task 1（用例模型）+ Task 3（runner/裁判）自测
+  test_security_gate.py  CI 硬门禁入口，含路由覆盖守卫、里程碑门槛、零 skip
+  test_report.py         Task 4 报告脱敏与门禁独立性
+  test_baseline_freeze.py Task 5 冻结守卫（节点顺序、不接入 /api/v2）
+  test_isolation.py      §5.6 单向依赖扫描
+  conftest.py             安全集专用夹具 + 零 skip pytest 钩子
+```
+
+用例有两种形态（`EvalCase.form`）：**端点用例**用 `httpx.AsyncClient` 打真实 ASGI 应用；
+**原语用例**在被测对象还没有端点时，按名称调用 `primitives.py` 白名单登记的函数
+（例如 `resource_scope.access_foreign_product` 直接调用 `require_owned()`）。两种形态共用
+同一套四种断言；`no_side_effect` 用「最后一轮执行前后」的表快照比对实现，不判定 setup 轮次
+产生的合法变化。
+
+N1 安全集覆盖 CROSS/SQLI/IDENTITY/BUYERKEY 四类（`introduced_in: N1`），
+APPROVAL/SELFAPPROVE/INJECTION 三类归 N2（`test_no_case_is_introduced_ahead_of_its_milestone`
+按 `CURRENT_MILESTONE` 常量强制，提前混入即失败）。`test_every_v2_route_has_an_endpoint_security_case`
+用 `app.openapi()` 枚举 v2 路由——FastAPI 近期版本把 `include_router` 折叠进内部
+`_IncludedRouter` 惰性结构，`app.routes` 顶层不再能直接读出子路由的有效路径，
+枚举必须走这条稳定的公开契约产出，不能假设 `app.routes` 是扁平列表。
+
+**已知限制**（如实记录，未在本轮修复）：`POST /api/v2/shop/sessions/demo-customer` 的路由处理器
+没有捕获仓储层 `SessionAlreadyBoundError` 并翻译成 409 `SESSION_ALREADY_BOUND`——已绑定顾客
+试图改绑另一 `buyer_key` 时会走到未预期异常处理器（500），不是契约文档的 409。
+`SEC-BUYERKEY-003` 只断言仓储层不变量本身（拒绝改绑 + `buyer_key` 不变），不声称该 HTTP
+路径已修复；此项留给会话身份模块的后续收口。
+
+Task 1–6 全部不需要真实模型（Fake/确定性），零费用。Task 7 步骤 1–2（真实模型质量评测）
+2026-09-22 按 R3 取得用户明确同意后已执行：`app/eval/datasets/quality/n1_baseline_quality.yaml`
+（6 条）+ `scripts/eval_quality_smoke.py`（双段式，默认只打印计划，硬编码
+`deepseek-flash`/`https://api.deepseek.com` 并强制覆盖 `.env` 里的已退役别名，不信任环境取值），
+实际发出 8 次真实调用，跑的是 v1 冻结商家 Chat 基线（当前唯一现成的真实端到端链路）。
+6 条中 1 通过、5 失败，发现两类基线自身的真实缺陷（按 O4 不修复，只记录为基线特征，详见
+`docs/project-progress.md` 与 `docs/history/eval/n1-quality-baseline-2026-09-22.md`）：
+CHAT 问候语路径产出内部占位文案而非真正问候语；显示语言与消息语言不一致时分类会误判为 INVALID。
+Task 7 步骤 3（与新工具循环对照）仍需 N2 工具循环存在才能执行，本轮未做。
+质量数据集目前只有这 6 条 N1 基线用例，不含 E5 专项评测——那部分的被测对象在 N4 才存在。
+
+### 规则
+
+- 默认全部使用 Fake / 确定性 LLM，**不产生费用**；真实模型评测按 R3 单独授权；
+- **关键安全集是硬门禁**：跨商家、跨角色、跨顾客访问、prompt injection、
+  越权写操作等用例**零失败**才算通过，不允许「大部分通过」；
+- 安全门禁在 N1 就要可跑，不等功能开发结束（PRD §15 N1、融合原则第 5 条）；
+- 评测集、评分脚本与结果一并版本管理，保证可重复；
+- 与冻结基线的对照只比**双方共有的旧能力**，不要求新功能实现两遍（A2）。
+
+### 必测
+
+- 安全集中任一用例失败时，评测整体判定为失败（门禁不可绕过）；
+- 同一评测集重复运行结果一致（确定性）；
+- 未授权时真实模型评测被跳过且**明确标注「待人工验收」**，不伪装成已通过。
+
+---
+
+## 6.16 Session Identity
+
+对应 PRD §7.5、§9 SEC3、§12.1，`docs/specs/2026-09-18-anthropic-fusion-decisions.md` D7、D8、O1、O2，
+实施计划 `plans/2026-09-21-n1-session-identity.md`。**顾客与商家复用同一套会话基础设施，
+但角色、状态模型与路由依赖不同，不是可互换的凭证**（D8①）。v1 的 `MerchantContext` 与
+Bearer 路径不受影响，两套并存直到 v2 前端切换完成。
+
+### 输入
+
+- 顾客：公开 `shop_slug`（签发访客会话）、`X-Session-Id`（后续所有顾客请求）；
+- 商家：既有演示 `Authorization: Bearer <token>`（只用于换会话）、`X-Session-Id`（后续所有商家请求）；
+- 服务端专属配置：`SESSION_TTL_SECONDS`、`BUYER_ALIAS_SECRET`、`DEMO_CUSTOMER_IDENTITIES`
+  （`shop_slug` → 演示 `buyer_key`，仅服务端持有，不下发给前端）。
+
+### 输出
+
+```python
+class SessionContext:
+    session_record_id: UUID       # 内部主键，不是凭证
+    role: SessionRole             # CUSTOMER | MERCHANT，签发后不可变
+    merchant_id: UUID
+    buyer_key: str | None         # 仅顾客会话；访客为 None
+    shop_slug: str | None         # 仅顾客会话
+    expires_at: datetime | None   # 供签发/绑定响应回显
+```
+
+`SessionRepository.resolve(token) -> SessionContext | None`：过期、已注销、已撤销三种情况
+对外不可区分，统一 `None`。`require_customer_session` / `require_merchant_session` /
+`require_bound_customer_session` 是仅有的三个角色守卫，管理员端点不使用它们（D8⑥⑦）。
+
+### 规则
+
+- 会话 ID 是**凭证**：`secrets.token_urlsafe(32)` 生成，库里只存 `sha256` 指纹，明文只在签发
+  响应中出现一次；
+- **角色签发后不可变**，由数据库触发器（而不仅是应用层）强制，堵住修数据脚本等旁路写入；
+- 统一 `401 SESSION_REQUIRED`（缺头）/ `401 SESSION_INVALID`（过期、已注销、已撤销、格式错误）；
+- **角色不符一律 `403 SESSION_ROLE_MISMATCH` 并写审计**，不降级为 401；
+- 未绑定顾客调用要求已绑定的端点返回 `403 CUSTOMER_BINDING_REQUIRED`，不复用
+  `SESSION_ROLE_MISMATCH`（访客与已绑定顾客的 `role` 都是 `CUSTOMER`）；
+- 演示顾客绑定是**一次性、事务性、幂等**的（D7⑥）：同一 `buyer_key` 重试直接返回，
+  不同 `buyer_key` 返回 `409 SESSION_ALREADY_BOUND`；绑定与购物车合并共用同一个数据库
+  事务，任一失败整体回滚；
+- **统一 403 非枚举响应**（O1、R5）：目标不存在与目标不属于当前主体在状态码、`code`、
+  `message`、`details` 上逐字段一致，且两条路径执行完全相同形状的查询，不允许"先查存在性
+  再早退"——那样的早退路径天然更快，构成时序侧信道；
+- **双重过滤**（D7①）：顾客侧订单、退款、售后等查询强制 `merchant_id` + `buyer_key`
+  同时过滤，跨店也要挡；
+- **来源状态不跨对话扩散**（D8④/O2）：`conversation_provenance` 按
+  `(principal_kind, principal_id, merchant_id, conversation_id, object_type, object_id)`
+  隔离，登录会话本身不携带任何对象访问资格；写入用版本号条件更新，冲突重读最多重试 3 次，
+  超限报错而不盲写；过期且未绑定的访客会话留下的来源状态由 Cron `app.jobs.purge_guest_provenance` 清理；
+- 撤销演示 Token 时，由它换取的**全部**商家会话级联失效（D8⑤）；应用启动时按指纹把当前
+  `DEMO_MERCHANT_TOKENS` 与已签发会话对账，撤销已移除 issuer 的会话，对账失败即中止启动，
+  日志只记撤销行数；
+- 顾客脱敏别名（D7⑤）按商家派生子密钥后取 `buyer_key` 的 HMAC 摘要：同一顾客在同一店铺
+  稳定，不同商家之间不可关联，且不可从别名反解 `buyer_key`；
+- 会话签发/绑定响应带 `Cache-Control: no-store`；日志、审计与异常上下文对 `X-Session-Id`
+  与明文 `buyer_key` 全量脱敏（结构化日志由 `app/core/logging.py` 的 `redact_sensitive_values`
+  按凭证键名脱敏，含嵌套请求头）；
+- 购物车合并在 N1 只接端口（`CartMergePort`），生产装配 `EmptyCartMerge`
+  （恒 `cart_adjusted=false`），真实实现由 `n2-trade-closed-loop` 通过
+  `app.dependency_overrides[get_cart_merge_port]` 换入，不改路由代码。
+
+### 必测
+
+- 会话凭证高熵、唯一、指纹不可逆、原值不落库；
+- 过期、已注销、已撤销三种情况对外响应逐字段一致；
+- 顾客会话调商家端点、商家会话调顾客端点均 403 且写审计；
+- 未绑定顾客调用绑定专属端点返回 `CUSTOMER_BINDING_REQUIRED`；
+- 并发绑定不同身份只有一方生效（真实 PostgreSQL 行锁）；
+- 购物车合并失败时绑定整体回滚，`buyer_key` 保持 `NULL`；
+- 目标不存在与跨商家访问的响应体逐字段相同、状态码同为 403、耗时无系统性差异
+  （独立 `security_timing` 门禁，中位数差 ≤10ms、p95 比值 0.8–1.25）；
+- 双重过滤挡住跨顾客、跨店铺访问；
+- 来源状态不跨对话、不跨店铺、不跨对象类型泄漏；同一记录并发写不丢版本；重试有上限；
+  清理任务只删过期未绑定访客的来源状态且幂等；
+- 撤销演示 Token 级联撤销其全部商家会话，未涉及的会话不受影响；启动对账撤销已移除 issuer 的会话，
+  日志不含 Token；
+- 日志不出现明文 `X-Session-Id`；5 条会话路由的方法、鉴权头、模型名与错误码由专用 OpenAPI 哨兵固定；
+- 5 条会话签发路由的 HTTP 契约、跨角色门禁与审计，v1 API 零回归。
+
+---
+
+## 6.17 Model Client
+
+对应 PRD A1，实施计划 `plans/2026-09-21-n1-llm-client-and-adapters.md`。**为 §6.10 的工具循环提供上游能力；
+不含循环本身。** 编号 §6.16 留给 Session Identity（模块 D），两者互不依赖。
+
+现有 `LlmClient.complete(system, user, ...)` 只能「问一句答一句」，挡住工具循环的三点：输入是两个字符串而不是
+消息列表、没有工具定义入参、返回只有 `text`。因此 A1 的实质工作是**扩协议**，而不是再写一个适配器。
+
+### 输入
+
+```python
+class ConversationalLlmClient(LlmClient, Protocol):      # app/llm/client.py
+    async def converse(self, *, messages: list[LlmMessage], tools: list[ToolSchema],
+                       budget: LlmBudget, options: LlmCallOptions = ...) -> LlmTurn: ...
+    def converse_stream(self, *, messages, tools, budget, options = ...) -> AsyncIterator[LlmStreamEvent]: ...
+```
+
+- `LlmMessage(role, content, tool_call_id?, tool_calls?, reasoning?)`：`role="tool"` 必带 `tool_call_id`；
+- `ToolSchema(name, description, parameters)`：`parameters` 是 JSON Schema，由 Pydantic 模型导出；
+- 现有 `complete()` **签名与行为不变**，v1 链路继续用它；`LlmClient` 本身**不加方法**——
+  `LlmCostGuard` 等 v1 实现按结构满足它，给它加方法会让它们集体失去资格，所以工具调用能力放在子协议里
+  （这是扩展而非第二个客户端协议，§5.6 衔接表的「不新增第二个客户端协议」仍成立）。
+
+### 输出
+
+```python
+@dataclass(frozen=True)
+class LlmTurn:
+    text: str | None
+    tool_calls: list[LlmToolCall]          # LlmToolCall(call_id, tool_name, arguments_json: str)
+    stop_reason: Literal["END_TURN", "TOOL_USE", "MAX_TOKENS", "ERROR"]
+    tokens: int; input_tokens: int; output_tokens: int
+    degraded: bool; failure_kind: LlmFailureKind | None; usage_known: bool
+    cache_hit_tokens: int | None           # None = 提供方未上报，不等于 0
+    cache_miss_tokens: int | None
+    reasoning: ReasoningReplay | None      # 原样回放给同一协议；适配器之外不解读
+```
+
+流式事件为 `TextDelta(text)` 与 `TurnComplete(turn)`；`TurnComplete.turn` 与 `converse()` 的返回值同构。
+构造期不变量：`TOOL_USE` 必带 `tool_calls`，`END_TURN` 的 `text` 不为 `None`（空串允许，表示模型返回了空内容，
+由调用方降级）。
+
+### 两种协议的差异
+
+适配器吸收全部差异，**让 `LlmTurn` 在两种协议下形状完全一致**：
+
+| | OpenAI 兼容（`openai_adapter.py`） | Anthropic 兼容（`anthropic_adapter.py`） |
+| --- | --- | --- |
+| 端点 | `{LLM_BASE_URL}/chat/completions` | `{LLM_BASE_URL}/anthropic/v1/messages`（`/anthropic` 由适配器拼接，`LLM_BASE_URL` 仍存根地址） |
+| 认证头 | `authorization: Bearer <key>` | `x-api-key: <key>` + `anthropic-version: 2023-06-01` |
+| system | `messages` 里的一条 | 顶层 `system` 参数（多条以空行连接），不在 `messages` 里 |
+| 工具定义 | `{"type":"function","function":{name,description,parameters}}` | `{name, description, input_schema}` |
+| 工具调用 | `message.tool_calls[]`，`arguments` 是**字符串** | `content[]` 里 `type="tool_use"` 的块，`input` 是**对象**——适配器序列化回紧凑 JSON 字符串 |
+| 工具结果 | `role="tool"` 消息，逐条独立 | `user` 消息里的 `tool_result` 块；同一轮的多个结果**合并进同一条**消息（角色要交替） |
+| 推理回放 | assistant 消息的 `reasoning_content` | assistant 内容里的 `thinking` 块（`ReasoningReplay.payload` 是块列表的 JSON） |
+| 用量 | `usage.total_tokens` 等三项，`prompt_tokens` 含缓存命中部分 | `input_tokens` + `output_tokens`，**没有 total，自己相加**；`input_tokens` **不含**缓存命中部分（实测），总输入 = `input_tokens` + `cache_creation_input_tokens` + `cache_read_input_tokens`；缺 `input_tokens` / `output_tokens` 任一项即 `usage_known=False` |
+| 缓存字段 | `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens` | `cache_read_input_tokens`（命中）/ `cache_creation_input_tokens`（写入，归入未命中）；文档未列出，实测上报；未上报时为 `None` |
+| 结构化输出 | `options.json_output` → `response_format: json_object` | 无对应能力，`json_output` 无效；靠提示词与下游 Pydantic 校验 |
+| 流式 | `data:` 分片、`[DONE]`；请求带 `stream_options.include_usage` | `event:` 流：`message_start` / `content_block_*` / `message_delta` / `message_stop` |
+| 结束判定 | 见到 `finish_reason` | 见到 `message_delta.delta.stop_reason` |
+
+### 规则
+
+- **预算先扣后发。** 先 `charge_call()`，再把 `min(剩余额度, LLM_MAX_OUTPUT_TOKENS_PER_CALL)` 作为 `max_tokens` 随请求发出；
+  调用次数或 token 额度耗尽时**不发出请求**（发出去就要付钱）。成功后按上报的 `tokens` 记账；
+- **不解析工具参数。** `arguments_json` 原样上交，解析与校验是工具注册表的职责（R4）。适配器若 `json.loads()` 并吞掉
+  异常，畸形参数就会以「空字典」的面目进入工具而绕过闸门。Anthropic 适配器是唯一会碰参数的地方，且只做序列化；
+- **上游失败是降级回合，不是异常。** 401 / 403 / 429 / 其他 HTTP / 超时 / 网络 / 响应损坏一律映射到既有
+  `LlmFailureKind`（**不新增枚举**），返回 `stop_reason="ERROR"`、`degraded=True`、`text=None`、`tool_calls=[]`
+  的回合（R7：降级必须可见）。认证失败被上游拒绝在计费之前，记 `usage_known=True`；
+- **本地错误抛异常，且发生在扣预算之前**：未配置 `LLM_API_KEY`（`LlmUnavailableError`）、预算耗尽、
+  推理回放来自另一协议、Anthropic 历史里的工具参数不是 JSON 对象——这些是调用方的 bug，不该被吞成「上游降级」，
+  也不该白扣一次配额；
+- **截断即丢弃工具调用。** `finish_reason=length` / `stop_reason=max_tokens` 时参数可能是半截的，
+  `stop_reason="MAX_TOKENS"` 且 `tool_calls=[]`；
+- **思考模式显式发送。** 官方默认开启，因此每次请求都发送 `thinking: {"type": ...}`。`LLM_THINKING`
+  是**上限**，单次调用的 `LlmCallOptions.thinking` 只能把它收紧，不能越过它放开（两者都为 `enabled` 才开启）；
+  默认 `disabled`，改默认值须以冒烟实测为据。官方文档要求思考模式下带 `tools` 的多轮请求回传此前每一轮的推理内容
+  （文档称否则 400）；2026-09-22 实测 `deepseek-flash` 两协议省略推理内容都**未被拒**，但仍按文档回传——
+  `LlmTurn.reasoning` 原样带回下一轮的 assistant 消息，无害且防上游收紧；
+- **推理回放绑定协议。** `ReasoningReplay.protocol` 与适配器不符时抛 `ValueError`。`LLM_PROTOCOL` 是进程级配置，
+  同一次对话的循环只用一种协议，切换协议须新开对话，不跨协议回放历史；
+- **缓存未上报记 `None`，不记 0**：记成 0 会让成本估算误以为全部未命中。缓存字段只是附带信息，
+  单个字段非法记 `None`，不因此判整次响应损坏；
+- **流式：** 文本增量逐段产出，**工具调用不产出增量**（参数分片在适配器内按 `index` 拼完，只在最后的
+  `TurnComplete.turn.tool_calls` 出现，半截参数交给上层没有用处还可能被误执行）；流以且仅以一个 `TurnComplete`
+  结束；中途断流时为降级回合（`NETWORK`），已收到的工具调用分片一律丢弃，**已经展示给用户的文本保留在 `text` 里**；
+  流内显式错误事件归为 `HTTP_OTHER`；令牌在流结束时记账一次；
+- **协议开关：** `LLM_PROTOCOL` = `openai`（默认）| `anthropic`，只影响 `converse*`；`complete()` 固定走
+  OpenAI 兼容协议。默认模型 `deepseek-flash`；`deepseek-chat`、`deepseek-reasoner` 与已退役别名
+  `deepseek-v4-flash` 不得出现在任何生效配置（AGENTS.md R3）；
+- **Fake：** `FakeLlmClient(turns=[LlmTurn, ...])` 按序回放回合，记录每次调用的消息快照、工具与选项，
+  是 N2 全部循环测试的基础设施。脚本耗尽抛 `FakeScriptExhaustedError`（`AssertionError` 子类）——
+  静默编造一个回合会掩盖「循环比预期多转一轮」的缺陷。
+
+### 真实冒烟实测（2026-09-22，R3 授权）
+
+范围：DeepSeek，`deepseek-flash`，三次授权共 **42 次**真实调用，估算约 $0.006（按 token 数与高峰价上限估，非平台账单）：
+首轮思考 `disabled`、每协议 12 次；追加 Anthropic 原始 `usage` 诊断 2 次与思考 `enabled` 多轮工具历史每协议 2 次；
+第三次为 `--suite extended`（思考 `enabled`，单次输出上限 1024）OpenAI 5 次、Anthropic 7 次。
+逐项原始记录见 `docs/history/llm-smoke-2026-09-22.md`。
+
+| 项 | OpenAI 兼容 | Anthropic 兼容 |
+| --- | --- | --- |
+| 普通问答、结构化 JSON（Pydantic 校验通过）、单工具调用、多工具并行 | 通过 | 通过 |
+| 多轮工具历史（第 2 轮成功） | 通过（`disabled` 与 `enabled`） | 通过（`disabled` 与 `enabled`） |
+| 思考 `enabled` 下的推理内容回放 | 通过：第 1 轮拿到 `reasoning_content`，原样回放后第 2 轮成功 | 通过：第 1 轮拿到 `thinking` 块，原样回放后第 2 轮成功 |
+| **思考 `enabled` 下故意省略推理内容** | **未被拒**：HTTP 200、`END_TURN` | **未被拒**：HTTP 200、`END_TURN` |
+| 思考 `enabled` 下的流式文本 / 流式工具调用 / 多工具并行 | 通过：增量只含正文，推理单独捕获；参数分片拼接可解析；一次 2 个调用 | 通过（同左） |
+| 流式文本、流式工具调用（`disabled`） | 通过；流式返回用量（`stream_options.include_usage` 被接受） | 通过；流式返回用量 |
+| 错误分类：无效 Key → `HTTP_401`；不存在的 `tool_call_id` → 被拒，归为 `HTTP_OTHER` | 通过 | 通过 |
+| `thinking` 参数显式发送（`disabled` 与 `enabled`） | 被接受 | 被接受 |
+| 缓存计量（非流式） | 上报 `prompt_cache_hit/miss_tokens`：同一前缀第 1 次 0 / 1570，第 2 次 1408 / 162 | 上报 `cache_read_input_tokens` / `cache_creation_input_tokens`（见下） |
+| 缓存计量（流式，原始事件） | 末尾用量块含 `prompt_cache_hit/miss_tokens` | `message_start` 已含完整缓存字段；`message_delta` 带**完整** usage（输入、缓存与最终输出），不只输出数 |
+
+**Anthropic 协议的用量缺陷：已证实并修复。** 原始 `usage` 对象为
+`{"cache_creation_input_tokens": 0, "cache_read_input_tokens": 1408, "input_tokens": 162, "output_tokens": 1}`：
+`input_tokens` **只含缓存未命中的部分**，命中数另在 `cache_read_input_tokens`，162 + 1408 = 1570，与 OpenAI 协议同一提示的
+`prompt_tokens` 吻合。修复前适配器只读 `input_tokens`，缓存命中时 `tokens` 会低估、缓存计量恒为 `None`；现在总输入 =
+`input_tokens` + 写入缓存 + 命中缓存，`cache_hit_tokens = cache_read_input_tokens`，写入缓存的部分归入 `cache_miss_tokens`
+（`cache_creation_input_tokens` 实测恒为 0，这一归类是语义推定，未见非零样本）。流式下适配器按字段覆盖合并
+`message_start` 与 `message_delta` 的 usage，对真实的「delta 带完整 usage」形状同样正确：同一次流式工具调用两协议折算
+逐项相同（377 / 317 / 60，缓存 128 / 189），并有按真实事件原样构造的单测（`test_streaming.py`）。
+
+**结论：`LLM_PROTOCOL` 生产默认保持 `openai`。** 两协议的功能、思考模式行为与用量口径（含流式）现在都有真实证据且互相对得上，
+切换已不再有证据上的阻碍；保持 `openai` 是因为 v1 链路已在用它，而实测没有发现 Anthropic 协议带来任何可观察的收益——
+切换只增加迁移成本。若日后需要 Anthropic 协议独有的能力，可直接切换，无需再补冒烟。
+
+### 尚未验证与已知缺口
+
+- **「省略推理内容会 400」经实测不成立**（`deepseek-flash`，2026-09-22）。回放仍保留：它是官方文档要求，上游随时可能收紧；
+  在上游明确不再需要之前，不得为省 token 而去掉回放；
+- 思考模式下「推理耗尽 `max_tokens` 导致正文为空」在 1024 上限下未出现，没有真实样本；适配器对它的处理
+  （`MAX_TOKENS` / 空正文降级）只有 mock 证据。`cache_creation_input_tokens` 非零的情况也没有真实样本；
+- 「非法请求被拒」只知归入 `HTTP_OTHER`（首轮冒烟当时未记录状态码；脚本已补传输层状态码记录，此项未重跑）；
+- **`LlmCostGuard` 尚未包装 `converse*`。** 每日全局预算熔断目前只挡 `complete()`；工具循环接入 `converse()`
+  前必须补齐，否则 v2 路径会绕过每日预算（上线前置条件，AGENTS.md 十一）。这属于 N5 三级预算，本模块不含；
+- 流式中途断流时，若上游已在断流前扣费，`tokens` 记为 0 会低估——这是可见的降级（`degraded=True`），不是静默。
+
+### 必测
+
+- 数据类构造期不变量：`tool` 消息缺 `tool_call_id`、`TOOL_USE` 无工具调用、`END_TURN` 无文本都拒绝；
+  `complete()` 签名不变；`LlmClient` 不新增必需方法（`test_converse_contract.py`）；
+- 每个适配器：工具调用映射、并行调用保序、畸形参数原样上交、截断丢弃工具调用、预算先扣后发、
+  429 / 401 / 超时 / 网络 / 响应损坏各自的 `LlmFailureKind`、思考模式每次显式发送且只能收紧、
+  日志不含 Key（`test_openai_adapter.py`、`test_anthropic_adapter.py`）；
+- **多轮工具历史的出站请求体**：工具调用、结果与推理内容按原样回放，跨协议回放被拒
+  （`test_history_serialization.py`）——单轮 mock 证明不了「第二轮请求发得对」；
+- 流式：文本拼接、参数分片拼接、并行调用按 `index` 分开、断流丢弃分片并保留已展示文本、错误事件降级
+  （`test_streaming.py`）；
+- 两适配器等价：喂等价响应，`LlmTurn` 在 `text / tool_calls / stop_reason / tokens / usage_known /
+  degraded / failure_kind` 上逐字段相等，含缓存命中场景下两协议折算出同样的 `tokens`、`input_tokens` 与
+  `cache_hit / miss_tokens`（数值取自真实冒烟）；**只证明解析一致，不证明两个真实接口行为等价**
+  （`test_adapter_parity.py`）；
+- Anthropic 用量折算：`input_tokens` 不含命中部分、写入缓存计入总输入与未命中、命中 0 与未上报（`None`）区分、
+  非法缓存字段按未上报处理、缓存命中的调用按完整提示记账，流式 `message_start` 同理
+  （`test_anthropic_adapter.py`、`test_streaming.py`）；
+- 协议开关委派与 `complete()` 不受影响（`test_protocol_switch.py`）；Fake 脚本（`test_fake_converse.py`）；
+  默认模型哨兵（`test_default_model.py`）；
+- **零费用自检**：测试目录里 `api.deepseek.com` 只出现在 `_transport.py` 的 URL 断言常量里；
+  无 `respx`；`llm_smoke` 不被 `app/` 或 `tests/` 引用（真实调用不加入默认测试套件，R3）。
+
+---
+
 ## 7. 数据库计划
 
 ## 7.1 第一批表
@@ -523,7 +1323,7 @@ feedback
 export_files
 ```
 
-CSV 导出属于 P0，因此这张表不能和 P1 的附件表放在同一批迁移里。
+CSV 导出记录是现有 v1 基线的一部分，继续独立保留。
 
 ### Operations [P0]
 
@@ -564,12 +1364,6 @@ support_tickets
 
 对应的指标、维度和明细见 §9 B4 的第一批指标表。
 
-### Attachments [P1]
-
-```text
-attachments
-```
-
 ## 7.2 数据类型规则
 
 - 主键优先 UUID；
@@ -594,18 +1388,17 @@ attachments
 - 知识域 + 状态；
 - `llm_usage` 的 `(usage_date)`（每日预算聚合）；
 - `audit_logs` 的 `(merchant_id, created_at)`；
-- 附件 merchant + id。
 
 先通过 `EXPLAIN` 和真实测试数据证明，再增加复杂索引。
 
 ## 7.4 迁移
 
-迁移分组必须与交付阶段一致，**P0 的功能不得依赖 P1 的迁移**：
+以下编号记录旧路线的已执行迁移顺序；新迁移按 PRD N1–N5 规划，不复用 P0/P1 作为优先级：
 
 - 第一迁移（P0）创建商家、会话、知识和运维表（`audit_logs`、`llm_usage`）；
 - 第二迁移（P0）创建演示经营表；
 - 第三迁移（P0）创建 `export_files`；
-- 第四迁移（P1）创建 `attachments` 和 `merchant_memories`；
+- 后续已创建 `merchant_memories`；本版不得新建 `attachments` 表；
 - Seed 脚本不属于 Migration；
 - Migration 不调用网络或 LLM；
 - Migration 可以在空库重复验证；
@@ -617,7 +1410,7 @@ attachments
 
 > **本章是 ChatRequest / ChatResponse / ErrorResponse / SSE 的唯一权威定义，§8.6 起同时是
 > 本地化 Header 与 Schema 变更的唯一权威定义。**
-> `docs/PRD.md` §11.3、§11.5 只描述产品级语义，`AGENTS.md` 只做索引，前端从本章生成的 OpenAPI 取类型。
+> `docs/PRD.md` §11.3 只描述产品级语义，`AGENTS.md` 只做索引，前端从本章生成的 OpenAPI 取类型。
 > 任何字段变化必须先改本章，再改 Pydantic Schema、OpenAPI、`docs/api.md`、前端 Adapter 和契约测试。
 > 全部字段使用 **snake_case 扁平结构**，不引入 `reviewer.*`、`metric.*` 之类的嵌套对象。
 
@@ -631,48 +1424,84 @@ attachments
 | --- | --- | --- |
 | `M` | 商家演示 Token | `Authorization: Bearer <token>` |
 | `A` | 管理员令牌 | **`X-Admin-Token: <token>`** |
+| `A/V` | 管理员或只读令牌 | **`X-Admin-Token: <token>`**；写操作仍只允许管理员 |
 | `S` | URL 自带签名 | 无请求头，签名在 query 参数中 |
 | `—` | 无需认证 | — |
 
 **管理员令牌走独立请求头 `X-Admin-Token`，不复用 `Authorization`。** 两者语义不同、生命周期不同、泄露后果也不同；共用一个头会让后端无法区分"商家在调管理接口"和"管理员在调商家接口"，前端也容易误把管理员令牌发给商家接口。后端对 `A` 类接口只认 `X-Admin-Token`，出现 `Authorization` 一律忽略。
 
-| 阶段 | 方法 | 路径 | 认证 | 请求 | 响应 | 主要错误码 |
+| 状态 | 方法 | 路径 | 认证 | 请求 | 响应 | 主要错误码 |
 | --- | --- | --- | --- | --- | --- | --- |
-| P0 | `POST` | `/api/chat` | M | `ChatRequest` | SSE 流或 `ChatResponse` | 401 403 409 422 429 503 |
-| P0 | `GET` | `/api/conversations` | M | 分页查询参数 | `ConversationListResponse` | 401 |
-| P0 | `GET` | `/api/conversations/{id}` | M | — | `ConversationDetailResponse` | 401 403 404 |
-| P0 | `DELETE` | `/api/conversations/{id}` | M | — | `204` | 401 403 404 |
-| P0 | `POST` | `/api/answers/{id}/feedback` | M | `FeedbackRequest` | `FeedbackResponse` | 401 403 404 422 |
-| P0 | `GET` | `/api/exports/{id}` | **S** | 签名参数 | `text/csv` 字节流 | 403 404 410 |
-| P0 | `GET` | `/api/metrics/{code}` | M | — | `MetricDefinitionResponse` | 401 404 |
-| P0 | `GET` | `/api/demo/merchants` | — | — | `DemoMerchantListResponse` | 404（功能关闭时） |
-| P0 | `GET` | `/api/health` | — | — | `HealthResponse` | — |
-| P0 | `GET` | `/api/ready` | — | — | `ReadyResponse` | 503 |
-| P0 | `GET` | `/api/admin/ops/status` | A | — | `OpsStatusResponse` | 401 403 |
-| P1 | `GET` | `/api/reports/daily` | M | 无参数；业务时区昨日由后端固定 | `DailyReportResponse` | 401 422 429 500 503 |
-| P1 | `POST` | `/api/admin/reports/daily/recompute` | A | `merchant_id`、`report_date`、`reason`；仅演示商家、最近 180 天且非未来日期 | `DailyReportResponse` | 401 403 404 409 422 503 |
-| P1 | `GET` | `/api/admin/analytics/chatbi/overview` | A | `ChatBiWindow` 查询参数 | `ChatBiOverviewResponse` | 401 403 422 |
-| P1 | `GET` | `/api/admin/analytics/chatbi/categories` | A | `ChatBiWindow` 查询参数 | `ChatBiCategoriesResponse` | 401 403 422 |
-| P1 | `POST` | `/api/admin/analytics/chatbi/rollup` | A | `ChatBiWindow` | `ChatBiRollupResponse` | 401 403 422 |
-| P1 | `POST` | `/api/attachments` | M | `multipart/form-data` | `AttachmentResponse` | 401 413 415 422 429 |
-| P1 | `GET` | `/api/attachments/{id}` | M | — | `AttachmentResponse` | 401 403 404 |
-| P1 | `DELETE` | `/api/attachments/{id}` | M | — | `204` | 401 403 404 409 |
-| P1 | `GET` | `/api/admin/knowledge/tree` | A | — | `KnowledgeTreeResponse` | 401 403 |
-| P1 | `GET` | `/api/admin/knowledge/documents/{id}` | A | — | `KnowledgeDocumentResponse` | 401 403 404 |
-| P1 | `POST` | `/api/admin/knowledge/documents` | A | `KnowledgeDocumentCreate` | `KnowledgeDocumentResponse` | 401 403 422 |
-| P1 | `PUT` | `/api/admin/knowledge/documents/{id}` | A | `KnowledgeDocumentUpdateRequest` | `KnowledgeDocumentResponse` | 401 403 404 409 422 |
-| P1 | `DELETE` | `/api/admin/knowledge/documents/{id}` | A | — | `204` | 401 403 404 |
-| P1 | `POST` | `/api/admin/knowledge/memories/compress` | A | `MemoryCompressRequest` | `MemoryCompressResponse` | 401 403 404 422 |
+| v1 已实现 | `POST` | `/api/chat` | M | `ChatRequest` | SSE 流或 `ChatResponse` | 401 403 409 422 429 503 |
+| v1 已实现 | `GET` | `/api/conversations` | M | 分页查询参数 | `ConversationListResponse` | 401 |
+| v1 已实现 | `GET` | `/api/conversations/{conversation_id}` | M | — | `ConversationDetailResponse` | 401 403 404 |
+| v1 已实现 | `DELETE` | `/api/conversations/{conversation_id}` | M | — | `204` | 401 403 404 |
+| v1 已实现 | `POST` | `/api/answers/{answer_id}/feedback` | M | `FeedbackRequest` | `FeedbackResponse` | 401 403 404 422 |
+| v1 已实现 | `GET` | `/api/exports/{export_id}` | **S** | 签名参数 | `text/csv` 字节流 | 403 404 410 |
+| v1 已实现 | `GET` | `/api/metrics/{code}` | M | — | `MetricDefinitionResponse` | 401 404 |
+| v1 已实现 | `GET` | `/api/demo/merchants` | — | — | `DemoMerchantListResponse` | 404（功能关闭时） |
+| v1 已实现 | `GET` | `/api/health` | — | — | `HealthResponse` | — |
+| v1 已实现 | `GET` | `/api/ready` | — | — | `ReadyResponse` | 503 |
+| v1 已实现 | `GET` | `/api/admin/ops/status` | A | — | `OpsStatusResponse` | 401 403 |
+| v1 已实现 | `GET` | `/api/reports/daily` | M | 无参数；业务时区昨日由后端固定 | `DailyReportResponse` | 401 422 429 500 503 |
+| v1 已实现 | `POST` | `/api/admin/reports/daily/recompute` | A | `merchant_id`、`report_date`、`reason`；仅演示商家、最近 180 天且非未来日期 | `DailyReportResponse` | 401 403 404 409 422 503 |
+| v1 已实现 | `GET` | `/api/admin/analytics/chatbi/overview` | A/V | `ChatBiWindow` 查询参数 | `ChatBiOverviewResponse` | 401 403 422 |
+| v1 已实现 | `GET` | `/api/admin/analytics/chatbi/categories` | A/V | `ChatBiWindow` 查询参数 | `ChatBiCategoriesResponse` | 401 403 422 |
+| v1 已实现 | `POST` | `/api/admin/analytics/chatbi/rollup` | A | `ChatBiWindow` | `ChatBiRollupResponse` | 401 403 422 |
+| v1 已实现 | `GET` | `/api/admin/knowledge/tree` | A/V | — | `KnowledgeTreeResponse` | 401 403 |
+| v1 已实现 | `GET` | `/api/admin/knowledge/documents/{document_path}` | A/V | 可选 `content_locale` | `KnowledgeDocumentResponse` | 400 401 403 404 422 |
+| v1 已实现 | `POST` | `/api/admin/knowledge/documents` | A | `KnowledgeDocumentRequest` | `KnowledgeDocumentResponse` | 400 401 403 409 413 415 422 |
+| v1 已实现 | `PUT` | `/api/admin/knowledge/documents/{document_path}` | A | `KnowledgeDocumentUpdateRequest` + `If-Match` | `KnowledgeDocumentResponse` | 400 401 403 404 412 413 415 422 428 |
+| v1 已实现 | `DELETE` | `/api/admin/knowledge/documents/{document_path}` | A | `If-Match` | `204` | 400 401 403 404 412 422 428 |
+| v1 已实现 | `POST` | `/api/admin/knowledge/business-domains` | A | `BusinessDomainRequest` | `KnowledgeTreeNode` | 400 401 403 409 422 |
+| v1 已实现 | `PUT` | `/api/admin/knowledge/business-domains` | A | `name` + `BusinessDomainRenameRequest` + `If-Match` | `KnowledgeTreeNode` | 400 401 403 404 409 412 422 428 |
+| v1 已实现 | `DELETE` | `/api/admin/knowledge/business-domains` | A | `name` + `recursive` + `If-Match` | `204` | 400 401 403 404 409 412 422 428 |
+| v1 已实现 | `POST` | `/api/admin/knowledge/memories/compress` | A | `MemoryCompressRequest` | `MemoryCompressResponse` | 401 403 404 422 |
 
 说明：
 
 - **没有** `GET /api/admin/knowledge/documents` 列表接口，目录由 `tree` 提供；
-- `PUT` 知识文档使用乐观锁或 ETag，版本冲突返回 `409`；
+- `PUT` / `DELETE` 知识文档使用 ETag / `If-Match`，前置条件失败返回 `412`，缺头返回 `428`；
+- 附件三个端点从未实现，已按 PRD D6 从本版路由计划移除；
 - `/api/admin/knowledge/memories/compress` 使用 `X-Admin-Token` 对指定商家分类执行人工重压；先写独立审计日志再提交记忆，模型不可用时响应必须返回 `degraded=true` 与原因；
 - `/api/admin/ops/status` 见 §9 B7 的运维端点定义；
 - 每条路由至少有一条"未认证"、一条"跨商家越权"用例，越权必须返回 `403` 并写 `audit_logs`。
 
-### 8.0.1 Chat BI 衡量层契约
+### 8.0.1 v2 契约迁移门槛
+
+`docs/PRD.md` §11.2.2–§11.2.3 已固定 v2 方法与路径，但请求、响应、错误、幂等键和 SSE 事件字段
+尚未迁入本章。N1 的第一项工作必须按七组逐项补齐字段契约：顾客会话与店铺浏览、商家会话与对话目录、交易（购物车与订单履约）、
+售后（双端）、商家经营只读面（当日简报、库存告警、顾客信号）、草稿审批与变更账本、
+记忆与反馈与 MCP。七组合计覆盖 PRD §11.2 的全部 47 条路径；原「六组」表述遗漏了
+`briefs/daily/current`、`briefs/daily/current/regenerate`、`inventory/alerts`、
+`customer-signals`、`customer-signals/{signal_id}/ignore` 五条。
+
+在某一路径的字段契约完成前：
+
+- 不得创建 FastAPI 路由或前端请求封装；
+- 不得直接复用 v1 `ChatRequest` / `ChatResponse` 假装完成 v2；
+- 不得接受前端传入 `merchant_id` / `buyer_key`；
+- 不得把顾客会话、商家会话或 MCP 凭证互相复用；
+- 不得宣称对应 N1 契约任务完成。
+
+**OpenAPI 的生成时点：** 当前路由驱动的 OpenAPI 导出无法包含未被路由引用的 v2 Schema 和路径。
+共享组件（如 ErrorCode）改变既有 v1 契约时，须在同次变更同步现有 OpenAPI、生成类型与错误处理映射，不能等到 v2 路由实现。
+因此契约冻结的交付物是本章的字段定义，加上 `backend/app/schemas/v2/` 的 Pydantic 模型与其单测；
+`docs/api.json`、`docs/api.md`、生成类型与 Adapter 在该组路由实现的**同一次变更内**同步。
+
+这不放宽门槛，而是把门槛拆成前后两道。**每组路由的完成门槛必须同时满足**：
+
+1. 本章对应小节的字段契约已写完（路由创建的前置条件）；
+2. `cd backend; uv run python ../scripts/export_openapi.py` 已重新导出 `docs/api.json` 与 `docs/api.md`（仓库根目录没有 `pyproject.toml`，不能在根目录用 `-m` 方式运行）；
+3. `npm run codegen` 已重新生成 `frontend/src/api/generated.ts`，且 `npm run codegen:check` 通过；
+4. 对应 Adapter 与 Adapter 契约测试已更新；
+5. OpenAPI 快照/哨兵测试通过（`backend/tests/api/test_openapi_chat_contract.py` 同类）。
+
+五项缺一，该组不得标记完成。
+
+**契约冻结状态（2026-09-21）：** 七组字段契约已全部写入 §8.7–§8.14，PRD §11.2 的 47 条路径逐条覆盖；`backend/app/schemas/v2/` 的 Pydantic 模型与单测已落地。上述五项中的第 1 项（字段契约）对七组均已满足，第 2–5 项仍随各组路由实现的同一次变更完成——**契约冻结不等于 v2 功能已实现**，v2 路由、OpenAPI 导出、生成类型与 Adapter 尚未开始。
+
+### 8.0.2 Chat BI 衡量层契约
 
 三个端点的精确字段由 `app/schemas/analytics.py` 定义并以导出的 OpenAPI 为最终来源。`ChatBiWindow` 的 `start_date` 与 `end_date` 是闭区间，必须满足起日不晚于止日且窗口不超过 180 天；GET 端点使用查询参数，Rollup 使用 JSON 请求体。
 
@@ -703,7 +1532,7 @@ attachments
 | --- | --- | --- | --- |
 | `message` | `str` | 是 | 用户问题，长度上限由配置提供 |
 | `session_id` | `str \| null` | 否 | 为空表示新建会话 |
-| `attachment_ids` | `list[str]` | 否 | P1 附件，P0 恒为空数组 |
+| `attachment_ids` | `list[str]` | 否 | v1 遗留保留字段；本版必须省略或为空数组，v2 不继承该字段 |
 | `client_request_id` | `str` | 是 | 客户端生成的幂等键，见 §8.5 |
 
 不允许普通用户通过正文决定可信商家 ID：请求体、查询参数和自定义请求头中的 `merchant_id` 一律忽略，身份只来自 Bearer Token。
@@ -733,7 +1562,7 @@ attachments
 **枚举**：
 
 ```text
-AnswerMode     = METRIC | DETAIL | RULE | IDENTITY | CHAT | INVALID | ATTACHMENT
+AnswerMode     = METRIC | DETAIL | RULE | IDENTITY | CHAT | INVALID | ATTACHMENT（v1 遗留保留值，本版不产生）
 QualityStatus  = PASSED | DEGRADED | FAILED | NOT_RUN
 AnalysisSource = DATABASE | KNOWLEDGE | ATTACHMENT | MEMORY | FALLBACK | NONE
 MetricStatus   = ACTIVE | DEPRECATED | UNVERIFIED
@@ -741,8 +1570,8 @@ QuestionCategory = PLATFORM_RULE | TRADE | REFUND | CS_TICKET | COMPENSATION
                  | COUPON | GOODS | MERCHANT_OTHER | IDENTITY | SCM | UNKNOWN
 ```
 
-`category` 取 `QuestionCategory` 枚举，**不是自由字符串**。业务域按 1:1 复刻参考实现
-（`model/QuestionCategory.java`），少一个都会让 B3 的意图分类出现无法归类的问题。
+`category` 取 `QuestionCategory` 枚举，**不是自由字符串**。该枚举是现有 v1 契约的兼容集合；
+参考实现可用于追溯来源，但不再定义新需求。N1 若要调整分类，须先在 v2 字段契约中定稿并提供迁移映射。
 枚举值是对外契约码，只能是英文；中文名由后端 `CATEGORY_DISPLAY_NAMES` 提供：
 
 | 码 | 中文名 | 码 | 中文名 |
@@ -767,7 +1596,8 @@ B2 的 Fake Agent 只覆盖 `TRADE`、`REFUND`、`PLATFORM_RULE` 三类场景与
 | 上游、预算或缺 Reviewer 降级 | `DEGRADED` | 0 至 3 |
 | 未执行校验 | `NOT_RUN` | 0 |
 
-`analysis_sources` 是数组而非单值，因为组合场景是常态：查了数据并引用了口径返回 `["DATABASE", "KNOWLEDGE"]`，附件联合分析返回 `["ATTACHMENT", "DATABASE"]`。
+`analysis_sources` 是数组而非单值，因为组合场景是常态：查了数据并引用了口径返回
+`["DATABASE", "KNOWLEDGE"]`。`ATTACHMENT` 仅为 v1 遗留枚举兼容值，本版不产生。
 
 **`NONE` 用于本来就没有分析来源的回答**：`CHAT` 的问候闲聊和 `INVALID` 的危险请求／无法处理，既没查库也没引知识，返回 `["NONE"]`。没有这个值时，"至少一个元素"的约束会逼着实现给普通聊天硬塞一个 `KNOWLEDGE` 或 `FALLBACK`，那是假的来源标注，直接违反 `AGENTS.md` R7。
 
@@ -801,18 +1631,18 @@ B2 的 Fake Agent 只覆盖 `TRADE`、`REFUND`、`PLATFORM_RULE` 三类场景与
 | `total_rows` | `int` | `METRIC`、`DETAIL`、`IDENTITY` |
 | `truncated` | `bool` | `METRIC`、`DETAIL`、`IDENTITY` |
 | `export` | `ExportInfo` | `DETAIL` |
-| `visualization` | `Visualization` | `METRIC` 必填；`DETAIL`、`ATTACHMENT` 可选 |
-| `recommendations` | `list[Recommendation]`（至少两条） | `METRIC`、要求分析的 `DETAIL`、`ATTACHMENT`；纯明细必须为空列表 |
+| `visualization` | `Visualization` | `METRIC` 必填；`DETAIL` 可选 |
+| `recommendations` | `list[Recommendation]`（至少两条） | `METRIC`、要求分析的 `DETAIL`；纯明细必须为空列表 |
 
 `metric_source`、`metric_owner`、`metric_status` 是 PRD 要求指标口径面板展示的三项，缺一前端就只能显示空白，因此列为 `METRIC` 必填。
 
 **`metric_definition`（业务口径）与 `metric_sql_definition` 必须并列存在，不得合并为单一文本字段。**
 参考项目的指标平台元数据表把它们分列为 `metrics_biz_meaning` / `metrics_sql_meaning`，
-面向读者不同（见 PRD §6.3）。为兼容已保存的 `answers.response_payload`，业务口径继续使用
+面向读者不同（见 PRD M8）。为兼容已保存的 `answers.response_payload`，业务口径继续使用
 `metric_definition`；升级器只为历史 JSONB 补齐安全默认值，前端没有第二个业务口径入口。
 
 `metric_source` 是三取一的枚举 `METRIC_CATALOG` / `FIELD_COMMENT` / `AI_GENERATED`，
-对应 PRD §10 Metric Catalog 的三级检索命中层级，**不是自由文本**：前端要据此渲染来源徽标，
+对应 PRD M8 的受控指标资产来源层级，**不是自由文本**：前端要据此渲染来源徽标，
 自由文本会让徽标映射退化成字符串匹配。中文标签由前端负责，后端只给枚举。
 
 `metric_generated` 是独立布尔，不要让前端从 `metric_status == UNVERIFIED` 反推——
@@ -989,7 +1819,7 @@ FAILED_FINAL      # 不可重试（参数非法、越权、内容被拒）
 > **本节是 `Accept-Language` / `Content-Language` 请求响应头，以及 `ChatResponse`、
 > `ConversationListResponse`、`ConversationDetailResponse`、`KnowledgeDocumentResponse`、
 > `KnowledgeDocumentRequest`、`KnowledgeDocumentUpdateRequest`、`ExportSpec` 新增本地化字段的唯一权威定义。**
-> 对应产品级语义见 `docs/PRD.md` §7.5 与 §11.5，前端消费方式见 `docs/frontend-development-plan.md`
+> 对应产品级语义见 `docs/PRD.md` C9、§10.6 与 §11.3，前端消费方式见 `docs/frontend-development-plan.md`
 > §5.10。设计出处是 `plans/2026-08-31-full-stack-bilingual-localization.md` §1 与 §3.3；
 > 后续实施任务（该计划的 Task 2–13）必须原样使用本节字段名，不得另起名字或改变失败语义。
 > `SupportedLocale` 只允许 `zh-CN | en-US`；`SourceLanguage` 允许 `zh-CN | en-US | mixed | und`，
@@ -1083,6 +1913,926 @@ FAILED_FINAL      # 不可重试（参数非法、越权、内容被拒）
 
 ---
 
+## 8.7 v2 共用契约组件
+
+本节定义无路由共用模型。全部模型拒绝未声明字段；表中的“必填”指输入键必须存在，
+“可空”指允许 JSON null，两者独立。字符串未列长度限制时不另设上限。
+共用模型不执行鉴权、游标签名、幂等持久化或证据消费；这些由后续路由与领域服务实现。
+
+| 模型 / 字段 | 类型 | 必填 | 可空 | 范围、默认值与说明 |
+| --- | --- | --- | --- | --- |
+| `CursorPageRequest.cursor` | string | 否 | 是 | 默认 null；提供时长度 1–2048；不透明游标，签名校验由服务层执行 |
+| `CursorPageRequest.limit` | integer | 否 | 否 | 1–100，默认 20 |
+| `CursorPage[T].items` | T[] | 是 | 否 | 本页条目，允许空数组 |
+| `CursorPage[T].next_cursor` | string | 是 | 是 | 最后一页为 null；非空时长度 1–2048 |
+| `CursorPage[T].has_more` | boolean | 是 | 否 | 是否存在下一页；必须等于 `next_cursor` 非空（执行期裁定 E10） |
+| `IdempotentWriteRequest.client_request_id` | string | 是 | 否 | 1–128 个 ASCII 字符；首字符为字母或数字，后续仅允许字母、数字、`.`、`_`、`:`、`-`；适用端点见 §8.7.3 |
+| `MoneyCents` | integer | — | 否 | 严格整数，0–99999999999999 分；不接受布尔、字符串或小数 |
+
+`yuan_to_cents` 只接受范围内的有限 Decimal 元，`cents_to_yuan` 只接受范围内的整数分；
+非法类型、负值、非有限值及超上界值拒绝转换。舍入规则见 §8.7.8。
+
+### 8.7.1 会话与角色
+
+顾客与商家会话端点使用请求头 `X-Session-Id: <session id>` 传递会话凭证；
+公开端点不需要此头；创建商家会话使用演示 Bearer Token（AGENTS.md §8.3）；MCP 只接受独立的 `Authorization: Bearer <MCP access token>`，
+不得接受 `X-Session-Id`（见 §8.14）。会话记录包含
+**不可变角色** `SessionRole = CUSTOMER | MERCHANT`（PRD §7.5 不变量 4）。
+
+| 场景 | 状态码 | `code` |
+| --- | --- | --- |
+| 缺 `X-Session-Id` | 401 | `SESSION_REQUIRED` |
+| 会话不存在、已过期、已注销或已被撤销 | 401 | `SESSION_INVALID` |
+| 角色不符（顾客会话调商家端点，或反之） | 403 | `SESSION_ROLE_MISMATCH` |
+| 顾客角色正确但仍是访客，端点要求已绑定身份 | 403 | `CUSTOMER_BINDING_REQUIRED` |
+| 目标对象不存在，或存在但不属于当前主体 | **403** | `RESOURCE_FORBIDDEN` |
+
+最后一行是**非枚举要求**。**状态码是 403 不是 404**——这是 O1 裁定、D7⑦ 与 `AGENTS.md` R5
+的一致要求（"目标不存在与目标不属于当前主体使用相同公开错误结构，不得泄露对象存在性"）。
+
+一致性要求比"同一个状态码"更严，PRD §12.1 要求响应**逐字段一致**：
+
+- 同一 `code`（`RESOURCE_FORBIDDEN`，**不叫** `*_NOT_FOUND`——名字本身不得暗示存在性）；
+- 同一段 `message`，且不含对象类型、ID 或任何可区分线索；
+- `details` 为**空数组 `[]`**（`ErrorResponse.details` 的类型是 `list[dict[str, Any]]`，不是对象）；
+- **响应耗时一致**：不得出现"不存在快、越权慢"的时序差（O1 明确点名"耗时"）。
+  实现约束登记见 `plans/2026-09-21-n1-session-identity.md`。
+
+内部日志可以区分两者原因，对外一律不可区分。角色不符与跨主体访问一律写 `audit_logs`。
+
+### 8.7.2 错误信封与新增错误码
+
+沿用 §8.3 的 `ErrorResponse`。**错误码扩充 `app.core.errors.ErrorCode` 这一唯一枚举**——
+该文件的 docstring 已规定「这是后端实际会发出的错误码的唯一出处」，新建 `V2ErrorCode`
+会直接违反它，并让前端的按码查表出现两张表。本轮新增 14 个成员：
+
+| `code` | HTTP | `retryable` | 触发场景 |
+| --- | --- | --- | --- |
+| `SESSION_REQUIRED` | 401 | `false` | 缺会话头 |
+| `SESSION_INVALID` | 401 | `false` | 会话失效、过期、注销或被撤销 |
+| `SESSION_ROLE_MISMATCH` | 403 | `false` | 跨角色访问 |
+| `CUSTOMER_BINDING_REQUIRED` | 403 | `false` | 顾客角色正确但当前仍是访客，端点要求已绑定演示顾客 |
+| `SESSION_ALREADY_BOUND` | 409 | `false` | 已绑定会话试图切换到另一个服务端顾客身份；同一身份重试幂等成功 |
+| `RESOURCE_FORBIDDEN` | **403** | `false` | 不存在或不属于当前主体（非枚举，逐字段一致） |
+| `PRODUCT_NOT_IN_SCOPE` | 403 | `false` | 商品不属于本店或未通过来源闸门 |
+| `INSUFFICIENT_STOCK` | 409 | `false` | 可售量不足（PRD §7.4 不变量 1） |
+| `ILLEGAL_STATE_TRANSITION` | 409 | `false` | 非法状态迁移（PRD §7.1 不变量 2） |
+| `VERSION_CONFLICT` | 409 | `false` | 草案版本或目标对象版本不匹配；同一请求盲重试无效，须刷新后重新确认 |
+| `DRAFT_EXPIRED` | 409 | `false` | 草稿已过期 |
+| `GUARDRAIL_REJECTED` | 422 | `false` | 护栏预检不通过 |
+| `CONFIRMATION_REQUIRED` | 422 | `false` | 必须提交证据的写操作缺失证据，或提交的证据无效/过期/已消费；售后首次预检返回 200 challenge，不用此错误 |
+| `INVALID_CURSOR` | 422 | `false` | 游标不可解析、已失效或与当前主体/资源不匹配 |
+
+`IDEMPOTENCY_KEY_REUSED`（409）与 `REQUEST_IN_PROGRESS`（409，`retryable=true`）
+**已存在于 `ErrorCode`**，v2 直接沿用 §8.5 语义，不重复登记。
+`RATE_LIMITED`、`LLM_BUDGET_EXCEEDED`、`DATA_SOURCE_UNAVAILABLE` 同理。
+
+新码的三处同步是硬要求：后端计划 §14 的错误码表、`error_messages.py` 的 `_MESSAGES`
+（zh-CN 与 en-US 各一条）、`backend/tests/api/test_errors.py` 的哨兵测试。
+
+### 8.7.3 幂等写契约与适用白名单
+
+沿用 §8.5 的处理状态与重复提交规则，但 v2 幂等记录必须以
+`role + 主体稳定摘要 + merchant_id + 端点操作 + client_request_id` 为唯一域，不能直接复用 v1
+`answers(merchant_id, client_request_id)` 的索引；否则不同顾客碰巧使用同一客户端 ID 会互相冲突。
+请求摘要只取规范化后的**业务输入**，排除 `confirmation_token` / `approval_evidence` 等短期证据；
+同一 ID 改变业务输入仍返回 `409 IDEMPOTENCY_KEY_REUSED`。状态、请求摘要、终态响应与业务写入须由
+同一数据库事务或可恢复状态机保证；具体表/索引是对应写路由上线前置，不属于本次 Schema 冻结已实现事项。
+承载表是 `idempotency_records`，由数据迁移计划 M8 创建，唯一约束即上述五元组；**业务表上不另设
+`(merchant_id, client_request_id)` 之类的窄唯一索引**，否则会重新引入跨顾客误判冲突（2026-09-21 N1 计划审查补全）。
+传输仍用**请求体字段 `client_request_id`，不引入新请求头**（裁定 A2）。
+
+适用范围是**白名单，不是「全部 POST」**：
+
+| 携带 `client_request_id` | 不携带 | 不携带的理由 |
+| --- | --- | --- |
+| `POST /shop/orders` | `POST /shop/sessions` | 会话签发；请求体只含 `shop_slug` |
+| `POST /shop/orders/{id}/pay` | `POST /shop/sessions/demo-customer` | 同一服务端身份重复绑定幂等返回；试图切换到不同身份才返回 `409 SESSION_ALREADY_BOUND` |
+| `POST /shop/orders/{id}/cancel` | `POST /merchant/sessions` | 会话签发；请求体为空对象 |
+| `POST /shop/after-sales` | `POST /merchant/mcp` | MCP 本版只暴露只读工具，不存在写副作用；JSON-RPC `id` 只做请求/响应关联，不承担幂等 |
+| `POST /merchant/briefs/daily/current/regenerate` | `PUT /shop/cart/items/{product_id}` | 设置绝对数量而非增量，按资源语义天然幂等 |
+| `POST /merchant/customer-signals/{id}/ignore` | `PUT /shop/memory-preference` | 设置绝对状态，天然幂等 |
+| `POST /merchant/drafts/{id}/apply` | 全部 `DELETE` 端点 | 天然幂等 |
+| `POST /merchant/answers/{id}/feedback` | | |
+| `POST /shop/chat` | | |
+| `POST /merchant/chat` | | |
+| `POST /shop/after-sales/{id}/supplements` | | |
+
+白名单之外的端点**不得**声明 `client_request_id`；白名单之内的**必须**声明。
+
+两个 Chat 端点沿用 §8.5 聊天重试幂等（五种状态分支、并发重复提交只产生一次 LLM 调用、断开后凭 ID
+取回、预算耗尽/限流为 `FAILED_RETRYABLE` 且重试不调用 LLM）与 §8.6.4 的 locale 重放规则，但：
+
+- 唯一域按本节五元组，承载于 `idempotency_records`；**不复用** v1 `answers(merchant_id, client_request_id)`
+  索引，否则同店不同顾客会互相冲突；
+- `request_digest` 取规范化后的 `message` 与 `conversation_id`；v2 无附件字段，摘要不含 `attachment_ids`。
+
+（2026-09-21 执行核对补全：原白名单漏列 Chat，与 Task 2 不变量 3 冲突。）
+新增 v2 写端点时同步更新本表。
+
+### 8.7.4 游标分页
+
+v2 列表端点一律游标分页，不提供 offset（裁定 A4）。**这是新约定**：v1 会话列表用的是
+`limit + offset`，只有会话详情的消息用游标，两者不构成先例。
+
+请求：`cursor: str | null`（省略表示首页）、`limit: int`（1–100，默认 20）。
+响应：`items: list[T]`、`next_cursor: str | null`（`null` 表示末页）、`has_more: bool`。
+
+契约必须为每个列表端点定清下列五项，缺一即为契约不完整：
+
+1. **稳定排序键**：主排序字段与方向（默认 `created_at DESC`）。排序键必须在数据库有索引。
+2. **tie-breaker**：同分值时的次级排序键，固定用主键 `id` 降序。
+   缺 tie-breaker 会让同一时间戳的多条记录在翻页时重复或丢失。
+3. **游标绑定**：游标编码里必须包含**主体标识**（会话解析出的 role、`merchant_id` /
+   `buyer_key` 摘要）、端点资源类型、`shop_slug`、筛选条件、排序方式与 locale 的规范化摘要。
+   公开列表至少绑定 `shop_slug + 资源类型 + 筛选/排序`。跨主体、跨资源或跨查询形状复用游标
+   返回 `422 INVALID_CURSOR`，**不返回数据**，并写审计。
+4. **签名与失效规则**：游标是不透明的版本化签名字符串，载荷至少含版本、查询绑定摘要、
+   最后一条排序键、签发时间与过期时间。服务端用 `EXPORT_SIGNING_SECRET` 派生独立的
+   `cursor:v1` HMAC 子密钥，禁止直接复用裸密钥或接受未签名 base64。签名失败、载荷被修改或游标
+   超过 24 小时，返回 `422 INVALID_CURSOR`。锚点记录在两页之间被删除**不使游标失效**：keyset
+   分页直接按游标携带的排序键继续查询，不为确认锚点存在而追加探测查询。
+5. **重试语义**：`INVALID_CURSOR` 的 `retryable=false`——重试同一游标不会成功，
+   客户端必须从首页重取。`VERSION_CONFLICT` 同样是 `retryable=false`：它要求先刷新、重新确认，
+   不是对原请求自动重试。
+
+### 8.7.5 v2 SSE 事件契约
+
+`step` 复用 `ThinkingStep`：`label` 为 1–120 字符，`node` 匹配
+`^[a-z][a-z0-9_]{0,63}$`；均必填且不可空。以下工具展示模型全部拒绝额外字段，
+不提供接收原始参数或原始结果的扩展字典。`summary` 只允许下列固定短句；
+工具参数、结果、模型文本不得直接填入。日后需要动态业务摘要时，须先定义受控投影、脱敏规则和反例测试，
+再扩充契约。显示语言由路由选择对应短句。
+
+| 字段 | 闭集 |
+| --- | --- |
+| `status` | `STARTED` / `RUNNING` / `SUCCEEDED` / `DEGRADED` / `FAILED` / `UNAVAILABLE` |
+| `summary` | `正在处理` / `处理完成` / `暂时不可用` / `处理失败`，及对应英语 `Processing` / `Completed` / `Unavailable` / `Failed` |
+
+| 模型 / 字段 | 类型 | 必填 | 可空 | 说明 |
+| --- | --- | --- | --- | --- |
+| `ToolCallDisplay.tool_name` | string | 是 | 否 | 匹配 `^[a-z][a-z0-9_]{0,63}$`；具体工具名仍须由注册表白名单验证 |
+| `ToolCallDisplay.call_id` | string | 是 | 否 | 匹配 `^[A-Za-z0-9_-]{1,64}$` |
+| `ToolCallDisplay.status` | ToolDisplayStatus | 是 | 否 | 上述状态闭集 |
+| `ToolCallDisplay.summary` | PublicToolSummary | 是 | 否 | 上述双语固定短句，不接受任意正文 |
+| `ToolResultDisplay.call_id` | string | 是 | 否 | 匹配 `^[A-Za-z0-9_-]{1,64}$` |
+| `ToolResultDisplay.status` | ToolDisplayStatus | 是 | 否 | 上述状态闭集 |
+| `ToolResultDisplay.duration_ms` | integer | 是 | 否 | ≥0，单位毫秒 |
+| `ToolResultDisplay.row_count` | integer | 是 | 是 | ≥0；不适用时为 null |
+| `ToolResultDisplay.summary` | PublicToolSummary | 是 | 否 | 上述双语固定短句，不接受任意正文 |
+
+| 事件 | 载荷 | 与 v1 的关系 |
+| --- | --- | --- |
+| `step` | `{ label, node }` | **与 v1 同名同构**，迁移适配层直通 |
+| `tool_call` | `{ tool_name, call_id, status, summary }` | v2 新增 |
+| `tool_result` | `{ call_id, status, duration_ms, row_count, summary }` | v2 新增 |
+| `turn_complete` | 完整 `ShopChatResponse` 或 `MerchantChatResponse` | **取代 v1 `done`**，载荷唯一 |
+| `error` | 标准 `ErrorResponse` | **与 v1 同名同构** |
+
+线协议（响应头、空行分隔、单行紧凑 JSON、15 秒 `: keep-alive` 心跳、事件名只放 `event:` 字段、
+`Accept: application/json` 走非流式、头发送前后的错误语义差异）**完全沿用 §8.4**，本节不重复定义。
+
+`tool_call` / `tool_result` 的 `summary` 只含可公开展示的摘要（PRD §11.3）：
+**不得**包含原始参数、SQL、完整结果行、Prompt 全文或任何未脱敏的顾客标识。
+
+流的最后一个事件必须是 `turn_complete` 或 `error` 之一，互斥。
+
+### 8.7.6 降级披露字段
+
+| 模型 / 字段 | 类型 | 必填 | 可空 | 范围、默认值与说明 |
+| --- | --- | --- | --- | --- |
+| `AnalysisSourceEntry.source` | AnalysisSource | 是 | 否 | DATABASE / KNOWLEDGE / MEMORY / FALLBACK / NONE；拒绝 ATTACHMENT |
+| `AnalysisSourceEntry.degraded` | boolean | 是 | 否 | 本来源是否降级 |
+| `AnalysisSourceEntry.degraded_reason` | string | 是 | 是 | 降级时非空且不能只有空白；未降级时必须 null |
+| `DegradationMixin.analysis_sources` | AnalysisSourceEntry[] | 是 | 否 | 至少一项，主来源在前；NONE 必须独占 |
+| `DegradationMixin.thinking_steps` | ThinkingStep[] | 否 | 否 | 默认 []，字段限制见 §8.7.5 |
+| `DegradationMixin.quality_status` | QualityStatus | 是 | 否 | PASSED / DEGRADED / FAILED / NOT_RUN |
+| `DegradationMixin.quality_attempts` | integer | 是 | 否 | 0–3 |
+| `DegradationMixin.quality_notes` | string[] | 否 | 否 | 默认 [] |
+| `DegradationMixin.degraded` | boolean | 是 | 否 | 整轮是否降级 |
+| `DegradationMixin.degraded_reason` | string | 是 | 是 | 与整轮降级标识成对，规则同来源原因 |
+
+R7 的六个字段在 v2 保持同名：`analysis_sources`、`thinking_steps`、`quality_status`、
+`quality_notes`、`degraded`、`degraded_reason`。v2 新增区分**整轮降级与单来源降级**（PRD §11.3）：
+`analysis_sources` 的每个元素从字符串升为对象 `{ source, degraded, degraded_reason }`，
+顶层 `degraded` 表示整轮是否降级。**顶层 `degraded=false` 时允许存在单个来源 `degraded=true`。**
+`source` 使用现有 `app.schemas.chat.AnalysisSource` 成员构成的 v2 字面值子集，
+使运行时校验与 OpenAPI 都不包含已移出本版的 `ATTACHMENT`；
+`NONE` 只能单独出现。单来源 `degraded=true` 时该元素的 `degraded_reason` 必须为非空字符串，
+否则必须为 `null`。顶层也遵守同一成对规则：`degraded=true` 必须给出非空原因，`false` 必须为 `null`。
+`FALLBACK` 来源自身及顶层都必须标记 `degraded=true` 并给出原因；不得以 `PASSED` 的未降级结果展示规则兜底。
+
+### 8.7.7 `session_id` 与 `conversation_id` 的命名冻结
+
+`V2ChatResponseBase` 继承全部降级字段，并增加以下必填、不可空字段：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string | 回答标识 |
+| `conversation_id` | string | 业务对话标识 |
+| `answer` | string | 当前显示语言下的回答正文 |
+| `tool_calls` | ToolCallDisplay[] | 脱敏调用摘要，无调用时为 [] |
+| `created_at` | datetime | 带时区 ISO 8601；拒绝无时区值，归一化至 UTC 输出 |
+
+v1 用 `session_id` 表示业务对话（`AGENTS.md` §8.5：「会话标识统一为 `session_id`，
+不存在 `conversation_id`」）。v2 同时存在**两个**不同的东西，继续复用一个名字会让
+认证凭证和业务对话在契约、日志和前端 Store 里混为一谈：
+
+| 名字 | 含义 | 出现位置 |
+| --- | --- | --- |
+| `session_id` | **认证会话凭证**：高熵、可过期、可注销、可撤销，带不可变角色 | 会话创建响应体；请求头 `X-Session-Id` 的取值 |
+| `conversation_id` | **业务对话标识**：一次会话内可以有多个对话 | Chat 请求与响应；对话目录列表与详情；`DELETE /conversations/{conversation_id}` |
+
+约束：
+
+- **v2 的 Chat 请求体不含 `session_id`**——认证会话只走请求头。续接已有对话传 `conversation_id`，
+  为空表示新建对话。
+- **v2 的 Chat 响应体不含 `session_id`**，只含 `conversation_id`。
+- `session_id` 只出现在 `POST /shop/sessions` 与 `POST /merchant/sessions` 的响应体里。
+- **`AGENTS.md` §8.5 的「不存在 `conversation_id`」只约束 v1 契约。** 本节是 v2 的有意分歧，
+  §8.7.7 必须写明这一点，避免后来者把它当成不一致去「修正」。v1 路径不受本节影响。
+
+`V2ChatResponseBase` 定义在 `common.py`，含 `id`、`conversation_id`、`answer`、`tool_calls`
+与 §8.7.6 的全部降级字段，**但不含 `answer_mode`**——两端枚举不同，由各自模块定义
+（`ShopChatResponse` 用 `ShopAnswerMode`，`MerchantChatResponse` 用 `MerchantAnswerMode`）。
+这样 Task 2 与 Task 3 都只依赖 Task 1，互不依赖。
+
+### 8.7.8 金额表示与转换
+
+数据库保持 `Decimal`（`_MONEY = Numeric(14, 2)`，单位**元**）；**API 边界转换为整数分**（裁定 A5）。
+
+- API 字段类型是 `int`，字段名以 `_cents` 结尾，**禁止 `float`**——
+  包括禁止在转换过程中经过 `float`（`int(float(d) * 100)` 会引入舍入误差，必须用
+  `int(d.quantize(Decimal("0.01")) * 100)`）。
+- **折扣与汇总的舍入顺序是契约的一部分**：先按**订单行**各自四舍五入到分，再对行结果求和；
+  不得先汇总再舍入。两种顺序在多行折扣下会差几分，而退款上限校验依赖行金额
+  （PRD §7.2 不变量 2），顺序不固定就会出现「逐行都合法、合计却超额」。
+- 舍入模式固定为 `ROUND_HALF_UP`。
+- **安全整数范围**：`Numeric(14, 2)` 的上界是 `999999999999.99` 元，即 `99999999999999` 分
+  （约 1.0e14），小于 JavaScript 的 `Number.MAX_SAFE_INTEGER`（约 9.007e15），
+  因此整数分可以安全地用 JSON number 传输，不需要字符串编码。契约须写明这条推导，
+  以免后来者在没有依据的情况下改成字符串。
+
+### 8.7.9 界面操作证据的通用语义
+
+`confirmation_token` 与 `approval_evidence` 都是服务端签发的 opaque token，不是前端自行拼接的布尔值：
+
+- 从现有 `EXPORT_SIGNING_SECRET` 分别派生 `customer-confirmation:v1` 与 `draft-approval:v1` HMAC 子密钥，
+  禁止直接复用裸密钥；载荷必须含版本、用途、主体/资源/请求绑定、nonce、签发与过期时间；
+- 有效期不超过 10 分钟；nonce 必须在数据库中持久化，并与业务写入在**同一事务**中原子消费，
+  不能只靠进程内集合，否则多实例或重启后可重放；日志、SSE 与错误详情不得回显 token；
+- 处理顺序固定为：先按 `client_request_id` 查幂等结果；命中则原样返回第一次结果；未命中才验证并消费证据。
+  因此网络重试不会被误判为重放，而同一证据换一个 `client_request_id` 再用会返回
+  `422 CONFIRMATION_REQUIRED`，且不产生第二次业务写入；业务请求摘要排除该短期 token，
+  同键重试的摘要比较以业务字段为准；
+- 缺失、签名错误、过期、用途/主体/资源/请求不匹配或已消费，对外都使用同一中性错误结构，
+  不披露具体失败原因；内部安全审计可记录原因枚举，但不得记录 token 原值。
+
+实现售后创建或草稿应用之前，数据库迁移必须建立按用途/nonce 唯一的操作证据消费表，明确过期清理；
+仅有 Pydantic 字段和签名函数不构成“防重放已完成”。该表属于对应业务路由的实现前置，
+不把尚未上线的写端点所需表伪装成 N1 契约任务已经落地。
+
+证据必须有契约内可实现的签发来源，不能写成“由界面自行签发”：售后创建采用同一路径两阶段提交——
+第一次 `POST /shop/after-sales` 不带 token 时只做确定性预检，不写业务数据，并返回
+`200 AfterSaleConfirmationChallenge`（`confirmation_token`、过期时间、供人核对的脱敏摘要）；
+该响应必须 `Cache-Control: no-store`，且不得进入 Agent/MCP 工具投影。界面展示摘要并由用户确认后，
+用**同一个** `client_request_id` 加 token 重交；
+第一次 challenge 响应不登记为终态幂等结果。缺失 token 不返回普通校验错误；无效或已消费 token
+才返回 `422 CONFIRMATION_REQUIRED`。草稿则由工作台读取 `GET /merchant/drafts/{draft_id}` 时
+取得绑定当前版本的 `approval_evidence` 与过期时间；该 GET 必须 `Cache-Control: no-store`，
+重复读取可签发多个短期 nonce，但每个只能消费一次，未消费的过期记录由 Cron 清理。
+Agent 工具结果、MCP、SSE、日志和审计元数据均不得
+获得或回显这两类证据；后端不能靠 User-Agent、Referer 或前端自报字段判断“来自界面”。
+
+### 8.7.10 猜你想问（PRD M13，2026-09-24 补入）
+
+`V2ChatResponseBase` 增加两个**可选**字段，两端 Chat 响应与对话详情中的 `answer` 共用：
+
+| 字段 | 类型 | 必填 | 可空 | 范围、默认值与说明 |
+| --- | --- | --- | --- | --- |
+| `suggestions` | string[] | 否 | 否 | 默认 `[]`；至多 3 条，每条 1–200 字符；当前一组推荐问题 |
+| `suggestion_alternates` | string[][] | 否 | 否 | 默认 `[]`；至多 5 组，每组 1–3 条；供「换一换」本地轮换 |
+
+约束：
+
+- 备选组不得与当前组逐条相同；**没有当前组时不得出现备选组**；
+- 候选**全部由后端生成**，与 v1 `suggestions` 同名同形，但候选内容按会话角色分开：
+  顾客端只含顾客工具面（`search_products` / `get_product` / `get_shop_policy` / `set_cart_item`）答得了的问题，
+  商家端只含商家工具面答得了的问题，两端候选互不相交；
+- 订单与售后问题在 N2 由页面而不是对话回答，对话里没有对应工具，**不进候选**；N3 补上对应工具再加；
+- 语言随 `Accept-Language`，文案是人工维护的固定词典，不经 LLM 也不经本地化缓存；
+- 模型只允许对候选**排序**：排序后的问题必须仍属于本角色的候选集合、条数一致且互不重复，
+  否则回退原候选（`constrain_rewrite`）。N2 尚未把任何模型接到该环节，因此不增加每轮的 LLM 调用；
+- 字段带默认值，落盘在 `messages.response_payload` 里、本字段上线前写入的回答仍能读回；
+- 降级回答照常给候选，**降级字段不因此改变**（R7）。
+
+### 8.7.11 图表可视化（PRD M3，2026-09-27 补入）
+
+`MerchantChatResponse` 增加一个**可选**字段：
+
+| 字段 | 类型 | 必填 | 可空 | 范围、默认值与说明 |
+| --- | --- | --- | --- | --- |
+| `visualization` | `Visualization` | 否 | 否 | 默认 `enabled=false`；本回合是否有可画的指标结果，及数据点本身 |
+
+`Visualization` 复用 v1 已冻结的模型（`app.schemas.chat.Visualization`/`ChartType`），
+不新定义第二套形状——v1/v2 并存不互相 import 业务逻辑（§5.6），但共用类型定义已有先例
+（`AnalysisSource`/`QualityStatus`/`ThinkingStep`，§8.7.1 起），图表模型属于同一类：
+
+```python
+class ChartType(StrEnum):
+    LINE = "LINE"
+    BAR = "BAR"
+    PIE = "PIE"
+
+class Visualization(BaseModel):
+    enabled: bool
+    type: ChartType | None = None
+    allowed_types: list[ChartType] = Field(default_factory=list)
+    title: str | None = None
+    dimension_key: str | None = None
+    metric_key: str | None = None
+    unit: str | None = None
+    data: list[dict[str, str | int | float | None]] = Field(default_factory=list)
+```
+
+约束（与 M3「图表数据点由后端生成」「只允许在后端声明的兼容图表类型之间切换」一致）：
+
+- **只有本回合调用了 `query_metrics` 或 `attribute_change` 且返回的 `MetricQueryResult`/
+  `AttributionResult` 带有可画的时间序列或分类构成时才 `enabled=true`**；纯文字问答、
+  规则问答（`search_rules`/`get_metric_definition`）、导出、草稿起草等回合恒为
+  `enabled=false`；同一回合调用多个指标工具时，只取**最后一次**成功的指标查询结果
+  （与 `answer` 正文引用的数字保持同一个来源，不让图表和文字对不上）；
+- `data` 的每一行只能包含 `dimension_key`/`metric_key` 两个键对应的值，值只能来自
+  `MetricQueryResult`/`AttributionResult` 已经算好的数值——**Agent/LLM 不经手这份数据**，
+  工具循环内部直接从服务层结果构造 `Visualization`，模型只在 `tool_calls` 摘要里看到
+  行数，看不到 `visualization.data` 本身（与 `ToolDisplay.payload` 永不进 SSE 同一原则）；
+  复用 `app/services/visualization_service.py` 的既有构造逻辑，不重写一套新的映射规则；
+- `type` 与 `allowed_types` 的取值规则复用 M3 既有约束：时间维度（`dimension_key == "date"`）
+  默认折线图、只允许折线图；分类维度默认柱状图、允许柱状图或饼图；前端只能在
+  `allowed_types` 内切换，不能凭空选择契约未声明的图表类型；
+- 字段带默认值，落盘在 `messages.response_payload` 里、本字段上线前写入的历史回答
+  读回时得到默认值 `enabled=false`，不回填历史数据（不伪造历史图表）；
+- 降级回答（`degraded=true`）时 `visualization.enabled` 必须为 `false`——降级意味着
+  本回合至少一个数据来源不可信，绝不能仍然展示一份看似正常的图表（同 R7 底线）。
+
+---
+
+### 8.8 顾客会话与店铺浏览（组 1）
+
+本节为 N1 纯模型契约，不挂载路由；其中 3 条会话签发路由由 N1 会话计划 Task 7 挂载（2026-09-21 裁定），其余路由归 N2。全部请求、响应模型拒绝额外字段。
+身份只从凭证解析，响应不返回 `merchant_id`、`buyer_key` 或精确库存。
+`Accept-Language` 沿用 §8.6；时间必填时必须带时区并归一化 UTC。
+
+#### 8.8.1 基础字段与模型
+
+下表的字段全部必填且不可空，除非明确标注默认值或可空；字符串长度按字符计算。
+`PublicId` 为 1–128 字符的非空标识，`shop_slug` 为 1–64 字符，匹配 `[a-z0-9]+(?:-[a-z0-9]+)*`。
+`session_id` 是至少 43、至多 128 字符的无前缀 base64url 凭证，不接受 UUID 代替。
+模型中的价格全部用 §8.7.8 的非负整数分，不接受 float 或 bool。
+
+| 模型 | 字段、类型与范围 |
+| --- | --- |
+| `ShopSessionCreateRequest` | `shop_slug: string`，规则如上 |
+| `ShopSessionCreateResponse` | `session_id: string`；`role: CUSTOMER`；`expires_at: UTC datetime` |
+| `DemoCustomerBindRequest` | 空对象 `{}`，不接受任何身份或幂等键字段 |
+| `DemoCustomerBindResponse` | `role: CUSTOMER`；`is_bound: true`；`expires_at: UTC datetime`；`cart_adjusted: bool`（严格布尔；合并时发生数量截顶、剔除不可售商品或超 50 行截断为 true，幂等重绑不再合并恒为 false；规则见 PRD C3，执行期裁定 E9）。原凭证保持有效，不再次返回凭证 |
+| `StoreProfileResponse` | `shop_slug: string`；`display_name: string[1..120]`；`rules_summary: string[0..10000]` |
+| `StockBand` | `IN_STOCK / LOW_STOCK / OUT_OF_STOCK` |
+| `ProductSummary` | `id: PublicId`；`name: string[1..200]`；`short_description: string[0..500]`；`price_cents: MoneyCents`；`stock_band: StockBand`；`image_url: string[1..2048]或null`；`source_locale: zh-CN / en-US / mixed / und`；`content_version: int≥1`；`requested_locale: zh-CN / en-US`；`name_translation_status / short_description_translation_status: SOURCE / MACHINE / FALLBACK` |
+| `ProductAttribute` | `name: string[1..100]`；`value: string[1..2000]`；`source: MERCHANT / DEMO`；`updated_at: UTC datetime`；`name_translation_status / value_translation_status: SOURCE / MACHINE / FALLBACK` |
+| `ProductDetailResponse` | ProductSummary 全部字段；`description: string[0..20000]`；`attributes: ProductAttribute[]`（0–100 项）；`description_translation_status: SOURCE / MACHINE / FALLBACK` |
+
+商品公开列表与详情按 `Accept-Language` 选择 `requested_locale`。`source_locale` 与 `content_version`
+来自当前商品源记录，译文逐字段按当前源文本哈希从**本商家**未过期的机器译文缓存读取；商品字段更新后，
+旧哈希立即不再命中。超出目标字段长度或内容为空的缓存译文也视为未命中。公开 GET 只读缓存，绝不触发 LLM 或写入新译文。`SOURCE` 表示源语言与请求
+语言一致，或字段只是数字、单位、编码等无需翻译的内容；`MACHINE` 表示命中机器译文，页面须显式
+标注；`FALLBACK` 表示缺少可用译文并原样显示源文，页面须显式提示。属性的 `source: MERCHANT /
+DEMO` 仍表示**业务内容来源**，与翻译状态独立，不得把 `MACHINE` 译文标作商家原文。
+| `CouponSummary` | `id: PublicId`；`name: string[1..200]`；`kind: AMOUNT_OFF / PERCENT_OFF`；`min_spend_cents: MoneyCents`；`amount_off_cents: MoneyCents或null`；`discount_bps: int[1..9999]或null`（折扣后的支付比例，单位基点）；`product_ids: PublicId[]`（0–100 项，空表示全店）；`starts_at / ends_at: UTC datetime` |
+| `ShopChatRequest` | `message: string[1..2000]`（strip 后非空）；`conversation_id: PublicId或null`（可省略，默认null）；`client_request_id` 按 §8.7.3，必填 |
+| `ShopAnswerMode` | `SHOP_GUIDE / ORDER / AFTER_SALE / CHAT / INVALID` |
+| `ShopChatResponse` | §8.7.7 `V2ChatResponseBase` 的全部字段；`answer_mode: ShopAnswerMode` |
+| `ShopConversationSummary` | `id: PublicId`；`title: string[1..200]`；`created_at / updated_at: UTC datetime` |
+| `ShopConversationMessage` | `id: PublicId`；`role: user / assistant`；`content: string[1..20000]`；`created_at: UTC datetime`；`answer: ShopChatResponse或null`（user 必须null；assistant 必須包含最终响应） |
+| `ShopConversationDetailResponse` | `conversation: ShopConversationSummary`；`messages: CursorPage[ShopConversationMessage]` |
+
+优惠券 `ends_at > starts_at`；满减券 `amount_off_cents>0` 且 `discount_bps=null`；折扣券
+`amount_off_cents=null` 且 `discount_bps` 必填。商品属性名、券的商品标识不得重复。
+商品与购物车图片共用 `ImageUrl` 结构校验，仅接受 `/demo/products/` 下无查询串、片段、路径跳转或编码逃逸的静态资源路径，
+或显式受信配置允许的 HTTPS 主机（不接受用户信息、非443端口、IP地址）。HTTPS 主机白名单**不在 Schema 内判定**：Schema 只做与部署无关的结构校验，
+主机是否可信由服务层在入库或组装响应前调用 `is_trusted_image_host(url, allowed_hosts)` 判定；该函数也先执行同一结构校验，不能只按主机名放行不安全地址。缺配置时拒绝全部外部主机，Schema 不联网抓图。
+（原写法依赖 Pydantic 校验 context，但 FastAPI 校验 `response_model` 时不传 context，会让所有外部图片在响应阶段 500；执行期裁定 E11。）
+`CHAT / INVALID` 的回答来源必须是单独的 `NONE`；其余模式仍遵守共用降级约束。
+历史 user 消息不带回答；assistant 消息须携带完整最终响应且 content 与 answer.answer 一致。
+
+#### 8.8.2 逐路径契约
+
+下表的“无”表示不接受请求体或该类参数；列表参数统一为 `cursor: string[1..2048]或null`（默认null）、
+`limit: int[1..100]`（默认20），响应 `CursorPage` 的三字段按 §8.7.4 全部必填。
+所有错误返回 §8.3 ErrorResponse。表中的 401 为 `SESSION_REQUIRED / SESSION_INVALID`，
+403 角色错误为 `SESSION_ROLE_MISMATCH`；资源不存在与越权统一 `RESOURCE_FORBIDDEN`、空 details。
+本节沿用的既有错误 `INVALID_REQUEST`（422）、`NOT_FOUND`（404）、`INTERNAL_ERROR`（500）
+与 §8.7.2 已列共用码使用同一 ErrorCode；不另建枚举。
+
+| 方法与完整路径 | 鉴权、路径/查询/请求体 | 成功响应 | 错误、幂等与传输 |
+| --- | --- | --- | --- |
+| `POST /api/v2/shop/sessions` | 公开；路径/查询无；体 ShopSessionCreateRequest | 201 ShopSessionCreateResponse，Cache-Control: no-store | 403 RESOURCE_FORBIDDEN（店铺不可用）；422 INVALID_REQUEST；429 RATE_LIMITED；503 DATA_SOURCE_UNAVAILABLE。每次签发新凭证，无client_request_id |
+| `POST /api/v2/shop/sessions/demo-customer` | X-Session-Id 顾客；路径/查询无；体 DemoCustomerBindRequest | 200 DemoCustomerBindResponse，Cache-Control: no-store | 401；403角色错误；404 NOT_FOUND（演示模式关闭，统一公开不可用）；409 SESSION_ALREADY_BOUND；422 INVALID_REQUEST；503 DATA_SOURCE_UNAVAILABLE。同一身份原地绑定与购物车合并事务幂等，无client_request_id |
+| `DELETE /api/v2/shop/sessions/current` | X-Session-Id 顾客；路径/查询/体无 | 204，无体 | 401；403角色错误；503 DATA_SOURCE_UNAVAILABLE。注销当前会话；后续用该凭证返回401，无client_request_id |
+| `GET /api/v2/shop/stores/{shop_slug}` | 公开；路径shop_slug；查询/体无 | 200 StoreProfileResponse | 403 RESOURCE_FORBIDDEN；422 INVALID_REQUEST；503 DATA_SOURCE_UNAVAILABLE。只读，无幂等键 |
+| `GET /api/v2/shop/stores/{shop_slug}/products` | 公开；路径shop_slug；查询cursor/limit；体无 | 200 CursorPage[ProductSummary] | 403 RESOURCE_FORBIDDEN；422 INVALID_REQUEST / INVALID_CURSOR；503 DATA_SOURCE_UNAVAILABLE。只返回在售商品；只读 |
+| `GET /api/v2/shop/stores/{shop_slug}/products/{product_id}` | 公开；路径shop_slug、product_id:PublicId；查询/体无 | 200 ProductDetailResponse | 403 RESOURCE_FORBIDDEN（含非本店或不可售）；422 INVALID_REQUEST；503 DATA_SOURCE_UNAVAILABLE。只读 |
+| `GET /api/v2/shop/stores/{shop_slug}/coupons` | 公开；路径shop_slug；查询cursor/limit；体无 | 200 CursorPage[CouponSummary] | 403 RESOURCE_FORBIDDEN；422 INVALID_REQUEST / INVALID_CURSOR；503 DATA_SOURCE_UNAVAILABLE。仅当前已生效券（starts_at≤now<ends_at）；只读 |
+| `POST /api/v2/shop/chat` | X-Session-Id 顾客；路径/查询无；体ShopChatRequest | 200 SSE 或 ShopChatResponse | 401；403角色错误 / RESOURCE_FORBIDDEN；409 IDEMPOTENCY_KEY_REUSED / REQUEST_IN_PROGRESS；422 INVALID_REQUEST；429 RATE_LIMITED；503 LLM_BUDGET_EXCEEDED / DATA_SOURCE_UNAVAILABLE。幂等域、摘要与语言重放按 §8.7.3；默认SSE |
+| `GET /api/v2/shop/conversations` | X-Session-Id 顾客；路径无；查询cursor/limit；体无 | 200 CursorPage[ShopConversationSummary] | 401；403角色错误；422 INVALID_REQUEST / INVALID_CURSOR；503 DATA_SOURCE_UNAVAILABLE。仅当前主体本店对话；只读 |
+| `GET /api/v2/shop/conversations/{conversation_id}` | X-Session-Id 顾客；路径conversation_id:PublicId；查询cursor/limit用于消息；体无 | 200 ShopConversationDetailResponse | 401；403角色错误 / RESOURCE_FORBIDDEN；422 INVALID_REQUEST / INVALID_CURSOR；503 DATA_SOURCE_UNAVAILABLE。只读 |
+| `DELETE /api/v2/shop/conversations/{conversation_id}` | X-Session-Id 顾客；路径conversation_id:PublicId；查询/体无 | 204，无体 | 401；403角色错误 / RESOURCE_FORBIDDEN；422 INVALID_REQUEST；503 DATA_SOURCE_UNAVAILABLE。删除后再次请求统一403；同事务删除来源状态，无client_request_id |
+
+所有受限对象查询强制当前主体 + 店铺范围；公开浏览按 slug 在服务端解析店铺，不让前端提供租户ID。
+列表排序：商品、优惠券、对话均 `created_at DESC, id DESC`；消息 `created_at ASC, id ASC`。
+签名游标绑定端点、公开店铺或会话主体+店铺、资源类型、语言与limit；消息还绑定conversation_id。
+签名、24小时过期、锚点删除与从首页重取规则严格沿用 §8.7.4，不跨资源复用。
+
+#### 8.8.3 Chat 与 v1 迁移
+
+SSE 逐事件使用 §8.7.5 的 `step / tool_call / tool_result / turn_complete / error`；
+turn_complete 携带唯一完整 ShopChatResponse，和 JSON 响应逐字段相同，工具载荷只能用受控展示模型。
+开流前错误保留HTTP状态；开流后error为唯一终态，不再发送turn_complete；断流不得当成功。
+切换语言重放按 §8.6.4，不重复推理或产生副作用。请求拒绝 session_id、attachment_ids 和身份字段。
+
+| v1 AnswerMode | 顾客端处理 |
+| --- | --- |
+| CHAT / INVALID | 同名映射 |
+| METRIC / DETAIL / RULE / IDENTITY | 不自动映射；由顾客请求语义选择 SHOP_GUIDE / ORDER / AFTER_SALE，商家能力不得透传 |
+| ATTACHMENT | 拒绝，本版无附件能力 |
+
+### 8.9 商家会话与对话目录（组 2）
+
+本节为 N1 纯模型契约，不挂载路由；其中 2 条会话签发路由由 N1 会话计划 Task 7 挂载（2026-09-21 裁定），其余路由归 N2。全部请求、响应模型拒绝额外字段。身份只从凭证解析，
+响应不返回 `merchant_id`。`Accept-Language` 沿用 §8.6；时间带时区并归一化 UTC。
+`PublicId`、`SessionToken` 与 §8.8.1 定义相同；本节不引用顾客端模块（两端只共享 `common.py`）。
+
+#### 8.9.1 基础字段与模型
+
+| 模型 | 字段、类型与范围 |
+| --- | --- |
+| `MerchantSessionCreateRequest` | 空对象 `{}`；身份只来自 `Authorization: Bearer <演示 Token>`，不接受 `merchant_id` 等任何字段 |
+| `MerchantSessionCreateResponse` | `session_id: string`（43–128 字符 base64url 凭证）；`role: MERCHANT`；`expires_at: UTC datetime`；`merchant_display_name: string[1..120]` |
+| `MerchantChatRequest` | `message: string[1..2000]`（strip 后非空）；`conversation_id: PublicId或null`（可省略，默认null）；`client_request_id` 按 §8.7.3，必填 |
+| `MerchantAnswerMode` | `METRIC / DETAIL / RULE / IDENTITY / CHAT / INVALID`，无 `ATTACHMENT` |
+| `MerchantChatResponse` | §8.7.7 `V2ChatResponseBase` 的全部字段；`answer_mode: MerchantAnswerMode` |
+| `MerchantConversationSummary` | `id: PublicId`；`title: string[1..200]`；`created_at / updated_at: UTC datetime` |
+| `MerchantConversationFeedbackState` | `adopted: bool`；`reaction: FeedbackReaction或null`；`reason: string[1..500]或null`，原因只可附着于非空赞踩；无反馈记录时返回 `false / null / null` |
+| `MerchantConversationMessage` | `id: PublicId`；`role: user / assistant`；`content: string[1..20000]`；`created_at: UTC datetime`；`answer: MerchantChatResponse或null`；`feedback: MerchantConversationFeedbackState或null`（user 的 answer、feedback 均必须为null；assistant 必须携带最终响应和非空 feedback，且 content 与 answer.answer 一致） |
+| `MerchantConversationDetailResponse` | `conversation: MerchantConversationSummary`；`messages: CursorPage[MerchantConversationMessage]` |
+
+`CHAT / INVALID` 的回答来源必须是单独的 `NONE`；其余模式遵守共用降级约束。
+顾客的店铺级脱敏别名 `buyer_alias` 只在商家售后契约（§8.11）中出现；对话目录本身不含任何顾客标识，
+因此两端目录摘要字段完全对称，且都不含 `merchant_id` / `buyer_key`。
+详情只对本店商家会话返回回答反馈；按当前消息页的回答 ID 与服务端解析的 `merchant_id` 批量读取反馈，
+不得信任请求中的商家标识，也不得把同店顾客回答或其他商家的反馈混入结果。顾客会话详情契约不增加此字段。
+
+#### 8.9.2 逐路径契约
+
+列表参数统一为 `cursor: string[1..2048]或null`（默认null）、`limit: int[1..100]`（默认20）；
+错误沿用 §8.3 ErrorResponse。401 为 `SESSION_REQUIRED / SESSION_INVALID`，
+403 角色错误为 `SESSION_ROLE_MISMATCH`，资源不存在与越权统一 `RESOURCE_FORBIDDEN`、空 details。
+
+| 方法与完整路径 | 鉴权、路径/查询/请求体 | 成功响应 | 错误、幂等与传输 |
+| --- | --- | --- | --- |
+| `POST /api/v2/merchant/sessions` | `Authorization: Bearer <演示 Token>`（唯一使用 Bearer 的 v2 商家端点）；路径/查询无；体 MerchantSessionCreateRequest | 201 MerchantSessionCreateResponse，Cache-Control: no-store | 401 AUTH_REQUIRED（Token 缺失、无效或已撤销）；422 INVALID_REQUEST；429 RATE_LIMITED；503 DATA_SOURCE_UNAVAILABLE。每次签发新凭证，无client_request_id |
+| `DELETE /api/v2/merchant/sessions/current` | X-Session-Id 商家；路径/查询/体无 | 204，无体 | 401；403角色错误；503 DATA_SOURCE_UNAVAILABLE。后续用该凭证返回401，无client_request_id |
+| `POST /api/v2/merchant/chat` | X-Session-Id 商家；路径/查询无；体MerchantChatRequest | 200 SSE 或 MerchantChatResponse | 401；403角色错误 / RESOURCE_FORBIDDEN；409 IDEMPOTENCY_KEY_REUSED / REQUEST_IN_PROGRESS；422 INVALID_REQUEST；429 RATE_LIMITED；503 LLM_BUDGET_EXCEEDED / DATA_SOURCE_UNAVAILABLE。幂等域、摘要与语言重放按 §8.7.3；默认SSE |
+| `GET /api/v2/merchant/conversations` | X-Session-Id 商家；路径无；查询cursor/limit；体无 | 200 CursorPage[MerchantConversationSummary] | 401；403角色错误；422 INVALID_REQUEST / INVALID_CURSOR；503 DATA_SOURCE_UNAVAILABLE。仅当前商家对话；只读 |
+| `GET /api/v2/merchant/conversations/{conversation_id}` | X-Session-Id 商家；路径conversation_id:PublicId；查询cursor/limit用于消息；体无 | 200 MerchantConversationDetailResponse | 401；403角色错误 / RESOURCE_FORBIDDEN；422 INVALID_REQUEST / INVALID_CURSOR；503 DATA_SOURCE_UNAVAILABLE。只读 |
+| `DELETE /api/v2/merchant/conversations/{conversation_id}` | X-Session-Id 商家；路径conversation_id:PublicId；查询/体无 | 204，无体 | 401；403角色错误 / RESOURCE_FORBIDDEN；422 INVALID_REQUEST；503 DATA_SOURCE_UNAVAILABLE。删除后再次请求统一403；同事务删除来源状态，无client_request_id |
+
+**Token 撤销级联**（PRD §7.5 不变量 5）：撤销演示 Token 时，由它换取的全部现存会话同步失效；
+会话失效一律返回 `401 SESSION_INVALID`，客户端据此重新走 `POST /merchant/sessions`。
+排序：对话 `updated_at DESC, id DESC`；消息 `created_at ASC, id ASC`。签名游标绑定端点、商家主体摘要、
+资源类型、语言与 limit，消息还绑定 conversation_id；规则严格沿用 §8.7.4。
+
+#### 8.9.3 Chat 与 v1 迁移
+
+SSE 逐事件使用 §8.7.5；turn_complete 携带唯一完整 MerchantChatResponse，与 JSON 响应逐字段相同。
+请求拒绝 `session_id`、`attachment_ids` 与身份字段。v1 `AnswerMode` 一一映射：
+
+| v1 AnswerMode | 商家端处理 |
+| --- | --- |
+| METRIC / DETAIL / RULE / IDENTITY / CHAT / INVALID | 同名映射 |
+| ATTACHMENT | 不进入 v2；请求侧无附件字段，响应枚举无此值 |
+
+### 8.10 交易：购物车与订单履约（组 3）
+
+本节为 N1 纯模型契约，不挂载路由。全部请求、响应模型拒绝额外字段。金额一律 §8.7.8 的非负整数分；
+时间带时区并归一化 UTC。`PublicId`、`StockBand` 与 §8.8.1 相同（`StockBand` 由 `shop_session` 导出，本节不重复定义）。
+`merchant_id`、`buyer_key`、精确库存数量不出现在任何请求或响应中。
+
+#### 8.10.1 基础字段与模型
+
+| 模型 | 字段、类型与范围 |
+| --- | --- |
+| `PaymentStatus` | `PENDING / PAID / CLOSED`（支付维度，与履约维度值集不相交） |
+| `FulfillmentStatus` | `NOT_SHIPPED / SHIPPED / IN_TRANSIT / OUT_FOR_DELIVERY / DELIVERED`（履约维度） |
+| `OrderAfterSaleProjection` | `NONE / ACTIVE / CLOSED`；订单级聚合投影，与 §8.11 的 `AfterSaleState` 不是同一个枚举 |
+| `CartItem` | `product_id: PublicId`；`name: string[1..200]`；`image_url: ImageUrl或null`（与 §8.8.1 商品图片结构校验完全一致）；`quantity: int[1..99]`；`unit_price_cents: MoneyCents`；`line_total_cents: MoneyCents`（必须等于 unit_price × quantity）；`stock_band: StockBand` |
+| `CartResponse` | `items: CartItem[]`（0–50 项，`product_id` 不重复）；`subtotal_cents: MoneyCents`（必须等于各行之和）。购物车不占库存，价格仅作展示，结算以后端重算为准 |
+| `CartItemSetRequest` | `quantity: int[0..99]`（严格整数，0 表示删除）；**不含 `client_request_id`**：设置绝对数量，天然幂等 |
+| `OrderCreateRequest` | `client_request_id` 按 §8.7.3，必填；`coupon_id: PublicId或null`（可省略，默认null）。订单行来自当前购物车，请求不接受商品、单价、金额或库存字段 |
+| `OrderItemPriceSnapshot` | `order_item_id: PublicId`；`product_id: PublicId`；`name: string[1..200]`；`quantity: int[1..99]`；`unit_price_cents`、`discount_cents`、`line_total_cents: MoneyCents`。约束：`discount_cents ≤ unit_price_cents × quantity`；`line_total_cents = unit_price_cents × quantity − discount_cents` |
+| `OrderSummary` | `id: PublicId`；`payment_status`；`fulfillment_status`；`after_sale_status: OrderAfterSaleProjection`；`total_cents: MoneyCents`；`item_count: int≥1`；`created_at: UTC datetime`；`pay_by: UTC datetime`（支付截止，创建后 30 分钟）。约束：`fulfillment_status ≠ NOT_SHIPPED` 时 `payment_status` 必须是 `PAID` |
+| `OrderDetailResponse` | OrderSummary 全部字段；`items: OrderItemPriceSnapshot[]`（1–50 项，`order_item_id` 不重复）；`subtotal_cents`、`discount_cents: MoneyCents`；`coupon_id: PublicId或null`；`paid_at: UTC datetime或null`；`closed_at: UTC datetime或null`；`close_reason: USER_CANCELLED / PAYMENT_TIMEOUT / null`；`is_demo: true`。约束见下 |
+| `FulfillmentEventType` | `ORDER_PLACED / PAYMENT_CONFIRMED / SHIPPED / IN_TRANSIT / OUT_FOR_DELIVERY / DELIVERED / ORDER_CLOSED` |
+| `FulfillmentEvent` | `id: PublicId`；`event_type: FulfillmentEventType`；`occurred_at: UTC datetime`；`source_timezone: string[1..64]`（IANA 时区名，来源时区，不做隐式推断） |
+| `FulfillmentEventPage` | 即 `CursorPage[FulfillmentEvent]`（`items / next_cursor / has_more`，§8.7.4） |
+| `OrderPayRequest` / `OrderCancelRequest` | 仅 `client_request_id` 按 §8.7.3，必填，不接受其他字段 |
+| `IllegalTransitionDetail` | `payment_status: PaymentStatus`。仅用于 `ILLEGAL_STATE_TRANSITION.details` 的唯一元素，不含任何锁、版本或内部状态 |
+| `UnavailableItemDetail` | `product_id: PublicId`；`reason: OUT_OF_STOCK / INSUFFICIENT_STOCK / DELISTED`；`stock_band: StockBand`。用于下单不可用项提示，只给档位，不给数量 |
+
+`OrderDetailResponse` 的一致性约束：`subtotal_cents = Σ unit_price × quantity`；`discount_cents = Σ 行 discount`；
+`total_cents = subtotal_cents − discount_cents = Σ line_total_cents`；`item_count = Σ quantity`；
+`paid_at` 非空当且仅当 `payment_status = PAID`；`closed_at` 与 `close_reason` 同时非空当且仅当 `payment_status = CLOSED`；
+`pay_by` 不早于 `created_at`。
+
+关闭原因在数据库保留 `CUSTOMER_CANCEL` / `TIMEOUT`，分别对应 API 的
+`USER_CANCELLED` / `PAYMENT_TIMEOUT`。响应装配与写入边界须调用
+`app/domain/order_status_mapping.py` 中的 `close_reason_to_api` / `close_reason_from_api`；
+`null` 原样传递，未知值拒绝。存储词汇不得直接下发，历史迁移不改写。
+
+#### 8.10.2 不变量
+
+1. **支付与履约是两个独立字段，不合并**（PRD §7.1 D14⑥）。事件表才是事实源；`OrderSummary / OrderDetailResponse`
+   的三维字段是查询投影，**由事件重算，客户端不得据投影推断事件缺失**。`OrderDetailResponse`
+   **不内嵌无界 `events` 数组**，履约事件只由 `/orders/{order_id}/events` 游标分页提供。
+   `ORDER_CLOSED` 是让 `payment_status = CLOSED` 能由事件派生的事件类型，已回写 PRD §7.1 与 §C5，并与数据迁移计划 M3 的 `fulfillment_events` 类型一致。
+2. **顾客侧只暴露库存档位**：购物车、订单与公开商品响应只含 `stock_band`，不得返回 `stock_on_hand / stock_reserved / stock_available`。
+3. **`POST /orders` 响应含完整价格快照**（`OrderItemPriceSnapshot`），§8.11 的行级退款上限直接依赖它；
+   舍入顺序按 §8.7.8：先逐行 `ROUND_HALF_UP` 到分，再对行结果求和。
+4. **`PUT /cart/items/{product_id}` 设置绝对数量**，天然幂等，不带 `client_request_id`；`quantity = 0` 等价于删除。
+   商品不属于本店或未通过来源闸门返回 `403 PRODUCT_NOT_IN_SCOPE`；`quantity > 0` 但商品已售罄返回 `409 INSUFFICIENT_STOCK`。
+5. **`POST /orders`、`/pay`、`/cancel` 全部携带 `client_request_id`**。`pay` 与 `cancel`（以及超时关闭）并发互斥：
+   败者返回 `409 ILLEGAL_STATE_TRANSITION`，`details` 只含一个 `IllegalTransitionDetail`。
+
+#### 8.10.3 逐路径契约
+
+列表参数为 `cursor: string[1..2048]或null`（默认null）、`limit: int[1..100]`（默认20）；错误沿用 §8.3 ErrorResponse。
+401 为 `SESSION_REQUIRED / SESSION_INVALID`，403 角色错误为 `SESSION_ROLE_MISMATCH`；
+「演示顾客会话」指已绑定演示顾客的会话，访客会话访问返回 `403 CUSTOMER_BINDING_REQUIRED`。
+资源不存在与越权统一 `RESOURCE_FORBIDDEN`、空 details。
+
+| 方法与完整路径 | 鉴权、路径/查询/请求体 | 成功响应 | 错误、幂等与传输 |
+| --- | --- | --- | --- |
+| `GET /api/v2/shop/cart` | X-Session-Id 顾客（含访客）；路径/查询/体无 | 200 CartResponse | 401；403角色错误；503 DATA_SOURCE_UNAVAILABLE。只读 |
+| `PUT /api/v2/shop/cart/items/{product_id}` | X-Session-Id 顾客（含访客）；路径product_id:PublicId；查询无；体 CartItemSetRequest | 200 CartResponse（设置后的完整购物车） | 401；403角色错误 / PRODUCT_NOT_IN_SCOPE；409 INSUFFICIENT_STOCK；422 INVALID_REQUEST；503 DATA_SOURCE_UNAVAILABLE。绝对数量，天然幂等，无client_request_id；不占库存 |
+| `DELETE /api/v2/shop/cart/items/{product_id}` | X-Session-Id 顾客（含访客）；路径product_id:PublicId；查询/体无 | 200 CartResponse（删除后的完整购物车） | 401；403角色错误；422 INVALID_REQUEST；503 DATA_SOURCE_UNAVAILABLE。天然幂等：商品不在购物车时同样 200，不探测商品是否存在 |
+| `POST /api/v2/shop/orders` | X-Session-Id 演示顾客；路径/查询无；体 OrderCreateRequest | 201 OrderDetailResponse（含价格快照）；幂等重放返回原响应，状态码不变 | 401；403角色错误 / CUSTOMER_BINDING_REQUIRED；409 INSUFFICIENT_STOCK（details: UnavailableItemDetail[]）/ IDEMPOTENCY_KEY_REUSED / REQUEST_IN_PROGRESS；403 PRODUCT_NOT_IN_SCOPE（商品下架，details同上）；422 INVALID_REQUEST（购物车为空或优惠券不可用，details: [{field, reason}]）；503 DATA_SOURCE_UNAVAILABLE。幂等域按 §8.7.3；同一事务创建订单、占库、写事件，任一失败整体回滚 |
+| `GET /api/v2/shop/orders` | X-Session-Id 演示顾客；路径无；查询cursor/limit；体无 | 200 CursorPage[OrderSummary] | 401；403角色错误 / CUSTOMER_BINDING_REQUIRED；422 INVALID_REQUEST / INVALID_CURSOR；503 DATA_SOURCE_UNAVAILABLE。仅本人订单（merchant_id + buyer_key 双重过滤）；只读 |
+| `GET /api/v2/shop/orders/{order_id}` | X-Session-Id 演示顾客；路径order_id:PublicId；查询/体无 | 200 OrderDetailResponse | 401；403角色错误 / CUSTOMER_BINDING_REQUIRED / RESOURCE_FORBIDDEN；422 INVALID_REQUEST；503 DATA_SOURCE_UNAVAILABLE。只读；历史订单（迁移前创建）同样统一 RESOURCE_FORBIDDEN |
+| `GET /api/v2/shop/orders/{order_id}/events` | X-Session-Id 演示顾客；路径order_id:PublicId；查询cursor/limit；体无 | 200 FulfillmentEventPage | 401；403角色错误 / CUSTOMER_BINDING_REQUIRED / RESOURCE_FORBIDDEN；422 INVALID_REQUEST / INVALID_CURSOR；503 DATA_SOURCE_UNAVAILABLE。只读；游标额外绑定 order_id |
+| `POST /api/v2/shop/orders/{order_id}/pay` | X-Session-Id 演示顾客；路径order_id:PublicId；查询无；体 OrderPayRequest | 200 OrderDetailResponse | 401；403角色错误 / CUSTOMER_BINDING_REQUIRED / RESOURCE_FORBIDDEN；409 ILLEGAL_STATE_TRANSITION（details: IllegalTransitionDetail）/ IDEMPOTENCY_KEY_REUSED / REQUEST_IN_PROGRESS；422 INVALID_REQUEST；503 DATA_SOURCE_UNAVAILABLE。模拟支付；已过 `pay_by` 视为已关闭 |
+| `POST /api/v2/shop/orders/{order_id}/cancel` | X-Session-Id 演示顾客；路径order_id:PublicId；查询无；体 OrderCancelRequest | 200 OrderDetailResponse | 同 `/pay`。仅 `PENDING` 可取消；成功释放占用 |
+
+排序：订单 `created_at DESC, id DESC`；履约事件 `occurred_at ASC, id ASC`。签名游标绑定端点、会话主体+店铺、资源类型、语言与 limit，
+事件游标另绑定 order_id，规则严格沿用 §8.7.4。
+
+#### 8.10.4 实现期约束（由路由实现任务承接，不属于 Schema 冻结）
+
+以下 PRD §7.1、§7.4 不变量无法落到字段上，登记在此，**不得静默丢弃**：
+
+- 订单创建、占库、写 `ORDER_PLACED` 事件在同一事务内原子完成（§7.4 不变量 2）；
+- 库存扣减使用带条件更新，任何路径不得产生负可售量（§7.4 不变量 1）；每条库存变化写账本并注明来源（§7.4 不变量 3）；
+- 事件表追加写，投影与事件同事务更新，并提供由事件重算校验的任务（§7.1 不变量 1）；
+- 非法迁移拒绝写入（如未支付直接出库、已签收回退运输中），事件按去重键幂等（§7.1 不变量 2、3）；
+- 「已支付」与「已关闭」以条件更新裁决，只有一方生效（§7.1 不变量 4）；30 分钟未支付关闭由**业务路径自检 `pay_by`**保证，Cron 只清理；
+- 一个订单只有一条履约流，不做拆单（§7.1 不变量 5）；时间存 UTC 并记录来源时区（§7.1 不变量 6）。
+
+### 8.11 售后（双端）（组 4）
+
+本节为 N1 纯模型契约，不挂载路由。全部请求、响应模型拒绝额外字段。金额一律 §8.7.8 的非负整数分；
+时间带时区并归一化 UTC。`after_sale_id` 指售后主记录 `after_sales.id`（PRD §8.1、数据迁移计划 M7）；
+`refunds` / `returns` 是它名下的资金 / 货品动作记录，工单以唯一外键挂在它上面，均不单独作为 `after_sale_id` 暴露。
+`OrderItemPriceSnapshot` 复用 §8.10.1，本节不重复定义。范围：退货退款、仅退款、客服工单，不做换货。
+
+#### 8.11.1 基础字段与模型
+
+| 模型 | 字段、类型与范围 |
+| --- | --- |
+| `AfterSaleType` | `RETURN_REFUND / REFUND_ONLY / TICKET` |
+| `AfterSaleState` | `PENDING_MERCHANT / APPROVED / REJECTED / AWAITING_RETURN / RECEIVED / REFUNDED / AWAITING_CUSTOMER_INFO / CLOSED` |
+| `AfterSaleActor` | `CUSTOMER / MERCHANT / SYSTEM`；只表示动作来源类别，不含任何主体标识 |
+| `AfterSaleCreateRequest` | `client_request_id` 按 §8.7.3，必填；`order_id: PublicId`；`after_sale_type: AfterSaleType`；`order_item_ids: PublicId[]`（0–50 项，不重复；空表示整单全部订单行，售后按整行处理，不支持行内部分数量）；`reason: string[0..1000]`（strip，默认空串；`TICKET` 必须非空）；`include_conversation_summary: bool`（默认 false）；`confirmation_token: string[1..2048]或null`（默认 null；字符集 `A-Za-z0-9._~-`）。**不含任何金额、可否发起、状态、身份或库存字段**；提交任何此类字段一律**拒绝**并返回 `422 INVALID_REQUEST`（不是忽略）。`RETURN_REFUND` / `REFUND_ONLY` 的 `order_item_ids` 可为空但不可重复 |
+| `AfterSaleChallengeLine` | `order_item_id: PublicId`；`name: string[1..200]`；`quantity: int[1..99]`；`line_total_cents: MoneyCents` |
+| `AfterSaleChallengeSummary` | `order_id: PublicId`；`after_sale_type`；`lines: AfterSaleChallengeLine[]`（0–50 项）；`estimated_refund_cents: MoneyCents或null`（`TICKET` 必须 null，其余必填）；`reason: string[0..1000]`；`conversation_summary_status: NOT_SHARED / INCLUDED / UNAVAILABLE`；`conversation_summary: string[1..2000]或null`（仅 `INCLUDED` 时非空；已脱敏预览）。供人核对，不含 token 与身份 |
+| `AfterSaleConfirmationChallenge` | `confirmation_token: string[1..2048]`（服务端签发的 opaque 证据，§8.7.9）；`expires_at: UTC datetime`（签发后不超过 10 分钟）；`summary: AfterSaleChallengeSummary` |
+| `AfterSaleSummary` | `id: PublicId`；`order_id: PublicId`；`after_sale_type`；`state: AfterSaleState`；`refund_amount_cents: MoneyCents或null`（`TICKET` 必须 null，其余必填）；`created_at / updated_at: UTC datetime`（`updated_at ≥ created_at`）。**不含 `confirmation_token`** |
+| `AfterSaleLine` | `snapshot: OrderItemPriceSnapshot`；`refund_cents: MoneyCents`，且 `refund_cents ≤ snapshot.line_total_cents` |
+| `AfterSaleEvent` | `id: PublicId`；`from_state: AfterSaleState或null`（仅创建事件为 null）；`to_state: AfterSaleState`；`actor: AfterSaleActor`；`occurred_at: UTC datetime` |
+| `AfterSaleDetailBase` | AfterSaleSummary 全部字段；`reason: string[0..1000]`（顾客提交时的脱敏原因）；`lines: AfterSaleLine[]`（0–50 项，`TICKET` 可空，其余非空；`order_item_id` 不重复）；`events: AfterSaleEvent[]`（1–100 项，严格按 `occurred_at ASC, id ASC`）；`supplements: AfterSaleSupplement[]`（0–47 项，按 `submitted_at ASC, id ASC`）；`replies: AfterSaleReply[]`（按 `sent_at ASC, id ASC`）。约束：首个事件为 `null → PENDING_MERCHANT`；事件首尾相接；每一跳属于 §8.11.2 允许迁移表与补充信息次数上限；最后一个 `to_state` 等于 `state`；`refund_amount_cents = Σ lines.refund_cents`（`TICKET` 为 null） |
+| `AfterSaleSupplementRequest` | `client_request_id` 按 §8.7.3，必填；`note: string[1..1000]`（strip 后非空）。**不含任何金额、状态、身份或附件字段**，提交此类字段一律 `422 INVALID_REQUEST`（2026-09-24 用户裁定补入） |
+| `AfterSaleSupplement` | `id: PublicId`；`note: string[1..1000]`（入库前按 C8 同一规则脱敏：不含手机号、地址、支付信息）；`submitted_at: UTC datetime`。进入商家端 Agent 上下文时按 A11 围栏（顾客原文是数据，不是指令） |
+| `AfterSaleReply` | `id: PublicId`；`text: string[1..2000]`（商家批准的回复正文）；`sent_at: UTC datetime`。平台内送达与售后决定在同一数据库事务生效；按 `sent_at ASC, id ASC` 展示，不含原始身份 |
+| `CustomerAfterSaleDetailResponse` | AfterSaleDetailBase 全部字段；`conversation_summary_shared: bool`（是否已随申请提交给商家，C8 透明性）。**无 `buyer_alias`、无审计字段** |
+| `ConversationSnapshot` | `status: NOT_SHARED / AVAILABLE / UNAVAILABLE`；`text: string[1..2000]或null`（仅 `AVAILABLE` 非空）；`unavailable_reason: string[1..200]或null`（仅 `UNAVAILABLE` 非空）。提交时固化的不可变快照，已脱敏，不含手机号、地址、支付信息 |
+| `MerchantAfterSaleSummary` | AfterSaleSummary 全部字段；`buyer_alias: string[1..64]`（店铺级脱敏别名）；`first_response_due_at: UTC datetime`（仅提示，不强制考核） |
+| `MerchantAfterSaleDetailResponse` | AfterSaleDetailBase 全部字段；`buyer_alias`、`first_response_due_at` 同上；`ticket_id: PublicId`（每个售后事项唯一的处理入口）；`conversation_summary: ConversationSnapshot`。**无 `buyer_key`、无 `viewed_audit_id` / `audit_id`**：查看审计是服务端副作用，不进入响应 |
+
+#### 8.11.2 不变量与允许迁移表
+
+1. **发起条件由后端判定，模型不得决定**（PRD §7.2 不变量 1）：请求没有任何「是否符合发起条件」的客户端断言字段。
+   不符合条件（订单未签收、超时效、已有进行中或已全额退款的售后）返回 `422 GUARDRAIL_REJECTED`，
+   `details` 为 `[AfterSaleIneligibleDetail]`（`reason: ORDER_NOT_DELIVERED / WINDOW_EXPIRED / ALREADY_IN_PROGRESS / ALREADY_REFUNDED`；
+   `rule_reference: string[1..200]`，依据的平台规则条款，不许诺特例）。历史订单（迁移前创建）与他人订单统一 `403 RESOURCE_FORBIDDEN`。
+2. **退款金额只由后端计算**：`refund_amount_cents` 由后端按 `OrderItemPriceSnapshot.line_total_cents` 计算，
+   单行累计退款不得超过该行快照金额；多行分摊按 §8.7.8（先逐行舍入到分，再求和）。
+   客户端提交任何金额字段一律**拒绝并返回 `422 INVALID_REQUEST`**。
+3. **界面确认证据**（PRD §7.2 不变量 6）：`POST /shop/after-sales` 采用同一路径两阶段提交（§8.7.9）。
+   不带 `confirmation_token` 时只做确定性预检、不写业务数据，返回 `200 AfterSaleConfirmationChallenge`（`Cache-Control: no-store`）；
+   界面展示 `summary` 由用户确认后，用**同一个** `client_request_id` 加 token 重交，成功返回 `201 AfterSaleSummary`。
+   两个响应分支互斥，OpenAPI 与 Adapter 必须能分辨（状态码不同、模型不同）。token 只能由服务端预检响应签发，
+   **聊天中的确认不生效，Agent 不得代为生成**；token 服务端签名、一次性、短期有效，绑定
+   `session_record_id + merchant_id + buyer_key 摘要 + order_id + 售后类型 + 请求摘要`；无效、过期或已消费返回 `422 CONFIRMATION_REQUIRED`；
+   不得重复创建单据。challenge 响应不登记为终态幂等结果。
+4. **双端响应结构不对称且必须不对称**：商家侧顾客标识只能是店铺级脱敏别名 `buyer_alias`（R5）；读取商家详情必须在返回前写查看审计
+   （谁、何时、查看哪个单据的摘要，C8），响应不暴露审计标识。商家只能看到摘要与快照，不能展开完整对话。
+   顾客侧不含 `buyer_alias`。摘要生成失败不阻断提交，快照为 `UNAVAILABLE` 并说明原因。
+5. **商家没有售后直接写端点**：同意、拒绝、要求补充、确认收货与退款都经草稿审批（M9、§8.13）；本节只有商家读取。
+
+**允许迁移表**（源状态 → 目标状态；非法迁移返回 `409 ILLEGAL_STATE_TRANSITION`）。PRD §7.2 的各条链（含客服工单）逐跳如下：
+
+| 源状态 | 允许的目标状态 | 适用类型 | PRD §7.2 来源 |
+| --- | --- | --- | --- |
+| （创建） | `PENDING_MERCHANT` | 全部 | 各链起点 |
+| `PENDING_MERCHANT` | `APPROVED` | 全部 | 待商家处理 → 已同意 |
+| `PENDING_MERCHANT` | `REJECTED` | 全部 | 待商家处理 → 已拒绝 |
+| `PENDING_MERCHANT` | `AWAITING_CUSTOMER_INFO` | 全部 | 待商家处理 → 待顾客补充信息 |
+| `AWAITING_CUSTOMER_INFO` | `PENDING_MERCHANT` | 全部 | 待顾客补充信息 → 待商家处理 |
+| `APPROVED` | `AWAITING_RETURN` | `RETURN_REFUND` | 已同意 → 待顾客寄回 |
+| `APPROVED` | `REFUNDED` | `REFUND_ONLY` | 仅退款：已同意 → 已退款 |
+| `AWAITING_RETURN` | `RECEIVED` | `RETURN_REFUND` | 待顾客寄回 → 商家已收货 |
+| `RECEIVED` | `REFUNDED` | `RETURN_REFUND` | 商家已收货 → 已退款 |
+| `REFUNDED` | `CLOSED` | `RETURN_REFUND`、`REFUND_ONLY` | 已退款 → 关闭 |
+| `REJECTED` | `CLOSED` | 全部 | 已拒绝 → 关闭 |
+| `APPROVED` | `CLOSED` | **仅 `TICKET`** | 客服工单：待商家处理 → 已同意（即已处理）→ 关闭（PRD §7.2，2026-09-21 回写）：工单没有退款与寄回，否则无法结案 |
+
+`CLOSED` 是终态。除上表外的任何迁移（含 `TICKET` 进入 `AWAITING_RETURN / RECEIVED / REFUNDED`）都非法。
+对 `PENDING_MERCHANT → AWAITING_CUSTOMER_INFO` 再加同一售后事项累计 **47 次**的上限；第 48 次
+返回 `409 ILLEGAL_STATE_TRANSITION`，不追加事件、不改变状态。`is_allowed_transition()` 判断这条边时
+必须取得此前已发起的补充信息请求次数，不能省略计数；服务层在同一事务内锁定记录、计数并追加事件，
+避免并发越过上限。47 次完整往返后仍保留最长结案链的 5 条事件容量（`1 + 47×2 + 5 = 100`）。
+状态变化追加写售后事件，与 §8.10 同机制；库存回补只在 `RECEIVED` 且商家明确判定可售时发生，
+并写来源为退货的库存事件（PRD §7.2 不变量 3），该判定是草稿载荷的一部分，不出现在本节模型中。
+
+**触发方与系统续跳**（PRD §7.2「各跳的触发方」，2026-09-24 用户裁定）：允许迁移表只说「能不能走」，下表说「谁能触发」；
+服务层必须同时校验两者，`actor` 与触发方不符同样是非法迁移。
+
+| 迁移 | 唯一合法触发 | `actor` |
+| --- | --- | --- |
+| （创建）→ `PENDING_MERCHANT` | `POST /shop/after-sales` 第二阶段 | `CUSTOMER` |
+| `PENDING_MERCHANT` → `APPROVED` / `REJECTED` / `AWAITING_CUSTOMER_INFO` | 应用 `AFTER_SALE_DECISION` 草稿（§8.13） | `MERCHANT` |
+| `AWAITING_CUSTOMER_INFO` → `PENDING_MERCHANT` | `POST /shop/after-sales/{id}/supplements` | `CUSTOMER` |
+| `APPROVED` → `AWAITING_RETURN`（`RETURN_REFUND`） | 与「同意」同一事务的系统续跳 | `SYSTEM` |
+| `APPROVED` → `CLOSED`（`TICKET`） | 与「同意」同一事务的系统续跳 | `SYSTEM` |
+| `AWAITING_RETURN` → `RECEIVED` | 应用「确认收货」草稿（载荷含可售判定） | `MERCHANT` |
+| `APPROVED`（`REFUND_ONLY`）/ `RECEIVED` → `REFUNDED` | 应用「退款」草稿 | `MERCHANT` |
+| `REFUNDED` → `CLOSED` | 与「退款」同一事务的系统续跳 | `SYSTEM` |
+| `REJECTED` → `CLOSED` | 与「拒绝」同一事务的系统续跳 | `SYSTEM` |
+
+系统续跳与触发它的那一跳同事务、各写一条事件，失败整体回滚；因此 `APPROVED`（退货退款、工单）、`REFUNDED`、`REJECTED`
+只出现在事件里，不会是提交后的当前状态（仅退款的 `APPROVED` 除外，它等待退款草稿）。不设任何超时迁移。
+
+#### 8.11.3 逐路径契约
+
+列表参数为 `cursor: string[1..2048]或null`（默认null）、`limit: int[1..100]`（默认20）；商家列表另有 `state: AfterSaleState或null`（默认null，不过滤）。
+错误沿用 §8.3 ErrorResponse。401 为 `SESSION_REQUIRED / SESSION_INVALID`，403 角色错误为 `SESSION_ROLE_MISMATCH`；
+「演示顾客会话」指已绑定演示顾客的会话，访客访问返回 `403 CUSTOMER_BINDING_REQUIRED`。资源不存在与越权统一 `RESOURCE_FORBIDDEN`、空 details。
+
+| 方法与完整路径 | 鉴权、路径/查询/请求体 | 成功响应 | 错误、幂等与传输 |
+| --- | --- | --- | --- |
+| `POST /api/v2/shop/after-sales` | X-Session-Id 演示顾客；路径/查询无；体 AfterSaleCreateRequest | 200 AfterSaleConfirmationChallenge（无 token，预检，`Cache-Control: no-store`）或 201 AfterSaleSummary（带有效 token，已创建） | 401；403角色错误 / CUSTOMER_BINDING_REQUIRED / RESOURCE_FORBIDDEN；409 IDEMPOTENCY_KEY_REUSED / REQUEST_IN_PROGRESS；422 INVALID_REQUEST（含客户端金额等禁止字段）/ GUARDRAIL_REJECTED（details: AfterSaleIneligibleDetail[]）/ CONFIRMATION_REQUIRED；503 DATA_SOURCE_UNAVAILABLE。幂等域与处理顺序按 §8.7.3、§8.7.9；创建与证据消费同一事务 |
+| `GET /api/v2/shop/after-sales` | X-Session-Id 演示顾客；路径无；查询cursor/limit；体无 | 200 CursorPage[AfterSaleSummary] | 401；403角色错误 / CUSTOMER_BINDING_REQUIRED；422 INVALID_REQUEST / INVALID_CURSOR；503 DATA_SOURCE_UNAVAILABLE。仅本人（merchant_id + buyer_key 双重过滤）；只读 |
+| `GET /api/v2/shop/after-sales/{after_sale_id}` | X-Session-Id 演示顾客；路径after_sale_id:PublicId；查询/体无 | 200 CustomerAfterSaleDetailResponse | 401；403角色错误 / CUSTOMER_BINDING_REQUIRED / RESOURCE_FORBIDDEN；422 INVALID_REQUEST；503 DATA_SOURCE_UNAVAILABLE。只读 |
+| `POST /api/v2/shop/after-sales/{after_sale_id}/supplements` | X-Session-Id 演示顾客；路径after_sale_id:PublicId；查询无；体 AfterSaleSupplementRequest | 200 AfterSaleSummary（`state = PENDING_MERCHANT`） | 401；403角色错误 / CUSTOMER_BINDING_REQUIRED / RESOURCE_FORBIDDEN；409 ILLEGAL_STATE_TRANSITION（当前不是 `AWAITING_CUSTOMER_INFO`）/ IDEMPOTENCY_KEY_REUSED / REQUEST_IN_PROGRESS；422 INVALID_REQUEST；503 DATA_SOURCE_UNAVAILABLE。仅本人（双重过滤）；幂等按 §8.7.3；补充说明入库、事件追加与状态投影同一事务；界面表单提交即界面确认，不走 §8.7.9 两阶段；无 Agent 工具（2026-09-24 用户裁定补入） |
+| `GET /api/v2/merchant/after-sales` | X-Session-Id 商家；路径无；查询cursor/limit/state；体无 | 200 CursorPage[MerchantAfterSaleSummary] | 401；403角色错误；422 INVALID_REQUEST / INVALID_CURSOR；503 DATA_SOURCE_UNAVAILABLE。仅本店；只读 |
+| `GET /api/v2/merchant/after-sales/{after_sale_id}` | X-Session-Id 商家；路径after_sale_id:PublicId；查询/体无 | 200 MerchantAfterSaleDetailResponse，`Cache-Control: no-store` | 401；403角色错误 / RESOURCE_FORBIDDEN；422 INVALID_REQUEST；503 DATA_SOURCE_UNAVAILABLE。返回前写查看审计；审计写入失败则不返回摘要正文 |
+
+排序：两端列表均 `created_at DESC, id DESC`；商家列表游标额外绑定 `state` 筛选。签名游标规则严格沿用 §8.7.4，
+绑定端点、会话主体+店铺、资源类型、语言与 limit。
+
+### 8.12 商家经营只读面（组 5）
+
+本节为 N1 纯模型契约，不挂载路由。全部请求、响应模型拒绝额外字段。时间带时区并归一化 UTC；
+金额一律 §8.7.8 的整数分。**精确库存三元组只出现在本节的商家响应中**，不得进入 §8.8、§8.10 的顾客响应。
+本节不引用顾客端模块，只消费 `common.py`。PRD §11.2.3 把简报重生成描述为「限流、幂等地替换当日简报版本」。
+
+#### 8.12.1 基础字段与模型
+
+| 模型 | 字段、类型与范围 |
+| --- | --- |
+| `DailyBriefItemKind` | `INVENTORY_ALERT / PENDING_DRAFT / CUSTOMER_SIGNAL / METRIC_CHANGE / ORDER_EXCEPTION` |
+| `DailyBriefItem` | `rank: int≥1`；`kind: DailyBriefItemKind`；`title: string[1..200]`；`evidence: string[1..500]`（数字依据；数字缺失时说明缺什么，不估算）；`amount_cents: MoneyCents或null`（涉及金额；金额未知为 null，不自动排末尾）；`next_action_prompt: string[1..500]或null`（只把问题填入输入框，不发送、不批准、不执行，只能指向已有能力） |
+| `DailyBriefResponse` | §8.7.6 `DegradationMixin` 的全部字段（`analysis_sources`、`thinking_steps`、`quality_status`、`quality_attempts`、`quality_notes`、`degraded`、`degraded_reason`）；`brief_version: int≥1`；`business_date: date`（按商家配置时区的营业日）；`business_timezone: string[1..64]`（IANA 时区名）；`data_as_of: UTC datetime`（数据截至时间）；`generated_at: UTC datetime`（生成时间，`≥ data_as_of`）；`trigger: SCHEDULED / REGENERATED`；`items: DailyBriefItem[]`（0–6 项，`rank` 从 1 连续且不重复）；`collapsed_count: int≥0`（折叠为「另有 N 项」的数量） |
+| `BriefRegenerateRequest` | 仅 `client_request_id` 按 §8.7.3，必填，不接受其他字段 |
+| `InventoryAlertKind` | `LOW_STOCK / OUT_OF_STOCK / SLOW_MOVING` |
+| `InventoryAlert` | `id: PublicId`；`kind: InventoryAlertKind`；`product_id: PublicId`；`product_name: string[1..200]`；`stock_on_hand: int≥0`；`stock_reserved: int≥0`；`stock_available: int≥0`；`low_stock_threshold: int≥0`；`sold_last_30d: int≥0`；`days_of_supply: int≥0或null`。约束见下 |
+| `CustomerSignalKind` | `RETURN_REQUESTS / REFUND_REQUESTS / SUPPORT_TICKETS / CONTENT_GAP`（`CONTENT_GAP` 为 PRD S2 / D11④ 的内容缺口信号，2026-09-21 补入，执行期裁定 E8） |
+| `SignalSourceRef` | `source_type: AFTER_SALE / PRODUCT`；`source_id: PublicId`；`content_version: int≥1或null`（可省略，默认null）。`AFTER_SALE` 指向售后主记录（§8.11），`content_version` 必须为 null；`PRODUCT` 指向商品，`content_version` 必填，记录发现缺口时的商品内容版本。**任何信号都不指向顾客对话** |
+| `CustomerSignal` | `id: PublicId`；`kind: CustomerSignalKind`；`product_id: PublicId或null`；`product_name: string[1..200]或null`（二者同时为空或同时非空）；`signal_date: date`；`count: int≥1`（同商品同类信号按天聚合去重计数）；`derived_from: SignalSourceRef[]`（1–50 项，不重复，项数 ≤ `count`；`CONTENT_GAP` 恰好 1 项 `PRODUCT` 来源且 `source_id = product_id`，`product_id` 必填；其余三类只接受 `AFTER_SALE` 来源）；`is_ignored: bool`；`ignore_reason: string[1..500]或null`（仅 `is_ignored=true` 时非空）。**不含任何顾客标识**（PRD M9：前端不显示顾客标识） |
+| `SignalIgnoreRequest` | `client_request_id` 按 §8.7.3，必填；`reason: string[1..500]`（strip 后非空，必填） |
+
+`InventoryAlert` 一致性约束：`stock_reserved ≤ stock_on_hand`；`stock_available = stock_on_hand − stock_reserved`（可售 = 在库 − 占用）；
+`OUT_OF_STOCK` 要求 `stock_available = 0`；`LOW_STOCK` 要求 `0 < stock_available ≤ low_stock_threshold`；
+`SLOW_MOVING` 要求 `stock_available > 0`；`days_of_supply` 为 null 当且仅当 `sold_last_30d = 0`（销量为零时显示「未知 / 无近期销量」，不产生伪精确值）。
+库存值全部由后端确定性计算，客户端不可写。
+
+#### 8.12.2 不变量
+
+1. **简报有版本**：同一商家、同一营业日只有一份当前简报；定时重试与手动重新生成都是版本替换，`brief_version` 单调递增，
+   有并发锁与幂等保护。**旧简报可作历史保留，但不得标为今日简报**：`GET .../current` 只返回当前营业日的当前版本。
+2. **简报必须如实披露降级**（R7）：`DailyBriefResponse` 混入 §8.7.6 全部降级字段。由确定性规则生成的简报
+   `analysis_sources` 只能填实际来源（如 `DATABASE`），**不得包装成模型分析**；`FALLBACK` 来源必须同时 `degraded=true`。
+   **N2 最小简报**只汇总库存告警与待批准草稿、不调用 LLM，属于此情形；同一响应结构在 N3 扩展为完整 M2，字段不变，只是来源与条目变多。
+   生成失败时返回 `degraded=true` 且 `items` 可为空的当前版本，`degraded_reason` 是安全可理解的说明，不泄露内部异常、SQL 或模型信息。
+3. **顾客信号是派生提醒，不是事实源**（PRD §8.1、M9）：业务记录才是事实源，信号只经 `derived_from` 指回它。
+   内容缺口信号的事实源是商品内容与后端确定性完整度规则（D11③④）：顾客提问只触发重算与计数，信号本身只指回商品与内容版本，不保存或引用顾客提问原文。
+   **忽略信号不改变任何事实数据**，只写忽略记录（操作者、时间、原因）。
+4. **库存告警只读**：补货、下架、降价都经草稿审批（§8.13），本组没有任何库存写端点。
+
+#### 8.12.3 逐路径契约
+
+列表参数为 `cursor: string[1..2048]或null`（默认null）、`limit: int[1..100]`（默认20）；错误沿用 §8.3 ErrorResponse。
+401 为 `SESSION_REQUIRED / SESSION_INVALID`，403 角色错误为 `SESSION_ROLE_MISMATCH`，资源不存在与越权统一 `RESOURCE_FORBIDDEN`、空 details。
+
+`MerchantProductContent` 必填字段：`id: PublicId`、`title: string[1..200]`、`category: string[1..64]`、`status: string`、`content_version: int≥1`、`missing_required_attributes: string[]`（后端排序）、`missing_content_fields: string[]`（后端排序，取值 `商品描述`/`商品图片`）、`content_complete: bool`、`stock_on_hand/stock_reserved/stock_available: int≥0`。三项库存满足 `stock_available = stock_on_hand - stock_reserved`；完整度由后端按类目同时核对必填属性、最短详情描述及图片期望，未登记类目不臆造要求。
+
+`MerchantCoupon` 继承顾客券 `CouponSummary` 的金额、支付比例和时间字段，另必填 `state: string`、`currently_active: bool`；商家列表包含未生效及停用券，`currently_active` 与顾客可见券使用同一判定函数。两类列表均为 `CursorPage`，不接受业务写入。
+
+| 方法与完整路径 | 鉴权、路径/查询/请求体 | 成功响应 | 错误、幂等与传输 |
+| --- | --- | --- | --- |
+| `GET /api/v2/merchant/briefs/daily/current` | X-Session-Id 商家；路径/查询/体无 | 200 DailyBriefResponse | 401；403角色错误；422；503 DATA_SOURCE_UNAVAILABLE。只读；**不返回 404**——尚无已存储简报时现算并以 `trigger=SCHEDULED` 落为第 1 版再返回（2026-09-26 修正：定时任务默认关闭，若严格 404 则商家在首次手动重新生成前永远看不到任何简报） |
+| `POST /api/v2/merchant/briefs/daily/current/regenerate` | X-Session-Id 商家；路径/查询无；体 BriefRegenerateRequest | 200 DailyBriefResponse（替换后的新版本） | 401；403角色错误；409 IDEMPOTENCY_KEY_REUSED / REQUEST_IN_PROGRESS；422 INVALID_REQUEST；429 RATE_LIMITED（限流或冷却，`FAILED_RETRYABLE`，重试不调用 LLM）；503 LLM_BUDGET_EXCEEDED / DATA_SOURCE_UNAVAILABLE。幂等域按 §8.7.3；同营业日并发只产生一个新版本 |
+| `GET /api/v2/merchant/inventory/alerts` | X-Session-Id 商家；路径无；查询cursor/limit/kind（`InventoryAlertKind或null`，默认不过滤）；体无 | 200 CursorPage[InventoryAlert] | 401；403角色错误；422 INVALID_REQUEST / INVALID_CURSOR；503 DATA_SOURCE_UNAVAILABLE。仅本店；只读 |
+| `GET /api/v2/merchant/products/content` | X-Session-Id 商家；路径无；查询cursor/limit；体无 | 200 CursorPage[MerchantProductContent] | 401；403角色错误；422 INVALID_REQUEST / INVALID_CURSOR；503 DATA_SOURCE_UNAVAILABLE。按商家会话取本店全部状态商品，后端按类目完整度规则计算两类缺口与 `content_complete`，并返回精确库存三元组；不接受前端商家标识 |
+| `GET /api/v2/merchant/coupons` | X-Session-Id 商家；路径无；查询cursor/limit；体无 | 200 CursorPage[MerchantCoupon] | 401；403角色错误；422 INVALID_REQUEST / INVALID_CURSOR；503 DATA_SOURCE_UNAVAILABLE。按商家会话取本店全部状态优惠券，金额单位为分、折扣为支付比例基点，`currently_active` 由后端依据状态和当前时间判定；不接受前端商家标识 |
+| `GET /api/v2/merchant/customer-signals` | X-Session-Id 商家；路径无；查询cursor/limit/include_ignored（bool，默认false）；体无 | 200 CursorPage[CustomerSignal] | 401；403角色错误；422 INVALID_REQUEST / INVALID_CURSOR；503 DATA_SOURCE_UNAVAILABLE。仅聚合或脱敏结果；只读 |
+| `POST /api/v2/merchant/customer-signals/{signal_id}/ignore` | X-Session-Id 商家；路径signal_id:PublicId；查询无；体 SignalIgnoreRequest | 200 CustomerSignal（`is_ignored=true`） | 401；403角色错误 / RESOURCE_FORBIDDEN；409 IDEMPOTENCY_KEY_REUSED / REQUEST_IN_PROGRESS；422 INVALID_REQUEST；503 DATA_SOURCE_UNAVAILABLE。幂等域按 §8.7.3；不改变任何事实数据 |
+
+排序：库存告警按严重度 `OUT_OF_STOCK → LOW_STOCK → SLOW_MOVING`，同级 `product_id ASC`（`id` 兜底）；商品内容与优惠券按 `created_at DESC, id DESC`；顾客信号 `signal_date DESC, id DESC`。
+签名游标绑定端点、商家主体摘要、资源类型、筛选条件、语言与 limit，规则严格沿用 §8.7.4。
+
+### 8.13 草稿审批与变更账本（组 6）
+
+本节为 N1 纯模型契约，不挂载路由。全部请求、响应模型拒绝额外字段。时间带时区并归一化 UTC。
+草稿是商家端所有写操作的唯一出口（PRD M10）；本组只有商家会话端点，没有任何顾客端点。本节不引用其他组的模块，只消费 `common.py`。
+
+#### 8.13.1 基础字段与模型
+
+| 模型 | 字段、类型与范围 |
+| --- | --- |
+| `DraftState` | `STAGED / APPLIED / DISCARDED / EXPIRED`。**没有 `APPROVED`**（PRD §7.3 不变量 1）：批准是 apply 事务的入参，不是可被后续请求复用的持久状态 |
+| `DraftKind` | `RESTOCK / CONTENT_CHANGE / PRICE_CHANGE / COUPON / AFTER_SALE_DECISION` |
+| `DraftSummary` | `id: PublicId`；`kind: DraftKind`；`state: DraftState`；`title: string[1..200]`；`draft_version: int≥1`（草案内容变更即递增）；`target_version: int≥0`（目标对象版本：库存为当前在库量基数，商品内容为内容版本号，售后为售后记录版本，新建优惠券为 0）；`batch_id: PublicId或null`（N3 阶段 C 新增：商品内容批量起草时，同一批次的各子草稿共享同一个值；**仅 `CONTENT_CHANGE` 可非空**，其余 `DraftKind` 恒为 null）；`created_at / updated_at: UTC datetime`；`expires_at: UTC datetime`（创建后 7 天）。约束：`updated_at ≥ created_at`；`expires_at > created_at` |
+| `DiffUnit` | `TEXT / COUNT / CENTS / BPS / BOOL` |
+| `DraftDiffEntry` | `entry_id: PublicId`；`target_type: PRODUCT / COUPON / AFTER_SALE`；`target_id: PublicId`；`field: string[1..100]`；`unit: DiffUnit`；`before: 值或null`；`after: 值或null`（值类型必须与 `unit` 一致：`TEXT` 为长度 ≤2000 的字符串，`COUNT / CENTS / BPS` 为非负整数（`CENTS` 不超过 §8.7.8 上界），`BOOL` 为布尔；均不接受 float 与隐式转换）；`is_preview: bool`（该值是应用时才计算的预览，以应用结果为准） |
+| `DraftDiff` | `entries: DraftDiffEntry[]`（1–100 项，`entry_id` 不重复） |
+| `GuardrailCheckResult` | `code: string[1..64]`（匹配 `^[A-Z][A-Z0-9_]*$` 的公开原因码）；`passed: bool`；`current_limit: string[1..200]或null`；`remediation: string[1..300]或null`。`passed=false` 时后两者必填。只表达**业务护栏**（价格、折扣、库存、时效），安全闸门的内部规则名不出现在此 |
+| `DraftDetailResponse` | DraftSummary 全部字段；`diff: DraftDiff`；`guardrail_checks: GuardrailCheckResult[]`（0–20 项）；`guardrails_checked_at: UTC datetime`；`approval_evidence: string[1..2048]或null`；`approval_evidence_expires_at: UTC datetime或null`。`state=STAGED` 时两个证据字段必须同时非空，其余状态必须同时为 null。**这两个字段只供工作台 Adapter 消费**，不得进入 Agent / MCP 工具投影、SSE、日志或审计元数据 |
+| `DraftApplyRequest` | `client_request_id` 按 §8.7.3，必填；`draft_version: int≥1`（必填）；`target_version: int≥0`（必填）；`approval_evidence: string[1..2048]`（必填，字符集 `A-Za-z0-9._~-`）；`accepted_entry_ids: PublicId[]或null`（1–100 项，不重复；null 表示批准全部条目；商品内容批量草稿支持勾选，未勾选条目不应用，PRD M4） |
+| `LedgerActor` | `actor_type: AGENT / MERCHANT`；`label: string[1..120]`（展示名，不含会话或 Token 标识） |
+| `ChangeLedgerEntry` | `id: PublicId`；`draft_id: PublicId`；`kind: DraftKind`；`drafted_by: LedgerActor`；`approved_by: LedgerActor`（`actor_type` 必须是 `MERCHANT`）；`approved_at: UTC datetime`；`applied_entry_ids: PublicId[]`（1–100 项，不重复）；`guardrail_results: GuardrailCheckResult[]`（0–20 项，全部 `passed=true`：应用时重查未通过则不会有账本条目） |
+| `DraftApplyResponse` | `draft: DraftSummary`（`state` 必须是 `APPLIED`）；`ledger_entry: ChangeLedgerEntry`（`draft_id` 必须等于 `draft.id`，`kind` 必须等于 `draft.kind`） |
+| `VersionConflictDetail` | `scope: DRAFT / TARGET`；仅用于 `VERSION_CONFLICT.details` 的唯一元素 |
+| `DraftStateDetail` | `state: DraftState`；仅用于 `ILLEGAL_STATE_TRANSITION.details` 的唯一元素 |
+
+**`AFTER_SALE_DECISION` 的特殊约束**：承载商家售后决定（同意、拒绝、要求补充、确认收货含可售判定、退款）与随附回复
+（PRD M9，2026-09-21 裁定，§11.2.3 无售后直接写端点）。其草稿载荷**不得含任何金额字段**，退款金额在应用时按价格快照计算（§8.11.2）；
+`diff` 中单位为 `CENTS` 的条目只能作为**应用时将计算的预览**展示，必须 `is_preview=true`，并标注以应用结果为准。
+`is_preview=true` 只允许出现在 `AFTER_SALE_DECISION` 草稿中。
+
+#### 8.13.2 不变量与迁移表
+
+`DraftState` 迁移：`STAGED → APPLIED`（apply 事务内）、`STAGED → DISCARDED`（丢弃）、`STAGED → EXPIRED`（超过 7 天）；三个终态不再迁出。
+非法迁移返回 `409 ILLEGAL_STATE_TRANSITION`，`details` 为唯一的 `DraftStateDetail`。逐条落地 PRD §7.3：
+
+1. **只有 `STAGED` 可进入批准并应用事务**（不变量 1），终态都不可复用。
+2. **批准绑定草案版本**（不变量 2）：`draft_version` 与服务端当前版本不符返回 `409 VERSION_CONFLICT`（`retryable=false`，
+   `details=[VersionConflictDetail(scope=DRAFT)]`），客户端须重取详情、重新确认后发新请求。草案内容变更即递增版本，旧证据随之失效。
+3. **目标对象版本校验**（不变量 3）：`target_version` 与目标对象当前值不符同样返回 `409 VERSION_CONFLICT`
+   （`scope=TARGET`），**草稿保持 `STAGED`**——失败不推进状态、不写账本、不消费证据。
+4. **应用时重查护栏**（不变量 4）：`DraftDetailResponse.guardrail_checks` 是**预检快照**，仅供展示，不构成通过承诺。
+   apply 时按**当时生效**的配置重查，不通过返回 `422 GUARDRAIL_REJECTED`，`details` 为未通过的 `GuardrailCheckResult[]`，草稿保持 `STAGED`。
+5. **幂等原子**（不变量 5）：`client_request_id` 按 §8.7.3；状态迁移、业务写入、账本条目与证据消费在同一事务内完成。
+   同一 `client_request_id` 重试返回第一次结果，不产生二次副作用。
+6. **批准只能来自审批界面**（不变量 6）：`approval_evidence` 由 `GET /drafts/{draft_id}` 签发，服务端签名、一次性、短期有效
+   （≤10 分钟），绑定 `session_record_id + merchant_id + draft_id + draft_version + target_version`，请求摘要另含 `accepted_entry_ids`。
+   处理顺序、持久化消费、重放语义严格按 §8.7.9：先查幂等；同一证据换新请求 ID 重放返回 `422 CONFIRMATION_REQUIRED`。
+   **聊天里的「批准」不生效**；Agent 与 MCP 都没有签发或生成该证据的工具。批准与丢弃只能由**同店铺**商家会话执行，跨店铺 `403 RESOURCE_FORBIDDEN` 并写审计。
+7. **变更账本**（不变量 7）：`DraftApplyResponse.ledger_entry` 记录起草者、批准者、批准时间与应用时的护栏检查结果。
+
+**按种类分派（N3 阶段 A Task 5）**：应用事务只有一份骨架（`services/v2/draft_apply.py`）——锁行 → 状态 → 过期 → 草案版本 →
+消费证据 → **种类处理器** → 置 `APPLIED` → 写账本。目标对象复检、按当时生效护栏复检、条件写入与领域事件（上文不变量 3、4
+与实际写入）由 `services/v2/draft_handlers/` 中按 `DraftKind` 注册的处理器执行，返回 `HandlerResult(checks,
+applied_entry_ids, ledger_result)`；构造时即核对：`ledger_result` 只能是 `APPLIED`（失败必须抛异常回滚），
+`applied_entry_ids` 1–100 项且不重复，与 `ChangeLedgerEntry` 契约一致。处理器收到的是去掉证据与幂等键的 `HandlerRequest(draft_version, target_version,
+accepted_entry_ids)`，结构上拿不到证据；不得提交事务、不得推进草稿状态或写账本，失败即整体回滚（证据消费随之回滚）。
+分派表在导入期构建并自检：同一种类重复注册、`ENABLED_DRAFT_KINDS` 中的种类缺处理器都让服务起不来；运行期遇到未注册种类是
+部署缺陷，在消费证据前抛出并返回 `500 INTERNAL_ERROR`，不是 409/422。当前已开放 `RESTOCK`、`PRICE_CHANGE`、`COUPON`
+（N3 阶段 C）；B 注册 `AFTER_SALE_DECISION`、C 注册 `CONTENT_CHANGE` 时同步加入 `ENABLED_DRAFT_KINDS`。
+
+过期由业务路径自检 `expires_at` 决定：读取或 apply 时 `now ≥ expires_at` 一律按 `EXPIRED` 处理，不依赖 Cron 是否已清理；
+对已过期草稿 apply 返回 `409 DRAFT_EXPIRED`。
+
+#### 8.13.3 逐路径契约
+
+列表参数为 `cursor: string[1..2048]或null`（默认null）、`limit: int[1..100]`（默认20）。错误沿用 §8.3 ErrorResponse。
+401 为 `SESSION_REQUIRED / SESSION_INVALID`，403 角色错误为 `SESSION_ROLE_MISMATCH`，资源不存在与越权统一 `RESOURCE_FORBIDDEN`、空 details。
+
+| 方法与完整路径 | 鉴权、路径/查询/请求体 | 成功响应 | 错误、幂等与传输 |
+| --- | --- | --- | --- |
+| `GET /api/v2/merchant/drafts` | X-Session-Id 商家；路径无；查询cursor/limit/state（`DraftState`，默认 `STAGED`）/kind（`DraftKind或null`，默认不过滤）/batch_id（`PublicId或null`，默认不过滤；N3 阶段 C 新增，供审批界面按批次分组查看）；体无 | 200 CursorPage[DraftSummary] | 401；403角色错误；422 INVALID_REQUEST / INVALID_CURSOR；503 DATA_SOURCE_UNAVAILABLE。仅本店；只读；不含证据字段 |
+| `GET /api/v2/merchant/drafts/{draft_id}` | X-Session-Id 商家；路径draft_id:PublicId；查询/体无 | 200 DraftDetailResponse，`Cache-Control: no-store` | 401；403角色错误 / RESOURCE_FORBIDDEN；422 INVALID_REQUEST；503 DATA_SOURCE_UNAVAILABLE。`STAGED` 时每次读取签发新的一次性证据；重复读取可有多个未消费 nonce，过期由 Cron 清理 |
+| `POST /api/v2/merchant/drafts/{draft_id}/apply` | X-Session-Id 商家；路径draft_id:PublicId；查询无；体 DraftApplyRequest | 200 DraftApplyResponse | 401；403角色错误 / RESOURCE_FORBIDDEN；409 VERSION_CONFLICT / DRAFT_EXPIRED / ILLEGAL_STATE_TRANSITION / IDEMPOTENCY_KEY_REUSED / REQUEST_IN_PROGRESS；422 INVALID_REQUEST / GUARDRAIL_REJECTED / CONFIRMATION_REQUIRED；503 DATA_SOURCE_UNAVAILABLE。幂等域与处理顺序按 §8.7.3、§8.7.9；失败不推进状态 |
+| `DELETE /api/v2/merchant/drafts/{draft_id}` | X-Session-Id 商家；路径draft_id:PublicId；查询/体无 | 204，无体 | 401；403角色错误 / RESOURCE_FORBIDDEN；409 ILLEGAL_STATE_TRANSITION（`APPLIED` 或 `EXPIRED`，details: DraftStateDetail）；422 INVALID_REQUEST；503 DATA_SOURCE_UNAVAILABLE。仅 `STAGED → DISCARDED`；对已 `DISCARDED` 的草稿重复请求仍返回 204（DELETE 天然幂等，§8.7.3）；无client_request_id |
+
+排序：草稿 `created_at DESC, id DESC`。签名游标绑定端点、商家主体摘要、资源类型、筛选条件（state、kind）、语言与 limit，规则严格沿用 §8.7.4。
+
+### 8.14 记忆、反馈与 MCP（组 7）
+
+本节为 N1 纯模型契约，不挂载路由。全部请求、响应模型拒绝额外字段。时间带时区并归一化 UTC。
+`FeedbackReaction`（`LIKE / DISLIKE`）沿用 v1 既有枚举；`ShopSlug`、`PublicId` 与 §8.8.1 定义相同。
+`merchant_id`、`buyer_key` 不出现在任何请求或响应中。
+
+#### 8.14.1 基础字段与模型
+
+| 模型 | 字段、类型与范围 |
+| --- | --- |
+| `MemoryLayer` | `FACT / SUMMARY`（仅商家记忆有两层；顾客记忆只有事实层，PRD C7、D16） |
+| `CustomerMemoryItem` | `id: PublicId`；`shop_slug: ShopSlug`；`category: string[1..64]`；`key: string[1..100]`；`value: string[1..500]`；`last_confirmed_at: UTC datetime`；`expires_at: UTC datetime`（= `last_confirmed_at` + 180 天；仅被读取不续期）。**不含 `buyer_key`、`merchant_id`** |
+| `CustomerMemoriesResponse` | `memory_enabled: bool`；`memories: CursorPage[CustomerMemoryItem]`（§8.7.4） |
+| `MemoryPreferenceRequest` | `enabled: bool`；`purge_confirmation: "yes"或null`（默认 null）。**条件必填**：`enabled=false` 时必须为 `"yes"`；`enabled=true` 时必须为 null。无客户端幂等键：设置绝对状态，天然幂等 |
+| `MemoryPreferenceResponse` | `memory_enabled: bool`；`purged_count: int≥0`（本次清空的记忆条数；未关闭或本无记忆时为 0） |
+| `MemorySourceRef` | `conversation_id: PublicId`；`message_id: PublicId`（事实来源于哪条商家消息） |
+| `MerchantMemoryItem` | `id: PublicId`；`layer: MemoryLayer`；`category: string[1..64]`；`content: string[1..2000]`；`source_ref: MemorySourceRef或null`；`updated_at: UTC datetime`。约束：`layer=FACT` 时 `source_ref` 必填；`layer=SUMMARY` 时 `source_ref` 必须为 null |
+| `MerchantMemoriesResponse` | `facts: CursorPage[MerchantMemoryItem]`（每项必须是 `FACT` 层）；`summaries: MerchantMemoryItem[]`（0–20 项，每项必须是 `SUMMARY` 层，`category` 不重复） |
+| `MerchantMemoryDeleteResponse` | `deleted_id: PublicId`；`summary_rebuild_scheduled: bool`（删除事实来源会触发总结层重建） |
+| `FeedbackKind` | `ADOPTION / REACTION`：采纳与赞踩是**不同语义，不得互相覆盖**，每次请求只改其中一种 |
+| `V2FeedbackRequest` | `client_request_id` 按 §8.7.3，必填；`kind: FeedbackKind`；`adopted: bool或null`；`reaction: FeedbackReaction或null`；`reason: string[1..500]或null`（strip 后非空）。`kind=ADOPTION`：`adopted` 必填，`reaction` 与 `reason` 必须为 null。`kind=REACTION`：`adopted` 必须为 null，`reaction=null` 表示撤销赞踩，`reason` 仅在 `reaction` 非空时允许 |
+| `V2FeedbackResponse` | `answer_id: PublicId`；`adopted: bool`；`reaction: FeedbackReaction或null`；`reason: string[1..500]或null`；`updated_at: UTC datetime`。总是返回两种反馈的当前完整状态 |
+| `McpReadOnlyTool` | MCP 工具白名单，见 §8.14.3 |
+
+#### 8.14.2 不变量
+
+1. **商家记忆分两层**（PRD §8.1、M11）：事实层只存商家明确表达或确认的偏好，必带来源引用，可逐条删除；
+   总结层是按类别管理的**可重建文档**，不承诺逐条删除，删除事实来源后重新生成。总结层条目不可作为删除目标
+   （`DELETE /merchant/memories/{id}` 指向总结层返回 `422 INVALID_REQUEST`）。两层都不得回答规则、替代知识库或充当经营数字来源。
+2. **顾客记忆按顾客 + 店铺双重隔离**（R5）：仅当前主体在当前店铺范围内可见，商家不可见；
+   保留期 180 天、按最后确认或更新时间滚动、仅被读取不续期；**过期以业务路径自检 `expires_at` 为准，Cron 只负责清理**。
+3. **关闭记忆须显式确认并清空**（PRD §11.2.2、C7）：`enabled=false` 缺少 `purge_confirmation` 返回 `422 CONFIRMATION_REQUIRED`
+   （路由把该条件必填校验映射为此码，不是普通 `INVALID_REQUEST`）；关闭后清空已有记忆并不再写入。Agent 没有关闭记忆的工具，聊天中的确认不生效。
+4. **反馈的采纳与赞踩互不覆盖**（PRD M13）：`kind` 决定本次只改哪一种；未涉及的一种保持原值，响应返回两者当前状态。
+   反馈进入评测集前须脱敏并经人工确认（不属于本契约）。
+5. **团队知识与商家记忆单向边界**：记忆**绝不升级写回团队知识库**；契约层不提供任何「提升为团队知识」的字段或端点。
+
+#### 8.14.3 MCP 入口
+
+`POST /api/v2/merchant/mcp` 是 MCP 的唯一入口，只暴露**只读工具子集**（PRD A8）。协议依据固定为官方 2026-07-28 发布说明
+（`https://blog.modelcontextprotocol.io/posts/2026-07-28/`）；实施时若所选 SDK 仍默认旧协议，必须显式配置版本并增加握手被拒绝的反例测试。
+本契约**不另造**与标准漂移的信封模型：请求与响应直接使用所选官方 SDK 的协议类型，本节只冻结它之外的边界。
+
+- **协议版本固定 `2026-07-28`**：采用无协议会话的 Streamable HTTP；**不实现旧版 `initialize` / `initialized`，不接收也不签发 `Mcp-Session-Id`**。
+  请求必须校验 `MCP-Protocol-Version: 2026-07-28`、`Mcp-Method`、`Mcp-Name` 与 JSON-RPC 2.0 正文的一致性，任一不一致按 JSON-RPC error 拒绝。
+- **鉴权**：只认 `Authorization: Bearer <MCP access token>`，凭证独立、短期、可撤销，限定商家、scope 与有效期；**不接受 `X-Session-Id`**，
+  不把浏览器会话交给第三方（AGENTS.md §8.3）。`merchant_id` 只从凭证解析。
+- **凭证签发与撤销（PRD A8，2026-09-21 用户裁定）只经后端命令行脚本**，契约中**不存在**签发、撤销或查询凭证的 HTTP 路径，也没有自助页；
+  原值只在签发时展示一次，库中只存哈希；撤销后的下一次请求立即返回 401，校验结果不缓存。
+- **错误分层**：缺失或无效凭证在解析 JSON-RPC **之前**返回 HTTP `401` 并带 `WWW-Authenticate`；协议解析之后的方法、参数与工具错误使用 JSON-RPC error，
+  **不包装成普通 v2 `ErrorResponse`**。该入口不支持 GET，返回 `405`（`Allow: POST`）。
+- **幂等**：本版只读、无写副作用，JSON-RPC `id` 只做请求/响应关联，不携带 `client_request_id`（§8.7.3）。
+- **工具白名单**（`McpReadOnlyTool`，全部只读）：`query_metrics`、`attribute_change`、`get_inventory_alerts`、`get_product_content`、
+  `list_coupons`、`get_metric_definition`、`search_rules`。`tools/list` 只返回白名单与凭证 `scopes` 的交集；`scopes` 只能是白名单的子集。
+  **不在白名单内的**：一切 `draft_*` 写工具；`regenerate_brief` 与 `create_export`（虽是 `READ_ONLY`，但会写简报版本或导出记录，不属于纯读取）；
+  `list_signals`（顾客派生数据不外发给第三方客户端）。工具名以 N3 实际注册表为准，不一致先改契约再动代码。
+- **审批证据与确认令牌不得通过 MCP 获得**（§8.7.9）：MCP 工具结果、日志与审计元数据均不出现 `approval_evidence`、`confirmation_token`。
+- 必须用标准 MCP 客户端做无 LLM 集成测试（N5）。
+
+#### 8.14.4 逐路径契约
+
+列表参数为 `cursor: string[1..2048]或null`（默认null）、`limit: int[1..100]`（默认20）。错误沿用 §8.3 ErrorResponse（MCP 入口除外，见上）。
+401 为 `SESSION_REQUIRED / SESSION_INVALID`，403 角色错误为 `SESSION_ROLE_MISMATCH`；「演示顾客会话」指已绑定演示顾客的会话，
+访客访问返回 `403 CUSTOMER_BINDING_REQUIRED`。资源不存在与越权统一 `RESOURCE_FORBIDDEN`、空 details。
+
+| 方法与完整路径 | 鉴权、路径/查询/请求体 | 成功响应 | 错误、幂等与传输 |
+| --- | --- | --- | --- |
+| `GET /api/v2/shop/memories` | X-Session-Id 演示顾客；路径无；查询cursor/limit；体无 | 200 CustomerMemoriesResponse | 401；403角色错误 / CUSTOMER_BINDING_REQUIRED；422 INVALID_REQUEST / INVALID_CURSOR；503 DATA_SOURCE_UNAVAILABLE。仅本人本店；只读 |
+| `DELETE /api/v2/shop/memories/{memory_id}` | X-Session-Id 演示顾客；路径memory_id:PublicId；查询/体无 | 204，无体 | 401；403角色错误 / CUSTOMER_BINDING_REQUIRED / RESOURCE_FORBIDDEN；422 INVALID_REQUEST；503 DATA_SOURCE_UNAVAILABLE。天然幂等，无client_request_id |
+| `PUT /api/v2/shop/memory-preference` | X-Session-Id 演示顾客；路径/查询无；体 MemoryPreferenceRequest | 200 MemoryPreferenceResponse | 401；403角色错误 / CUSTOMER_BINDING_REQUIRED；422 INVALID_REQUEST / CONFIRMATION_REQUIRED（`enabled=false` 缺确认）；503 DATA_SOURCE_UNAVAILABLE。设置绝对状态，天然幂等，无client_request_id；关闭时清空与状态写入同一事务 |
+| `GET /api/v2/merchant/memories` | X-Session-Id 商家；路径无；查询cursor/limit（分页作用于事实层）；体无 | 200 MerchantMemoriesResponse | 401；403角色错误；422 INVALID_REQUEST / INVALID_CURSOR；503 DATA_SOURCE_UNAVAILABLE。仅本店；只读 |
+| `DELETE /api/v2/merchant/memories/{memory_id}` | X-Session-Id 商家；路径memory_id:PublicId；查询/体无 | 200 MerchantMemoryDeleteResponse | 401；403角色错误 / RESOURCE_FORBIDDEN；422 INVALID_REQUEST（目标是总结层）；503 DATA_SOURCE_UNAVAILABLE。天然幂等：重复删除同一事实仍 200 且 `summary_rebuild_scheduled=false`；无client_request_id |
+| `POST /api/v2/merchant/answers/{answer_id}/feedback` | X-Session-Id 商家；路径answer_id:PublicId；查询无；体 V2FeedbackRequest | 200 V2FeedbackResponse | 401；403角色错误 / RESOURCE_FORBIDDEN；409 IDEMPOTENCY_KEY_REUSED / REQUEST_IN_PROGRESS；422 INVALID_REQUEST；503 DATA_SOURCE_UNAVAILABLE。幂等域按 §8.7.3；只有回答所属商家可提交 |
+| `POST /api/v2/merchant/mcp` | `Authorization: Bearer <MCP access token>`；头 `MCP-Protocol-Version`、`Mcp-Method`、`Mcp-Name`；体 JSON-RPC 2.0（SDK 协议类型） | 200 JSON-RPC result 或 JSON-RPC error | HTTP 401 + `WWW-Authenticate`（凭证缺失、无效或已撤销，解析 JSON-RPC 前）；其余错误一律 JSON-RPC error；不接受 `X-Session-Id`；不签发 `Mcp-Session-Id`；无client_request_id |
+
+排序：顾客记忆 `last_confirmed_at DESC, id DESC`；商家事实 `updated_at DESC, id DESC`；总结按 `category ASC`。
+签名游标绑定端点、主体摘要（+店铺）、资源类型、语言与 limit，规则严格沿用 §8.7.4。
+
 ## 9. 开发阶段
 
 **执行顺序即编号顺序，MVP 在 B7 收口，不要为了做 P1 功能而推迟部署。**
@@ -1097,7 +2847,7 @@ FAILED_FINAL      # 不可重试（参数非法、越权、内容被拒）
 | B5 | 回答、图表和 Reviewer | P0 |
 | B6 | 反馈与 CSV 导出 | P0 |
 | **B7** | **Railway、费用防护与 MVP 收口** | **P0 · MVP 完成** |
-| B8 | 附件、日报、商家记忆、对象存储和异步任务 | P1 |
+| B8 | 日报与商家记忆（附件/对象存储待办已由新 PRD 取消） | 历史 P1 |
 | B9 | 知识库后台 | P1 |
 
 对应 PRD 的里程碑：B0 → M0，B1–B2 → M1，B1/B4 → M2，B3/B5 → M3，B7 → M4，B8–B9 → M5。
@@ -1208,7 +2958,7 @@ B3 引入 Fake LLM 之后，**Fake Agent 即退役**，不保留两条并行的�
 
 ### 任务
 
-- [x] 创建 `AnswerMode`（P0 六种，`ATTACHMENT` 在 B8 扩展为第七种）、业务分类和 Query Intent；
+- [x] 创建 v1 `AnswerMode` 与 Query Intent；`ATTACHMENT` 仅保留兼容枚举值，本版不产生；
 - [x] 创建指标定义表和 Seed，含 `metric_code` 与 `display_name`；
 - [x] **建立指标、维度、筛选三套白名单**（本阶段完成，不留到 B4）；
 - [x] 创建知识文档表和旧 Wiki 导入脚本；
@@ -1216,7 +2966,8 @@ B3 引入 Fake LLM 之后，**Fake Agent 即退役**，不保留两条并行的�
 - [x] 实现 Knowledge Retrieval 的两层检索（索引层 + 正文层，见 §6.5）；
 - [x] 定义 LLM Client Protocol；
 - [x] 实现 Fake LLM，并退役 B2 的 Fake Agent；
-- [x] 实现 DeepSeek LLM Adapter，但测试不启用：使用 OpenAI 兼容 Chat Completions API，`base_url=https://api.deepseek.com`，默认 `model=deepseek-v4-flash`；
+- [x] 实现 v1 DeepSeek OpenAI 兼容 Adapter，测试不启用真实调用；N1 将默认模型迁为
+  `deepseek-flash` 并新增 Anthropic 兼容 Adapter，两种接口的真实冒烟测试均须另行取得 R3 授权；
 - [x] 实现单请求 LLM 调用次数与 token 上限；
 - [x] 实现两阶段意图：分类 → 结构化理解；
 - [x] 结构化输出用 Pydantic 严格校验；
@@ -1534,7 +3285,7 @@ PostgreSQL 钉住的一条（`test_return_count_reads_returns_not_refunds`）。
 - [x] 中文列名；
 - [x] CSV 公式注入防护；
 - [x] 权限校验；
-- [x] **P0 动态生成，不引入 S3 SDK**；对象存储和签名对象 URL 属于 P1；
+- [x] 动态生成 CSV，不引入对象存储；本版继续使用限时签名下载并限制同步导出规模；
 - [x] 导出记录写入 `export_files`；
 - [x] **签名 URL 自带鉴权**：`GET /api/exports/{id}` 不要求 `Authorization`，校验 HMAC 签名 + 商家归属即可，浏览器可原生下载（理由见 §8.0）；
 - [x] 签名有效期 **15 分钟**，过期返回 `410 EXPORT_LINK_EXPIRED`；
@@ -1561,9 +3312,8 @@ PostgreSQL 钉住的一条（`test_return_count_reads_returns_not_refunds`）。
 
 ## B7 · Railway、费用防护与 MVP 收口
 
-**本阶段属于 P0，是 MVP 的最后一步。执行顺序是 B0 → B7，不要先做 B8/B9 的 P1 功能再部署。**
-
-PRD 的里程碑是 M0–M4 完成 MVP 并上线，M5 才是 P1。把 Railway 排在附件和知识库之后，会让部署、迁移和费用风险暴露得过晚。
+**历史说明：** 这是旧单端 MVP 的最后一步，已完成。新路线的部署拓扑与交付顺序以 PRD N1–N5 为准；
+本段 P0/M0–M5 术语不得用于新需求排期。
 
 > **更新（2026-08-06，Task 1-18 收口）**：费用防护/限流/可信 IP 补齐了必测，Docker 优雅关闭、
 > `OperationalMetrics` 可观测性、`GET /api/admin/ops/status` 运维端点、`railway.json` 与
@@ -1602,7 +3352,7 @@ PRD 的里程碑是 M0–M4 完成 MVP 并上线，M5 才是 P1。把 Railway �
 - [ ] CORS 只允许 Frontend 的**精确 Origin**，不使用 `*`；允许头包含 `Authorization`、`Accept`、`Content-Type`、`X-Request-Id`；限制方法与预检缓存时长；
 - [ ] 配置日志；
 - [ ] 生产环境关闭 Debug；
-- [ ] 确认容器临时磁盘不保存正式附件。
+- [x] 本版不保存正式附件；导出按请求生成，不把容器临时磁盘当持久存储。
 
 ### 可信来源 IP
 
@@ -1668,13 +3418,14 @@ PRD 的里程碑是 M0–M4 完成 MVP 并上线，M5 才是 P1。把 Railway �
 - 演示商家端点在生产配置下不可访问；
 - 日志可以定位请求但不泄露隐私；
 - 前端可以通过部署域名完成核心 E2E，SSE 在真实 CORS 环境下正常流式；
-- **`docs/PRD.md` §16 全部验收条目通过。到此后端 MVP 完成。**
+- **`docs/PRD.md` §12 中适用于 v1 迁移基线的验收条目通过。到此后端 v1 基线完成；新路线按 N1–N5 另行验收。**
 
 ---
 
-## B8 · 附件、日报、商家记忆、对象存储和异步任务
+## B8 · 日报与商家记忆（旧路线历史阶段）
 
-**本阶段属于 P1，在 MVP 上线之后执行。**
+本节保留已完成的日报与商家记忆实施记录。原附件、对象存储与 OCR 待办已被 PRD D6 取代，
+不再属于当前开发计划；未来如重启必须新建需求与契约，不得从历史勾选框直接开工。
 
 ### Daily Report
 
@@ -1686,58 +3437,6 @@ PRD 的里程碑是 M0–M4 完成 MVP 并上线，M5 才是 P1。把 Railway �
 - [x] **日报建议复用回答反馈通道**：日报响应返回可反馈的 `answer_id`，前端"采纳"直接调用 `POST /api/answers/{id}/feedback`，不新增反馈接口；
 - [x] 本阶段不引入 Railway Cron、Worker、Redis 或推送；按需在后续业务要求中另行设计。
 
-### Attachment API
-
-- [ ] 上传；
-- [ ] 状态查询；
-- [ ] 删除；
-- [ ] 所有权校验；
-- [ ] 数量、类型和大小限制；
-- [ ] 文件签名检查；
-- [ ] 安全文件名；
-- [ ] SHA-256；
-- [ ] 对象存储；
-- [ ] TTL 和删除策略。
-
-附件解析状态枚举（前端状态机依赖它，必须先稳定）：
-
-```text
-UPLOADING → PENDING → PARSING → PARSED
-                            └─→ FAILED
-```
-
-### Extraction
-
-- [ ] PDF 文本；
-- [ ] Excel 工作表摘要；
-- [ ] CSV 编码和分隔符；
-- [ ] 最大行列限制；
-- [ ] 附件正文不可信标记；
-- [ ] 解析失败原因；
-- [ ] 不把完整大文件塞进 Prompt。
-
-### OCR Adapter
-
-方案在实现前必须确定，不能只写"图片 OCR Adapter"：
-
-- [ ] **默认使用本地 OCR**（如 PaddleOCR 或 Tesseract），不默认调用收费的多模态模型；
-- [ ] 输入限制：单图最大边长、最大像素、最大文件大小、PDF 最大页数；
-- [ ] 单次 OCR 超时与总超时；
-- [ ] 定义 `OcrAdapter` Protocol，测试注入 `FakeOcrAdapter`，CI 不跑真实 OCR；
-- [ ] 识别结果中的手机号、身份证、银行卡等按脱敏规则处理后才可进入日志；
-- [ ] **如果改用收费模型 OCR，必须遵守 `AGENTS.md` R3**：先说明模型、次数和预计费用并获得同意，且纳入 §9 B7 的每日预算熔断统计。
-
-### `ATTACHMENT` 模式进入 Agent Graph
-
-B3 建立的是六种 `AnswerMode`，本阶段扩展为七种。仅在 ChatResponse 里加枚举值不够，Graph 必须有对应路径：
-
-- [ ] 新增节点：`load_attachments` → `validate_attachment_ownership` → `wait_or_reject_unparsed_attachment` → `extract_attachment_context` → `route_attachment_query`；
-- [ ] 所有权校验失败返回 `403` 并写 `audit_logs`，**跨商家附件 ID 必须测**；
-- [ ] 解析未完成时的行为：短暂等待后仍未完成则返回明确的"附件仍在解析"回答，不阻塞整个请求；解析失败返回 `FAILED` 原因，不静默忽略；
-- [ ] 附件与经营数据联合分析时，`analysis_sources` 返回 `["ATTACHMENT", "DATABASE"]`；
-- [ ] 附件正文以不可信数据块注入 Prompt，明确标注不得改变系统规则；
-- [ ] 必测：附件中的"忽略以上所有指令"不改变 Agent 行为；跨商家附件 ID 返回 403；未解析完成不产生编造结论。
-
 ### 商家记忆闭环
 
 **已完成（2026-08-20）**：`merchant_memories` 已由独立迁移创建；成功回答持久化后通过
@@ -1746,7 +3445,7 @@ B3 建立的是六种 `AnswerMode`，本阶段扩展为七种。仅在 ChatRespo
 命中记忆时 `analysis_sources` 返回 `MEMORY`；每日预算耗尽、数据库或模型异常只记录日志，绝不影响主回答。
 本轮没有调用真实模型，记忆压缩的真实模型验收仍须按 R3 单独申报。
 
-仍未实现的 P1 后续能力如下：
+商家记忆向新路线迁移时仍需完成：
 
 | 环节 | 要求 |
 | --- | --- |
@@ -1755,35 +3454,21 @@ B3 建立的是六种 `AnswerMode`，本阶段扩展为七种。仅在 ChatRespo
 | Memory Persistence | ✅ 写入时机为一轮问答成功落库之后的异步任务；以 `(merchant_id, category)` 唯一约束保证覆盖写入 |
 | Memory Retrieval | ✅ 检索优先级：团队知识 > 商家记忆；命中记忆时 `analysis_sources` 含 `MEMORY` |
 - [ ] 压缩与去重：同一事实重复出现时合并，不无限增长；
-- [ ] 过期策略：超过保留期的记忆自动失效（清理策略本身属于 P2）；
+- [ ] 过期策略：超过保留期的记忆自动失效；
 - [ ] 提取失败时静默降级，不影响主回答链路；
 - [ ] 必测：记忆提取、召回、压缩各一条；提取失败不影响主回答，过期记忆不再进入 Prompt。
 
-### Worker 独立工程
+### 后台执行边界
 
-`AGENTS.md` 规划了独立 `worker/`，实现前必须先定这几项：
-
-- [ ] **队列框架**：Redis + RQ（简单、与 FastAPI 同步代码兼容好）；不引入 Celery 的完整生态；
-- [ ] **共享代码方式**：`backend/app` 中与业务无关的模型、Schema 和配置抽为可安装包，`worker/pyproject.toml` 依赖它；不允许两边各拷一份 ORM 定义；
-- [ ] **版本兼容规则**：Worker 与 Backend 同版本发布；任务载荷只传 ID 和幂等键，不传序列化的 ORM 对象，避免跨版本反序列化失败；
-- [ ] **任务 Schema**：`task_type`、`payload`、`idempotency_key`、`attempt`、`max_attempts`；
-- [ ] **重试与死信**：指数退避，超过 `max_attempts` 进入死信表并记录最后错误；
-- [ ] **Railway 启动命令**与健康检查方式；
-- [ ] Worker **不执行数据库 Migration**；
-- [ ] 幂等键格式：`{task_type}:{merchant_id}:{business_id}`。
+本版不创建通用 Worker。N4 记忆抽取与 N5 简报/汇总/过期清理使用幂等短任务和数据库锁；
+Railway Cron 不等于队列 Worker。只有异步导出、持久文件处理等新需求重新进入 PRD 时，
+才评审 Redis、队列、死信和独立 Worker。
 
 ### 验收
 
-- 非法文件被拒绝；
-- 扩展名与实际类型不一致被拒绝或隔离；
-- 其他商家不能读取附件；
-- 附件中的"忽略系统提示"不会改变 Agent 规则；
-- 大文件不会导致 API 进程内存失控；
-- Worker 重试不会重复创建导出或记忆；
 - 无数据时返回正常日报而非 500；
 - 日报返回的 `answer_id` 可以正常提交反馈；
 - 昨日区间按 `Asia/Shanghai` 计算，冻结时钟测试通过；
-- `ATTACHMENT` 模式端到端可用，跨商家附件 ID 返回 403；
 - 商家记忆可提取、可召回、可删除，且跨商家隔离。
 
 ---
@@ -1853,7 +3538,6 @@ request_id
 merchant_context
 session_context
 question
-attachments
 knowledge_index          # 第一层检索结果：目录与摘要
 knowledge_sources        # 第二层检索结果：命中业务域的正文
 metric_definition
@@ -1896,7 +3580,6 @@ AgentState 使用 TypedDict、Pydantic 或 LangGraph 支持的明确类型，不
 - [ ] Visualization 字段安全；
 - [ ] Reviewer 重试；
 - [ ] CSV 注入防护；
-- [ ] Attachment 类型和大小。
 
 ## 11.2 API
 
@@ -1915,7 +3598,6 @@ AgentState 使用 TypedDict、Pydantic 或 LangGraph 支持的明确类型，不
 - [ ] 限流命中 `RATE_LIMITED`；
 - [ ] **伪造 `X-Forwarded-For` 不能重置限流计数**；
 - [ ] 运维端点鉴权与脱敏；
-- [ ] 附件权限；
 - [ ] 知识版本冲突；
 - [ ] Health；
 - [ ] 全局安全错误格式；
@@ -1956,7 +3638,6 @@ docker-compose -p borough up -d postgres
 - [ ] statement timeout；
 - [ ] **每日预算原子扣减**：10 个并发请求逼近预算边界时无超发；
 - [ ] Seed；
-- [ ] 对象存储 Fake 或本地兼容实现。
 
 ## 11.4 Agent
 
@@ -1979,9 +3660,7 @@ docker-compose -p borough up -d postgres
 - [ ] Reviewer 未执行（`NOT_RUN` / attempts=0）；
 - [ ] 达到 `QUALITY_MAX_ATTEMPTS` 后返回确定性降级摘要；
 - [ ] 每日预算熔断后的降级；
-- [ ] `ATTACHMENT` 模式路由（P1）；
-- [ ] 商家记忆提取、召回、删除与跨商家隔离（P1）；
-- [ ] 附件提示词注入。
+- [ ] 商家记忆提取、召回、删除与跨商家隔离；
 
 ## 11.5 回归问题集
 
@@ -2038,13 +3717,13 @@ DATABASE_URL=<postgresql-url>
 FRONTEND_ORIGIN=http://localhost:5173
 LLM_API_KEY=<deepseek-api-key>
 LLM_BASE_URL=https://api.deepseek.com
-LLM_MODEL=deepseek-v4-flash
+LLM_MODEL=deepseek-flash
 LLM_ENABLED=false
 BUSINESS_TIMEZONE=Asia/Shanghai
 DEMO_MERCHANT_TOKENS=<token:merchant_id,token:merchant_id,token:merchant_id>
 DEMO_MERCHANTS_ENDPOINT_ENABLED=true
 DEMO_DEPLOYMENT_MODE=false             # 仅对外演示部署时显式开启
-ADMIN_TOKEN=<development-placeholder>   # P0 起必需（运维端点），P1 知识库后台复用；请求头 X-Admin-Token
+ADMIN_TOKEN=<development-placeholder>   # 运维、知识后台与评测管理复用；请求头 X-Admin-Token
 EXPORT_URL_TTL_MINUTES=15
 MAX_QUERY_DAYS=180
 MAX_DETAIL_ROWS=200
@@ -2054,20 +3733,14 @@ MAX_LLM_TOKENS_PER_REQUEST=<int>
 LLM_DAILY_BUDGET_TOKENS=<int>
 RATE_LIMIT_PER_MINUTE=<int>
 TRUSTED_PROXY_HOPS=1
-MAX_ATTACHMENTS=8
-MAX_ATTACHMENT_MB=15
-OCR_ENABLED=false
-OCR_PROVIDER=local
-OBJECT_STORAGE_ENDPOINT=<optional>
-OBJECT_STORAGE_BUCKET=<optional>
 REDIS_URL=<optional>
 ```
 
 `JWT_SECRET` 已移除——MVP 不做 JWT 登录，商家身份来自演示 Token 白名单（见 §6.1）。
 
-`LLM_API_KEY` 的值是 DeepSeek API Key。真实 Adapter 使用 DeepSeek 的 OpenAI 兼容
-Chat Completions API；`LLM_BASE_URL` 和 `LLM_MODEL` 采用上面的固定默认值。MVP 不使用
-已弃用的 `deepseek-chat` 或 `deepseek-reasoner`，也不在此阶段引入双模型路由；如需升级为
+`LLM_API_KEY` 的值是 DeepSeek API Key。OpenAI 兼容 Adapter 使用根地址，Anthropic 兼容 Adapter
+使用根地址下的 `/anthropic` 端点；默认模型为 `deepseek-flash`。新配置不得使用已弃用的
+`deepseek-chat`、`deepseek-reasoner` 或退役兼容别名 `deepseek-v4-flash`；如需升级为
 `deepseek-v4-pro`，必须先完成真实模型离线验收与 R3 费用确认。
 
 生产环境默认关闭演示商家端点：`DEMO_MERCHANTS_ENDPOINT_ENABLED` 在生产环境不具备开启效果；仅当 `DEMO_DEPLOYMENT_MODE=true` 时才会显式开放，且不降低其余生产安全校验。
@@ -2078,9 +3751,42 @@ Chat Completions API；`LLM_BASE_URL` 和 `LLM_MODEL` 采用上面的固定默�
 
 ## 14. 后端错误码
 
+v2 新增错误码（与 ErrorCode 和双语文案同步）：
+
+| `code` | HTTP | `retryable` | 触发场景 |
+| --- | --- | --- | --- |
+| `SESSION_REQUIRED` | 401 | `false` | 缺会话头 |
+| `SESSION_INVALID` | 401 | `false` | 会话失效、过期、注销或被撤销 |
+| `SESSION_ROLE_MISMATCH` | 403 | `false` | 跨角色访问 |
+| `CUSTOMER_BINDING_REQUIRED` | 403 | `false` | 顾客角色正确但当前仍是访客，端点要求已绑定演示顾客 |
+| `SESSION_ALREADY_BOUND` | 409 | `false` | 已绑定会话试图切换到另一个服务端顾客身份；同一身份重试幂等成功 |
+| `RESOURCE_FORBIDDEN` | **403** | `false` | 不存在或不属于当前主体（非枚举，逐字段一致） |
+| `PRODUCT_NOT_IN_SCOPE` | 403 | `false` | 商品不属于本店或未通过来源闸门 |
+| `INSUFFICIENT_STOCK` | 409 | `false` | 可售量不足（PRD §7.4 不变量 1） |
+| `ILLEGAL_STATE_TRANSITION` | 409 | `false` | 非法状态迁移（PRD §7.1 不变量 2） |
+| `VERSION_CONFLICT` | 409 | `false` | 草案版本或目标对象版本不匹配；同一请求盲重试无效，须刷新后重新确认 |
+| `DRAFT_EXPIRED` | 409 | `false` | 草稿已过期 |
+| `GUARDRAIL_REJECTED` | 422 | `false` | 护栏预检不通过 |
+| `CONFIRMATION_REQUIRED` | 422 | `false` | 必须提交证据的写操作缺失证据，或提交的证据无效/过期/已消费；售后首次预检返回 200 challenge，不用此错误 |
+| `INVALID_CURSOR` | 422 | `false` | 游标不可解析、已失效或与当前主体/资源不匹配 |
+
+
 建议稳定错误码：
 
 ```text
+SESSION_REQUIRED
+SESSION_INVALID
+SESSION_ROLE_MISMATCH
+CUSTOMER_BINDING_REQUIRED
+SESSION_ALREADY_BOUND
+RESOURCE_FORBIDDEN
+PRODUCT_NOT_IN_SCOPE
+INSUFFICIENT_STOCK
+ILLEGAL_STATE_TRANSITION
+DRAFT_EXPIRED
+GUARDRAIL_REJECTED
+CONFIRMATION_REQUIRED
+INVALID_CURSOR
 AUTH_REQUIRED
 FORBIDDEN
 MERCHANT_SCOPE_VIOLATION
@@ -2095,9 +3801,6 @@ QUERY_TIMEOUT
 DATA_SOURCE_UNAVAILABLE
 LLM_UNAVAILABLE
 KNOWLEDGE_NOT_FOUND
-ATTACHMENT_TOO_LARGE
-ATTACHMENT_TYPE_UNSUPPORTED
-ATTACHMENT_PARSE_FAILED
 VERSION_CONFLICT
 RATE_LIMITED
 LLM_BUDGET_EXCEEDED
@@ -2161,8 +3864,7 @@ WIKI_IO_ERROR
 - 不允许真实 LLM 进入默认测试；
 - 不允许无限 Reviewer 循环；
 - 不允许把 Fake 结果标记为数据库结果；
-- 不允许附件正文覆盖系统规则；
-- 不允许把正式文件放在 Railway 临时磁盘；
+- 不允许顾客对话、商品描述、知识正文或第三方工具文本覆盖系统规则；
 - 不允许在日志中输出密钥、完整 Prompt、个人信息或完整查询结果；
 - 不允许未获用户授权就执行 Git 发布或 Railway 正式部署。
 

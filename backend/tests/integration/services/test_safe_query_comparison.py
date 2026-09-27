@@ -14,6 +14,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import MerchantContext
+from app.domain.order_status_mapping import from_legacy_status
 from app.intent.models import ComparisonMode, DateRange, QueryIntent
 from app.models.analytics import Order
 from app.repositories.analytics import AnalyticsRepository
@@ -50,6 +51,11 @@ async def _paid_order(
             order_no=f"NO-{uuid4().hex[:8]}",
             buyer_key="buyer-1",
             order_status="COMPLETED",
+            payment_status=from_legacy_status("COMPLETED")[0],
+            fulfillment_status=from_legacy_status("COMPLETED")[1],
+            close_reason=from_legacy_status("COMPLETED")[2],
+            after_sale_status="NONE",
+            lifecycle_origin="LEGACY_V1",
             total_amount=Decimal(amount),
             paid_amount=Decimal(amount),
             placed_at=NOW,

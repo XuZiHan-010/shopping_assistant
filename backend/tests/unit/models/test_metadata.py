@@ -1,5 +1,3 @@
-from sqlalchemy import UniqueConstraint
-
 from app.db.base import Base
 
 EXPECTED_FOUNDATION_TABLES = {
@@ -28,14 +26,14 @@ def test_all_foundation_tables_use_default_schema() -> None:
 
 
 def test_answers_enforce_merchant_scoped_idempotency_key() -> None:
-    answers = Base.metadata.tables["answers"]
-    unique_column_sets = {
-        tuple(column.name for column in constraint.columns)
-        for constraint in answers.constraints
-        if isinstance(constraint, UniqueConstraint)
-    }
+    """v1 幂等键按商家唯一；v2 行（`surface` 非空）的幂等由 `idempotency_records` 裁决。"""
 
-    assert ("merchant_id", "client_request_id") in unique_column_sets
+    answers = Base.metadata.tables["answers"]
+    index = next(i for i in answers.indexes if i.name == "uq_answers_merchant_client_request")
+
+    assert index.unique
+    assert tuple(column.name for column in index.columns) == ("merchant_id", "client_request_id")
+    assert str(index.dialect_options["postgresql"]["where"]) == "surface IS NULL"
 
 
 def test_operations_tables_have_required_lookup_indexes() -> None:

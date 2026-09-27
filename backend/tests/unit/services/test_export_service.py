@@ -285,9 +285,7 @@ async def test_same_data_two_locale_exports_are_two_non_interchangeable_signed_l
         filters=(("order_status", "PAID"),),
     )
 
-    zh_info = await service.create(
-        merchant_id=merchant_id, answer_id=answer_id, spec=spec, now=now
-    )
+    zh_info = await service.create(merchant_id=merchant_id, answer_id=answer_id, spec=spec, now=now)
     en_info = await service.create(
         merchant_id=merchant_id,
         answer_id=answer_id,

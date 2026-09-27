@@ -5,7 +5,7 @@ import { useI18n } from 'vue-i18n'
 
 import { useEChart } from '@/composables/useEChart'
 import { useLocaleStore } from '@/stores/locale'
-import type { ChatAnswer } from '@/types/chat'
+import type { ChartSeries } from '@/types/chat'
 import {
   chartNoDataMessage,
   chartTypeLabel,
@@ -20,9 +20,12 @@ import { formatCell } from '@/utils/format'
 const { t } = useI18n()
 const localeStore = useLocaleStore()
 
-const props = defineProps<{ answer?: ChatAnswer }>()
+// 只依赖 `ChartSeries` 本身（组件从不读 `ChatAnswer` 的其他字段）——v1、v2 两端
+// 契约的图表字段形状一致，各自的 Adapter 转换成这个类型后直接传，不需要为了
+// 满足 `ChatAnswer` 的其余必填字段而在 v2 侧硬凑一个不完整的假对象。
+const props = defineProps<{ chart?: ChartSeries }>()
 const container = ref<HTMLElement | null>(null)
-const chart = computed(() => props.answer?.chart)
+const chart = computed(() => props.chart)
 const validation = computed(() => validateChartRows(chart.value, localeStore.locale))
 const allowedTypes = computed(() =>
   (chart.value?.allowedTypes ?? []).filter((type): type is ChartType =>

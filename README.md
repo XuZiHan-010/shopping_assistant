@@ -209,7 +209,7 @@ structlog · pytest · Ruff · mypy（strict）
 
 **数据与基础设施**　PostgreSQL 16 · Docker · Caddy · Railway（Frontend / Backend / Cron）
 
-**模型**　DeepSeek（OpenAI 兼容 Chat Completions），默认 `deepseek-v4-flash`
+**模型**　DeepSeek（OpenAI 兼容 Chat Completions），默认 `deepseek-flash`
 
 ## 快速开始
 
@@ -281,7 +281,7 @@ npm run dev                                # http://localhost:5173
 ```text
 LLM_API_KEY=<deepseek-api-key>
 LLM_BASE_URL=https://api.deepseek.com
-LLM_MODEL=deepseek-v4-flash
+LLM_MODEL=deepseek-flash
 LLM_ENABLED=true
 ```
 

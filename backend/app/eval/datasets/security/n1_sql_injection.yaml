@@ -1,0 +1,64 @@
+# SQL 注入意图类（SQLI）：结构化查询意图的维度/过滤字段/过滤值里塞注入载荷。
+# 全部走 `SafeQueryService` 的既有白名单（B3），用间谍仓储证明零 SQL 执行
+# （见 `app/eval/primitives.py::_NeverCalledRepository`）。
+#
+# 422/INVALID_REQUEST 是复用 `InvalidRequestError` 既有的语义分类（“语法正确
+# 但违反受控业务边界”），不代表存在一条客户端可直接提交结构化意图的 v2 路由——
+# N1 没有这样的路由，结构化意图只由 LLM 产出。
+
+- id: SEC-SQLI-001
+  introduced_in: N1
+  role: MERCHANT
+  skill: safe_query
+  risk: SECURITY
+  locale: zh-CN
+  form: PRIMITIVE
+  turns:
+    - actor: merchant_a
+      primitive:
+        name: safe_query.reject_dimension_injection
+  assertions:
+    - type: http_status
+      expected: 422
+    - type: error_code
+      expected: INVALID_REQUEST
+    - type: no_side_effect
+      table: orders
+
+- id: SEC-SQLI-002
+  introduced_in: N1
+  role: MERCHANT
+  skill: safe_query
+  risk: SECURITY
+  locale: zh-CN
+  form: PRIMITIVE
+  turns:
+    - actor: merchant_a
+      primitive:
+        name: safe_query.reject_filter_key_injection
+  assertions:
+    - type: http_status
+      expected: 422
+    - type: error_code
+      expected: INVALID_REQUEST
+    - type: no_side_effect
+      table: orders
+
+- id: SEC-SQLI-003
+  introduced_in: N1
+  role: MERCHANT
+  skill: safe_query
+  risk: SECURITY
+  locale: en-US
+  form: PRIMITIVE
+  turns:
+    - actor: merchant_a
+      primitive:
+        name: safe_query.reject_filter_value_injection
+  assertions:
+    - type: http_status
+      expected: 422
+    - type: error_code
+      expected: INVALID_REQUEST
+    - type: no_side_effect
+      table: orders

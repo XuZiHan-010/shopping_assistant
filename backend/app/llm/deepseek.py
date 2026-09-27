@@ -3,20 +3,26 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
 
 import httpx
 
 from app.core.config import Settings
+from app.llm.anthropic_adapter import AnthropicConverseAdapter
 from app.llm.client import (
     DEFAULT_LLM_CALL_OPTIONS,
     LlmBudget,
     LlmBudgetExceededError,
     LlmCallOptions,
     LlmFailureKind,
+    LlmMessage,
     LlmResult,
+    LlmStreamEvent,
+    LlmTurn,
     LlmUnavailableError,
+    ToolSchema,
 )
+from app.llm.openai_adapter import OpenAiConverseAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -26,9 +32,39 @@ class DeepSeekLlmClient:
         self, settings: Settings, *, transport: httpx.AsyncBaseTransport | None = None
     ) -> None:
         self._settings, self._transport = settings, transport
+        # `complete()`（v1）固定走 OpenAI 兼容协议；`LLM_PROTOCOL` 只决定 `converse*`（v2）。
+        self._converse_adapter: OpenAiConverseAdapter | AnthropicConverseAdapter = (
+            AnthropicConverseAdapter(settings, transport=transport)
+            if settings.llm_protocol == "anthropic"
+            else OpenAiConverseAdapter(settings, transport=transport)
+        )
 
     def is_configured(self) -> bool:
         return bool(self._settings.llm_api_key)
+
+    async def converse(
+        self,
+        *,
+        messages: list[LlmMessage],
+        tools: list[ToolSchema],
+        budget: LlmBudget,
+        options: LlmCallOptions = DEFAULT_LLM_CALL_OPTIONS,
+    ) -> LlmTurn:
+        return await self._converse_adapter.converse(
+            messages=messages, tools=tools, budget=budget, options=options
+        )
+
+    def converse_stream(
+        self,
+        *,
+        messages: list[LlmMessage],
+        tools: list[ToolSchema],
+        budget: LlmBudget,
+        options: LlmCallOptions = DEFAULT_LLM_CALL_OPTIONS,
+    ) -> AsyncIterator[LlmStreamEvent]:
+        return self._converse_adapter.converse_stream(
+            messages=messages, tools=tools, budget=budget, options=options
+        )
 
     async def complete(
         self,

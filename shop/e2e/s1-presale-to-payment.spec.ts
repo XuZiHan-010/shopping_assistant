@@ -1,0 +1,191 @@
+/**
+ * 场景 S1 浏览器验收：售前导购到支付（PRD §12.2）。
+ *
+ * 进入店铺 → 绑定演示顾客 → 向导购提问 → Agent 对比两款商品并加购
+ * → 购物车页提交订单 → 订单页模拟支付 → 订单页显示「已支付」。
+ *
+ * 后端是真实代码 + 真实 PostgreSQL，只有「模型决定调哪个工具」被脚本化（零 LLM 费用）。
+ * 页面内导航一律点链接，不用 `page.goto`：会话只存浏览器内存，整页跳转会丢会话（这正是
+ * PRD C3 的行为，刷新相关用例专门验证它）。
+ */
+import { expect, test, type Page } from '@playwright/test'
+
+const SHOP = '/borough-s1-e2e'
+const BACKEND = 'http://127.0.0.1:8013'
+const QUESTION = '冬天想买条围巾，比较一下再帮我加一条'
+
+function trackSessionIds(page: Page): string[] {
+  const seen: string[] = []
+  page.on('request', (request) => {
+    const id = request.headers()['x-session-id']
+    if (id && !seen.includes(id)) seen.push(id)
+  })
+  return seen
+}
+
+async function openShop(page: Page) {
+  await page.goto(SHOP)
+  await expect(page.getByTestId('identity')).toHaveText('访客')
+}
+
+async function bindDemoCustomer(page: Page) {
+  await page.getByRole('banner').getByRole('button', { name: '绑定演示顾客' }).click()
+  await expect(page.getByTestId('identity')).toHaveText('演示顾客')
+}
+
+const ROUTES = { 导购助手: '/assistant', 购物车: '/cart' } as const
+
+/** 点导航链接并等 URL 真的切过去，避免断言落在旧页面上（旧页面可能恰好含同样的文字）。 */
+async function goTo(page: Page, name: keyof typeof ROUTES) {
+  await page.getByRole('navigation', { name: '店铺导航' }).getByRole('link', { name: new RegExp(name) }).click()
+  await expect(page).toHaveURL(new RegExp(`${ROUTES[name]}$`))
+}
+
+async function addCashmereFromProductPage(page: Page) {
+  await page.getByRole('link', { name: '羊绒围巾' }).click()
+  await expect(page.getByRole('heading', { name: '羊绒围巾' })).toBeVisible()
+  await page.getByRole('button', { name: '加入购物车' }).click()
+  await expect(page.getByText('已加入购物车')).toBeVisible()
+}
+
+async function emptyBuyerCart(page: Page) {
+  await goTo(page, '购物车')
+  const remove = page.getByRole('button', { name: '移除' })
+  while ((await remove.count()) > 0) {
+    await remove.first().click()
+    await page.waitForTimeout(150)
+  }
+}
+
+test.describe.configure({ mode: 'serial' })
+
+test('S1：进入店铺 → 绑定演示顾客 → 导购对比并加购 → 提交订单 → 模拟支付 → 已支付', async ({ page }) => {
+  const sessionIds = trackSessionIds(page)
+
+  // 进入店铺：公开页面由服务端渲染，库存只有三档，没有数量。
+  await openShop(page)
+  await expect(page.getByRole('heading', { name: 'Borough商家100' })).toBeVisible()
+  await expect(page.getByRole('link', { name: '羊毛围巾' })).toBeVisible()
+  await expect(page.getByRole('link', { name: '羊绒围巾' })).toBeVisible()
+  await expect(page.getByText('有货').first()).toBeVisible()
+  await expect(page.getByText(/\d+\s*件/)).toHaveCount(0)
+
+  // 选择演示顾客（原地绑定，界面标注演示身份）。
+  await bindDemoCustomer(page)
+  await expect(page.getByText(/演示环境：身份为演示身份，非真实登录/)).toBeVisible()
+
+  // 向导购提问：Agent 检索、逐个看详情、加购；工具行只有名称与状态。
+  await goTo(page, '导购助手')
+  await page.getByRole('textbox', { name: '向导购助手提问' }).fill(QUESTION)
+  await page.getByRole('button', { name: '发送' }).click()
+  await expect(page.getByText(/羊绒款是 100% 羊绒/)).toBeVisible()
+  await expect(page.getByText(/search_products/)).toBeVisible()
+  await expect(page.getByText(/set_cart_item/)).toBeVisible()
+
+  // 购物车角标来自服务端 GET /cart。
+  await expect(page.getByLabel('购物车 1 件商品')).toBeVisible()
+  await expect(page.getByText(/以结账页计算为准/)).toBeVisible()
+
+  // 购物车页：金额来自后端；提交订单，不可用项为空时进入订单页。
+  await page.getByRole('link', { name: '去结账' }).click()
+  await expect(page.getByRole('heading', { name: '购物车' })).toBeVisible()
+  await expect(page.getByText('羊绒围巾').first()).toBeVisible()
+  await expect(page.getByText('¥259.00').first()).toBeVisible()
+  await expect(page.getByText('演示结账，不产生真实扣款。')).toBeVisible()
+  await page.getByRole('button', { name: '提交订单' }).click()
+
+  // 订单页：待支付，常驻演示支付提示；三个状态分开展示。
+  await expect(page.getByRole('heading', { name: '订单详情' })).toBeVisible()
+  expect(page.url()).toMatch(/\/orders\/[0-9a-f-]{36}$/)
+  await expect(page.getByText('支付状态').locator('xpath=following-sibling::*[1]')).toHaveText('待支付')
+  await expect(page.getByText('履约状态').locator('xpath=following-sibling::*[1]')).toHaveText('未发货')
+  await expect(page.getByText('售后状态').locator('xpath=following-sibling::*[1]')).toHaveText('无售后')
+  await expect(page.getByText(/演示支付，不产生真实扣款/)).toBeVisible()
+  await expect(page.getByText('已下单')).toBeVisible()
+
+  // 模拟支付 → 已支付，事件出现「已支付」，支付按钮消失。
+  await page.getByRole('button', { name: '模拟支付' }).click()
+  await expect(page.getByText('支付状态').locator('xpath=following-sibling::*[1]')).toHaveText('已支付')
+  await expect(page.getByRole('listitem').filter({ hasText: '已支付' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '模拟支付' })).toHaveCount(0)
+
+  // 会话 ID 只在请求头里：不在 URL，也不落浏览器持久化存储。
+  expect(sessionIds.length).toBeGreaterThan(0)
+  for (const id of sessionIds) expect(page.url()).not.toContain(id)
+  const storage = await page.evaluate(() =>
+    JSON.stringify({ ...localStorage }) + JSON.stringify({ ...sessionStorage }) + document.cookie,
+  )
+  for (const id of sessionIds) expect(storage).not.toContain(id)
+})
+
+test('刷新①：未绑定访客加购 → 刷新后购物车为空并提示无法找回，但服务端原记录仍在', async ({ page, request }) => {
+  const sessionIds = trackSessionIds(page)
+  await openShop(page)
+  await addCashmereFromProductPage(page)
+  await goTo(page, '购物车')
+  await expect(page.getByText('羊绒围巾').first()).toBeVisible()
+  await expect(page.getByText(/未绑定身份时刷新后无法找回购物车/)).toBeVisible()
+  const originalSession = sessionIds.at(-1)!
+
+  await page.reload()
+
+  // 新访客会话：页面显示空购物车，且明示「无法找回」，不说「已删除」。
+  await expect(page.getByText(/购物车还是空的/)).toBeVisible()
+  await expect(page.getByText(/未绑定身份时刷新后无法找回购物车/)).toBeVisible()
+  await expect(page.getByText(/绑定演示身份后可恢复/)).toBeVisible()
+  await expect(page.getByText(/已删除|已清空/)).toHaveCount(0)
+
+  // 服务端原购物车记录仍然存在——证明是「暂时无法访问」，不是被删除。
+  const original = await request.get(`${BACKEND}/api/v2/shop/cart`, {
+    headers: { 'X-Session-Id': originalSession },
+  })
+  expect(original.status()).toBe(200)
+  const body = (await original.json()) as { items: { name: string; quantity: number }[] }
+  expect(body.items.map((item) => item.name)).toEqual(['羊绒围巾'])
+})
+
+test('刷新②：已绑定演示顾客加购 → 刷新 → 重新绑定同一身份 → 原购物车商品恢复', async ({ page }) => {
+  await openShop(page)
+  await bindDemoCustomer(page)
+  await addCashmereFromProductPage(page)
+  await goTo(page, '购物车')
+  await expect(page.getByText('羊绒围巾').first()).toBeVisible()
+
+  await page.reload()
+
+  // 刷新后是新的访客会话：购物车暂时看不到。
+  await expect(page.getByTestId('identity')).toHaveText('访客')
+  await expect(page.getByText(/购物车还是空的/)).toBeVisible()
+
+  // 重新绑定同一演示身份 → 服务端按 buyer_key 返回自己的购物车。
+  await bindDemoCustomer(page)
+  await expect(page.getByText('羊绒围巾').first()).toBeVisible()
+  await expect(page.getByRole('list').getByRole('listitem').filter({ hasText: '羊绒围巾' })).toHaveCount(1)
+
+  await emptyBuyerCart(page)
+  await expect(page.getByText(/购物车还是空的/)).toBeVisible()
+})
+
+test('越权：直接访问他人订单 URL，显示与「不存在」一致的页面', async ({ page, request }) => {
+  // 用 API 以演示顾客身份建一笔订单（页面外的第三方持有者）。
+  const created = await request.post(`${BACKEND}/api/v2/shop/sessions`, { data: { shop_slug: 'borough-s1-e2e' } })
+  const headers = { 'X-Session-Id': ((await created.json()) as { session_id: string }).session_id }
+  expect((await request.post(`${BACKEND}/api/v2/shop/sessions/demo-customer`, { headers, data: {} })).status()).toBe(200)
+  expect(
+    (await request.put(`${BACKEND}/api/v2/shop/cart/items/00000000-0000-0000-0000-0000000051b2`, { headers, data: { quantity: 1 } })).status(),
+  ).toBe(200)
+  const placed = await request.post(`${BACKEND}/api/v2/shop/orders`, { headers, data: { client_request_id: 'e2e-foreign-order' } })
+  expect(placed.status()).toBe(201)
+  const foreignOrderId = ((await placed.json()) as { id: string }).id
+
+  // 另一个浏览器会话（未绑定访客）直接打开这笔订单的 URL。
+  await page.goto(`${SHOP}/orders/${foreignOrderId}`)
+  await expect(page.getByRole('heading', { name: '订单不存在' })).toBeVisible()
+  const foreign = await page.locator('main').innerText()
+
+  // 一个根本不存在的订单：页面内容必须逐字一致。
+  await page.goto(`${SHOP}/orders/00000000-0000-0000-0000-000000000000`)
+  await expect(page.getByRole('heading', { name: '订单不存在' })).toBeVisible()
+  expect(await page.locator('main').innerText()).toBe(foreign)
+  await expect(page.getByText('羊绒围巾')).toHaveCount(0)
+})

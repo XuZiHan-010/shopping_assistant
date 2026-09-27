@@ -9,3 +9,4 @@
 # 生成脚本的输出一致。
 frontend/src/api/generated.ts eol=lf
 frontend/src/api/mock/fixtures.generated.ts eol=lf
+shop/src/api/generated.ts eol=lf

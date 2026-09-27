@@ -1,0 +1,301 @@
+@import '../styles/tokens.css';
+@import '../styles/shop-tokens.css';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+body {
+  background: var(--shop-paper);
+  color: var(--color-text);
+  font-size: var(--shop-font-body);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+a {
+  color: inherit;
+  text-decoration: none;
+}
+button {
+  font: inherit;
+  cursor: pointer;
+}
+h1,
+h2,
+h3 {
+  font-family: var(--shop-serif);
+  color: var(--shop-plum);
+  margin: 0;
+  line-height: 1.25;
+}
+h1 {
+  font-size: var(--shop-font-title);
+}
+h2 {
+  font-size: var(--shop-font-lead);
+}
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.page {
+  max-width: var(--shop-page-width);
+  margin: 0 auto;
+  padding: var(--space-5) var(--space-4) 4rem;
+}
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  background: color-mix(in srgb, var(--shop-paper) 88%, transparent);
+  border-bottom: 1px solid var(--shop-paper-line);
+  backdrop-filter: blur(8px);
+}
+.topbar .brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--shop-serif);
+  font-weight: 700;
+}
+.topbar nav {
+  display: flex;
+  gap: var(--space-1);
+  margin-left: auto;
+  overflow-x: auto;
+}
+.topbar nav a {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  white-space: nowrap;
+}
+.topbar nav a[aria-current='page'] {
+  background: var(--shop-paper-2);
+  color: var(--shop-plum);
+  font-weight: 700;
+}
+.badge {
+  display: inline-block;
+  min-width: 1.25rem;
+  padding: 0 var(--space-1-5);
+  margin-left: var(--space-1);
+  border-radius: 999px;
+  background: var(--color-primary);
+  color: #fff;
+  font-size: var(--font-size-caption);
+  text-align: center;
+  line-height: 1.25rem;
+}
+
+.grid {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+}
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--shop-paper-line);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-control);
+  overflow: hidden;
+}
+.card-body {
+  padding: var(--space-4);
+  display: grid;
+  gap: var(--space-2);
+}
+.muted {
+  color: var(--color-text-secondary);
+  font-size: var(--shop-font-small);
+}
+.price {
+  font-weight: 750;
+  font-size: var(--shop-font-lead);
+}
+
+.pill {
+  display: inline-block;
+  padding: 0 var(--space-2);
+  border-radius: 999px;
+  font-size: var(--shop-font-small);
+}
+.pill-ok {
+  background: var(--shop-ok-bg);
+  color: var(--shop-ok-text);
+}
+.pill-warn {
+  background: var(--shop-warn-bg);
+  color: var(--shop-warn-text);
+}
+.pill-off {
+  background: var(--color-danger-surface);
+  color: var(--color-danger-text);
+}
+
+.btn {
+  min-height: var(--control-height);
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-control);
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+.btn-primary {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #fff;
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.notice {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-card);
+  background: var(--shop-warn-bg);
+  color: var(--shop-warn-text);
+}
+.notice-demo {
+  background: var(--color-primary-soft);
+  color: var(--color-primary-strong);
+}
+.notice-error {
+  background: var(--color-danger-surface);
+  color: var(--color-danger-text);
+}
+
+.attrs {
+  width: 100%;
+  border-collapse: collapse;
+}
+.attrs th,
+.attrs td {
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--shop-paper-line);
+}
+.attrs th {
+  width: 30%;
+  color: var(--color-text-secondary);
+  font-weight: 600;
+}
+.stack {
+  display: grid;
+  gap: var(--space-4);
+}
+.row {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  flex-wrap: wrap;
+}
+.spread {
+  justify-content: space-between;
+}
+.chat-log {
+  display: grid;
+  gap: var(--space-3);
+}
+.bubble {
+  max-width: 42rem;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-card);
+  background: var(--shop-paper-2);
+  border: 1px solid var(--shop-paper-line);
+  white-space: pre-wrap;
+  /* 没有空格的长串（单号、链接）也要在气泡内折行，否则会把窄屏页面撑出横向滚动。 */
+  overflow-wrap: anywhere;
+}
+.bubble-user {
+  justify-self: end;
+  background: var(--color-primary-soft);
+}
+.tool-row {
+  font-size: var(--shop-font-small);
+  color: var(--color-text-secondary);
+}
+
+/* 导购页：宽屏左侧会话目录 + 右侧对话；窄屏上下堆叠，目录限高内部滚动。 */
+.assistant-layout {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: minmax(0, 16rem) minmax(0, 1fr);
+  align-items: start;
+}
+.assistant-main {
+  min-width: 0;
+}
+.conversation-directory {
+  min-width: 0;
+}
+.conversation-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-1);
+  max-height: 24rem;
+  overflow-y: auto;
+}
+.conversation-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: var(--space-2);
+  align-items: center;
+}
+.conversation-open {
+  min-width: 0;
+  min-height: var(--control-height);
+  padding: 0 var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--color-text);
+  text-align: left;
+}
+.conversation-open[aria-current='true'] {
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary);
+}
+.conversation-title {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.conversation-time {
+  grid-column: 1;
+  padding-inline: var(--space-2);
+}
+.conversation-item .btn {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  padding: 0 var(--space-3);
+}
+
+@media (max-width: 40rem) {
+  .topbar {
+    flex-wrap: wrap;
+  }
+  .page {
+    padding-inline: var(--space-3);
+  }
+  .assistant-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .conversation-list {
+    max-height: 12rem;
+  }
+}

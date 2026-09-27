@@ -579,8 +579,7 @@ async def test_english_locale_localizes_a_real_answer_validation_failure() -> No
             json.dumps(
                 {
                     "answer": (
-                        "Refund order 123e4567-e89b-12d3-a456-426614174000 "
-                        "totalled 500 CNY."
+                        "Refund order 123e4567-e89b-12d3-a456-426614174000 totalled 500 CNY."
                     ),
                     "recommendations": [
                         {

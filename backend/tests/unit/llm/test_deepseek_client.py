@@ -167,7 +167,7 @@ async def test_upstream_401_is_recorded_and_logged_not_silently_swallowed(
                 "extra": {
                     "failure_kind": "HTTP_401",
                     "status_code": 401,
-                    "model": "deepseek-v4-flash",
+                    "model": "deepseek-flash",
                 }
             },
         )

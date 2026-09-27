@@ -11,6 +11,7 @@ def make_settings(**overrides: object) -> Settings:
     values: dict[str, object] = {
         "database_url": "postgresql+psycopg://user:pass@localhost/db",
         "frontend_origin": "https://merchant.example.com",
+        "buyer_alias_secret": "test-buyer-alias-secret",
     }
     values.update(overrides)
     return Settings(**values)  # type: ignore[arg-type]
@@ -55,6 +56,12 @@ def test_demo_deployment_mode_defaults_to_false() -> None:
     )
 
     assert settings.demo_deployment_mode is False
+
+
+def test_daily_brief_schedule_disabled_by_default() -> None:
+    """D18⑩：完整简报的定时预生成默认关闭；Cron 接线归 N5，真实生成需 R3。"""
+
+    assert make_settings().daily_brief_schedule_enabled is False
 
 
 def test_production_requires_export_signing_secret() -> None:
@@ -142,6 +149,25 @@ def test_production_rejects_weak_placeholder_secrets(secret: str) -> None:
         )
 
 
+def test_session_identity_defaults_and_demo_identities_are_server_only_configuration() -> None:
+    """删除会话有效期边界或演示身份映射配置时应失败。"""
+    settings = make_settings(demo_customer_identities={"borough-100": "buyer-demo-1"})
+
+    assert settings.session_ttl_seconds == 86_400
+    assert settings.demo_customer_identities == {"borough-100": "buyer-demo-1"}
+
+
+@pytest.mark.parametrize("secret", [None, "short", "<development-placeholder>"])
+def test_production_requires_a_non_placeholder_buyer_alias_secret(secret: str | None) -> None:
+    """生产环境缺失或使用弱别名密钥时应失败。"""
+    with pytest.raises(ValidationError, match="BUYER_ALIAS_SECRET"):
+        make_settings(
+            app_env=AppEnvironment.PRODUCTION,
+            export_signing_secret="a-secure-export-signing-secret",
+            buyer_alias_secret=secret,
+        )
+
+
 def test_question_prefilter_defaults() -> None:
     settings = make_settings()
 
@@ -219,3 +245,30 @@ def test_settings_in_tests_ignore_ambient_environment_variables(
 
     assert settings.llm_api_key is None
     assert settings.llm_model != "ambient-env-model-must-not-leak"
+
+
+@pytest.mark.parametrize(
+    "identities",
+    [{"Bad_Slug": "buyer-1"}, {"borough-100": "  "}, {"": "buyer-1"}],
+)
+def test_demo_customer_identities_reject_malformed_entries(identities: dict[str, str]) -> None:
+    with pytest.raises(ValidationError):
+        make_settings(demo_customer_identities=identities)
+
+
+def test_skill_limits_default_to_loader_constants() -> None:
+    """A4：Skill 长度与单回合加载数上限可配置，默认值与加载器常量一致。"""
+    from app.skills.loader import SKILL_MAX_CHARS, SKILL_MAX_PER_TURN
+
+    settings = make_settings()
+    assert settings.skill_max_chars == SKILL_MAX_CHARS
+    assert settings.skill_max_per_turn == SKILL_MAX_PER_TURN
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("skill_max_chars", 0), ("skill_max_chars", 64_001), ("skill_max_per_turn", 0)],
+)
+def test_skill_limits_are_bounded(field: str, value: int) -> None:
+    with pytest.raises(ValidationError):
+        make_settings(**{field: value})

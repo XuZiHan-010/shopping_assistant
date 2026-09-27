@@ -42,10 +42,18 @@ class Answer(UuidPrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, Base):
             "response_locale IN ('zh-CN', 'en-US', 'mixed', 'und')",
             name="ck_answers_response_locale",
         ),
-        UniqueConstraint(
+        CheckConstraint(
+            "surface IS NULL OR surface IN ('SHOP', 'MERCHANT')",
+            name="ck_answers_surface",
+        ),
+        # 只约束 v1 行：v2 幂等由 `idempotency_records` 按主体裁决（§8.7.3），同店不同顾客
+        # 可以复用同一个 `client_request_id`。
+        Index(
+            "uq_answers_merchant_client_request",
             "merchant_id",
             "client_request_id",
-            name="uq_answers_merchant_client_request",
+            unique=True,
+            postgresql_where=text("surface IS NULL"),
         ),
         Index("ix_answers_conversation_created", "conversation_id", "created_at"),
     )
@@ -80,6 +88,8 @@ class Answer(UuidPrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, Base):
     # 伪造成 `zh-CN`。应用层不额外收窄这个 CHECK 允许的取值域,避免和迁移的回填
     # 结果冲突。
     response_locale: Mapped[str] = mapped_column(String(16), nullable=False)
+    #: 产生这条回答的 v2 端（`SHOP` / `MERCHANT`）；v1 回答为空。v1 接口只读空值行。
+    surface: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
 
 class Feedback(UuidPrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, Base):
@@ -112,3 +122,5 @@ class Feedback(UuidPrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, Base):
         server_default=text("false"),
     )
     reaction: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # 仅 v2 契约（§8.14.1）使用：赞踩的可选原因，只能附着在 reaction 上。v1 从不写入。
+    reason: Mapped[str | None] = mapped_column(String(500), nullable=True)

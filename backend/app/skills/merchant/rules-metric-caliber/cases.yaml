@@ -1,0 +1,89 @@
+# N3 阶段 C Task 0：规则与指标口径问答 Skill 的触发用例。
+
+- id: rules-metric-caliber-hit1
+  introduced_in: N3
+  role: MERCHANT
+  skill: rules-metric-caliber
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: skill_trigger
+  turns:
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/merchant/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json: {message: 净成交额是怎么算出来的, client_request_id: skill-rules-hit1}
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: tool_calls_include
+      expected: load_skill:rules-metric-caliber
+
+- id: rules-metric-caliber-hit2
+  introduced_in: N3
+  role: MERCHANT
+  skill: rules-metric-caliber
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: skill_trigger
+  turns:
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/merchant/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json: {message: 退货的运费平台规定是谁出, client_request_id: skill-rules-hit2}
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: tool_calls_include
+      expected: load_skill:rules-metric-caliber
+
+- id: rules-metric-caliber-miss1
+  introduced_in: N3
+  role: MERCHANT
+  skill: rules-metric-caliber
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: skill_trigger
+  turns:
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/merchant/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json: {message: 这个月的净成交额具体是多少钱, client_request_id: skill-rules-miss1}
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: tool_calls_exclude
+      expected: load_skill:rules-metric-caliber
+
+- id: rules-metric-caliber-boundary1
+  introduced_in: N3
+  role: MERCHANT
+  skill: rules-metric-caliber
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: skill_trigger
+  turns:
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/merchant/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json: {message: 净成交额怎么算的，另外这个月它具体是多少, client_request_id: skill-rules-boundary1}
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: tool_calls_include
+      expected: load_skill:rules-metric-caliber

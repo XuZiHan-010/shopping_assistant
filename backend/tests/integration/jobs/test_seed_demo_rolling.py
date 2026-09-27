@@ -9,6 +9,7 @@ from sqlalchemy import String, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.seed_config import SeedSettings
+from app.domain.order_status_mapping import from_legacy_status
 from app.jobs.seed_demo_rolling import roll_forward
 from app.models.analytics import Order, OrderItem, Product, Refund, ReturnRecord
 from app.models.merchant import Merchant
@@ -144,6 +145,11 @@ async def test_rolling_seed_keeps_a_refund_still_in_window_even_if_its_order_lef
             buyer_key="legacy-buyer",
             address_city_name=None,
             order_status="COMPLETED",
+            payment_status=from_legacy_status("COMPLETED")[0],
+            fulfillment_status=from_legacy_status("COMPLETED")[1],
+            close_reason=from_legacy_status("COMPLETED")[2],
+            after_sale_status="NONE",
+            lifecycle_origin="LEGACY_V1",
             total_amount=Decimal("100.00"),
             paid_amount=Decimal("100.00"),
             placed_at=datetime(2026, 8, 10, tzinfo=UTC),
@@ -162,6 +168,9 @@ async def test_rolling_seed_keeps_a_refund_still_in_window_even_if_its_order_lef
             product_id=product_id,
             quantity=1,
             item_amount=Decimal("100.00"),
+            unit_price=(Decimal("100.00")),
+            discount_amount=(Decimal("100.00")) * ((1) - 1),
+            line_total=(Decimal("100.00")),
         )
     )
     await db_session.flush()

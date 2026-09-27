@@ -1,0 +1,94 @@
+# N3 阶段 C Task 0：定价与促销 Skill 的触发用例。
+# boundary1 是与阶段 B「客服回复」Skill 的冲突用例（Task 0 步骤 3 要求）：
+# 同一句话里既有售后处理诉求又有业绩查询诉求，断言按 registry.py 固定的裁决顺序
+# （Borough 规则 > 更具体的 Skill > 更一般的 Skill）只加载与本轮意图最相关的一个。
+
+- id: pricing-promotions-hit1
+  introduced_in: N3
+  role: MERCHANT
+  skill: pricing-promotions
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: skill_trigger
+  turns:
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/merchant/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json: {message: 帮这个商品出一张折扣券, client_request_id: skill-price-hit1}
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: tool_calls_include
+      expected: load_skill:pricing-promotions
+
+- id: pricing-promotions-hit2
+  introduced_in: N3
+  role: MERCHANT
+  skill: pricing-promotions
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: skill_trigger
+  turns:
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/merchant/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json: {message: 这个商品能不能永久降价 20 元, client_request_id: skill-price-hit2}
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: tool_calls_include
+      expected: load_skill:pricing-promotions
+
+- id: pricing-promotions-miss1
+  introduced_in: N3
+  role: MERCHANT
+  skill: pricing-promotions
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: skill_trigger
+  turns:
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/merchant/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json: {message: 这周的退款率是多少, client_request_id: skill-price-miss1}
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: tool_calls_exclude
+      expected: load_skill:pricing-promotions
+
+- id: pricing-promotions-boundary1
+  introduced_in: N3
+  role: MERCHANT
+  skill: pricing-promotions
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: skill_trigger
+  turns:
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/merchant/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json:
+          message: 这单怎么处理，顺便看看本周退款率
+          client_request_id: skill-price-boundary1-conflict
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: tool_calls_exclude
+      expected: load_skill:pricing-promotions

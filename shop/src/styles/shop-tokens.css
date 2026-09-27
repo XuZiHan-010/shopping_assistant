@@ -1,0 +1,41 @@
+/* 顾客端在共享 token（tokens.css，禁止修改）之上追加的消费级 token：暖纸底、衬线标题、更大字阶。 */
+:root {
+  --shop-paper: #faf7f2;
+  --shop-paper-2: #f3ede3;
+  --shop-paper-line: #e4dbcc;
+  --shop-plum: #2c2420;
+  --shop-warn-bg: #fff6e6;
+  --shop-warn-text: #7a4a05;
+  --shop-ok-bg: #e7f7f4;
+  --shop-ok-text: #0d5f55;
+
+  --shop-serif: 'Noto Serif SC', Georgia, 'Songti SC', serif;
+  --shop-font-title: 1.75rem;
+  --shop-font-lead: 1.0625rem;
+  --shop-font-body: 0.9375rem;
+  --shop-font-small: 0.8125rem;
+  --shop-page-width: 68rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --shop-paper: #1c1815;
+    --shop-paper-2: #262019;
+    --shop-paper-line: #3a3128;
+    --shop-plum: #f0e9df;
+    --shop-warn-bg: #3a2c12;
+    --shop-warn-text: #ffcf8a;
+    --shop-ok-bg: #12332e;
+    --shop-ok-text: #7fd8c8;
+    color: #e8ecf4;
+    --color-surface: #221d19;
+    --color-border: #3a3128;
+    --color-border-strong: #4a4035;
+    --color-text: #e8ecf4;
+    --color-text-secondary: #a7b1c4;
+    --color-text-muted: #7b8598;
+    --color-primary-soft: #1e2540;
+    --color-danger-surface: #3a1f1c;
+    --color-danger-text: #ffb4ab;
+  }
+}

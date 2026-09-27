@@ -40,8 +40,24 @@ test('首屏不请求 ECharts chunk', async ({ page }) => {
       return
     }
 
-    if (request.method() === 'GET' && url.pathname === '/api/conversations') {
-      await route.fulfill({ headers, json: { items: [], limit: 50, offset: 0 } })
+    // 两页合并（2026-09-27，选项 C）后 `/` 是 v2 运营助手：身份换取与会话
+    // 目录走 `/api/v2/merchant/*`，取代了 v1 的 `/api/conversations`。
+    if (request.method() === 'POST' && url.pathname === '/api/v2/merchant/sessions') {
+      await route.fulfill({
+        headers,
+        status: 201,
+        json: {
+          session_id: 'first-paint-session-id-00000000000000000000',
+          role: 'MERCHANT',
+          expires_at: '2099-01-01T00:00:00Z',
+          merchant_display_name: 'Borough商家100',
+        },
+      })
+      return
+    }
+
+    if (request.method() === 'GET' && url.pathname === '/api/v2/merchant/conversations') {
+      await route.fulfill({ headers, json: { items: [], next_cursor: null, has_more: false } })
       return
     }
 
@@ -49,10 +65,10 @@ test('首屏不请求 ECharts chunk', async ({ page }) => {
   })
 
   await page.goto('/')
-  await expect(page.getByTestId('quick-question').first()).toBeVisible()
+  await expect(page.getByLabel('向运营助手提问')).toBeVisible()
   await expect
     .poll(() => interceptedApiPaths)
-    .toEqual(['/api/demo/merchants', '/api/conversations'])
+    .toEqual(['/api/demo/merchants', '/api/v2/merchant/sessions', '/api/v2/merchant/conversations'])
 
   expect(requested).toEqual([])
 })

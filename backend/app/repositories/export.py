@@ -20,7 +20,7 @@ class ExportRepository:
         self,
         *,
         merchant_id: UUID,
-        answer_id: UUID,
+        answer_id: UUID | None,
         export_spec: dict[str, Any],
         expires_at: datetime,
     ) -> ExportFile:

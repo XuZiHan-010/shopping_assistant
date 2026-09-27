@@ -1,0 +1,27 @@
+# 场景 S4：售后闭环的 Agent 起草质量。确定性的资格、金额、审批和状态迁移
+# 由 tests/e2e/test_s4_after_sale_loop.py 用 Fake LLM 验证。本登记只用于经另行费用
+# 授权的真实模型质量验收，不进入默认测试套件。
+
+- id: QLT-S4-001
+  introduced_in: N3
+  role: MERCHANT
+  skill: customer-service-replies
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: answer_quality
+  turns:
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/merchant/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json:
+          client_request_id: eval-qlt-s4-001
+          message: 请查看本店待处理的售后事项，按平台规则起草处理决定和礼貌回复，批准留给我在审批页完成。
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: degraded
+      expected: false
