@@ -134,7 +134,34 @@
 > Task 0/1/3(步骤0-2)/4/5/6 实现完成，Task 9 步骤 1（全量回归自检）完成。**
 > Task 3 步骤 3、Task 7、Task 8 部分此前阻塞在阶段 B；B 已提供顾客信号服务与售后 UI，待 C 接入并验证；
 > Task 9 步骤 2（双页合并评审）与步骤 3（同步进度文档）待推进。
->
+
+> **当前部署排障（2026-09-09）**：后端镜像构建成功，但 Railway 在 30 秒窗口内未通过
+> `/api/health` 检查；用户提供的运行日志显示 Uvicorn 最终启动于 `0.0.0.0:8080`，
+> 缺少时间戳，尚不能确认超时是唯一根因。已将 `backend/railway.json` 的
+> `healthcheckTimeout` 从 30 调整为 120 秒，并同步部署手册。已静态核对
+> `app/run.py` 使用 Railway `PORT`，JSON 解析与变更范围检查通过；未运行后端、
+> Docker 或真实 LLM。当前本地沙箱工具故障，修改通过 GitHub 接口提交，本地工作副本
+> 尚未同步。下一步核对新部署是否采用 120 秒窗口并通过健康检查；线上结果尚待验证。
+
+> **2026-09-09 `feature/bilingual-localization` 合并进 `main`（用户已明确要求，R2）**：把该分支
+> 40+ 次提交（含 2026-08-31/09-05/09-06/09-08 以下几条记录描述的全部工作）合并进 `main`。
+> `main` 自身在分支分叉后新增的改动集中在 `df3d949`（图表摘要格式化 + `useEChart` 时序整改，见
+> 下一条记录）——两侧独立修复了同一批文件（`format.ts`/`chart.ts`/`ChatMessage.spec.ts`/
+> `InsightPanels.spec.ts`/`transport.ts`/`ConfirmDeleteDialog.vue`/本文件），逐个手工核对语义后
+> 合并，而不是简单二选一：`format.ts`/`chart.ts` 保留 `main` 的负零修正与 `formatCell` 统一入口，
+> 同时套用 `feature` 分支的 locale 参数与中英文双语句式；`ChatMessage.spec.ts` 保留 `main` 的
+> 冻结时钟（顺带修好了此前两条因真实挂钟时间超过 fixture 硬编码 `expires_at` 而失败的
+> `download-export` 测试）与 `feature` 分支的 `mountWithI18n`/`mountMessage` 帮手；
+> `ConfirmDeleteDialog.vue` 删掉了 `main` 一侧遗留的重复未 i18n 段落。合并前用
+> `git merge-tree` 预演确认只有这 7 个文件真正冲突（`docs/project-progress.md`、
+> `frontend/src/api/mock/transport.ts`、`ChatMessage.spec.ts`、`InsightPanels.spec.ts`、
+> `ConfirmDeleteDialog.vue`、`utils/chart.ts`、`utils/format.ts`、`views/AssistantView.vue`——
+> 实际 8 个，`merge-tree` 预演未把本文件自身计入），其余全部干净自动合并。
+
+> **2026-09-27 Railway 部署修复补记**：`0c3483d` 将 `backend/railway.json` 的
+> `healthcheckTimeout` 由 30 秒延长至 120 秒，解决上条记录描述的健康检查超时问题；
+> 未运行后端、Docker 或真实 LLM。
+
 > **交付**：6 个商家 Skill（业绩洞察/库存运营/商品内容/定价促销/明细导出/规则口径，
 > `app/skills/merchant/`，前 4 个改编自 `vendor/anthropic-commerce-agents@fd4d592`，
 > 后 2 个 Borough 自撰）；`gross_gmv`/`net_gmv` 指标口径与归因服务（`AttributionService`）；
