@@ -3,8 +3,8 @@
  * 它不碰会话凭证，因此可以放心在服务端组件里使用。
  * 需要会话的调用从内存凭证里取 `X-Session-Id`；没有会话时抛 `NoSessionError`。
  */
-import type { Cart, FulfillmentEvent, Order } from '@/types/shop'
-import { toCart, toFulfillmentEvent, toOrder } from './adapters/shop'
+import type { Cart, FulfillmentEvent, Order, OrderSummaryView } from '@/types/shop'
+import { toCart, toFulfillmentEvent, toOrder, toOrderSummary } from './adapters/shop'
 import { requestJson } from './client'
 import { getSession } from './credentials'
 import type { components } from './generated'
@@ -96,4 +96,9 @@ export async function cancelOrder(orderId: string, clientRequestId: string): Pro
       sessionId: sessionId(),
     }),
   )
+}
+
+export async function listOrders(): Promise<OrderSummaryView[]> {
+  const page = await requestJson<S['CursorPage_OrderSummary_']>('/api/v2/shop/orders?limit=20', { sessionId: sessionId() })
+  return page.items.map(toOrderSummary)
 }

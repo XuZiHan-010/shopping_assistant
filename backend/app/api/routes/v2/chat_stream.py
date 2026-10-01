@@ -20,7 +20,14 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.types import Receive, Scope, Send
 
-from app.agent.loop.runner import EventSink, LoopEvent, ToolCallFinished, ToolCallStarted
+from app.agent.loop.compaction import compaction_step
+from app.agent.loop.runner import (
+    ContextCompacted,
+    EventSink,
+    LoopEvent,
+    ToolCallFinished,
+    ToolCallStarted,
+)
 from app.core.errors import AppError, ErrorCode, ErrorResponse
 from app.db.session import Database
 from app.localization.error_messages import localize_error_message
@@ -157,6 +164,9 @@ async def stream_turn(
 def project(event: LoopEvent, locale: SupportedLocale) -> bytes:
     """循环事件 → 契约事件。只有脱敏展示信息能走到这里。"""
 
+    if isinstance(event, ContextCompacted):
+        # 只说「在整理较早的对话」，不带策略名或任何上下文内容。
+        return encode(SseEventName.STEP.value, compaction_step(locale))
     if isinstance(event, ToolCallStarted):
         return encode(
             SseEventName.TOOL_CALL.value,

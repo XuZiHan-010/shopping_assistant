@@ -17,6 +17,7 @@ from pydantic import (
     model_validator,
 )
 
+from app.core.errors import ConfirmationRequiredError
 from app.schemas.feedback import FeedbackReaction
 from app.schemas.v2.common import CursorPage, IdempotentWriteRequest
 from app.schemas.v2.shop_session import ShopSlug
@@ -69,7 +70,7 @@ class MemoryPreferenceRequest(MemoryModel):
     @model_validator(mode="after")
     def confirmation_matches_intent(self) -> Self:
         if not self.enabled and self.purge_confirmation is None:
-            raise ValueError("关闭记忆并清空已有记忆前必须显式确认")
+            raise ConfirmationRequiredError
         if self.enabled and self.purge_confirmation is not None:
             raise ValueError("开启记忆不接受清空确认")
         return self

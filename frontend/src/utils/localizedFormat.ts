@@ -43,3 +43,40 @@ export function formatCurrency(
 ): string {
   return new Intl.NumberFormat(locale, { style: 'currency', currency }).format(value)
 }
+
+/**
+ * 把后端的万分比整数（`*_bp`，1/10000 为单位）格式化为百分比文本。
+ *
+ * Adapter 层保持 `*_bp` 为整数（不做浮点换算），换算只在这里发生：
+ * `Intl.NumberFormat` 的 `style: 'percent'` 期望一个「1 = 100%」的小数，
+ * 因此除以 10000（万分比换算成小数）。`null` 表示无可比数据，直接原样传回
+ * `null`，调用方负责渲染「—」之类的占位符，不在这里编造 0%。
+ */
+export function formatRatioBp(
+  valueBp: number | null,
+  locale: SupportedLocale,
+  options: { maximumFractionDigits?: number; signed?: boolean } = {},
+): string | null {
+  if (valueBp === null) return null
+  return new Intl.NumberFormat(locale, {
+    style: 'percent',
+    maximumFractionDigits: options.maximumFractionDigits ?? 1,
+    signDisplay: options.signed ? 'exceptZero' : 'auto',
+  }).format(valueBp / 10000)
+}
+
+/**
+ * 把后端的整数分（`*_cents`）格式化为人民币金额文本。只做「分 → 元」的单位换算，
+ * 不取整、不参与任何业务计算；`signed` 用于贡献、变化这类有方向的金额（正数带 `+`）。
+ */
+export function formatMoneyCents(
+  cents: number,
+  locale: SupportedLocale,
+  options: { signed?: boolean } = {},
+): string {
+  return new Intl.NumberFormat(locale, {
+    style: 'currency',
+    currency: 'CNY',
+    signDisplay: options.signed ? 'exceptZero' : 'auto',
+  }).format(cents / 100)
+}

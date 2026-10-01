@@ -22,6 +22,7 @@ from app.models.after_sales import AfterSale
 from app.models.analytics import Product
 from app.models.drafts import Draft
 from app.schemas.v2.drafts import (
+    INITIAL_DRAFT_VERSION,
     DiffUnit,
     DraftDiff,
     DraftDiffEntry,
@@ -70,7 +71,7 @@ class DraftRepository:
             target_type=target_type,
             target_id=target_id,
             target_version=target_version,
-            draft_version=1,
+            draft_version=INITIAL_DRAFT_VERSION,
             state=DraftState.STAGED.value,
             payload=payload,
             guardrail_snapshot=guardrail_snapshot,

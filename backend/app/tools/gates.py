@@ -35,7 +35,7 @@ from app.core.session import SessionContext, SessionRole, principal_digest
 from app.db.session import Database
 from app.repositories.audit import AuditRepository
 from app.repositories.provenance import ConversationProvenanceRepository
-from app.schemas.v2.drafts import DraftKind
+from app.schemas.v2.drafts import INITIAL_DRAFT_VERSION, DraftKind
 from app.tools.errors import FatalToolError, GuardrailRejection
 from app.tools.registry import IDENTITY_FIELDS, ToolRegistry
 from app.tools.types import (
@@ -303,7 +303,12 @@ class ToolGates:
             await self._provenance.record(scope, [ObjectRef("DRAFT", draft_id)])
             return ToolResult(
                 ok=True,
-                payload={"draft_id": draft_id, "kind": spec.draft_kind.value},
+                # 带上草稿版本：上下文压缩后模型仍需知道自己引用的是哪一版（PRD A5、D9⑦）。
+                payload={
+                    "draft_id": draft_id,
+                    "kind": spec.draft_kind.value,
+                    "draft_version": INITIAL_DRAFT_VERSION,
+                },
                 display=self._display(spec.name, call.call_id, started, ToolOutcome.DRAFT_CREATED),
                 reason_code=None,
                 outcome=ToolOutcome.DRAFT_CREATED,

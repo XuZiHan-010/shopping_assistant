@@ -167,11 +167,23 @@ def check_price_change(
 
 def check_coupon(
     *,
-    discount_rate: Decimal,
+    discount_rate: Decimal | None = None,
+    threshold_amount: Decimal | None = None,
+    discount_amount: Decimal | None = None,
     limits: GuardrailLimits,
     locale: SupportedLocale = SupportedLocale.ZH_CN,
 ) -> list[GuardrailCheckResult]:
     """Q6：实付不得低于原价的 (1 - max_discount_rate)，即减免比例不得超过上限。"""
+
+    if discount_rate is None:
+        if threshold_amount is None or discount_amount is None:
+            raise ValueError("满减券需要门槛和减免金额")
+        # 门槛处的优惠幅度最大；没有门槛的满减券无法保证实付不低于 80%。
+        discount_rate = (
+            discount_amount / threshold_amount
+            if threshold_amount > 0
+            else Decimal("1")
+        )
 
     if discount_rate <= limits.max_discount_rate:
         return [

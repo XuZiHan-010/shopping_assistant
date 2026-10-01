@@ -1,13 +1,12 @@
 import { AfterSalesClient } from './AfterSalesClient'
-import { headers } from 'next/headers'
+import { serverLocale } from '@/i18n/serverLocale'
 
 export default async function AfterSalesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ order?: string }>
+  searchParams: Promise<{ order?: string; case?: string }>
 }) {
-  const { order } = await searchParams
-  const language = (await headers()).get('accept-language') ?? ''
-  const locale = language.toLowerCase().startsWith('en') ? 'en-US' : 'zh-CN'
-  return <AfterSalesClient orderId={order} locale={locale} />
+  const { order, case: caseId } = await searchParams
+  const locale = await serverLocale()
+  return <AfterSalesClient orderId={order} caseId={caseId} locale={locale} />
 }

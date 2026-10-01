@@ -14,6 +14,8 @@ import { defineConfig, devices } from '@playwright/test'
 export default defineConfig({
   testDir: './e2e',
   testMatch: '**/*.spec.ts',
+  // S4 需要自己的一次性库与后端，只能由 playwright.s4.config.ts 运行。
+  testIgnore: ['**/s4/**'],
   fullyParallel: false,
   workers: 1,
   reporter: 'list',
@@ -22,6 +24,7 @@ export default defineConfig({
     baseURL: 'http://127.0.0.1:3275',
     trace: 'retain-on-failure',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  // 顾客端按浏览器语言渲染（R1），S1 断言中文文案，必须固定中文浏览器语言，与 S4 配置一致。
+  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'], locale: 'zh-CN' } }],
   globalSetup: './e2e/global-setup.mjs',
 })

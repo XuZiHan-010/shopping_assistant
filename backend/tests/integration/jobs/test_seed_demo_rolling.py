@@ -241,3 +241,56 @@ async def test_rolling_seed_refuses_without_the_explicit_write_permission(
         )
 
     assert await db_session.scalar(select(func.count()).select_from(Order)) == 0
+
+
+@pytest.mark.asyncio
+async def test_catalog_refresh_updates_only_untouched_legacy_seed_rows(
+    db_session: AsyncSession,
+) -> None:
+    from app.analytics.demo_data import DEMO_ANALYTICS_SEED_BASE, build_demo_catalog
+    from app.jobs.seed_demo_rolling import _catalog
+
+    await seed_demo_merchants(db_session, default_merchants())
+    merchant = default_merchants()[0]
+    generated = build_demo_catalog(merchant_id=merchant.id, seed=DEMO_ANALYTICS_SEED_BASE)
+    originals = []
+    for index in range(3):
+        row = dict(generated[index])
+        row.update(
+            title=f"演示商品 {index + 1:02d}",
+            price=Decimal("10.00"),
+            short_description="旧简介",
+            detail_description="旧说明",
+            attributes={},
+            image_url="/demo/products/old.png",
+            stock_on_hand=17,
+            status="OFFLINE",
+        )
+        if index == 1:
+            row["content_version"] = 2
+        if index == 2:
+            row["title"] = "商家自定义标题"
+        originals.append(row)
+        db_session.add(Product(**row))
+    await db_session.flush()
+
+    catalog = await _catalog(db_session, merchant.id, DEMO_ANALYTICS_SEED_BASE)
+    by_code = {row["product_code"]: row for row in catalog}
+    updated = by_code["SKU0000"]
+    for key in (
+        "title",
+        "price",
+        "short_description",
+        "detail_description",
+        "attributes",
+        "image_url",
+    ):
+        assert updated[key] == generated[0][key]
+    assert updated["content_version"] == 2
+    for key in ("id", "status", "listed_at", "stock_on_hand", "stock_reserved", "created_at"):
+        assert updated[key] == originals[0][key]
+    for original in originals[1:]:
+        persisted = by_code[original["product_code"]]
+        for key, value in original.items():
+            assert persisted[key] == value
+    assert await _catalog(db_session, merchant.id, DEMO_ANALYTICS_SEED_BASE) == catalog

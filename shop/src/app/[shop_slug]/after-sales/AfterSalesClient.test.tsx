@@ -6,11 +6,12 @@ import { AfterSalesClient } from './AfterSalesClient'
 
 const preview = vi.fn()
 const confirm = vi.fn()
+const getCase = vi.fn()
 vi.mock('@/api/afterSalesApi', () => ({
   previewAfterSale: (...args: unknown[]) => preview(...args),
   confirmAfterSale: (...args: unknown[]) => confirm(...args),
   listAfterSales: async () => [],
-  getAfterSale: async () => null,
+  getAfterSale: (...args: unknown[]) => getCase(...args),
   supplementAfterSale: async () => null,
 }))
 vi.mock('@/api/shopApi', () => ({
@@ -23,6 +24,8 @@ vi.mock('@/api/shopApi', () => ({
 beforeEach(() => {
   preview.mockReset()
   confirm.mockReset()
+  getCase.mockReset()
+  getCase.mockResolvedValue(null)
   preview.mockResolvedValue({
     token: 'evidence', expiresAt: '2099-01-01T00:00:00Z',
     lines: [{ orderItemId: 'line-1', name: '围巾', quantity: 1, lineTotalCents: 1234 }],
@@ -30,6 +33,17 @@ beforeEach(() => {
     conversationSummary: null,
   })
   confirm.mockResolvedValue({ id: 'sale-1', state: 'PENDING_MERCHANT' })
+})
+
+it('从订单视图进入指定售后单时直接打开该详情', async () => {
+  getCase.mockResolvedValueOnce({
+    id: 'case-1', orderId: 'order-1', type: 'REFUND_ONLY', state: 'PENDING_MERCHANT',
+    reason: '质量问题', refundAmountCents: 1234, createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z',
+    lines: [], events: [], supplements: [], replies: [], conversationSummaryShared: false,
+  })
+  render(<AfterSalesClient caseId="case-1" />)
+  expect(await screen.findByText('质量问题', { exact: false })).toBeInTheDocument()
+  expect(getCase).toHaveBeenCalledWith('case-1')
 })
 
 it('shows server refund preview and requires explicit checkbox before confirmation', async () => {

@@ -74,6 +74,8 @@ def order(**changes: object) -> dict[str, object]:
         "item_count": 2,
         "created_at": T0,
         "pay_by": "2026-09-21T00:30:00Z",
+        "lead_item": {"product_id": "p1", "name": "商品", "image_url": None},
+        "last_event_at": T0,
         "items": [order_item()],
         "subtotal_cents": 1000,
         "discount_cents": 100,

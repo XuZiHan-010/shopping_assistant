@@ -1,41 +1,46 @@
-/* 顾客端在共享 token（tokens.css，禁止修改）之上追加的消费级 token：暖纸底、衬线标题、更大字阶。 */
+/* 顾客端专有 token；色板和深色背景沿用同步的共享 tokens.css。 */
 :root {
-  --shop-paper: #faf7f2;
-  --shop-paper-2: #f3ede3;
-  --shop-paper-line: #e4dbcc;
-  --shop-plum: #2c2420;
-  --shop-warn-bg: #fff6e6;
-  --shop-warn-text: #7a4a05;
-  --shop-ok-bg: #e7f7f4;
-  --shop-ok-text: #0d5f55;
+  --shop-active-bg: var(--iron);
+  --shop-active-text: #fffdf8;
+  --shop-active-icon: var(--gilt);
 
-  --shop-serif: 'Noto Serif SC', Georgia, 'Songti SC', serif;
+  --font-display: var(--font-fraunces), var(--font-noto-serif), Georgia, serif;
+  --font-body: var(--font-instrument), var(--font-noto-sans), system-ui, sans-serif;
+  --shop-serif: var(--font-display);
   --shop-font-title: 1.75rem;
   --shop-font-lead: 1.0625rem;
   --shop-font-body: 0.9375rem;
   --shop-font-small: 0.8125rem;
   --shop-page-width: 68rem;
+
+  /* 商品图加载占位底色：五个类目各一（取定稿原型 :root），缺图仍用虚线条纹 */
+  --t-dress: #f4e2d8; --t-dress-ink: #9c4a2c;
+  --t-shirt: #dfe9e2; --t-shirt-ink: #2c5242;
+  --t-boot: #f1e6cf; --t-boot-ink: #7a5a1c;
+  --t-home: #e2eaf1; --t-home-ink: #2b5f8a;
+  --t-beauty: #ebe4f4; --t-beauty-ink: #5a48b0;
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
-    --shop-paper: #1c1815;
-    --shop-paper-2: #262019;
-    --shop-paper-line: #3a3128;
-    --shop-plum: #f0e9df;
-    --shop-warn-bg: #3a2c12;
-    --shop-warn-text: #ffcf8a;
-    --shop-ok-bg: #12332e;
-    --shop-ok-text: #7fd8c8;
-    color: #e8ecf4;
-    --color-surface: #221d19;
-    --color-border: #3a3128;
-    --color-border-strong: #4a4035;
-    --color-text: #e8ecf4;
-    --color-text-secondary: #a7b1c4;
-    --color-text-muted: #7b8598;
-    --color-primary-soft: #1e2540;
-    --color-danger-surface: #3a1f1c;
-    --color-danger-text: #ffb4ab;
+  :root[data-theme='system'] {
+    --shop-active-bg: var(--gilt);
+    --shop-active-text: var(--ground);
+    --shop-active-icon: var(--ground);
+    --t-dress: rgba(219, 117, 82, 0.14); --t-dress-ink: #f0a88c;
+    --t-shirt: rgba(108, 197, 146, 0.12); --t-shirt-ink: #8fd3ad;
+    --t-boot: rgba(212, 176, 96, 0.13); --t-boot-ink: #e2c681;
+    --t-home: rgba(128, 180, 224, 0.13); --t-home-ink: #9cc6ea;
+    --t-beauty: rgba(173, 161, 240, 0.14); --t-beauty-ink: #bdb3f4;
   }
+}
+
+:root[data-theme='dark'] {
+  --shop-active-bg: var(--gilt);
+  --shop-active-text: var(--ground);
+  --shop-active-icon: var(--ground);
+  --t-dress: rgba(219, 117, 82, 0.14); --t-dress-ink: #f0a88c;
+  --t-shirt: rgba(108, 197, 146, 0.12); --t-shirt-ink: #8fd3ad;
+  --t-boot: rgba(212, 176, 96, 0.13); --t-boot-ink: #e2c681;
+  --t-home: rgba(128, 180, 224, 0.13); --t-home-ink: #9cc6ea;
+  --t-beauty: rgba(173, 161, 240, 0.14); --t-beauty-ink: #bdb3f4;
 }

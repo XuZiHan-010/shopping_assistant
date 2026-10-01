@@ -1,6 +1,6 @@
 """商家售后草稿应用时复核状态，并把退款和回补写入真实 PostgreSQL。"""
 
-from datetime import timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import VersionConflictError
 from app.core.session import SessionContext, SessionRole
 from app.models.after_sales import AfterSale, AfterSaleLine, AfterSaleReply
-from app.models.analytics import OrderItem, Product, Refund
+from app.models.analytics import OrderItem, Product, Refund, ReturnRecord
 from app.models.drafts import Draft
 from app.models.events import InventoryEvent
 from app.services.v2.after_sales import sale_detail
@@ -21,6 +21,8 @@ from app.services.v2.draft_handlers.after_sale_decision import AfterSaleDecision
 from tests.integration.v2.test_after_sale_machine import NOW, sale
 
 pytestmark = pytest.mark.integration
+# UTC 9/24 20:00 = 上海 9/25 04:00：退款、退货必须记在业务日，净成交额才与首页同日。
+CROSS_DAY = datetime(2026, 9, 24, 20, tzinfo=UTC)
 
 
 def context(merchant_id: UUID) -> SessionContext:
@@ -69,7 +71,9 @@ async def draft(
     return record
 
 
-async def apply(session: AsyncSession, merchant_id: UUID, record: Draft) -> None:
+async def apply(
+    session: AsyncSession, merchant_id: UUID, record: Draft, *, now: datetime = NOW
+) -> None:
     await AfterSaleDecisionHandler().apply(
         session,
         context(merchant_id),
@@ -77,7 +81,7 @@ async def apply(session: AsyncSession, merchant_id: UUID, record: Draft) -> None
         HandlerRequest(
             draft_version=1, target_version=record.target_version, accepted_entry_ids=None
         ),
-        now=NOW,
+        now=now,
         locale="zh-CN",  # type: ignore[arg-type]
     )
 
@@ -254,3 +258,44 @@ async def test_return_receipt_restocks_only_sellable_and_refund_uses_snapshot(
         select(AfterSaleLine).where(AfterSaleLine.after_sale_id == record.id)
     )
     assert line is not None and line.refund_amount == Decimal("7.00")
+
+
+@pytest.mark.asyncio
+async def test_refund_and_return_use_business_day_across_utc_midnight(
+    db_session: AsyncSession, merchant_one_id: UUID
+) -> None:
+    record = await sale(db_session, merchant_one_id, kind="RETURN_REFUND")
+    product = Product(
+        merchant_id=merchant_one_id, business_date=NOW.date(),
+        product_code=f"test-{uuid4().hex[:10]}", title="退货商品", category="测试",
+        price=Decimal("10.00"), status="ONLINE", listed_at=NOW,
+        stock_on_hand=5, stock_reserved=0,
+    )
+    db_session.add(product)
+    await db_session.flush()
+    item = OrderItem(
+        merchant_id=merchant_one_id, business_date=NOW.date(), order_id=record.order_id,
+        product_id=product.id, quantity=1, item_amount=Decimal("10.00"),
+        unit_price=Decimal("10.00"), discount_amount=Decimal("0.00"),
+        line_total=Decimal("10.00"),
+    )
+    db_session.add(item)
+    await db_session.flush()
+    db_session.add(AfterSaleLine(
+        after_sale_id=record.id, order_item_id=item.id, quantity=1,
+        refund_amount=Decimal("10.00"),
+    ))
+    await db_session.flush()
+    for decision, sellable in (("APPROVE", None), ("RECEIVE", False), ("REFUND", None)):
+        proposal = await draft(
+            db_session, merchant_one_id, record.id,
+            version=record.state_version, decision=decision, sellable=sellable,
+        )
+        await apply(db_session, merchant_one_id, proposal, now=CROSS_DAY)
+
+    refund = await db_session.scalar(select(Refund).where(Refund.after_sale_id == record.id))
+    returned = await db_session.scalar(
+        select(ReturnRecord).where(ReturnRecord.after_sale_id == record.id)
+    )
+    assert refund is not None and refund.business_date == date(2026, 9, 25)
+    assert returned is not None and returned.business_date == date(2026, 9, 25)

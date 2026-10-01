@@ -50,7 +50,7 @@ class LlmCostGuard:
         *,
         request_id: str,
         merchant_id: UUID | None,
-        purpose: Literal["AGENT", "LOCALIZATION"] = "AGENT",
+        purpose: Literal["AGENT", "LOCALIZATION", "MEMORY"] = "AGENT",
     ) -> None:
         """`merchant_id` 放宽为可空：`/api/admin/*` 的全局调用（如本地化的
         GLOBAL 作用域翻译）没有商家上下文，`llm_usage.merchant_id` 本身也早已

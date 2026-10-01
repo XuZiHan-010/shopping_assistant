@@ -121,6 +121,14 @@ class OrderItemPriceSnapshot(TradeModel):
         return self
 
 
+class OrderLeadItem(TradeModel):
+    """订单摘要用的首件商品展示信息，取订单首行价格快照名称与商品当前图片。"""
+
+    product_id: PublicId
+    name: str = Field(min_length=1, max_length=200)
+    image_url: ImageUrl | None
+
+
 class OrderSummary(TradeModel):
     id: PublicId
     payment_status: PaymentStatus
@@ -130,6 +138,8 @@ class OrderSummary(TradeModel):
     item_count: int = Field(strict=True, ge=1)
     created_at: UtcDatetime
     pay_by: UtcDatetime
+    lead_item: OrderLeadItem
+    last_event_at: UtcDatetime
 
     @model_validator(mode="after")
     def fulfillment_requires_payment(self) -> Self:
@@ -140,6 +150,8 @@ class OrderSummary(TradeModel):
             raise ValueError("未支付订单不得进入履约")
         if self.pay_by < self.created_at:
             raise ValueError("支付截止不得早于创建时间")
+        if self.last_event_at < self.created_at:
+            raise ValueError("最近事件时间不得早于创建时间")
         return self
 
 
@@ -211,3 +223,17 @@ class UnavailableItemDetail(TradeModel):
     product_id: PublicId
     reason: Literal["OUT_OF_STOCK", "INSUFFICIENT_STOCK", "DELISTED"]
     stock_band: StockBand
+
+
+MAX_ORDER_LINE_COUNT = 50
+
+
+class MerchantOrderSummary(OrderSummary):
+    """商家侧订单摘要：顾客以店铺级脱敏别名出现，不含 buyer_key（§8.12.4）。"""
+
+    buyer_alias: str = Field(min_length=1, max_length=64)
+    line_count: int = Field(strict=True, ge=1, le=MAX_ORDER_LINE_COUNT)
+
+
+class MerchantOrderDetailResponse(OrderDetailResponse):
+    buyer_alias: str = Field(min_length=1, max_length=64)

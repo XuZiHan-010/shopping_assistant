@@ -6,13 +6,15 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from typing import Annotated, Final
+from collections.abc import Mapping
+from datetime import UTC, datetime, timedelta
+from typing import Annotated, Final, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.analytics.demo_data import BUSINESS_TIMEZONE
 from app.api.dependencies import get_db_session, get_request_locale
 from app.api.v2_deps import get_cursor_codec
 from app.core.errors import ResourceForbiddenError, error_responses
@@ -42,6 +44,7 @@ ShopSlugPath = Annotated[
 ]
 #: 店铺规则摘要暂无数据来源；返回空串而不是编造一段摘要（R7）。
 RULES_SUMMARY_UNAVAILABLE: Final = ""
+ProductSort = Literal["newest", "popular"]
 
 
 async def resolve_shop(shop_slug: ShopSlugPath, session: AsyncSession) -> UUID:
@@ -52,7 +55,8 @@ async def resolve_shop(shop_slug: ShopSlugPath, session: AsyncSession) -> UUID:
 
 
 def _public_scope(
-    *, endpoint: str, resource: str, merchant_id: UUID, locale: SupportedLocale, limit: int
+    *, endpoint: str, resource: str, merchant_id: UUID, locale: SupportedLocale, limit: int,
+    filters: Mapping[str, str] | None = None,
 ) -> CursorScope:
     """公开列表的游标绑定到端点 + 店铺 + 资源 + 语言 + 每页大小；没有会话主体。"""
 
@@ -62,7 +66,7 @@ def _public_scope(
         principal_digest="",
         merchant_id=str(merchant_id),
         resource=resource,
-        filters={},
+        filters=dict(filters or {}),
         locale=locale.value,
         limit=limit,
     )
@@ -103,23 +107,40 @@ async def list_products(
     locale: Annotated[SupportedLocale, Depends(get_request_locale)],
     cursor: Annotated[str | None, Query(min_length=1, max_length=2048)] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    sort: Annotated[ProductSort, Query()] = "newest",
 ) -> CursorPage[ProductSummary]:
-    """只返回在售商品；排序 `created_at DESC, id DESC`。"""
+    """只返回在售商品；按上新或近 30 个业务日已支付件数排序。"""
 
     merchant_id = await resolve_shop(shop_slug, session)
-    products = await CatalogReadRepository(session).on_sale_products(merchant_id)
+    repository = CatalogReadRepository(session)
+    products = await repository.on_sale_products(merchant_id)
+    now = datetime.now(UTC)
+    quantities: dict[UUID, int] = {}
+    if sort == "popular":
+        since = now.astimezone(BUSINESS_TIMEZONE).date() - timedelta(days=29)
+        quantities = await repository.recent_paid_quantities(merchant_id, since=since)
+        products.sort(
+            key=lambda product: (
+                quantities.get(product.id, 0), product.created_at, product.id
+            ),
+            reverse=True,
+        )
     page = codec.page(
         products,
-        key=lambda product: _newest_first(product.created_at, str(product.id)),
+        key=lambda product: (
+            (descending(f"{quantities.get(product.id, 0):012d}"),)
+            if sort == "popular" else ()
+        ) + _newest_first(product.created_at, str(product.id)),
         scope=_public_scope(
             endpoint="shop.products.list",
             resource="PRODUCT",
             merchant_id=merchant_id,
             locale=locale,
             limit=limit,
+            filters={"sort": sort},
         ),
         cursor=cursor,
-        now=datetime.now(UTC),
+        now=now,
     )
     translations = await cached_product_translations(
         session, merchant_id=merchant_id, products=page.items, locale=locale

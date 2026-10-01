@@ -1,6 +1,6 @@
-import { CartClient } from './CartClient'
+import { redirect } from 'next/navigation'
 
-// 需要会话的页面一律客户端渲染：会话只存浏览器内存，服务端拿不到。
-export default function CartPage() {
-  return <CartClient />
+export default async function CartPage({ params }: { params: Promise<{ shop_slug: string }> }) {
+  const { shop_slug } = await params
+  redirect(`/${shop_slug}?panel=cart`)
 }

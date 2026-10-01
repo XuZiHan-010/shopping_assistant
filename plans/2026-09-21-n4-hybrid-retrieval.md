@@ -25,15 +25,16 @@
 > 工具名、表字段、错误码都是**当时的设计**。开工前逐项对照上游**实际落地**的接口；
 > 不一致时先按 PRD → 契约 → 计划的顺序修正，**再动代码**，不得在实现里默默适配或绕过。
 
-- [ ] `n3-merchant-skills` Task 6 已完成：S7 在关键词检索下可跑，**作为本计划的回归基准**
-      （2026-09-27 核对：S7 目前只有集成测试 `tests/integration/v2/test_merchant_chat_definitions.py`，
-      `tests/e2e/` 无 S7；工作台 E2E 属 N3 出口，缺失时以该集成测试为基准并在报告中写明）；
+- [x] `n3-merchant-skills` Task 6 已完成：S7 在关键词检索下可跑，**作为本计划的回归基准**
+      （2026-09-28 核对：S7 已有两层证据——后端 `tests/e2e/test_s7_definitions_loop.py`（真实 PostgreSQL + Fake LLM）
+      与浏览器 `frontend/e2e/n3/merchant-skills.spec.ts` 的 S7 用例（`npm run test:e2e:n3`）；
+      另有集成测试 `tests/integration/v2/test_merchant_chat_definitions.py`。三者都是本计划 Task 7 的回归基准）；
 - [ ] 本地开发库与 Railway Postgres 均可启用 `vector` 扩展（先确认，不确认不开工）——
       2026-09-27 核对：`docker-compose.yml` 使用 `postgres:16-alpine`，**不含 pgvector**，见 Task 2 步骤 0；
-- [ ] **核对 §6.14 与本计划一致**；
-- [ ] **核对检索入口的实际形状**：本计划写作时假设的 `retrieve(...)` 函数并不存在，实际入口是
-      `KnowledgeRetrieval(repository).load_domain(category, keywords)`（`app/knowledge/retrieval.py:169`），
-      调用方为 v1 链路与 N3 `search_rules`（`app/tools/merchant/definitions.py:133`）；Task 4「接口不变」以此为准。
+- [x] **核对 §6.14 与本计划一致**；
+- [x] **核对检索入口的实际形状**：本计划写作时假设的 `retrieve(...)` 函数并不存在，实际入口是
+      `KnowledgeRetrieval(repository).load_domain(category, keywords)`（`app/knowledge/retrieval.py:200`），
+      调用方为 v1 链路与 N3 `search_rules`（`app/tools/merchant/definitions.py:145`）；Task 4「接口不变」以此为准。
 
 > **2026-09-27 编组修订**（见 `plans/2026-09-27-n4-module-roadmap.md` §二）：新增 Task 2 步骤 0（本地与集成测试库镜像）、
 > Task 6 步骤 0（知识后台索引状态字段契约先行）；Task 3 步骤 1 的 Railway 实测数据须由用户提供或另行授权读取。
@@ -239,7 +240,11 @@ async def test_retrieve_signature_unchanged() -> None:
 
 - [ ] **步骤 0：契约先行**——索引状态字段先写入后端计划 §8.6.5（知识后台契约），**优先加在既有
       `GET /api/admin/knowledge/tree` 响应里**；若确需新端点，须先改 PRD §11 与 `AGENTS.md` §8.1 路径表。
-      随后 Schema → OpenAPI → `generated.ts` → Adapter → `KnowledgeBaseView.vue`（Sonnet）
+      随后 Schema → OpenAPI → `generated.ts` → Adapter → `KnowledgeBaseView.vue`（Sonnet）。
+      **（2026-09-28，PRD §15「W」）** 页面部分在 W Task 7 完成后做：
+      - 知识库已迁入商家工作台侧栏的「管理」分组，经 `AdminGate` 输入管理员令牌后进入；
+      - 索引状态展示用新 token；
+      - 契约与后端部分不受 W 影响，可以先做。
 - [ ] **步骤 1：写失败测试**——保存文档后新版本进入构建中；构建期间旧版本继续服务。
 - [ ] **步骤 2：确认失败 → 实现 → 确认通过**
 
@@ -247,7 +252,8 @@ async def test_retrieve_signature_unchanged() -> None:
 
 ### Task 7：S7 回归与 E5 报告
 
-- [ ] **步骤 1：S7 回归**——`n3-merchant-skills` Task 6 的 S7 场景在混合检索下重跑，**必须通过**
+- [ ] **步骤 1：S7 回归**——`n3-merchant-skills` Task 6 的 S7 场景在混合检索下重跑，**必须通过**：
+      后端 `test_s7_definitions_loop.py` 与浏览器 `npm run test:e2e:n3` 的 S7 用例两层都要重跑
 - [ ] **步骤 2：E5 RAG 报告**——基线 vs 混合 vs 混合 + 重排的完整对比，
       落 `docs/history/eval/rag-hybrid.md`
 - [ ] **步骤 3：忠实度与引用正确率**——需 LLM 裁判，按 R3 提交审批，填入实际条数与费用上限；

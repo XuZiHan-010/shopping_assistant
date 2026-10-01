@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { components } from '../generated'
-import { toCart, toOrder, toProductDetail } from './shop'
+import { toCart, toOrder, toOrderSummary, toProductDetail } from './shop'
 
 type S = components['schemas']
 
@@ -11,13 +11,15 @@ describe('wire → 领域模型', () => {
       stock_band: 'LOW_STOCK', image_url: null, description: '长描述', content_version: 3,
       source_locale: 'zh-CN', requested_locale: 'en-US',
       name_translation_status: 'MACHINE', short_description_translation_status: 'FALLBACK',
-      description_translation_status: 'FALLBACK',
+      description_translation_status: 'FALLBACK', missing_attributes: ['产地'], category: '鞋靴',
       attributes: [
         { name: '材质', value: '100% 羊绒', source: 'MERCHANT', updated_at: '2026-09-01T00:00:00Z', name_translation_status: 'MACHINE', value_translation_status: 'FALLBACK' },
         { name: '产地', value: '', source: 'MERCHANT', updated_at: '2026-09-01T00:00:00Z', name_translation_status: 'FALLBACK', value_translation_status: 'SOURCE' },
       ],
     }
     const detail = toProductDetail(raw)
+    expect(detail.missingAttributes).toEqual(['产地'])
+    expect(detail.category).toBe('鞋靴')
     expect(detail.priceCents).toBe(25900)
     expect(detail.attributes).toEqual([
       { name: '材质', value: '100% 羊绒', source: 'MERCHANT', nameTranslationStatus: 'MACHINE', valueTranslationStatus: 'FALLBACK' },
@@ -45,11 +47,15 @@ describe('wire → 领域模型', () => {
     const raw: S['OrderDetailResponse'] = {
       id: 'o1', payment_status: 'PAID', fulfillment_status: 'SHIPPED', after_sale_status: 'ACTIVE',
       total_cents: 25900, item_count: 1, created_at: '2026-09-01T00:00:00Z', pay_by: '2026-09-01T00:30:00Z',
+      lead_item: { product_id: 'p1', name: 'A', image_url: null }, last_event_at: '2026-09-01T00:10:00Z',
       items: [], subtotal_cents: 25900, discount_cents: 0, coupon_id: null, paid_at: '2026-09-01T00:10:00Z',
       closed_at: null, close_reason: null, is_demo: true,
     }
     const order = toOrder(raw)
     expect([order.paymentStatus, order.fulfillmentStatus, order.afterSaleStatus]).toEqual(['PAID', 'SHIPPED', 'ACTIVE'])
     expect(order.totalCents).toBe(25900)
+    expect(order.leadItem).toEqual({ productId: 'p1', name: 'A', imageUrl: null })
+    expect(order.lastEventAt).toBe(raw.last_event_at)
+    expect(toOrderSummary(raw)).toMatchObject({ leadItem: order.leadItem, lastEventAt: raw.last_event_at })
   })
 })

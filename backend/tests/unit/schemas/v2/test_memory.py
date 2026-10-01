@@ -3,6 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
+from app.core.errors import ConfirmationRequiredError
 from app.schemas.v2 import memory
 from app.schemas.v2.memory import (
     MCP_PROTOCOL_VERSION,
@@ -78,7 +79,7 @@ def test_customer_memories_response_is_cursor_paged() -> None:
 
 
 def test_disabling_memory_requires_purge_confirmation() -> None:
-    with pytest.raises(ValidationError):
+    with pytest.raises(ConfirmationRequiredError):
         MemoryPreferenceRequest(enabled=False)
     ok = MemoryPreferenceRequest(enabled=False, purge_confirmation="yes")
     assert ok.purge_confirmation == "yes"

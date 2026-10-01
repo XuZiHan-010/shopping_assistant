@@ -5,7 +5,9 @@ const ORDER_ID = '00000000-0000-0000-0000-0000000054c1'
 test('S4 顾客核对后确认售后，未勾选时不能提交', async ({ page }) => {
   await page.goto(`/borough-s4-e2e/orders/${ORDER_ID}`)
   await expect(page.getByTestId('identity')).toHaveText('访客')
-  await page.getByRole('button', { name: '绑定演示顾客' }).click()
+  await expect(page.getByText(/购物车还是空的/)).toBeVisible()
+  await page.locator('#shop-main').getByRole('button', { name: '绑定演示顾客' }).click()
+  await expect(page.getByTestId('identity')).toHaveText('演示顾客')
   await expect(page.getByRole('link', { name: '申请售后' })).toBeVisible()
   await page.getByRole('link', { name: '申请售后' }).click()
   await expect(page.getByRole('heading', { name: '售后服务' })).toBeVisible()

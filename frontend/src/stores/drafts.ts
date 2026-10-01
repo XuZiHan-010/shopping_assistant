@@ -42,8 +42,11 @@ export const useDraftsStore = defineStore('drafts', () => {
   const hasMore = ref(false)
   const loading = ref(false)
   const errorMessage = ref('')
+  let requestVersion = 0
 
   registerSessionScopedReset(() => {
+    requestVersion += 1
+    loading.value = false
     items.value = []
     nextCursor.value = null
     hasMore.value = false
@@ -52,18 +55,21 @@ export const useDraftsStore = defineStore('drafts', () => {
 
   async function loadDrafts(options: LoadDraftsOptions = {}): Promise<void> {
     const auth = useAuthStore()
+    const version = ++requestVersion
     loading.value = true
     errorMessage.value = ''
     try {
       const page = await auth.callWithSessionRetry((sid) => fetchDrafts(sid, options))
+      if (version !== requestVersion) return
       items.value = options.cursor ? [...items.value, ...page.items] : page.items
       nextCursor.value = page.nextCursor
       hasMore.value = page.hasMore
     } catch (error) {
+      if (version !== requestVersion) return
       errorMessage.value = error instanceof Error ? error.message : '草稿列表加载失败。'
       throw error
     } finally {
-      loading.value = false
+      if (version === requestVersion) loading.value = false
     }
   }
 

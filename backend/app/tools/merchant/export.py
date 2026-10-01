@@ -2,8 +2,9 @@
 
 只有一个工具 `create_export`：`READ_ONLY`——它只建一条导出记录和一个限时签名链接，
 **不返回任何一行明细数据**，导出范围（商家、时间、行数上限）全部由 `ExportService`/
-`AnalyticsRepository` 在后端强制（R4）。创建与下载分别审计：创建审计写在这里，
-下载审计已在 `/api/exports/{export_id}` 路由里（v1 既有路径，v2 复用同一签名链接）。
+`AnalyticsRepository` 在后端强制（R4）。创建与下载分别审计：创建审计 `EXPORT_CREATED`
+写在这里，下载审计 `EXPORT_DOWNLOADED` 写在 `app/api/routes/exports.py`（签名校验通过、
+内容生成成功后才写；v1 既有路径，v2 复用同一签名链接）。
 
 **`answer_id` 恒为 `None`**：这个工具在工具循环执行期间运行，此时本轮的 `Answer` 行
 尚未落库（`services/v2/merchant_chat.py` 在循环结束后才写 `Answer`）；`ExportFile`

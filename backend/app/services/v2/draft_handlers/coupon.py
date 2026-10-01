@@ -20,7 +20,7 @@ from app.core.session import SessionContext
 from app.localization.locales import SupportedLocale
 from app.models.drafts import Draft
 from app.models.promotion import Coupon
-from app.schemas.v2.drafts import DraftKind, GuardrailCheckResult
+from app.schemas.v2.drafts import DraftKind
 from app.services.v2.draft_handlers import HandlerRequest, HandlerResult
 from app.services.v2.drafts import coupon_entry_id
 from app.services.v2.guardrails import check_coupon, load_limits
@@ -53,17 +53,32 @@ class CouponHandler:
             raise VersionConflictError(scope="TARGET")
 
         payload = draft.payload
-        checks: list[GuardrailCheckResult] = []
-        if payload["kind"] == "DISCOUNT":
-            limits = await load_limits(session, ctx.merchant_id)
-            checks = check_coupon(
-                discount_rate=Decimal(str(payload["discount_rate"])), limits=limits, locale=locale
+        is_full_reduction = payload["kind"] == "FULL_REDUCTION"
+        limits = await load_limits(session, ctx.merchant_id)
+        checks = check_coupon(
+            discount_rate=(
+                Decimal(str(payload["discount_rate"]))
+                if payload["kind"] == "DISCOUNT"
+                else None
+            ),
+            threshold_amount=(
+                Decimal(str(payload["threshold_amount"]))
+                if is_full_reduction and payload.get("threshold_amount") is not None
+                else None
+            ),
+            discount_amount=(
+                Decimal(str(payload["discount_amount"]))
+                if is_full_reduction and payload.get("discount_amount") is not None
+                else None
+            ),
+            limits=limits,
+            locale=locale,
+        )
+        failed = [check for check in checks if not check.passed]
+        if failed:
+            raise GuardrailRejectedError(
+                details=[check.model_dump(mode="json") for check in failed]
             )
-            failed = [check for check in checks if not check.passed]
-            if failed:
-                raise GuardrailRejectedError(
-                    details=[check.model_dump(mode="json") for check in failed]
-                )
 
         coupon = Coupon(
             id=draft.target_id,

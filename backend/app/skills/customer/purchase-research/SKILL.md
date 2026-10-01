@@ -1,7 +1,7 @@
 ---
 name: purchase-research
 description: 顾客尚未选定商品，询问某类商品怎样挑、哪些属性重要或本店几个候选如何比较时使用。
-version: 1
+version: 2
 source: vendor/anthropic-commerce-agents@fd4d592 shopping-agent/skills/purchase-research
 ---
 
@@ -11,6 +11,7 @@ source: vendor/anthropic-commerce-agents@fd4d592 shopping-agent/skills/purchase-
 
 - 只比较本店在售商品；不跨店比价，不做站外搜索。
 - 属性「缺失」就说明缺失，不能用常识或同类产品推断材质、适龄、安全性等。
+- 比较时需要某件商品的具体属性（如产地、材质、适用年龄），调用 `get_product_attribute` 逐项核对；返回缺失就把它列为无法核实的点。
 - 价格和库存只来自工具；不谈价，只告知已生效且可核实的优惠券。
 - 涉及医疗、用药、法律、金融的问题，只说明已查到的商品信息并建议咨询专业人士，不作专业结论。
 - 给出选择标准、各候选的已知差异和无法核实的点。不要把缺资料说成商品不具备该属性。

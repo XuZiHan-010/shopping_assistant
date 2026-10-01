@@ -25,6 +25,7 @@ from app.schemas.v2.shop_session import (
     ProductSummary,
     is_trusted_image_host,
 )
+from app.services.v2.content_completeness import missing_required_attributes
 from app.services.v2.stock_tier import stock_band
 
 _ATTRIBUTE_SOURCES: Final = frozenset({"MERCHANT", "DEMO"})
@@ -145,6 +146,7 @@ def to_product_summary(
         requested_locale=locale.value,
         name_translation_status=name_status,
         short_description_translation_status=short_status,
+        category=product.category,
     )
 
 
@@ -177,6 +179,9 @@ def to_product_detail(
             translations=cached,
         ),
         description_translation_status=description_status,
+        missing_attributes=sorted(
+            missing_required_attributes(category=product.category, attributes=product.attributes)
+        ),
     )
 
 
@@ -196,7 +201,7 @@ def _attributes(
         if not isinstance(entry, Mapping):
             continue
         value, source = entry.get("value"), entry.get("source")
-        if not isinstance(value, str) or not value or source not in _ATTRIBUTE_SOURCES:
+        if not isinstance(value, str) or not value.strip() or source not in _ATTRIBUTE_SOURCES:
             continue
         translated_name, name_status = _localized(
             name,

@@ -1,0 +1,1447 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="system" data-size="md">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#f6f1e7" media="(prefers-color-scheme: light)" />
+<meta name="theme-color" content="#131816" media="(prefers-color-scheme: dark)" />
+<meta name="description" content="Borough 顾客端第二版原型：结构对齐 Anthropic retail storefront-web，配色沿用「市集大厅」。" />
+<title>Borough 店铺</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500..700&family=IBM+Plex+Mono:wght@400;500&family=Instrument+Sans:wght@400..700&family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@600;700&display=swap" rel="stylesheet" />
+<style>
+/* ============================================================
+   Borough 顾客端 · 第二版原型（2026-09-28）
+   结构对齐 Anthropic retail storefront-web：顶栏视图切换 + 主区（首页/对话）+ 底部常驻输入框 + 右侧常驻购物车。
+   配色沿用商家端定稿的「市集大厅」：奶油纸面、铸铁绿结构色、砖红只给助手与主操作、金色只做细线与招牌。
+   ============================================================ */
+:root {
+  --ground: #f6f1e7;
+  --chrome: #fffdf8;
+  --card: #fffdf8;
+  --raised: #fffdf8;
+  --well: #efe8da;
+  --hover: #f3ede1;
+  --ink: #1b2420;
+  --ink-2: #435049;
+  --ink-soft: #6f7a73;
+  --ink-faint: #9aa39c;
+  --line: rgba(31, 59, 47, 0.12);
+  --line-strong: rgba(31, 59, 47, 0.22);
+  --iron: #1f3b2f;
+  --on-iron: #f6f1e7;
+  --gilt: #c39a3a;
+  --gilt-soft: #f4e9cf;
+  --gilt-bright: #e2c681;
+  --gilt-ink: #6a5116;
+  --accent: #b5502f;
+  --accent-strong: #9c3f22;
+  --accent-soft: #f5e3d9;
+  --accent-line: rgba(181, 80, 47, 0.38);
+  --accent-ink: #7a2f16;
+  --on-accent: #ffffff;
+  --ok: #2d7a4c;
+  --ok-soft: #e1f0e5;
+  --warn: #a8690f;
+  --warn-soft: #faedd3;
+  --danger: #b3261e;
+  --danger-soft: #f9e2df;
+  --info: #2b5f8a;
+  --info-soft: #e2edf6;
+  /* 商品占位图底色：五个类目各一，正式图片接入后只作加载占位 */
+  --t-dress: #f4e2d8; --t-dress-ink: #9c4a2c;
+  --t-shirt: #dfe9e2; --t-shirt-ink: #2c5242;
+  --t-boot: #f1e6cf;  --t-boot-ink: #7a5a1c;
+  --t-home: #e2eaf1;  --t-home-ink: #2b5f8a;
+  --t-beauty: #ebe4f4; --t-beauty-ink: #5a48b0;
+  --shadow-sm: 0 1px 2px rgba(31, 59, 47, 0.06);
+  --shadow: 0 1px 2px rgba(31, 59, 47, 0.06), 0 8px 24px -12px rgba(31, 59, 47, 0.2);
+  --shadow-lg: 0 24px 60px -20px rgba(20, 38, 30, 0.42);
+  --font-display: "Fraunces", "Noto Serif SC", "Songti SC", serif;
+  --font-body: "Instrument Sans", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", monospace;
+  --bar-h: 64px;
+  --cart-w: 400px;
+  --scale: 1;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --ground: #131816; --chrome: #181e1b; --card: #1b221f; --raised: #212a26; --well: #242d29; --hover: #26302b;
+  --ink: #ece7db; --ink-2: #c9cdc6; --ink-soft: #9ba49e; --ink-faint: #6f7973;
+  --line: rgba(236, 231, 219, 0.09); --line-strong: rgba(236, 231, 219, 0.17);
+  --iron: #2c5242; --on-iron: #f6f1e7;
+  --gilt: #d4b060; --gilt-soft: rgba(212, 176, 96, 0.12); --gilt-bright: #e8cf8f; --gilt-ink: #e2c681;
+  --accent: #db7552; --accent-strong: #e58a69; --accent-soft: rgba(219, 117, 82, 0.16); --accent-line: rgba(219, 117, 82, 0.45); --accent-ink: #f0a88c; --on-accent: #1b1410;
+  --ok: #6cc592; --ok-soft: rgba(108, 197, 146, 0.14); --warn: #e3ae52; --warn-soft: rgba(227, 174, 82, 0.14);
+  --danger: #f08378; --danger-soft: rgba(240, 131, 120, 0.14); --info: #80b4e0; --info-soft: rgba(128, 180, 224, 0.14);
+  --t-dress: rgba(219, 117, 82, 0.14); --t-dress-ink: #f0a88c;
+  --t-shirt: rgba(108, 197, 146, 0.12); --t-shirt-ink: #8fd3ad;
+  --t-boot: rgba(212, 176, 96, 0.13); --t-boot-ink: #e2c681;
+  --t-home: rgba(128, 180, 224, 0.13); --t-home-ink: #9cc6ea;
+  --t-beauty: rgba(173, 161, 240, 0.14); --t-beauty-ink: #bdb3f4;
+  --shadow-sm: none; --shadow: 0 1px 0 rgba(255, 255, 255, 0.03); --shadow-lg: 0 20px 50px -12px rgba(0, 0, 0, 0.6);
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="system"] {
+    --ground: #131816; --chrome: #181e1b; --card: #1b221f; --raised: #212a26; --well: #242d29; --hover: #26302b;
+    --ink: #ece7db; --ink-2: #c9cdc6; --ink-soft: #9ba49e; --ink-faint: #6f7973;
+    --line: rgba(236, 231, 219, 0.09); --line-strong: rgba(236, 231, 219, 0.17);
+    --iron: #2c5242; --on-iron: #f6f1e7;
+    --gilt: #d4b060; --gilt-soft: rgba(212, 176, 96, 0.12); --gilt-bright: #e8cf8f; --gilt-ink: #e2c681;
+    --accent: #db7552; --accent-strong: #e58a69; --accent-soft: rgba(219, 117, 82, 0.16); --accent-line: rgba(219, 117, 82, 0.45); --accent-ink: #f0a88c; --on-accent: #1b1410;
+    --ok: #6cc592; --ok-soft: rgba(108, 197, 146, 0.14); --warn: #e3ae52; --warn-soft: rgba(227, 174, 82, 0.14);
+    --danger: #f08378; --danger-soft: rgba(240, 131, 120, 0.14); --info: #80b4e0; --info-soft: rgba(128, 180, 224, 0.14);
+    --t-dress: rgba(219, 117, 82, 0.14); --t-dress-ink: #f0a88c;
+    --t-shirt: rgba(108, 197, 146, 0.12); --t-shirt-ink: #8fd3ad;
+    --t-boot: rgba(212, 176, 96, 0.13); --t-boot-ink: #e2c681;
+    --t-home: rgba(128, 180, 224, 0.13); --t-home-ink: #9cc6ea;
+    --t-beauty: rgba(173, 161, 240, 0.14); --t-beauty-ink: #bdb3f4;
+    --shadow-sm: none; --shadow: 0 1px 0 rgba(255, 255, 255, 0.03); --shadow-lg: 0 20px 50px -12px rgba(0, 0, 0, 0.6);
+    color-scheme: dark;
+  }
+}
+:root[data-size="sm"] { --scale: 0.92; }
+:root[data-size="lg"] { --scale: 1.1; }
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  font-family: var(--font-body); font-size: 14px; line-height: 1.5; color: var(--ink); background: var(--ground);
+  -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+  touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+}
+/* 纸面颗粒 */
+body::before {
+  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0; opacity: 0.35;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .12 0 0 0 0 .2 0 0 0 0 .16 0 0 0 .05 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+:root[data-theme="dark"] body::before { opacity: 0.12; }
+button, input, textarea, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+a { color: inherit; }
+svg.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+[hidden] { display: none !important; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.num { font-variant-numeric: tabular-nums lining-nums; }
+.mono { font-family: var(--font-mono); font-size: 0.9em; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+h1, h2, h3 { text-wrap: balance; }
+.skip { position: fixed; left: 12px; top: -60px; z-index: 100; padding: 10px 14px; border-radius: 10px; background: var(--ink); color: var(--ground); text-decoration: none; transition: top 160ms var(--ease); }
+.skip:focus { top: 12px; }
+
+/* ---------------- 外壳 ---------------- */
+.app {
+  position: relative; z-index: 1; zoom: var(--scale);
+  height: calc(100svh / var(--scale));
+  display: grid; grid-template-rows: var(--bar-h) minmax(0, 1fr); grid-template-columns: minmax(0, 1fr) var(--cart-w);
+}
+
+/* 顶栏：品牌 · 视图切换 · 动态 · 购物车（窄屏）· 身份 */
+.bar { grid-column: 1 / -1; position: relative; z-index: 20; display: flex; align-items: center; gap: 18px; padding: 0 20px; background: var(--chrome); border-bottom: 1px solid var(--line); }
+.bar::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; background: linear-gradient(90deg, transparent, var(--gilt) 18%, var(--gilt) 82%, transparent); opacity: 0.5; }
+.wordmark { display: flex; align-items: center; gap: 10px; padding-right: 4px; text-decoration: none; }
+.mark { width: 34px; height: 34px; flex: none; }
+.wordmark b { display: block; font-family: var(--font-display); font-size: 20px; font-weight: 600; letter-spacing: -0.01em; line-height: 1; }
+.wordmark small { display: block; margin-top: 3px; font-size: 11.5px; letter-spacing: 0.06em; color: var(--ink-soft); white-space: nowrap; }
+.tabs { display: flex; gap: 4px; }
+.tab { position: relative; display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 14px; border: 0; border-radius: 10px; background: none; color: var(--ink-2); font-size: 14.5px; font-weight: 500; transition: background-color 150ms, color 150ms; }
+.tab:hover { background: var(--hover); color: var(--ink); }
+.tab[aria-current="page"] { background: var(--iron); color: var(--on-iron); font-weight: 600; }
+.tab[aria-current="page"] svg.i { color: var(--gilt-bright); }
+.tab .count { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 99px; background: var(--warn-soft); color: var(--warn); font-size: 12px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.tab[aria-current="page"] .count { background: rgba(246, 241, 231, 0.18); color: var(--on-iron); }
+.bar-end { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.pill-btn { display: inline-flex; align-items: center; gap: 7px; height: 36px; padding: 0 14px; border: 1px solid var(--line-strong); border-radius: 99px; background: var(--card); font-size: 13.5px; font-weight: 600; transition: border-color 150ms, background-color 150ms; }
+.pill-btn:hover { border-color: var(--ink-faint); background: var(--hover); }
+.pill-btn .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: pulse 1.1s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.25; } }
+.cart-btn { display: none; }
+.cart-btn .n { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 99px; background: var(--accent); color: var(--on-accent); font-size: 12px; font-weight: 650; }
+.acct { position: relative; }
+.acct > button { display: flex; align-items: center; gap: 10px; padding: 4px 10px 4px 4px; border: 0; border-radius: 12px; background: none; text-align: left; }
+.acct > button:hover, .acct > button[aria-expanded="true"] { background: var(--hover); }
+.avatar { width: 34px; height: 34px; flex: none; border-radius: 50%; display: grid; place-items: center; background: var(--gilt-soft); color: var(--gilt-ink); border: 1px solid rgba(195, 154, 58, 0.45); font-size: 13px; font-weight: 700; }
+.avatar.guest { background: var(--well); color: var(--ink-soft); border-color: var(--line-strong); }
+.acct strong { display: block; font-size: 14px; font-weight: 600; line-height: 1.2; }
+.acct .t > span { display: block; font-size: 12px; color: var(--ink-soft); white-space: nowrap; }
+
+.menu { position: absolute; z-index: 40; border-radius: 14px; background: var(--raised); color: var(--ink); box-shadow: var(--shadow-lg); border: 1px solid var(--line); }
+.acct .menu { right: 0; top: calc(100% + 6px); width: 300px; padding: 16px; }
+.acct .menu p { margin: 0 0 12px; font-size: 13px; color: var(--ink-2); }
+.acct .menu .fine { margin: 10px 0 0; font-size: 12px; color: var(--ink-soft); }
+
+/* 主区：滚动页 + 底部常驻输入框 */
+.main { grid-column: 1; grid-row: 2; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.page { max-width: 856px; margin: 0 auto; padding: 30px 24px 28px; display: flex; flex-direction: column; gap: 24px; }
+.reveal > * { animation: rise 420ms var(--ease) both; }
+.reveal > *:nth-child(2) { animation-delay: 40ms; }
+.reveal > *:nth-child(3) { animation-delay: 80ms; }
+.reveal > *:nth-child(4) { animation-delay: 120ms; }
+.reveal > *:nth-child(5) { animation-delay: 160ms; }
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+.dock { padding: 10px 24px 16px; background: linear-gradient(to top, var(--ground) 72%, transparent); }
+.composer { max-width: 808px; margin: 0 auto; display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 18px; border: 1.5px solid var(--accent-line); border-radius: 16px; background: var(--card); box-shadow: var(--shadow); transition: border-color 150ms, box-shadow 150ms; }
+.composer:focus-within { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+.composer input { flex: 1; min-width: 0; height: 44px; border: 0; outline: 0; background: none; font-size: 16px; }
+.composer input::placeholder { color: var(--ink-faint); }
+.send { width: 42px; height: 42px; flex: none; display: grid; place-items: center; border: 0; border-radius: 12px; background: var(--well); color: var(--ink-faint); transition: background-color 150ms, color 150ms; }
+.send:enabled { background: var(--accent); color: var(--on-accent); }
+.send:enabled:hover { background: var(--accent-strong); }
+.dock .fine { max-width: 808px; margin: 8px auto 0; font-size: 12px; color: var(--ink-faint); text-align: center; }
+
+/* ---------------- 首页 ---------------- */
+.eyebrow { margin: 0; font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.06em; color: var(--ink-soft); }
+.greet { margin: 6px 0 8px; font-family: var(--font-display); font-size: 36px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.15; }
+.summary { margin: 0; font-size: 16.5px; color: var(--ink-2); }
+.summary strong { color: var(--warn); font-weight: 650; }
+.quick { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.qcard { display: flex; align-items: center; gap: 14px; min-height: 78px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); box-shadow: var(--shadow-sm); text-align: left; font-size: 15px; line-height: 1.4; transition: border-color 150ms, box-shadow 150ms, transform 150ms; }
+.qcard:hover { border-color: var(--accent-line); box-shadow: var(--shadow); transform: translateY(-1px); }
+.qcard .ico { width: 36px; height: 36px; flex: none; display: grid; place-items: center; border-radius: 10px; background: var(--accent-soft); color: var(--accent); }
+.qcard .go { margin-left: auto; color: var(--ink-faint); }
+.qcard:hover .go { color: var(--accent); }
+
+.panel { border: 1px solid var(--line); border-radius: 16px; background: var(--card); box-shadow: var(--shadow-sm); overflow: hidden; }
+.panel-head { display: flex; align-items: baseline; gap: 10px; padding: 18px 22px 12px; }
+.panel-head h2, .sec-head h2 { margin: 0; font-family: var(--font-display); font-size: 19px; font-weight: 600; }
+.panel-head .muted, .sec-head .muted { font-size: 13.5px; color: var(--ink-soft); }
+.link { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; border: 0; background: none; padding: 0; color: var(--accent-ink); font-size: 13.5px; font-weight: 600; white-space: nowrap; }
+.link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.link svg.i { width: 15px; height: 15px; }
+
+.orow { display: flex; align-items: center; gap: 14px; padding: 14px 22px; border-top: 1px solid var(--line); }
+button.orow { width: 100%; border-left: 0; border-right: 0; border-bottom: 0; background: none; text-align: left; transition: background-color 150ms; }
+button.orow:hover { background: var(--hover); }
+.orow .art { width: 54px; height: 54px; border-radius: 12px; }
+.orow .t { flex: 1; min-width: 0; }
+.orow .t strong { display: block; font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 4px; font-size: 13px; color: var(--ink-soft); }
+.meta .sep { color: var(--ink-faint); }
+.meta .urgent { color: var(--warn); font-weight: 600; }
+.status { display: inline-flex; align-items: center; gap: 6px; padding: 1px 9px; border-radius: 99px; font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.s-OUT_FOR_DELIVERY, .s-DELIVERED { background: var(--ok-soft); color: var(--ok); }
+.s-IN_TRANSIT, .s-SHIPPED { background: var(--info-soft); color: var(--info); }
+.s-NOT_SHIPPED { background: var(--well); color: var(--ink-2); }
+.s-PENDING { background: var(--warn-soft); color: var(--warn); }
+.s-CLOSED { background: var(--well); color: var(--ink-faint); }
+.s-AS { background: var(--accent-soft); color: var(--accent-ink); }
+.ghost-btn { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 13px; flex: none; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--card); font-size: 13.5px; font-weight: 600; white-space: nowrap; transition: border-color 150ms, background-color 150ms; }
+.ghost-btn:hover { border-color: var(--accent-line); background: var(--hover); }
+.ghost-btn svg.i { width: 15px; height: 15px; color: var(--accent); }
+.solid-btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 34px; padding: 0 14px; flex: none; border: 0; border-radius: 10px; background: var(--accent); color: var(--on-accent); font-size: 13.5px; font-weight: 600; white-space: nowrap; transition: background-color 150ms; }
+.solid-btn:hover { background: var(--accent-strong); }
+.solid-btn:disabled { background: var(--well); color: var(--ink-faint); }
+.empty-note { display: flex; align-items: center; gap: 14px; padding: 16px 22px 20px; border-top: 1px solid var(--line); font-size: 14px; color: var(--ink-2); }
+.empty-note p { flex: 1; margin: 0; }
+
+.sec-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 12px; margin-bottom: 14px; }
+.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px 14px; }
+.tile { display: flex; flex-direction: column; gap: 8px; padding: 0; border: 0; background: none; text-align: left; }
+.tile .art { aspect-ratio: 1 / 1; border-radius: 14px; transition: transform 200ms var(--ease), box-shadow 200ms; }
+.tile:hover .art { transform: translateY(-2px); box-shadow: var(--shadow); }
+.tile .nm { font-size: 14px; font-weight: 600; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.tile .pr { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--ink-2); }
+.stock { padding: 0 7px; border-radius: 99px; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+.stock.LOW { background: var(--warn-soft); color: var(--warn); }
+.stock.OUT { background: var(--danger-soft); color: var(--danger); }
+
+/* 商品图：正式图片接入前是类目色块 + 线稿；第 6 件商品刻意无图 */
+.art { position: relative; display: grid; place-items: center; overflow: hidden; background: var(--tint); color: var(--tint-ink); }
+.art[data-cat="dress"] { --tint: var(--t-dress); --tint-ink: var(--t-dress-ink); }
+.art[data-cat="shirt"] { --tint: var(--t-shirt); --tint-ink: var(--t-shirt-ink); }
+.art[data-cat="boot"] { --tint: var(--t-boot); --tint-ink: var(--t-boot-ink); }
+.art[data-cat="home"] { --tint: var(--t-home); --tint-ink: var(--t-home-ink); }
+.art[data-cat="beauty"] { --tint: var(--t-beauty); --tint-ink: var(--t-beauty-ink); }
+.art svg { width: 44%; height: 44%; fill: none; stroke: currentColor; stroke-width: 1.1; stroke-linecap: round; stroke-linejoin: round; }
+.art .code { position: absolute; left: 9px; top: 7px; font-family: var(--font-mono); font-size: 10.5px; opacity: 0.6; }
+.art.none { background: repeating-linear-gradient(135deg, var(--well) 0 8px, transparent 8px 16px), var(--card); color: var(--ink-faint); border: 1px dashed var(--line-strong); }
+.art.none span { font-size: 12px; font-weight: 600; }
+.art.sm svg { width: 54%; height: 54%; stroke-width: 1.4; }
+.art.sm .code, .art.sm.none span { display: none; }
+
+/* ---------------- 对话 ---------------- */
+.thread-head { display: flex; align-items: center; gap: 10px; }
+.thread-head h1 { margin: 0; font-family: var(--font-display); font-size: 22px; font-weight: 600; }
+.thread-head .ghost-btn:first-of-type { margin-left: auto; }
+.msgs { display: flex; flex-direction: column; gap: 22px; }
+.msg-user { align-self: flex-end; max-width: 78%; padding: 11px 16px; border-radius: 16px 16px 4px 16px; background: var(--well); font-size: 15px; line-height: 1.55; overflow-wrap: anywhere; }
+.msg-bot { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 12px; }
+.msg-bot .av { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 10px; background: var(--accent-soft); color: var(--accent); }
+.msg-bot .who { display: flex; align-items: center; gap: 10px; min-height: 32px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.steps-btn { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; font-size: 12.5px; font-weight: 500; color: var(--ink-soft); }
+.steps-btn:hover { color: var(--ink); }
+.steps-btn svg.i { width: 14px; height: 14px; transition: transform 150ms; }
+.steps-btn[aria-expanded="true"] svg.i { transform: rotate(180deg); }
+.steps { margin: 6px 0 2px; padding: 10px 12px; border-radius: 10px; background: var(--well); display: flex; flex-direction: column; gap: 6px; }
+.step { display: flex; align-items: baseline; gap: 8px; font-size: 13px; color: var(--ink-2); }
+.step svg.i { width: 14px; height: 14px; color: var(--ok); align-self: center; }
+.step .sum { color: var(--ink-soft); }
+.body { font-size: 15.5px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.thinking { display: inline-flex; gap: 8px; align-items: center; font-size: 14px; color: var(--ink-soft); }
+.thinking i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: pulse 1s ease-in-out infinite; }
+.thinking i:nth-child(2) { animation-delay: 150ms; }
+.thinking i:nth-child(3) { animation-delay: 300ms; }
+.degraded { display: flex; gap: 8px; margin-top: 10px; padding: 10px 12px; border-radius: 10px; background: var(--warn-soft); color: var(--warn); font-size: 13.5px; }
+.degraded svg.i { width: 16px; height: 16px; margin-top: 2px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.chip-btn { height: 34px; padding: 0 14px; border: 1px solid var(--line-strong); border-radius: 99px; background: var(--card); font-size: 13.5px; transition: border-color 150ms, background-color 150ms; }
+.chip-btn:hover { border-color: var(--accent-line); background: var(--accent-soft); }
+
+/* ---------------- 订单视图 ---------------- */
+.view-head h1 { margin: 0 0 6px; font-family: var(--font-display); font-size: 30px; font-weight: 600; }
+.view-head p { margin: 0; font-size: 15px; color: var(--ink-2); }
+.group-label { margin: 0 0 10px; font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.1em; color: var(--ink-soft); }
+.panel .orow:first-child { border-top: 0; }
+.orow .total { font-size: 14px; font-weight: 600; white-space: nowrap; }
+.orow .chev { color: var(--ink-faint); transition: transform 150ms; }
+.orow[aria-expanded="true"] .chev { transform: rotate(180deg); }
+.odetail { padding: 4px 22px 20px; border-top: 1px dashed var(--line); background: var(--hover); }
+.odetail-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 24px; padding-top: 14px; }
+.odetail h3 { margin: 0 0 10px; font-size: 12.5px; font-weight: 600; color: var(--ink-soft); }
+.oline { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 6px 0; font-size: 14px; }
+.oline .art { width: 44px; height: 44px; border-radius: 10px; }
+.oline small { display: block; color: var(--ink-soft); font-size: 12.5px; }
+.ototal { display: flex; justify-content: space-between; margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 14px; }
+.ototal strong { font-size: 16px; }
+.timeline { margin: 0; padding: 0; list-style: none; }
+.timeline li { position: relative; padding: 0 0 12px 20px; font-size: 13.5px; }
+.timeline li::before { content: ""; position: absolute; left: 3px; top: 7px; width: 8px; height: 8px; border-radius: 50%; background: var(--ink-faint); }
+.timeline li::after { content: ""; position: absolute; left: 6.5px; top: 17px; bottom: -3px; width: 1px; background: var(--line-strong); }
+.timeline li:last-child::after { display: none; }
+.timeline li.now::before { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
+.timeline small { display: block; color: var(--ink-soft); font-size: 12px; }
+.oactions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.asform { margin-top: 14px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); display: grid; gap: 12px; }
+.asform fieldset { margin: 0; padding: 0; border: 0; display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 14px; }
+.asform legend { margin-bottom: 6px; font-size: 12.5px; font-weight: 600; color: var(--ink-soft); }
+.asform label { display: inline-flex; align-items: center; gap: 6px; }
+.asform select, .cart select { height: 34px; padding: 0 30px 0 10px; border: 1px solid var(--line-strong); border-radius: 9px; background-color: var(--card); font-size: 13.5px; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239ca49f' stroke-width='2.2' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; }
+.asform .fine { margin: 0; font-size: 12.5px; color: var(--ink-soft); }
+
+/* ---------------- 购物车（宽屏常驻，窄屏抽屉） ---------------- */
+.cart { grid-column: 2; grid-row: 2; min-height: 0; display: flex; flex-direction: column; background: var(--chrome); border-left: 1px solid var(--line); }
+.cart-head { display: flex; align-items: center; gap: 10px; padding: 18px 20px 16px; border-bottom: 1px solid var(--line); }
+.cart-head h2 { margin: 0; font-family: var(--font-display); font-size: 20px; font-weight: 600; }
+.chip { padding: 1px 9px; border-radius: 99px; background: var(--well); font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
+.cart-head .close { display: none; margin-left: auto; }
+.icon-btn { width: 34px; height: 34px; display: grid; place-items: center; border: 0; border-radius: 9px; background: none; color: var(--ink-soft); }
+.icon-btn:hover { background: var(--hover); color: var(--ink); }
+.cart-list { flex: 1; min-height: 0; overflow: auto; padding: 4px 12px; }
+.cart-empty { padding: 56px 24px; text-align: center; font-size: 14.5px; color: var(--ink-2); }
+.cart-empty p { margin: 0 0 4px; }
+.cart-empty .muted { color: var(--ink-soft); font-size: 13.5px; }
+.line { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 12px; padding: 14px 8px; border-bottom: 1px solid var(--line); }
+.line:last-child { border-bottom: 0; }
+.line .art { width: 58px; height: 58px; border-radius: 11px; }
+.line .top { display: flex; justify-content: space-between; gap: 10px; font-size: 14px; }
+.line .top strong { font-weight: 600; line-height: 1.35; }
+.line .unit { margin-top: 2px; font-size: 12.5px; color: var(--ink-soft); }
+.line .ctl { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
+.stepper { display: inline-flex; align-items: center; height: 30px; border: 1px solid var(--line-strong); border-radius: 9px; }
+.stepper button { width: 30px; height: 28px; display: grid; place-items: center; border: 0; background: none; color: var(--ink-2); }
+.stepper button:hover:enabled { color: var(--accent); }
+.stepper button:disabled { color: var(--ink-faint); }
+.stepper span { min-width: 24px; text-align: center; font-size: 13.5px; font-weight: 600; }
+.stepper svg.i { width: 14px; height: 14px; }
+.text-btn { border: 0; background: none; padding: 0; font-size: 12.5px; color: var(--ink-soft); }
+.text-btn:hover { color: var(--danger); text-decoration: underline; }
+.cart-foot { padding: 16px 20px 20px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 12px; }
+.cart-foot .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 14px; }
+.cart-foot .row select { flex: 1; max-width: 220px; }
+.subtotal strong { font-family: var(--font-display); font-size: 24px; font-weight: 600; }
+.cart-foot .fine { margin: 0; font-size: 12px; color: var(--ink-soft); }
+.demo-note { margin: 0; padding: 8px 12px; border-radius: 10px; background: var(--info-soft); color: var(--info); font-size: 12.5px; }
+.primary { height: 46px; border: 0; border-radius: 12px; background: var(--accent); color: var(--on-accent); font-size: 15px; font-weight: 650; transition: background-color 150ms; }
+.primary:hover:enabled { background: var(--accent-strong); }
+.primary:disabled { background: var(--well); color: var(--ink-faint); }
+.bind-hint { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 12.5px; color: var(--ink-2); }
+.bind-hint .link { margin-left: auto; }
+
+/* ---------------- 覆盖层：商品详情 / 动态抽屉 / 偏好 ---------------- */
+.scrim { position: fixed; inset: 0; z-index: 50; background: rgba(15, 22, 19, 0.38); animation: fade 180ms ease both; }
+@keyframes fade { from { opacity: 0; } }
+.sheet { position: fixed; z-index: 55; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(840px, calc(100% - 32px)); max-height: min(88svh, 720px); overflow: auto; border-radius: 20px; background: var(--raised); box-shadow: var(--shadow-lg); border: 1px solid var(--line); animation: pop 220ms var(--ease) both; zoom: var(--scale); }
+@keyframes pop { from { opacity: 0; transform: translate(-50%, -48%) scale(0.98); } }
+.sheet-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); }
+.sheet .art { aspect-ratio: 1 / 1; border-radius: 0; }
+.sheet-info { position: relative; padding: 26px 28px 24px; display: flex; flex-direction: column; gap: 12px; }
+.sheet-info .close { position: absolute; right: 12px; top: 12px; }
+.sheet-info .cat { font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.1em; color: var(--ink-soft); }
+.sheet-info h2 { margin: 0; padding-right: 30px; font-family: var(--font-display); font-size: 26px; font-weight: 600; line-height: 1.2; }
+.sheet-info .price { display: flex; align-items: center; gap: 10px; font-size: 22px; font-weight: 650; }
+.sheet-info .lede { margin: 0; font-size: 15px; color: var(--ink-2); }
+.sheet-info .acts { display: flex; gap: 10px; }
+.sheet-info .acts .primary { flex: 1; height: 44px; }
+.sheet-info .acts .ghost-btn { height: 44px; }
+.attrs { margin: 4px 0 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0; border-top: 1px solid var(--line); font-size: 14px; }
+.attrs dt, .attrs dd { margin: 0; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.attrs dt { padding-right: 18px; color: var(--ink-soft); }
+.attrs dd.gap { color: var(--ink-soft); }
+.attrs dd.gap button { margin-left: 6px; border: 0; background: none; padding: 0; color: var(--accent-ink); font-weight: 600; font-size: 13.5px; }
+.attrs dd.gap button:hover { text-decoration: underline; }
+.sheet-info .desc { margin: 0; font-size: 14px; color: var(--ink-2); line-height: 1.7; }
+
+.drawer { position: fixed; z-index: 55; top: 0; right: 0; bottom: 0; width: min(420px, 94vw); display: flex; flex-direction: column; background: var(--chrome); border-left: 1px solid var(--line); box-shadow: var(--shadow-lg); animation: slide 240ms var(--ease) both; zoom: var(--scale); height: calc(100svh / var(--scale)); }
+@keyframes slide { from { transform: translateX(24px); opacity: 0; } }
+.drawer-head { display: flex; align-items: center; gap: 10px; padding: 16px 16px 12px 20px; }
+.drawer-head h2 { margin: 0; font-family: var(--font-display); font-size: 20px; font-weight: 600; }
+.drawer-head .icon-btn { margin-left: auto; }
+.seg { display: flex; gap: 2px; margin: 0 20px 4px; padding: 3px; border-radius: 11px; background: var(--well); }
+.seg button { flex: 1; height: 32px; border: 0; border-radius: 9px; background: none; font-size: 13px; font-weight: 600; color: var(--ink-soft); }
+.seg button[aria-selected="true"] { background: var(--card); color: var(--ink); box-shadow: var(--shadow-sm); }
+.drawer-body { flex: 1; min-height: 0; overflow: auto; padding: 14px 20px 24px; display: flex; flex-direction: column; gap: 14px; }
+.drawer-body .muted { margin: 0; font-size: 13.5px; color: var(--ink-soft); }
+.turn-nav { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; }
+.turn-nav button { width: 28px; height: 28px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--card); }
+.turn-nav button:disabled { opacity: 0.35; }
+.turn-nav span { color: var(--ink-soft); font-weight: 500; }
+.quote { margin: 0; padding: 10px 12px; border-left: 3px solid var(--gilt); border-radius: 0 10px 10px 0; background: var(--gilt-soft); font-size: 14px; }
+.trace { margin: 0; padding: 0; list-style: none; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+.trace li { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 10px; padding: 10px 12px; border-top: 1px solid var(--line); font-size: 13.5px; }
+.trace li:first-child { border-top: 0; }
+.trace svg.i { width: 16px; height: 16px; margin-top: 2px; color: var(--ok); }
+.trace .mono { display: block; margin-top: 2px; font-size: 11.5px; color: var(--ink-faint); }
+.trace .sum { display: block; color: var(--ink-soft); font-size: 13px; }
+.sources { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12.5px; color: var(--ink-soft); }
+.src { padding: 2px 9px; border-radius: 99px; background: var(--well); color: var(--ink-2); font-weight: 600; }
+.switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); font-size: 14px; }
+.switch-row small { display: block; font-size: 12px; color: var(--ink-soft); }
+.switch { position: relative; width: 42px; height: 24px; flex: none; border: 0; border-radius: 99px; background: var(--line-strong); transition: background-color 150ms; }
+.switch::after { content: ""; position: absolute; left: 3px; top: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: var(--shadow-sm); transition: transform 180ms var(--ease); }
+.switch[aria-checked="true"] { background: var(--ok); }
+.switch[aria-checked="true"]::after { transform: translateX(18px); }
+.mem, .conv { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); font-size: 14px; }
+.mem .t, .conv .t { flex: 1; min-width: 0; }
+.mem small, .conv small { display: block; margin-top: 2px; font-size: 12px; color: var(--ink-soft); }
+button.conv { width: 100%; text-align: left; transition: border-color 150ms; }
+button.conv:hover { border-color: var(--accent-line); }
+.conv[aria-current="true"] { border-color: var(--iron); box-shadow: inset 3px 0 0 var(--iron); }
+.conv strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+
+/* 左下角偏好设置 */
+.fab { position: fixed; left: 16px; bottom: 16px; z-index: 30; width: 42px; height: 42px; display: grid; place-items: center; border: 1px solid rgba(0, 0, 0, 0.15); border-radius: 50%; background: var(--iron); color: var(--on-iron); box-shadow: var(--shadow); zoom: var(--scale); transition: transform 150ms var(--ease); }
+.fab:hover, .fab[aria-expanded="true"] { transform: rotate(30deg); }
+.fab svg.i { color: var(--gilt-bright); }
+.prefs { position: fixed; left: 16px; bottom: 68px; z-index: 45; width: 330px; padding: 0; zoom: var(--scale); }
+.prefs-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 12px 10px 16px; border-bottom: 1px solid var(--line); }
+.prefs-head h2 { margin: 0; font-size: 14px; font-weight: 600; color: var(--ink-2); }
+.pref { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 13px 16px; border-bottom: 1px solid var(--line); }
+.pref:last-child { border-bottom: 0; }
+.pref strong { display: block; font-size: 13.5px; font-weight: 600; }
+.pref .t > span { display: block; margin-top: 2px; font-size: 12px; color: var(--ink-soft); }
+.pref select { height: 32px; padding: 0 28px 0 10px; border: 1px solid var(--line-strong); border-radius: 8px; background-color: var(--card); font-size: 13px; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239ca49f' stroke-width='2.2' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 9px center; }
+
+.toast { position: fixed; left: 50%; bottom: 104px; z-index: 70; transform: translateX(-50%); padding: 10px 16px; border-radius: 12px; background: var(--ink); color: var(--ground); font-size: 13.5px; box-shadow: var(--shadow-lg); animation: rise 240ms var(--ease) both; zoom: var(--scale); }
+
+/* ---------------- 响应式 ---------------- */
+@media (max-width: 1180px) {
+  .app { grid-template-columns: minmax(0, 1fr); }
+  .cart-btn { display: inline-flex; }
+  .cart { display: none; }
+  .app[data-cart="open"] .cart { display: flex; position: fixed; z-index: 55; top: 0; right: 0; bottom: 0; width: min(var(--cart-w), 94vw); box-shadow: var(--shadow-lg); animation: slide 240ms var(--ease) both; height: calc(100svh / var(--scale)); }
+  .cart-head .close { display: grid; }
+}
+@media (max-width: 760px) {
+  .bar { gap: 10px; padding: 0 12px; }
+  .wordmark small, .acct .t, .activity-label { display: none; }
+  .tab { padding: 0 11px; }
+  .page { padding: 22px 16px 24px; gap: 20px; }
+  .greet { font-size: 28px; }
+  .quick { grid-template-columns: minmax(0, 1fr); }
+  .qcard { min-height: 64px; }
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .orow { padding: 12px 16px; align-items: flex-start; }
+  .orow .ghost-btn, .orow .solid-btn { align-self: center; }
+  .panel-head { padding: 16px 16px 10px; }
+  .odetail { padding: 4px 16px 16px; }
+  .odetail-grid { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .dock { padding: 8px 12px 12px; }
+  .sheet-grid { grid-template-columns: minmax(0, 1fr); }
+  .sheet .art { aspect-ratio: 16 / 10; }
+  .msg-user { max-width: 88%; }
+  .fab { bottom: 88px; left: 12px; width: 38px; height: 38px; }
+  .prefs { left: 12px; bottom: 134px; width: calc(100vw - 24px); max-width: 330px; }
+}
+@media (max-width: 420px) {
+  .tab span.lbl { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3c.6 4.2 2.8 6.4 7 7-4.2.6-6.4 2.8-7 7-.6-4.2-2.8-6.4-7-7 4.2-.6 6.4-2.8 7-7Z"/><path d="M19 3v3m-1.5-1.5h3"/></symbol>
+  <symbol id="i-box" viewBox="0 0 24 24"><path d="m3 7 9-4 9 4-9 4-9-4Z"/><path d="M3 7v10l9 4 9-4V7"/><path d="M12 11v10"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 13 9 5 9-5"/></symbol>
+  <symbol id="i-drop" viewBox="0 0 24 24"><path d="M12 3s6 6.4 6 11a6 6 0 0 1-12 0c0-4.6 6-11 6-11Z"/><path d="M9.5 14.5a2.5 2.5 0 0 0 2.5 2.5"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16v4Z"/><path d="m13 7 4 4"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-5-5 5 5-5 5"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M19 12H5m5-5-5 5 5 5"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V5m-6 6 6-6 6 6"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-bag" viewBox="0 0 24 24"><path d="M5 8h14l-1 12H6L5 8Z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 7"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 9v4m0 4h.01"/><path d="M10.3 3.9 2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6m4-6v6M6 7l1 13h10l1-13M9 7V4h6v3"/></symbol>
+  <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M3 12h4l3-7 4 14 3-7h4"/></symbol>
+  <!-- 商品类目线稿（占位图） -->
+  <symbol id="c-dress" viewBox="0 0 24 24"><path d="M9.5 3h5l-.8 4.2L18 20.5H6l4.3-13.3L9.5 3Z"/><path d="M10.3 7.2h3.4"/></symbol>
+  <symbol id="c-shirt" viewBox="0 0 24 24"><path d="M8.5 4 4 6.3l1.6 4.2 2-.7V20h8.8V9.8l2 .7L20 6.3 15.5 4c-.6 1.6-1.9 2.6-3.5 2.6S9.1 5.6 8.5 4Z"/><path d="M12 6.6V20"/></symbol>
+  <symbol id="c-boot" viewBox="0 0 24 24"><path d="M7 3h6v9.5l5.4 2.6c1.2.6 1.6 1.6 1.6 2.6V20H4.5v-3.2L7 13V3Z"/><path d="M4.5 17.5H20"/><path d="M13 8h-2"/></symbol>
+  <symbol id="c-home" viewBox="0 0 24 24"><path d="M5 8.5h11v6.5a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4V8.5Z"/><path d="M16 10.5h1.5a2.5 2.5 0 0 1 0 5H16"/><path d="M9 3.5c0 1 1 1.3 1 2.3M12.5 3.5c0 1 1 1.3 1 2.3"/></symbol>
+  <symbol id="c-beauty" viewBox="0 0 24 24"><path d="M10 3h4v3h-4z"/><path d="M9 6h6l1.2 3v10a2 2 0 0 1-2 2H9.8a2 2 0 0 1-2-2V9L9 6Z"/><path d="M7.8 12.5h8.4"/></symbol>
+  <!-- Borough 商标：市集大厅的铸铁拱门 + 字母 B（与商家端提案一致） -->
+  <symbol id="mark" viewBox="0 0 40 40">
+    <rect width="40" height="40" rx="11" fill="#c39a3a"/>
+    <path d="M7 33V19a13 13 0 0 1 26 0v14" fill="none" stroke="#1f3b2f" stroke-width="2.4"/>
+    <path d="M12 33V20a8 8 0 0 1 16 0v13" fill="none" stroke="#1f3b2f" stroke-width="1.4" opacity=".55"/>
+    <path d="M5 33h30" stroke="#1f3b2f" stroke-width="2.4" stroke-linecap="round"/>
+    <text x="20" y="30" text-anchor="middle" font-family="Fraunces, Georgia, serif" font-size="13" font-weight="700" fill="#1f3b2f">B</text>
+  </symbol>
+</svg>
+
+<a class="skip" href="#main" data-i18n="skip">跳到主要内容</a>
+
+<div class="app" id="app" data-cart="closed">
+  <header class="bar">
+    <a class="wordmark" href="#" id="homeLink" aria-label="Borough">
+      <svg class="mark" aria-hidden="true"><use href="#mark"/></svg>
+      <span><b translate="no">Borough</b><small data-i18n="storeName">商家100 的店</small></span>
+    </a>
+    <nav class="tabs" id="tabs" data-i18n-label="navLabel" aria-label="店铺视图"></nav>
+    <div class="bar-end">
+      <button class="pill-btn" type="button" id="activityBtn" aria-haspopup="dialog">
+        <span class="dot" id="activityDot" hidden></span>
+        <svg class="i" aria-hidden="true"><use href="#i-pulse"/></svg>
+        <span class="activity-label" data-i18n="activity">动态</span>
+      </button>
+      <button class="pill-btn cart-btn" type="button" id="cartBtn" aria-controls="cart"></button>
+      <div class="acct" id="acct"></div>
+    </div>
+  </header>
+
+  <main class="main" id="main" tabindex="-1">
+    <div class="scroll" id="scroll">
+      <div class="page" id="page"></div>
+    </div>
+    <div class="dock">
+      <form class="composer" id="composer" autocomplete="off">
+        <label class="sr-only" for="ask" data-i18n="askLabel">向智能助手提问</label>
+        <input id="ask" name="ask" />
+        <button class="send" id="sendBtn" type="submit" disabled data-i18n-label="send" aria-label="发送"><svg class="i" aria-hidden="true"><use href="#i-send"/></svg></button>
+      </form>
+      <p class="fine" data-i18n="demoFine">演示环境：身份为演示身份，非真实登录；结账与支付均为演示，不产生真实扣款。</p>
+    </div>
+  </main>
+
+  <aside class="cart" id="cart" data-i18n-label="cart" aria-label="购物车"></aside>
+</div>
+
+<button class="fab" type="button" id="prefsBtn" aria-haspopup="dialog" aria-expanded="false" aria-controls="prefs" data-i18n-label="prefs.title" aria-label="偏好设置"><svg class="i" aria-hidden="true"><use href="#i-gear"/></svg></button>
+<div class="menu prefs" id="prefs" role="dialog" aria-labelledby="prefsTitle" hidden>
+  <div class="prefs-head">
+    <h2 id="prefsTitle" data-i18n="prefs.title">偏好设置</h2>
+    <button class="icon-btn" type="button" id="prefsClose" data-i18n-label="close" aria-label="关闭"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button>
+  </div>
+  <div class="pref">
+    <div class="t"><strong data-i18n="prefs.theme">主题</strong><span data-i18n="prefs.themeHint">浅色、深色，或跟随系统。</span></div>
+    <label class="sr-only" for="prefTheme" data-i18n="prefs.theme">主题</label>
+    <select id="prefTheme">
+      <option value="system" data-i18n="prefs.system">跟随系统</option>
+      <option value="light" data-i18n="prefs.light">浅色</option>
+      <option value="dark" data-i18n="prefs.dark">深色</option>
+    </select>
+  </div>
+  <div class="pref">
+    <div class="t"><strong data-i18n="prefs.lang">语言</strong><span data-i18n="prefs.langHint">界面、商品与智能助手回答使用的语言。</span></div>
+    <label class="sr-only" for="prefLang" data-i18n="prefs.lang">语言</label>
+    <select id="prefLang">
+      <option value="zh-CN">中文</option>
+      <option value="en-US">English</option>
+    </select>
+  </div>
+  <div class="pref">
+    <div class="t"><strong data-i18n="prefs.size">界面字号</strong><span data-i18n="prefs.sizeHint">整体放大或缩小页面。</span></div>
+    <label class="sr-only" for="prefSize" data-i18n="prefs.size">界面字号</label>
+    <select id="prefSize">
+      <option value="sm" data-i18n="prefs.sm">小</option>
+      <option value="md" data-i18n="prefs.md">标准</option>
+      <option value="lg" data-i18n="prefs.lg">大</option>
+    </select>
+  </div>
+</div>
+
+<div id="overlay"></div>
+<div id="toastHost" aria-live="polite"></div>
+
+<script>
+(() => {
+  'use strict';
+
+  /* ================= 文案 ================= */
+  const I18N = {
+    'zh-CN': {
+      skip: '跳到主要内容', storeName: '商家100 的店', navLabel: '店铺视图', activity: '动态', askLabel: '向智能助手提问', send: '发送',
+      demoFine: '演示环境：身份为演示身份，非真实登录；结账与支付均为演示，不产生真实扣款。',
+      'tab.assistant': '智能助手', 'tab.orders': '订单', pendingAttn: '单待付款',
+      placeholder: '问问商品、搭配，或者你的订单…', placeholderOrders: '问问某个订单、物流或退货…',
+      guest: '访客', guestSub: '未绑定身份', demo: '演示顾客', demoSub: '已绑定 · 演示身份',
+      acctGuest: '现在是访客身份。绑定演示顾客后，可以提交订单、查看订单进度，智能助手也能记住你的偏好。',
+      acctBound: '你正在使用演示顾客身份。退出后会回到访客，购物车保留在本次会话。',
+      bind: '绑定演示顾客', unbind: '退出演示身份', notReal: '演示身份，非真实登录。',
+      morning: '早上好', afternoon: '下午好', evening: '晚上好', welcomeBack: '，欢迎回来',
+      guestSummary: '想找什么都可以直接问智能助手。绑定演示顾客后，这里会显示你的订单进度。',
+      onTheWay: '进行中的订单', allOrders: '全部订单', ask: '问问', askWhy: '问原因', payNow: '去支付',
+      ordersBindPrompt: '绑定演示顾客后，这里会显示你最近的订单和物流。',
+      popular: '本周热门', popularSub: '近 30 天卖得最好的 8 件，点开可以问智能助手', allProducts: '全部商品', showLess: '收起',
+      allProductsSub: '本店在售', stock_LOW: '仅剩少量', stock_OUT: '已售罄', noImage: '暂无图片',
+      threadTitle: '和智能助手的对话', newChat: '新对话', history: '对话记录', clerk: 'Borough 智能助手',
+      stepsN: '查了 {n} 步', thinking: '正在查…', degraded: '本次回答已降级：',
+      cart: '购物车', items: '{n} 件', cartEmpty: '购物车还是空的。', cartEmptyHint: '看看本周热门，或者让智能助手帮你挑。',
+      unit: '单价 {p}', remove: '移除', coupon: '优惠券', noCoupon: '不使用', subtotal: '小计',
+      calcNote: '优惠与应付金额以提交订单后系统计算的结果为准。', demoNote: '演示结账，不产生真实扣款。',
+      submit: '提交订单', bindToSubmit: '绑定演示顾客后才能提交订单。', dec: '减少', inc: '增加', close: '关闭',
+      ordersTitle: '我的订单', ordersSub: '问智能助手任何一单的进度，或者对已签收的商品申请售后。', ordersSubGuest: '订单只对绑定的演示顾客显示。',
+      grpActive: '进行中', grpDone: '已完成', grpAS: '我的售后', noOrders: '还没有订单。',
+      items_h: '商品', track_h: '进度', total: '实付', payBy: '{t} 前支付', updated: '更新于 {t}',
+      cancel: '取消订单', afterSale: '申请售后', askClerk: '问问智能助手',
+      asType: '售后类型', asReturn: '退货退款', asRefund: '仅退款', asTicket: '问题反馈', asReason: '原因',
+      asR1: '尺码不合适', asR2: '与描述不符', asR3: '质量问题', asR4: '不想要了',
+      asConfirm: '确认提交', asCancel: '先不提交', asFine: '提交后由店家处理，你可以在「我的售后」里看进度。智能助手不会替你提交。',
+      asActive: '售后处理中',
+      'st.PENDING': '待付款', 'st.NOT_SHIPPED': '待发货', 'st.SHIPPED': '已发货', 'st.IN_TRANSIT': '运输中', 'st.OUT_FOR_DELIVERY': '派送中', 'st.DELIVERED': '已签收', 'st.CLOSED': '已关闭',
+      'ev.ORDER_PLACED': '已下单', 'ev.PAYMENT_CONFIRMED': '已支付', 'ev.SHIPPED': '店家已发货', 'ev.IN_TRANSIT': '运输中 · 到达转运中心', 'ev.OUT_FOR_DELIVERY': '派送中 · 快递员已出发', 'ev.DELIVERED': '已签收', 'ev.ORDER_CLOSED': '订单已关闭',
+      tabSteps: '本轮过程', tabMemory: '我记住的', tabHistory: '对话记录',
+      noTurns: '还没有对话。向智能助手提问后，这里会显示它查了什么、用了哪些来源。',
+      turnOf: '第 {k} 轮 · 共 {n} 轮', sources: '分析来源', elapsed: '用时 {s} 秒', noTools: '这一轮没有调用工具。',
+      memGuest: '记忆只对绑定的演示顾客开放。', memToggle: '允许智能助手记住我的偏好', memToggleHint: '只在本店范围内使用，可随时删除。',
+      memEmpty: '还没有记住任何偏好。可以对智能助手说「记住：……」。', memOff: '记忆已关闭，智能助手不会保存新的偏好。',
+      memConfirmOff: '关闭记忆会清空已保存的 {n} 条偏好，确定吗？', delete: '删除',
+      historyEmpty: '还没有对话记录。', current: '当前', msgs: '{n} 条消息',
+      'src.catalog': '商品目录', 'src.orders': '订单与物流', 'src.rules': '店铺规则', 'src.memory': '顾客记忆', 'src.cart': '购物车', 'src.none': '无',
+      addToCart: '加入购物车', soldOut: '已售罄', gapProvide: '店家暂未提供', askAboutIt: '问问智能助手',
+      'toast.added': '已加入购物车', 'toast.submitted': '订单已提交，请在 30 分钟内支付', 'toast.paid': '支付成功（演示）', 'toast.closed': '订单已关闭，库存已释放',
+      'toast.as': '售后申请已提交', 'toast.bound': '已绑定演示顾客', 'toast.unbound': '已退出演示身份', 'toast.history': '已打开历史对话',
+      'prefs.title': '偏好设置', 'prefs.theme': '主题', 'prefs.themeHint': '浅色、深色，或跟随系统。', 'prefs.system': '跟随系统', 'prefs.light': '浅色', 'prefs.dark': '深色',
+      'prefs.lang': '语言', 'prefs.langHint': '界面、商品与智能助手回答使用的语言。', 'prefs.size': '界面字号', 'prefs.sizeHint': '整体放大或缩小页面。', 'prefs.sm': '小', 'prefs.md': '标准', 'prefs.lg': '大',
+      more: ' 等 {n} 件', qty: '×{n}',
+    },
+    'en-US': {
+      skip: 'Skip to main content', storeName: 'Merchant 100’s shop', navLabel: 'Store views', activity: 'Activity', askLabel: 'Ask the assistant', send: 'Send',
+      demoFine: 'Demo environment: a demo identity, not a real sign-in. Checkout and payment are simulated; nothing is charged.',
+      'tab.assistant': 'Assistant', 'tab.orders': 'Orders', pendingAttn: 'awaiting payment',
+      placeholder: 'Ask about a product, an outfit, or an order…', placeholderOrders: 'Ask about an order, a delivery, a return…',
+      guest: 'Guest', guestSub: 'Not signed in', demo: 'Demo shopper', demoSub: 'Signed in · demo identity',
+      acctGuest: 'You are browsing as a guest. Sign in as the demo shopper to place orders, track them, and let the assistant remember your preferences.',
+      acctBound: 'You are using the demo shopper identity. Signing out returns you to guest; the cart stays with this session.',
+      bind: 'Use demo shopper', unbind: 'Sign out of demo', notReal: 'A demo identity, not a real sign-in.',
+      morning: 'Good morning', afternoon: 'Good afternoon', evening: 'Good evening', welcomeBack: ', welcome back',
+      guestSummary: 'Ask the assistant for anything in the store. Sign in as the demo shopper to see your orders here.',
+      onTheWay: 'Orders in progress', allOrders: 'All orders', ask: 'Ask', askWhy: 'Ask why', payNow: 'Pay now',
+      ordersBindPrompt: 'Sign in as the demo shopper to see your recent orders and deliveries here.',
+      popular: 'Popular right now', popularSub: 'The 8 best sellers of the last 30 days — open one to ask about it', allProducts: 'All products', showLess: 'Show less',
+      allProductsSub: 'Everything on sale', stock_LOW: 'Low stock', stock_OUT: 'Sold out', noImage: 'No image yet',
+      threadTitle: 'Conversation with the assistant', newChat: 'New chat', history: 'History', clerk: 'Borough assistant',
+      stepsN: '{n} steps', thinking: 'Looking…', degraded: 'This answer is degraded: ',
+      cart: 'Cart', items: '{n} items', cartEmpty: 'Nothing in the cart yet.', cartEmptyHint: 'Browse what’s popular, or ask the assistant to pick.',
+      unit: '{p} each', remove: 'Remove', coupon: 'Coupon', noCoupon: 'None', subtotal: 'Subtotal',
+      calcNote: 'Discounts and the amount due are calculated when you place the order.', demoNote: 'Demo checkout — nothing is charged.',
+      submit: 'Place order', bindToSubmit: 'Sign in as the demo shopper to place an order.', dec: 'Decrease', inc: 'Increase', close: 'Close',
+      ordersTitle: 'My orders', ordersSub: 'Ask about any order, or request a return on anything delivered.', ordersSubGuest: 'Orders are shown to the signed-in demo shopper only.',
+      grpActive: 'IN PROGRESS', grpDone: 'COMPLETED', grpAS: 'MY RETURNS & CASES', noOrders: 'No orders yet.',
+      items_h: 'Items', track_h: 'Tracking', total: 'Paid', payBy: 'Pay by {t}', updated: 'Updated {t}',
+      cancel: 'Cancel order', afterSale: 'Request a return', askClerk: 'Ask the assistant',
+      asType: 'Request type', asReturn: 'Return & refund', asRefund: 'Refund only', asTicket: 'Report a problem', asReason: 'Reason',
+      asR1: 'Doesn’t fit', asR2: 'Not as described', asR3: 'Quality issue', asR4: 'Changed my mind',
+      asConfirm: 'Submit request', asCancel: 'Not now', asFine: 'The merchant handles it next; follow it under My returns. The assistant never submits for you.',
+      asActive: 'Return in progress',
+      'st.PENDING': 'Awaiting payment', 'st.NOT_SHIPPED': 'Preparing', 'st.SHIPPED': 'Shipped', 'st.IN_TRANSIT': 'In transit', 'st.OUT_FOR_DELIVERY': 'Out for delivery', 'st.DELIVERED': 'Delivered', 'st.CLOSED': 'Closed',
+      'ev.ORDER_PLACED': 'Order placed', 'ev.PAYMENT_CONFIRMED': 'Payment confirmed', 'ev.SHIPPED': 'Shipped by the merchant', 'ev.IN_TRANSIT': 'In transit · at the sorting centre', 'ev.OUT_FOR_DELIVERY': 'Out for delivery · courier on the way', 'ev.DELIVERED': 'Delivered', 'ev.ORDER_CLOSED': 'Order closed',
+      tabSteps: 'This reply', tabMemory: 'Memory', tabHistory: 'History',
+      noTurns: 'No conversation yet. After you ask something, this shows what the assistant looked up and which sources it used.',
+      turnOf: 'Reply {k} of {n}', sources: 'Sources', elapsed: '{s}s', noTools: 'No tools were used in this reply.',
+      memGuest: 'Memory is available to the signed-in demo shopper only.', memToggle: 'Let the assistant remember my preferences', memToggleHint: 'Used in this store only; delete any time.',
+      memEmpty: 'Nothing remembered yet. Tell the assistant “Remember: …”.', memOff: 'Memory is off; nothing new will be saved.',
+      memConfirmOff: 'Turning memory off deletes the {n} saved preferences. Continue?', delete: 'Delete',
+      historyEmpty: 'No past conversations.', current: 'Current', msgs: '{n} messages',
+      'src.catalog': 'Catalog', 'src.orders': 'Orders & delivery', 'src.rules': 'Store rules', 'src.memory': 'Shopper memory', 'src.cart': 'Cart', 'src.none': 'None',
+      addToCart: 'Add to cart', soldOut: 'Sold out', gapProvide: 'Not provided by the merchant', askAboutIt: 'Ask the assistant',
+      'toast.added': 'Added to cart', 'toast.submitted': 'Order placed — pay within 30 minutes', 'toast.paid': 'Payment confirmed (demo)', 'toast.closed': 'Order closed; stock released',
+      'toast.as': 'Request submitted', 'toast.bound': 'Signed in as the demo shopper', 'toast.unbound': 'Signed out of the demo identity', 'toast.history': 'Opened a past conversation',
+      'prefs.title': 'Preferences', 'prefs.theme': 'Theme', 'prefs.themeHint': 'Light, dark, or match your system.', 'prefs.system': 'System', 'prefs.light': 'Light', 'prefs.dark': 'Dark',
+      'prefs.lang': 'Language', 'prefs.langHint': 'For the page, products, and assistant replies.', 'prefs.size': 'Text size', 'prefs.sizeHint': 'Scale the whole page.', 'prefs.sm': 'Small', 'prefs.md': 'Default', 'prefs.lg': 'Large',
+      more: ' + {n} more', qty: '×{n}',
+    },
+  };
+
+  /* ================= 偏好：主题 / 语言 / 字号，存在本机 ================= */
+  const PREF_KEY = 'borough-shop-prefs';
+  let prefs = { theme: 'system', lang: 'zh-CN', size: 'md' };
+  try { prefs = { ...prefs, ...JSON.parse(localStorage.getItem(PREF_KEY) || '{}') }; } catch (_) { /* 隐私模式下读不到就用默认值 */ }
+  const savePrefs = () => { try { localStorage.setItem(PREF_KEY, JSON.stringify(prefs)); } catch (_) { /* 忽略 */ } };
+
+  const en = () => prefs.lang === 'en-US';
+  const t = (k, vars) => {
+    let s = I18N[prefs.lang][k] ?? I18N['zh-CN'][k] ?? k;
+    if (vars) for (const [key, v] of Object.entries(vars)) s = s.replace(`{${key}}`, v);
+    return s;
+  };
+  const L = (o) => (o && typeof o === 'object' ? (en() ? o.en : o.zh) : o);
+  const $ = (s, r = document) => r.querySelector(s);
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const ic = (n) => `<svg class="i" aria-hidden="true"><use href="#i-${n}"/></svg>`;
+  const money = (n) => '¥' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ================= 演示商品：保留五个类目，只换成真实商品 =================
+     下标 = 现有种子的商品顺序（类目按 下标 % 5 循环）。刻意保留的缺口：
+     #03 缺「产地」、#05 说明很短、#06 无图；#01/#09/#17 为审核中（不上架）。 */
+  const CATS = ['dress', 'shirt', 'boot', 'home', 'beauty'];
+  const CAT_NAME = { dress: { zh: '女装', en: 'Womenswear' }, shirt: { zh: '男装', en: 'Menswear' }, boot: { zh: '鞋靴', en: 'Shoes' }, home: { zh: '家居', en: 'Home' }, beauty: { zh: '美妆', en: 'Beauty' } };
+  const A = (zk, zv, ek, ev) => ({ k: { zh: zk, en: ek }, v: zv == null ? null : { zh: zv, en: ev } });
+  const ORIGIN = { dress: ['浙江杭州', 'Hangzhou'], shirt: ['浙江杭州', 'Hangzhou'], boot: ['广东东莞', 'Dongguan'], home: ['福建厦门', 'Xiamen'], beauty: ['上海', 'Shanghai'] };
+  // [中文名, 英文名, 价格, 近30天销量, 中文简介, 英文简介, 材质/功效[中,英], 规格[中键,中值,英键,英值]]
+  const RAW = [
+    ['真丝印花半裙', 'Silk print midi skirt', 569, 0, '真丝印花，A 字及踝。', 'Printed silk, A-line, ankle length.', ['100% 桑蚕丝', '100% mulberry silk'], ['尺码', 'S–L', 'Sizes', 'S–L']],
+    ['牛津纺长袖衬衫', 'Oxford cloth shirt', 239, 142, '纯棉牛津纺，微挺括，领尖可扣。', 'Cotton oxford with a button-down collar.', ['100% 棉', '100% cotton'], ['尺码', 'S–XXL', 'Sizes', 'S–XXL']],
+    ['手工缝线切尔西靴', 'Goodyear-welt Chelsea boots', 699, 96, '牛皮鞋面，固特异缝线，鞋底可更换。', 'Calf leather, Goodyear-welted and resoleable.', ['头层牛皮', 'Full-grain calf leather'], ['尺码', '35–44', 'Sizes', 'EU 35–44']],
+    ['粗陶手作咖啡杯（两只装）', 'Stoneware mug pair', 128, 188, '手拉坯粗陶，哑光釉，每只略有不同。', 'Hand-thrown stoneware in a matte glaze; no two alike.', ['粗陶', 'Stoneware'], ['容量', '280ml ×2', 'Capacity', '280 ml ×2']],
+    ['燕麦舒缓保湿面霜', 'Oat calming moisturiser', 159, 121, '温和保湿，适合敏感肌。', 'Gentle hydration for sensitive skin.', ['舒缓保湿', 'Calming, hydrating'], ['规格', '50ml', 'Size', '50 ml']],
+    ['亚麻宽松开衫', 'Relaxed linen cardigan', 329, 77, '水洗亚麻，落肩宽松，春秋外搭。', 'Washed linen with dropped shoulders — an easy layer.', ['100% 亚麻', '100% linen'], ['尺码', 'S–XL', 'Sizes', 'S–XL']],
+    ['水洗帆布工装夹克', 'Washed canvas chore jacket', 459, 64, '水洗帆布，四个贴袋，越穿越软。', 'Washed canvas, four patch pockets, softens with wear.', ['棉帆布', 'Cotton canvas'], ['尺码', 'M–XXL', 'Sizes', 'M–XXL']],
+    ['复古德训运动鞋', 'Retro trainers', 389, 133, '麂皮拼接，橡胶生胶底。', 'Suede overlays on a gum rubber sole.', ['麂皮 + 牛皮', 'Suede and leather'], ['尺码', '35–45', 'Sizes', 'EU 35–45']],
+    ['橡木砧板', 'Oak chopping board', 199, 0, '整块白橡木，食品级木蜡油。', 'Solid white oak, food-safe oil finish.', ['白橡木', 'White oak'], ['尺寸', '40×28cm', 'Size', '40×28 cm']],
+    ['玫瑰果油修护精华', 'Rosehip repair serum', 219, 102, '冷压玫瑰果油，修护干燥肌。', 'Cold-pressed rosehip oil for dry skin.', ['修护、滋润', 'Repairing, nourishing'], ['规格', '30ml', 'Size', '30 ml']],
+    ['羊毛混纺高领毛衣', 'Wool-blend roll-neck jumper', 399, 88, '细针高领，贴身也不扎。', 'Fine-gauge roll neck that doesn’t itch.', ['70% 羊毛 30% 锦纶', '70% wool, 30% nylon'], ['尺码', 'S–L', 'Sizes', 'S–L']],
+    ['美利奴羊毛针织开衫', 'Merino knit cardigan', 529, 41, '美利奴羊毛，V 领，贝壳扣。', 'Merino wool, V-neck, shell buttons.', ['100% 美利奴羊毛', '100% merino wool'], ['尺码', 'M–XXL', 'Sizes', 'M–XXL']],
+    ['软底乐福鞋', 'Soft-sole loafers', 459, 72, '软底一脚蹬，轻便，久坐不累。', 'Soft-soled slip-ons, light enough for all day.', ['羊皮', 'Lambskin'], ['尺码', '35–44', 'Sizes', 'EU 35–44']],
+    ['亚麻格纹桌布', 'Linen check tablecloth', 169, 55, '亚麻格纹，可机洗。', 'Linen check, machine washable.', ['100% 亚麻', '100% linen'], ['尺寸', '140×180cm', 'Size', '140×180 cm']],
+    ['苦橙花淡香水', 'Neroli eau de toilette', 399, 69, '苦橙花与白麝香，清淡不闷。', 'Neroli and white musk, light and airy.', ['柑橘花香调', 'Citrus floral'], ['规格', '50ml', 'Size', '50 ml']],
+    ['高腰直筒牛仔裤', 'High-rise straight jeans', 299, 150, '高腰直筒，12oz 牛仔布，微弹。', 'High-rise straight leg, 12 oz denim with some stretch.', ['98% 棉 2% 氨纶', '98% cotton, 2% elastane'], ['尺码', '24–31', 'Sizes', 'W24–31']],
+    ['格纹羊绒围巾', 'Check cashmere scarf', 489, 0, '纯羊绒格纹，长 180cm。', 'Pure cashmere check, 180 cm long.', ['100% 羊绒', '100% cashmere'], ['尺寸', '180×30cm', 'Size', '180×30 cm']],
+    ['防泼水徒步短靴', 'Water-resistant hiking boots', 629, 58, '防泼水鞋面，大底抓地。', 'Water-resistant upper with a grippy lug sole.', ['防泼水尼龙 + 牛皮', 'Water-resistant nylon and leather'], ['尺码', '36–45', 'Sizes', 'EU 36–45']],
+    ['无花果雪松香氛蜡烛', 'Fig & cedar candle', 149, 110, '无花果叶与雪松，燃烧约 45 小时。', 'Fig leaf and cedar, about 45 hours of burn.', ['大豆蜡', 'Soy wax'], ['规格', '220g', 'Size', '220 g']],
+    ['氨基酸温和洁面乳', 'Gentle amino cleanser', 89, 164, '氨基酸表活，无皂基，洗后不紧绷。', 'Amino-acid, soap-free, never tight.', ['温和清洁', 'Gentle cleansing'], ['规格', '120ml', 'Size', '120 ml']],
+    ['法式碎花连衣裙', 'French floral dress', 459, 91, '碎花印花，V 领系带，及膝。', 'Floral print, tie V-neck, knee length.', ['100% 粘胶', '100% viscose'], ['尺码', 'XS–L', 'Sizes', 'XS–L']],
+    ['修身斜纹休闲裤', 'Slim twill trousers', 279, 83, '修身斜纹棉，微弹，九分长。', 'Slim cotton twill with stretch, cropped length.', ['97% 棉 3% 氨纶', '97% cotton, 3% elastane'], ['尺码', '28–36', 'Sizes', 'W28–36']],
+    ['羊皮芭蕾平底鞋', 'Leather ballet flats', 399, 47, '软羊皮，可折叠，鞋底防滑。', 'Soft lambskin that folds flat, non-slip sole.', ['羊皮', 'Lambskin'], ['尺码', '34–40', 'Sizes', 'EU 34–40']],
+    ['羊毛混纺沙发毯', 'Wool-blend throw', 359, 60, '羊毛混纺，流苏收边。', 'Wool blend with fringed edges.', ['60% 羊毛 40% 腈纶', '60% wool, 40% acrylic'], ['尺寸', '130×170cm', 'Size', '130×170 cm']],
+  ];
+  const P = RAW.map((r, i) => {
+    const cat = CATS[i % 5];
+    const matKey = cat === 'beauty' ? ['功效', 'Benefit'] : ['材质', 'Material'];
+    const attrs = [
+      A(matKey[0], r[6][0], matKey[1], r[6][1]),
+      i === 2 ? A('产地', null, 'Origin', null) : A('产地', ORIGIN[cat][0], 'Origin', ORIGIN[cat][1]),
+      A(r[7][0], r[7][1], r[7][2], r[7][3]),
+    ];
+    const long = i === 4
+      ? { zh: '简短说明。', en: 'Short description.' }
+      : { zh: r[4] + '尺码与保养信息经店家核对。', en: r[5] + ' Sizing and care checked by the merchant.' };
+    return {
+      i, cat, code: String(i + 1).padStart(2, '0'), name: { zh: r[0], en: r[1] }, price: r[2], sales: r[3],
+      short: { zh: r[4], en: r[5] }, desc: long, attrs,
+      online: i % 8 !== 0, img: i !== 5, stock: i === 3 ? 'LOW' : i === 17 ? 'OUT' : 'IN',
+    };
+  });
+  const nm = (i) => L(P[i].name);
+  const ONLINE = P.filter((p) => p.online);
+  const POPULAR = [...ONLINE].sort((a, b) => b.sales - a.sales).slice(0, 8);
+
+  const art = (p, sm = false) => {
+    if (!p.img) return `<div class="art none${sm ? ' sm' : ''}" role="img" aria-label="${esc(t('noImage'))}"><span>${esc(t('noImage'))}</span></div>`;
+    return `<div class="art${sm ? ' sm' : ''}" data-cat="${p.cat}" role="img" aria-label="${esc(L(p.name))}"><span class="code">${p.code}</span><svg aria-hidden="true"><use href="#c-${p.cat}"/></svg></div>`;
+  };
+
+  /* ================= 订单与售后（示意） ================= */
+  const T2 = (zh, en2) => ({ zh, en: en2 });
+  const orders = [
+    { id: 'BO-0926-0412', items: [[2, 1], [19, 1]], pay: 'PAID', ful: 'OUT_FOR_DELIVERY', updated: T2('今天 09:12', 'today 09:12'),
+      events: [['ORDER_PLACED', T2('9月26日 20:14', 'Sep 26, 20:14')], ['PAYMENT_CONFIRMED', T2('9月26日 20:15', 'Sep 26, 20:15')], ['SHIPPED', T2('9月27日 10:02', 'Sep 27, 10:02')], ['IN_TRANSIT', T2('9月27日 22:40', 'Sep 27, 22:40')], ['OUT_FOR_DELIVERY', T2('今天 09:12', 'Today 09:12')]] },
+    { id: 'BO-0928-0107', items: [[9, 1]], pay: 'PENDING', ful: 'NOT_SHIPPED', updated: T2('今天 08:31', 'today 08:31'), payBy: T2('今天 21:30', 'today 21:30'),
+      events: [['ORDER_PLACED', T2('今天 08:31', 'Today 08:31')]] },
+    { id: 'BO-0925-0388', items: [[3, 1]], pay: 'PAID', ful: 'IN_TRANSIT', updated: T2('昨天 18:40', 'yesterday 18:40'),
+      events: [['ORDER_PLACED', T2('9月25日 12:03', 'Sep 25, 12:03')], ['PAYMENT_CONFIRMED', T2('9月25日 12:04', 'Sep 25, 12:04')], ['SHIPPED', T2('9月26日 16:20', 'Sep 26, 16:20')], ['IN_TRANSIT', T2('昨天 18:40', 'Yesterday 18:40')]] },
+    { id: 'BO-0927-0521', items: [[13, 1]], pay: 'PAID', ful: 'NOT_SHIPPED', updated: T2('昨天 21:03', 'yesterday 21:03'),
+      events: [['ORDER_PLACED', T2('昨天 21:02', 'Yesterday 21:02')], ['PAYMENT_CONFIRMED', T2('昨天 21:03', 'Yesterday 21:03')]] },
+    { id: 'BO-0921-0233', items: [[1, 1], [21, 1]], pay: 'PAID', ful: 'DELIVERED', updated: T2('9月24日', 'Sep 24'),
+      events: [['ORDER_PLACED', T2('9月21日 19:40', 'Sep 21, 19:40')], ['PAYMENT_CONFIRMED', T2('9月21日 19:41', 'Sep 21, 19:41')], ['SHIPPED', T2('9月22日 11:05', 'Sep 22, 11:05')], ['DELIVERED', T2('9月24日 15:22', 'Sep 24, 15:22')]] },
+    { id: 'BO-0912-0090', items: [[10, 1]], pay: 'PAID', ful: 'DELIVERED', updated: T2('9月15日', 'Sep 15'), asActive: true,
+      events: [['ORDER_PLACED', T2('9月12日 09:10', 'Sep 12, 09:10')], ['PAYMENT_CONFIRMED', T2('9月12日 09:11', 'Sep 12, 09:11')], ['SHIPPED', T2('9月13日 10:30', 'Sep 13, 10:30')], ['DELIVERED', T2('9月15日 14:02', 'Sep 15, 14:02')]] },
+  ];
+  orders.forEach((o) => { o.total = o.items.reduce((s, [i, q]) => s + P[i].price * q, 0); });
+  const afterSales = [{ id: 'AS-0916-0031', order: 'BO-0912-0090', item: 10, type: 'asReturn', reason: 'asR1', status: T2('待商家处理', 'Awaiting the merchant'), when: T2('9月16日', 'Sep 16') }];
+  const coupons = [{ id: 'c300', name: T2('满 300 减 30', '¥30 off orders over ¥300') }, { id: 'c500', name: T2('满 500 减 60', '¥60 off orders over ¥500') }];
+
+  const statusKey = (o) => (o.pay === 'PENDING' ? 'PENDING' : o.pay === 'CLOSED' ? 'CLOSED' : o.ful);
+  const isActive = (o) => o.pay === 'PENDING' || (o.pay === 'PAID' && o.ful !== 'DELIVERED');
+  const RANK = { OUT_FOR_DELIVERY: 0, PENDING: 1, IN_TRANSIT: 2, SHIPPED: 3, NOT_SHIPPED: 4 };
+  const activeOrders = () => orders.filter(isActive).sort((a, b) => RANK[statusKey(a)] - RANK[statusKey(b)]);
+  const orderTitle = (o) => nm(o.items[0][0]) + (o.items.length > 1 ? t('more', { n: o.items.length - (en() ? 1 : 0) }) : '');
+  const statusPill = (o) => `<span class="status s-${statusKey(o)}">${esc(t('st.' + statusKey(o)))}</span>`;
+
+  /* ================= 状态 ================= */
+  const state = {
+    view: 'assistant', bound: true, thread: [], convId: null, streaming: false, showAll: false,
+    cart: [{ i: 18, q: 1 }], coupon: '', expanded: null, asForm: null,
+    turns: [], turnPin: null, memOn: true,
+    memories: [{ id: 'm1', text: T2('偏好天然材质（棉、亚麻、羊毛）', 'Prefers natural fibres (cotton, linen, wool)'), when: T2('9月20日', 'Sep 20') }],
+    history: [
+      { id: 'h1', title: T2('通勤鞋怎么选', 'Choosing commuter shoes'), when: T2('9月26日', 'Sep 26'),
+        msgs: [{ role: 'user', text: T2('上班走路多，鞋子怎么选？', 'I walk a lot to work — which shoes?') }, { role: 'bot', text: T2('走路多优先看鞋底能不能换、鞋面是不是真皮。店里的手工缝线切尔西靴两样都满足。', 'For lots of walking, look for a resoleable sole and real leather. The Goodyear-welt Chelsea boots have both.'), tools: [], sources: ['catalog'] }] },
+      { id: 'h2', title: T2('退货规则', 'Return policy'), when: T2('9月20日', 'Sep 20'),
+        msgs: [{ role: 'user', text: T2('签收以后还能退吗？', 'Can I return after delivery?') }, { role: 'bot', text: T2('可以，签收后 7 天内可以申请退货退款，需要你在订单里亲自提交。', 'Yes — within 7 days of delivery. You submit the request yourself from the order.'), tools: [], sources: ['rules'] }] },
+    ],
+    overlay: null, drawerTab: 'steps',
+  };
+
+  /* ================= 智能助手回复（原型预设；第一期仍是文字，卡片属于第二期） ================= */
+  const TL = (name, zh, en2, szh, sen) => ({ name, label: T2(zh, en2), sum: T2(szh, sen) });
+  const S = (zh, en2, intent) => ({ label: T2(zh, en2), intent });
+
+  function replyShoes() {
+    return {
+      tools: [TL('search_products', '搜索商品', 'Search products', '鞋靴 · 800 元以内 · 找到 4 件', 'Shoes under ¥800 · 4 found'), TL('get_product', '查看商品详情', 'Product details', '比较 2 件', 'Compared 2')],
+      text: T2(
+        `预算 800 以内、适合通勤的有两双：\n\n· ${P[2].name.zh} ${money(699)}：牛皮鞋面、固特异缝线，鞋底磨了可以换，适合每天走路多的通勤。\n· ${P[12].name.zh} ${money(459)}：更轻、一脚蹬，适合在办公室久坐。\n\n每天步行超过半小时，我更推荐切尔西靴；想穿脱省事就选乐福鞋。${P[17].name.zh}也在预算内，但目前已售罄。`,
+        `Two pairs under ¥800 suit a commute:\n\n· ${P[2].name.en}, ${money(699)}: calf leather and Goodyear-welted, so the sole can be replaced — good if you walk a lot.\n· ${P[12].name.en}, ${money(459)}: lighter slip-ons for a day at a desk.\n\nIf you walk more than half an hour a day, I’d pick the Chelsea boots; for easy on-and-off, the loafers. The ${P[17].name.en} are in budget too, but sold out right now.`),
+      sugg: [S('把乐福鞋加入购物车', 'Add the loafers to my cart', { add: [12] }), S('切尔西靴是哪里产的？', 'Where are the Chelsea boots made?', { gap: 2 })],
+      sources: ['catalog'],
+    };
+  }
+  function replyGap(i) {
+    return {
+      tools: [TL('get_product', '查看商品详情', 'Product details', `${P[i].name.zh} · 缺少「产地」`, `${P[i].name.en} · origin missing`), TL('report_content_gap', '反馈信息缺口', 'Report a content gap', '已告知店家', 'Merchant notified')],
+      text: T2(
+        `店家目前没有提供${P[i].name.zh}的产地，我不能替店家猜。\n\n我已经把「产地缺失」作为商品信息缺口反馈给店家，补全后商品页会更新。现在能确认的是：头层牛皮鞋面，尺码 35–44。`,
+        `The merchant hasn’t listed where the ${P[i].name.en} are made, and I won’t guess.\n\nI’ve reported the missing origin to the merchant as a content gap; the product page updates once they fill it in. What I can confirm: full-grain calf leather, EU sizes 35–44.`),
+      sugg: [S('把切尔西靴加入购物车', 'Add the Chelsea boots to my cart', { add: [2] })],
+      sources: ['catalog'],
+    };
+  }
+  function replyOutfit() {
+    const mem = state.bound && state.memOn && state.memories.some((m) => m.id === 'm2');
+    return {
+      tools: [
+        ...(mem ? [TL('read_memory', '读取偏好', 'Read preferences', '2 条', '2 saved')] : []),
+        TL('search_products', '搜索商品', 'Search products', '外套 / 裤装 / 鞋 · 找到 9 件', 'Layers, trousers, shoes · 9 found'),
+      ],
+      text: T2(
+        `${mem ? '按你记住的 M 码、低饱和配色，' : ''}这套周末搭配总价 ${money(329 + 299 + 389)}：\n\n· 外搭：${P[5].name.zh} ${money(329)}，水洗亚麻，早晚温差大时正好。\n· 下装：${P[15].name.zh} ${money(299)}，高腰直筒，显腿长。\n· 鞋：${P[7].name.zh} ${money(389)}，麂皮拼接，走一天也舒服。\n\n开衫店家暂时没有放商品图，想看细节可以先问我。`,
+        `${mem ? 'Going by your size M and muted colours, ' : ''}here’s a weekend outfit for ${money(329 + 299 + 389)}:\n\n· Layer: ${P[5].name.en}, ${money(329)} — washed linen for cool mornings.\n· Bottoms: ${P[15].name.en}, ${money(299)} — high-rise and straight.\n· Shoes: ${P[7].name.en}, ${money(389)} — suede, comfortable all day.\n\nThe merchant hasn’t added a photo of the cardigan yet; ask me for details.`),
+      sugg: [S('三件都加入购物车', 'Add all three to my cart', { add: [5, 15, 7] }), S('介绍一下亚麻宽松开衫', 'Tell me about the linen cardigan', { product: 5 })],
+      sources: mem ? ['catalog', 'memory'] : ['catalog'],
+    };
+  }
+  function replySkin() {
+    return {
+      tools: [TL('search_products', '搜索商品', 'Search products', '美妆 · 敏感肌 · 找到 2 件', 'Beauty · sensitive skin · 2 found'), TL('get_product', '查看商品详情', 'Product details', `${P[4].name.zh} · 说明较短`, `${P[4].name.en} · short description`), TL('report_content_gap', '反馈信息缺口', 'Report a content gap', '缺成分表 · 已告知店家', 'No ingredient list · merchant notified')],
+      text: T2(
+        `${P[4].name.zh} ${money(159)} 是店里唯一标注适合敏感肌的面霜。不过店家给的说明很短，没有完整成分表，我没法确认里面有没有你要避开的成分。\n\n稳妥一点：先买${P[19].name.zh} ${money(89)}（氨基酸、无皂基）试试这家的肤感，面霜等店家补全成分再决定。「缺成分表」我已经反馈给店家了。`,
+        `The ${P[4].name.en} (${money(159)}) is the only moisturiser here marked for sensitive skin. But the merchant’s description is short and has no ingredient list, so I can’t check for anything you avoid.\n\nThe safer route: try the ${P[19].name.en} (${money(89)}, amino-acid, soap-free) first, and decide on the moisturiser once the ingredients are listed. I’ve reported the missing list to the merchant.`),
+      sugg: [S('把洁面乳加入购物车', 'Add the cleanser to my cart', { add: [19] }), S('介绍一下燕麦舒缓保湿面霜', 'Tell me about the oat moisturiser', { product: 4 })],
+      sources: ['catalog'],
+    };
+  }
+  function replyRemember() {
+    if (!state.bound) return { tools: [], text: T2('记忆只对绑定的演示顾客开放。点右上角「访客」绑定后，我就能记住你的尺码和偏好。', 'Memory is for the signed-in demo shopper. Sign in from “Guest” at the top right and I’ll remember your size and preferences.'), sugg: [], sources: ['none'] };
+    if (!state.memOn) return { tools: [], text: T2('你关闭了记忆，这次不会保存。可以在「动态 → 我记住的」里重新打开。', 'Memory is off, so I won’t save this. Turn it back on under Activity → Memory.'), sugg: [], sources: ['none'] };
+    return {
+      tools: [TL('save_memory', '保存偏好', 'Save preferences', '2 条', '2 saved')],
+      text: T2('记住了：你穿 M 码，偏好低饱和的颜色。以后推荐衣服会先按这两条筛。\n\n想查看或删除，点右上角「动态」→「我记住的」。', 'Got it: you wear M and prefer muted colours. I’ll filter clothing by both from now on.\n\nTo review or delete them, open Activity → Memory at the top right.'),
+      sugg: [S('帮我搭一套周末出门的衣服', 'Put together a weekend outfit', { q: 'outfit' })],
+      sources: ['memory'],
+      effect: () => {
+        if (!state.memories.some((m) => m.id === 'm2')) {
+          state.memories.unshift({ id: 'm3', text: T2('偏好低饱和、不太亮的颜色', 'Prefers muted, not-too-bright colours'), when: T2('刚刚', 'just now') });
+          state.memories.unshift({ id: 'm2', text: T2('衣服穿 M 码', 'Wears size M'), when: T2('刚刚', 'just now') });
+        }
+      },
+    };
+  }
+  function replyAdd(list) {
+    const ok = list.filter((i) => P[i].stock !== 'OUT');
+    const out = list.filter((i) => P[i].stock === 'OUT');
+    const zhN = ok.map((i) => P[i].name.zh).join('、'), enN = ok.map((i) => P[i].name.en).join(', ');
+    return {
+      tools: [TL('add_to_cart', '加入购物车', 'Add to cart', `加入 ${ok.length} 件`, `${ok.length} added`)],
+      text: T2(
+        `已把${zhN}加入购物车，数量可以在右侧调整。${out.length ? `\n${out.map((i) => P[i].name.zh).join('、')}已售罄，没有加入。` : ''}\n\n提交订单和支付需要你在购物车里亲自确认，我不会替你下单。`,
+        `Added ${enN} to your cart — adjust quantities on the right.${out.length ? `\n${out.map((i) => P[i].name.en).join(', ')} is sold out and wasn’t added.` : ''}\n\nPlacing the order and paying are yours to confirm in the cart; I never order for you.`),
+      sugg: [],
+      sources: ['cart'],
+      effect: () => { ok.forEach((i) => addToCart(i, false)); },
+    };
+  }
+  function replyProduct(i) {
+    const p = P[i];
+    const lines = (lang) => p.attrs.map((a) => `· ${a.k[lang]}：${a.v ? a.v[lang] : (lang === 'zh' ? '店家暂未提供' : 'not provided by the merchant')}`).join('\n');
+    const stockZh = p.stock === 'OUT' ? '已售罄' : p.stock === 'LOW' ? '仅剩少量' : '有货';
+    const stockEn = p.stock === 'OUT' ? 'sold out' : p.stock === 'LOW' ? 'low stock' : 'in stock';
+    return {
+      tools: [TL('get_product', '查看商品详情', 'Product details', p.name.zh, p.name.en)],
+      text: T2(
+        `${p.name.zh}，${money(p.price)}，${stockZh}。${p.short.zh}\n\n${lines('zh')}${p.img ? '' : '\n\n店家暂时没有上传商品图。'}`,
+        `${p.name.en}, ${money(p.price)}, ${stockEn}. ${p.short.en}\n\n${lines('en').replaceAll('：', ': ')}${p.img ? '' : '\n\nThe merchant hasn’t uploaded a photo yet.'}`),
+      sugg: [
+        ...(p.stock !== 'OUT' ? [S('加入购物车', 'Add it to my cart', { add: [i] })] : []),
+        S('还有类似的吗？', 'Anything similar?', { similar: i }),
+      ],
+      sources: ['catalog'],
+    };
+  }
+  function replySimilar(i) {
+    const alts = ONLINE.filter((p) => p.cat === P[i].cat && p.i !== i && p.stock !== 'OUT').sort((a, b) => b.sales - a.sales).slice(0, 2);
+    return {
+      tools: [TL('search_products', '搜索商品', 'Search products', `${CAT_NAME[P[i].cat].zh} · 找到 ${alts.length} 件`, `${CAT_NAME[P[i].cat].en} · ${alts.length} found`)],
+      text: T2(
+        `同类里卖得比较好的还有：\n\n${alts.map((p) => `· ${p.name.zh} ${money(p.price)}：${p.short.zh}`).join('\n')}`,
+        `Other popular picks in the same category:\n\n${alts.map((p) => `· ${p.name.en}, ${money(p.price)}: ${p.short.en}`).join('\n')}`),
+      sugg: alts.map((p) => S(`介绍一下${p.name.zh}`, `Tell me about the ${p.name.en}`, { product: p.i })),
+      sources: ['catalog'],
+    };
+  }
+  function replyOrder(id) {
+    if (!state.bound) return { tools: [], text: T2('查看订单需要先绑定演示顾客。', 'Sign in as the demo shopper to look up orders.'), sugg: [], sources: ['none'] };
+    const o = orders.find((x) => x.id === id);
+    const title = T2(P[o.items[0][0]].name.zh + (o.items.length > 1 ? ` 等 ${o.items.length} 件` : ''), P[o.items[0][0]].name.en + (o.items.length > 1 ? ` + ${o.items.length - 1} more` : ''));
+    const k = statusKey(o);
+    const u = o.updated;
+    const text = {
+      OUT_FOR_DELIVERY: T2(`${title.zh}现在是「派送中」，最近一次更新是${u.zh}，快递员已从站点出发。平台没有给出精确的送达时间，派送中的包裹一般当天送到。\n\n签收后 7 天内如果不合适，可以在订单里申请退货。`, `${title.en} is out for delivery — last update ${u.en}, and the courier has left the depot. There’s no exact delivery time, but parcels out for delivery usually arrive the same day.\n\nIf something doesn’t fit, you can request a return within 7 days of delivery.`),
+      IN_TRANSIT: T2(`${title.zh}正在运输中，最近一次更新是${u.zh}（已到达转运中心）。目前没有异常记录，有新进展会显示在订单里。`, `${title.en} is in transit — last update ${u.en} at the sorting centre. Nothing unusual so far; new updates show up on the order.`),
+      NOT_SHIPPED: T2(`${title.zh}已付款，等店家发货。本店承诺付款后 48 小时内发货，现在还在时限内。`, `${title.en} is paid and waiting to ship. The store ships within 48 hours of payment, and it’s still within that window.`),
+      PENDING: T2(`${title.zh}还没付款，需要在${o.payBy.zh}前支付，超时会自动关闭并释放库存。\n\n支付要你在订单里亲自点「去支付」，我不能代付。`, `${title.en} isn’t paid yet — pay by ${o.payBy.en} or it closes automatically and the stock is released.\n\nPaying is yours to do from the order (“Pay now”); I can’t pay for you.`),
+      DELIVERED: T2(`${title.zh}已于${u.zh}签收。签收 7 天内可以申请退货退款，在订单里点「申请售后」即可，提交前需要你确认。`, `${title.en} was delivered on ${u.en}. You can request a return within 7 days of delivery from the order; you confirm before it’s submitted.`),
+      SHIPPED: T2(`${title.zh}已发货，最近一次更新是${u.zh}。`, `${title.en} has shipped — last update ${u.en}.`),
+      CLOSED: T2(`${title.zh}已关闭，库存已释放。`, `${title.en} is closed and its stock released.`),
+    }[k];
+    return {
+      tools: [TL('get_order', '查询订单', 'Look up order', o.id, o.id), TL('list_fulfillment_events', '查询物流', 'Delivery events', `最近更新 ${u.zh}`, `last update ${u.en}`)],
+      text,
+      sugg: k === 'OUT_FOR_DELIVERY' ? [S('切尔西靴不合脚怎么退？', 'How do I return the boots if they don’t fit?', { rule: 'return' }), S('我的其他订单呢？', 'What about my other orders?', { orders: true })] : [S('我的其他订单呢？', 'What about my other orders?', { orders: true })],
+      sources: ['orders'],
+    };
+  }
+  function replyOrders() {
+    if (!state.bound) return replyOrder(null);
+    const list = activeOrders();
+    return {
+      tools: [TL('list_orders', '查询订单列表', 'List orders', `进行中 ${list.length} 单`, `${list.length} in progress`)],
+      text: T2(
+        `你有 ${list.length} 单在进行中：\n\n${list.map((o) => `· ${P[o.items[0][0]].name.zh}${o.items.length > 1 ? ` 等 ${o.items.length} 件` : ''}：${I18N['zh-CN']['st.' + statusKey(o)]}${o.pay === 'PENDING' ? `，${o.payBy.zh}前支付` : `，更新于${o.updated.zh}`}`).join('\n')}\n\n想看哪一单的细节，直接问我。`,
+        `You have ${list.length} orders in progress:\n\n${list.map((o) => `· ${P[o.items[0][0]].name.en}${o.items.length > 1 ? ` + ${o.items.length - 1} more` : ''}: ${I18N['en-US']['st.' + statusKey(o)]}${o.pay === 'PENDING' ? `, pay by ${o.payBy.en}` : `, updated ${o.updated.en}`}`).join('\n')}\n\nAsk me about any of them.`),
+      sugg: [],
+      sources: ['orders'],
+    };
+  }
+  function replyReturnRule() {
+    return {
+      tools: [TL('search_store_rules', '查询店铺规则', 'Store rules', '退换货 · 1 条', 'Returns · 1 rule')],
+      text: T2(
+        '本店支持签收后 7 天内退货退款：\n\n1. 在「订单」里找到这一单，点「申请售后」；\n2. 选择退货退款并填写原因；\n3. 店家同意后，按页面给出的地址寄回。\n\n鞋子请保持鞋底干净、原包装完整。售后单要你自己在页面上确认提交，我不会替你提交。',
+        'You can return items within 7 days of delivery:\n\n1. Open the order under Orders and choose “Request a return”;\n2. Pick return & refund and add a reason;\n3. Once the merchant accepts, ship it to the address shown.\n\nFor shoes, keep the soles clean and the box intact. You confirm the request on the page yourself; I never submit it for you.'),
+      sugg: [S('我的其他订单呢？', 'What about my other orders?', { orders: true })],
+      sources: ['rules'],
+    };
+  }
+  function replyFallback() {
+    return {
+      tools: [],
+      text: T2('这个问题我暂时答不好。可以换个说法，或者直接问某件商品、某个订单。', 'I can’t answer that well right now. Try rephrasing, or ask about a specific product or order.'),
+      degraded: T2('导购模型暂不可用，这条是规则兜底回复（原型示意）。', 'the shopping model is unavailable; this is a rule-based fallback (prototype illustration).'),
+      sugg: [S('本周有什么热门？', 'What’s popular this week?', { q: 'popular' })],
+      sources: ['none'],
+    };
+  }
+  function replyPopular() {
+    return {
+      tools: [TL('list_products', '查询商品', 'List products', '按近 30 天销量 · 前 3', 'Top 3 by 30-day sales')],
+      text: T2(`近 30 天卖得最好的三件：\n\n${POPULAR.slice(0, 3).map((p) => `· ${p.name.zh} ${money(p.price)}：${p.short.zh}`).join('\n')}`,
+        `The three best sellers of the last 30 days:\n\n${POPULAR.slice(0, 3).map((p) => `· ${p.name.en}, ${money(p.price)}: ${p.short.en}`).join('\n')}`),
+      sugg: POPULAR.slice(0, 2).map((p) => S(`介绍一下${p.name.zh}`, `Tell me about the ${p.name.en}`, { product: p.i })),
+      sources: ['catalog'],
+    };
+  }
+
+  const QUICK = [
+    { id: 'shoes', icon: 'search', text: T2('通勤穿的皮鞋，预算 800 以内，有推荐吗？', 'Leather shoes for my commute, under ¥800?') },
+    { id: 'outfit', icon: 'layers', text: T2('换季了，帮我搭一套周末出门的衣服', 'Put together a weekend outfit for the new season') },
+    { id: 'skin', icon: 'drop', text: T2('敏感肌适合哪款面霜？', 'Which moisturiser suits sensitive skin?') },
+    { id: 'remember', icon: 'edit', text: T2('记住：我穿 M 码，不喜欢太亮的颜色', 'Remember: I wear M and avoid bright colours') },
+  ];
+
+  function route(text, intent) {
+    if (intent) {
+      if (intent.q === 'shoes') return replyShoes();
+      if (intent.q === 'outfit') return replyOutfit();
+      if (intent.q === 'skin') return replySkin();
+      if (intent.q === 'remember') return replyRemember();
+      if (intent.q === 'popular') return replyPopular();
+      if (intent.add) return replyAdd(intent.add);
+      if (intent.gap != null) return replyGap(intent.gap);
+      if (intent.product != null) return replyProduct(intent.product);
+      if (intent.similar != null) return replySimilar(intent.similar);
+      if (intent.order) return replyOrder(intent.order);
+      if (intent.orders) return replyOrders();
+      if (intent.rule) return replyReturnRule();
+    }
+    const s = text.toLowerCase();
+    if (/记住|remember/.test(s)) return replyRemember();
+    if (/退|return|refund/.test(s)) return replyReturnRule();
+    if (/订单|物流|快递|到哪|order|deliver|parcel|package/.test(s)) return replyOrders();
+    if (/敏感|面霜|护肤|moistur|sensitive|skin/.test(s)) return replySkin();
+    if (/搭|周末|outfit|weekend/.test(s)) return replyOutfit();
+    if (/鞋|靴|通勤|shoe|boot|loafer|commute/.test(s)) return replyShoes();
+    if (/热门|popular|best/.test(s)) return replyPopular();
+    const hit = ONLINE.find((p) => s.includes(p.name.zh) || s.includes(p.name.en.toLowerCase()));
+    if (hit) return replyProduct(hit.i);
+    return replyFallback();
+  }
+
+  /* ================= 发送一轮 ================= */
+  const wait = (ms) => new Promise((r) => setTimeout(r, reduced ? 0 : ms));
+  async function send(text, intent) {
+    const q = String(text).trim();
+    if (!q || state.streaming) return;
+    closeOverlay();
+    state.view = 'assistant';
+    if (!state.convId) state.convId = 'c' + Date.now();
+    state.thread.push({ role: 'user', text: q });
+    const bot = { role: 'bot', pending: true, tools: [], text: null, sources: [], open: false };
+    state.thread.push(bot);
+    state.streaming = true;
+    renderAll(true);
+    const started = performance.now();
+    const r = route(q, intent);
+    for (const tool of r.tools) { await wait(420); bot.tools.push(tool); renderPage(); scrollEnd(); }
+    await wait(520);
+    bot.pending = false; bot.text = r.text; bot.degraded = r.degraded; bot.sugg = r.sugg; bot.sources = r.sources;
+    if (r.effect) r.effect();
+    state.turns.push({ q, tools: r.tools, sources: r.sources, degraded: r.degraded, secs: ((performance.now() - started) / 1000 + 0.8).toFixed(1) });
+    state.turnPin = null;
+    state.streaming = false;
+    renderAll();
+    scrollEnd();
+  }
+  const scrollEnd = () => { const sc = $('#scroll'); sc.scrollTop = sc.scrollHeight; };
+
+  /* ================= 购物车 ================= */
+  function addToCart(i, toast = true) {
+    const line = state.cart.find((l) => l.i === i);
+    if (line) line.q += 1; else state.cart.push({ i, q: 1 });
+    if (toast) showToast(t('toast.added'));
+    renderCart(); renderBar();
+  }
+  const cartCount = () => state.cart.reduce((s, l) => s + l.q, 0);
+  const cartSubtotal = () => state.cart.reduce((s, l) => s + P[l.i].price * l.q, 0);
+
+  function submitOrder() {
+    if (!state.bound || !state.cart.length) return;
+    const now = new Date();
+    const hm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const due = new Date(now.getTime() + 30 * 60000);
+    const dm = `${String(due.getHours()).padStart(2, '0')}:${String(due.getMinutes()).padStart(2, '0')}`;
+    const o = { id: `BO-0928-${String(Math.floor(Math.random() * 9000) + 1000)}`, items: state.cart.map((l) => [l.i, l.q]), pay: 'PENDING', ful: 'NOT_SHIPPED',
+      updated: T2(`今天 ${hm}`, `today ${hm}`), payBy: T2(`今天 ${dm}`, `today ${dm}`), events: [['ORDER_PLACED', T2(`今天 ${hm}`, `Today ${hm}`)]] };
+    o.total = o.items.reduce((s, [i, q]) => s + P[i].price * q, 0);
+    orders.unshift(o);
+    state.cart = []; state.coupon = '';
+    state.view = 'orders'; state.expanded = o.id;
+    $('#app').dataset.cart = 'closed';
+    showToast(t('toast.submitted'));
+    renderAll(true);
+  }
+
+  /* ================= 渲染：顶栏 ================= */
+  function renderBar() {
+    const pending = state.bound ? orders.filter((o) => o.pay === 'PENDING').length : 0;
+    $('#tabs').innerHTML = [
+      ['assistant', 'spark', t('tab.assistant'), 0],
+      ['orders', 'box', t('tab.orders'), pending],
+    ].map(([id, icon, label, n]) => `<button type="button" class="tab" data-view="${id}"${state.view === id ? ' aria-current="page"' : ''}${n ? ` aria-label="${esc(label)}，${n} ${esc(t('pendingAttn'))}"` : ''}>${ic(icon)}<span class="lbl">${esc(label)}</span>${n ? `<span class="count" aria-hidden="true">${n}</span>` : ''}</button>`).join('');
+    $('#activityDot').hidden = !state.streaming;
+    const n = cartCount();
+    $('#cartBtn').innerHTML = `${ic('bag')}<span class="activity-label">${esc(t('cart'))}</span>${n ? `<span class="n">${n}</span>` : ''}`;
+    $('#cartBtn').setAttribute('aria-label', `${t('cart')} ${t('items', { n })}`);
+    const open = $('#acct .menu') && !$('#acct .menu').hidden;
+    $('#acct').innerHTML = `
+      <button type="button" id="acctBtn" aria-haspopup="true" aria-expanded="${open}">
+        <span class="avatar${state.bound ? '' : ' guest'}" aria-hidden="true">${state.bound ? (en() ? 'D' : '顾') : '?'}</span>
+        <span class="t"><strong>${esc(state.bound ? t('demo') : t('guest'))}</strong><span>${esc(state.bound ? t('demoSub') : t('guestSub'))}</span></span>
+      </button>
+      <div class="menu" role="dialog" aria-label="${esc(t('demo'))}"${open ? '' : ' hidden'}>
+        <p>${esc(state.bound ? t('acctBound') : t('acctGuest'))}</p>
+        <button type="button" class="${state.bound ? 'ghost-btn' : 'solid-btn'}" id="bindBtn">${esc(state.bound ? t('unbind') : t('bind'))}</button>
+        <p class="fine">${esc(t('notReal'))}</p>
+      </div>`;
+  }
+
+  /* ================= 渲染：主区 ================= */
+  function greeting() {
+    const h = new Date().getHours();
+    return t(h < 11 ? 'morning' : h < 18 ? 'afternoon' : 'evening') + (state.bound ? t('welcomeBack') : '');
+  }
+  function summaryHtml() {
+    if (!state.bound) return esc(t('guestSummary'));
+    const list = activeOrders();
+    const out = list.filter((o) => o.ful === 'OUT_FOR_DELIVERY' && o.pay === 'PAID').length;
+    const pend = list.filter((o) => o.pay === 'PENDING').length;
+    if (en()) return `${list.length} orders in progress${out ? `; ${out} out for delivery today` : ''}.${pend ? ` <strong>${pend} awaiting payment.</strong>` : ''}`;
+    return `${list.length} 单进行中${out ? `，${out} 单今天派送中` : ''}。${pend ? `<strong>${pend} 单待付款。</strong>` : ''}`;
+  }
+  function orderRowHome(o) {
+    const k = statusKey(o);
+    const when = o.pay === 'PENDING' ? `<span class="urgent">${esc(t('payBy', { t: L(o.payBy) }))}</span>` : esc(t('updated', { t: L(o.updated) }));
+    const act = o.pay === 'PENDING'
+      ? `<button type="button" class="solid-btn" data-open-order="${o.id}">${esc(t('payNow'))}</button>`
+      : `<button type="button" class="ghost-btn" data-ask-order="${o.id}">${ic('spark')}${esc(t('ask'))}</button>`;
+    return `<div class="orow">${art(P[o.items[0][0]], true)}<div class="t"><strong>${esc(orderTitle(o))}</strong><div class="meta">${statusPill(o)}<span class="sep">·</span><span>${when}</span></div></div>${act}</div>`;
+  }
+  function tile(p) {
+    return `<button type="button" class="tile" data-product="${p.i}">${art(p)}<span class="nm">${esc(L(p.name))}</span><span class="pr num">${money(p.price)}${p.stock !== 'IN' ? `<span class="stock ${p.stock}">${esc(t('stock_' + p.stock))}</span>` : ''}</span></button>`;
+  }
+  function homeHtml() {
+    const d = new Date();
+    const date = d.toLocaleDateString(en() ? 'en-US' : 'zh-CN', en() ? { weekday: 'long', month: 'long', day: 'numeric' } : { month: 'long', day: 'numeric', weekday: 'long' });
+    const list = state.bound ? activeOrders() : [];
+    const ordersPanel = state.bound
+      ? `<section class="panel" aria-labelledby="otw"><div class="panel-head"><h2 id="otw">${esc(t('onTheWay'))}</h2><span class="muted">${esc(t('items', { n: list.length }).replace(en() ? 'items' : '件', en() ? 'orders' : '单'))}</span><button type="button" class="link" data-view="orders">${esc(t('allOrders'))}${ic('arrow')}</button></div>${list.slice(0, 3).map(orderRowHome).join('')}</section>`
+      : `<section class="panel" aria-labelledby="otw"><div class="panel-head"><h2 id="otw">${esc(t('onTheWay'))}</h2></div><div class="empty-note"><p>${esc(t('ordersBindPrompt'))}</p><button type="button" class="solid-btn" data-bind>${esc(t('bind'))}</button></div></section>`;
+    const grid = state.showAll ? ONLINE : POPULAR;
+    return `<div class="page reveal" id="pageInner">
+      <header><p class="eyebrow">${esc(date)}</p><h1 class="greet">${esc(greeting())}</h1><p class="summary">${summaryHtml()}</p></header>
+      <div class="quick">${QUICK.map((q) => `<button type="button" class="qcard" data-quick="${q.id}"><span class="ico">${ic(q.icon)}</span><span>${esc(L(q.text))}</span><span class="go">${ic('arrow')}</span></button>`).join('')}</div>
+      ${ordersPanel}
+      <section aria-labelledby="pop"><div class="sec-head"><h2 id="pop">${esc(state.showAll ? t('allProducts') : t('popular'))}</h2><span class="muted">${esc(state.showAll ? t('allProductsSub') + ' · ' + t('items', { n: ONLINE.length }) : t('popularSub'))}</span><button type="button" class="link" data-toggle-all>${esc(state.showAll ? t('showLess') : t('allProducts'))}${ic('arrow')}</button></div>
+        <div class="tiles">${grid.map(tile).join('')}</div></section>
+    </div>`;
+  }
+  function botHtml(m, idx) {
+    const steps = m.tools.length
+      ? `<button type="button" class="steps-btn" data-steps="${idx}" aria-expanded="${!!m.open}">${esc(t('stepsN', { n: m.tools.length }))}${ic('chev')}</button>`
+      : '';
+    const list = m.tools.length && (m.open || m.pending)
+      ? `<div class="steps">${m.tools.map((x) => `<div class="step">${ic('check')}<span>${esc(L(x.label))}</span><span class="sum">${esc(L(x.sum))}</span></div>`).join('')}</div>`
+      : '';
+    const body = m.pending
+      ? `<div class="thinking"><i></i><i></i><i></i><span>${esc(t('thinking'))}</span></div>`
+      : `<div class="body">${esc(L(m.text))}</div>`;
+    const deg = m.degraded ? `<div class="degraded" role="note">${ic('alert')}<span>${esc(t('degraded') + L(m.degraded))}</span></div>` : '';
+    const isLast = idx === state.thread.length - 1;
+    const chips = !m.pending && isLast && m.sugg && m.sugg.length
+      ? `<div class="chips">${m.sugg.map((s, k) => `<button type="button" class="chip-btn" data-sugg="${k}">${esc(L(s.label))}</button>`).join('')}</div>`
+      : '';
+    return `<div class="msg-bot"><span class="av">${ic('spark')}</span><div><div class="who">${esc(t('clerk'))}${steps}</div>${list}${body}${deg}${chips}</div></div>`;
+  }
+  function threadHtml() {
+    return `<div class="page" id="pageInner">
+      <div class="thread-head"><h1>${esc(t('threadTitle'))}</h1>
+        <button type="button" class="ghost-btn" data-open-history>${ic('pulse')}${esc(t('history'))}</button>
+        <button type="button" class="ghost-btn" data-new-chat>${ic('plus')}${esc(t('newChat'))}</button></div>
+      <div class="msgs" aria-live="polite">${state.thread.map((m, idx) => (m.role === 'user' ? `<div class="msg-user">${esc(L(m.text))}</div>` : botHtml(m, idx))).join('')}</div>
+    </div>`;
+  }
+  function orderRowFull(o) {
+    const k = statusKey(o);
+    const open = state.expanded === o.id;
+    const when = o.pay === 'PENDING' ? `<span class="urgent">${esc(t('payBy', { t: L(o.payBy) }))}</span>` : esc(t('updated', { t: L(o.updated) }));
+    const as = o.asActive ? `<span class="status s-AS">${esc(t('asActive'))}</span>` : '';
+    let detail = '';
+    if (open) {
+      const lines = o.items.map(([i, q]) => `<div class="oline">${art(P[i], true)}<span>${esc(nm(i))}<small>${esc(t('qty', { n: q }))} · ${money(P[i].price)}</small></span><span class="num">${money(P[i].price * q)}</span></div>`).join('');
+      const tl = o.events.map(([type, when2], idx) => `<li${idx === o.events.length - 1 ? ' class="now"' : ''}>${esc(t('ev.' + type))}<small>${esc(L(when2))}</small></li>`).join('');
+      const acts = [];
+      if (o.pay === 'PENDING') acts.push(`<button type="button" class="solid-btn" data-pay="${o.id}">${esc(t('payNow'))}</button>`, `<button type="button" class="ghost-btn" data-cancel="${o.id}">${esc(t('cancel'))}</button>`);
+      if (o.pay === 'PAID' && o.ful === 'DELIVERED' && !o.asActive) acts.push(`<button type="button" class="ghost-btn" data-as="${o.id}">${esc(t('afterSale'))}</button>`);
+      acts.push(`<button type="button" class="ghost-btn" data-ask-order="${o.id}">${ic('spark')}${esc(t('askClerk'))}</button>`);
+      const form = state.asForm === o.id ? `<form class="asform" data-as-form="${o.id}">
+          <fieldset><legend>${esc(t('asType'))}</legend>${['asReturn', 'asRefund', 'asTicket'].map((k2, n) => `<label><input type="radio" name="type" value="${k2}"${n === 0 ? ' checked' : ''} />${esc(t(k2))}</label>`).join('')}</fieldset>
+          <label style="gap:10px">${esc(t('asReason'))}<select name="reason">${['asR1', 'asR2', 'asR3', 'asR4'].map((r) => `<option value="${r}">${esc(t(r))}</option>`).join('')}</select></label>
+          <p class="fine">${esc(t('asFine'))}</p>
+          <div class="oactions" style="margin:0"><button type="submit" class="solid-btn">${esc(t('asConfirm'))}</button><button type="button" class="ghost-btn" data-as-cancel>${esc(t('asCancel'))}</button></div>
+        </form>` : '';
+      detail = `<div class="odetail" id="od-${o.id}"><div class="odetail-grid">
+          <div><h3>${esc(t('items_h'))} · <span class="mono">${o.id}</span></h3>${lines}<div class="ototal"><span>${esc(t('total'))}</span><strong class="num">${money(o.total)}</strong></div></div>
+          <div><h3>${esc(t('track_h'))}</h3><ol class="timeline">${tl}</ol></div>
+        </div><div class="oactions">${acts.join('')}</div>${form}</div>`;
+    }
+    return `<button type="button" class="orow" data-expand="${o.id}" aria-expanded="${open}" aria-controls="od-${o.id}">${art(P[o.items[0][0]], true)}<span class="t"><strong>${esc(orderTitle(o))}</strong><span class="meta">${statusPill(o)}${as}<span class="sep">·</span><span>${when}</span></span></span><span class="total num">${money(o.total)}</span><span class="chev">${ic('chev')}</span></button>${detail}`;
+  }
+  function ordersHtml() {
+    if (!state.bound) {
+      return `<div class="page reveal" id="pageInner"><header class="view-head"><h1>${esc(t('ordersTitle'))}</h1><p>${esc(t('ordersSubGuest'))}</p></header>
+        <section class="panel"><div class="empty-note" style="border-top:0"><p>${esc(t('ordersBindPrompt'))}</p><button type="button" class="solid-btn" data-bind>${esc(t('bind'))}</button></div></section></div>`;
+    }
+    const act = orders.filter(isActive).sort((a, b) => RANK[statusKey(a)] - RANK[statusKey(b)]);
+    const done = orders.filter((o) => !isActive(o));
+    const asRows = afterSales.map((a) => `<div class="orow">${art(P[a.item], true)}<div class="t"><strong>${esc(nm(a.item))} · ${esc(t(a.type))}</strong><div class="meta"><span class="status s-AS">${esc(L(a.status))}</span><span class="sep">·</span><span>${esc(t(a.reason))}</span><span class="sep">·</span><span>${esc(L(a.when))}</span><span class="sep">·</span><span class="mono">${a.id}</span></div></div></div>`).join('');
+    return `<div class="page reveal" id="pageInner">
+      <header class="view-head"><h1>${esc(t('ordersTitle'))}</h1><p>${esc(t('ordersSub'))}</p></header>
+      <section><p class="group-label">${esc(t('grpActive'))} · ${act.length}</p><div class="panel">${act.length ? act.map(orderRowFull).join('') : `<div class="empty-note" style="border-top:0"><p>${esc(t('noOrders'))}</p></div>`}</div></section>
+      <section><p class="group-label">${esc(t('grpDone'))} · ${done.length}</p><div class="panel">${done.map(orderRowFull).join('')}</div></section>
+      <section><p class="group-label">${esc(t('grpAS'))} · ${afterSales.length}</p><div class="panel">${asRows}</div></section>
+    </div>`;
+  }
+  function renderPage(animate) {
+    const html = state.view === 'orders' ? ordersHtml() : state.thread.length ? threadHtml() : homeHtml();
+    $('#page').outerHTML = `<div id="page">${html}</div>`;
+    if (!animate) { const inner = $('#pageInner'); if (inner) inner.classList.remove('reveal'); }
+    $('#ask').placeholder = state.view === 'orders' ? t('placeholderOrders') : t('placeholder');
+    $('#ask').disabled = state.streaming;
+    $('#sendBtn').disabled = state.streaming || !$('#ask').value.trim();
+  }
+
+  /* ================= 渲染：购物车 ================= */
+  function renderCart() {
+    const n = cartCount();
+    const lines = state.cart.map((l) => {
+      const p = P[l.i];
+      return `<div class="line">${art(p, true)}<div>
+        <div class="top"><strong>${esc(L(p.name))}</strong><span class="num">${money(p.price * l.q)}</span></div>
+        <div class="unit num">${esc(t('unit', { p: money(p.price) }))}${p.stock === 'LOW' ? ` · <span class="stock LOW">${esc(t('stock_LOW'))}</span>` : ''}</div>
+        <div class="ctl"><span class="stepper"><button type="button" data-dec="${l.i}" aria-label="${esc(t('dec'))}"${l.q <= 1 ? ' disabled' : ''}>${ic('minus')}</button><span class="num" aria-live="polite">${l.q}</span><button type="button" data-inc="${l.i}" aria-label="${esc(t('inc'))}">${ic('plus')}</button></span>
+        <button type="button" class="text-btn" data-remove="${l.i}">${esc(t('remove'))}</button></div></div></div>`;
+    }).join('');
+    $('#cart').innerHTML = `
+      <div class="cart-head"><h2>${esc(t('cart'))}</h2><span class="chip num">${esc(t('items', { n }))}</span>
+        <button type="button" class="icon-btn close" data-close-cart aria-label="${esc(t('close'))}">${ic('x')}</button></div>
+      <div class="cart-list">${n ? lines : `<div class="cart-empty"><p>${esc(t('cartEmpty'))}</p><p class="muted">${esc(t('cartEmptyHint'))}</p></div>`}</div>
+      <div class="cart-foot">
+        ${n ? `<label class="row"><span>${esc(t('coupon'))}</span><select id="couponSel"><option value="">${esc(t('noCoupon'))}</option>${coupons.map((c) => `<option value="${c.id}"${state.coupon === c.id ? ' selected' : ''}>${esc(L(c.name))}</option>`).join('')}</select></label>` : ''}
+        <div class="row subtotal"><span>${esc(t('subtotal'))}</span><strong class="num">${money(cartSubtotal())}</strong></div>
+        ${n ? `<p class="fine">${esc(t('calcNote'))}</p><p class="demo-note">${esc(t('demoNote'))}</p>` : ''}
+        <button type="button" class="primary" id="submitBtn"${!n || !state.bound ? ' disabled' : ''}>${esc(t('submit'))}</button>
+        ${n && !state.bound ? `<p class="bind-hint">${esc(t('bindToSubmit'))}<button type="button" class="link" data-bind>${esc(t('bind'))}</button></p>` : ''}
+      </div>`;
+  }
+
+  /* ================= 覆盖层：商品详情 / 动态 ================= */
+  function openOverlay(kind, arg) {
+    state.overlay = { kind, arg, from: document.activeElement };
+    renderOverlay();
+  }
+  function closeOverlay() {
+    if (!state.overlay) return;
+    const from = state.overlay.from;
+    state.overlay = null;
+    $('#overlay').innerHTML = '';
+    if (from && document.contains(from)) from.focus();
+  }
+  function renderOverlay() {
+    const o = state.overlay;
+    if (!o) { $('#overlay').innerHTML = ''; return; }
+    if (o.kind === 'product') {
+      const p = P[o.arg];
+      const attrs = p.attrs.map((a) => `<dt>${esc(L(a.k))}</dt>${a.v ? `<dd>${esc(L(a.v))}</dd>` : `<dd class="gap">${esc(t('gapProvide'))}<button type="button" data-gap="${p.i}">· ${esc(t('askAboutIt'))}</button></dd>`}`).join('');
+      $('#overlay').innerHTML = `<div class="scrim" data-close></div>
+        <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle"><div class="sheet-grid">${art(p)}
+          <div class="sheet-info"><button type="button" class="icon-btn close" data-close aria-label="${esc(t('close'))}">${ic('x')}</button>
+            <span class="cat">${esc(L(CAT_NAME[p.cat]).toUpperCase())} · ${p.code}</span>
+            <h2 id="sheetTitle">${esc(L(p.name))}</h2>
+            <div class="price num">${money(p.price)}${p.stock !== 'IN' ? `<span class="stock ${p.stock}">${esc(t('stock_' + p.stock))}</span>` : ''}</div>
+            <p class="lede">${esc(L(p.short))}</p>
+            <div class="acts"><button type="button" class="primary" data-add="${p.i}"${p.stock === 'OUT' ? ' disabled' : ''}>${esc(p.stock === 'OUT' ? t('soldOut') : t('addToCart'))}</button><button type="button" class="ghost-btn" data-ask-product="${p.i}">${ic('spark')}${esc(t('askAboutIt'))}</button></div>
+            <dl class="attrs">${attrs}</dl>
+            <p class="desc">${esc(L(p.desc))}</p>
+          </div></div></div>`;
+      $('#overlay .close').focus();
+      return;
+    }
+    // 动态抽屉
+    const tab = state.drawerTab;
+    let body = '';
+    if (tab === 'steps') {
+      if (!state.turns.length) body = `<p class="muted">${esc(t('noTurns'))}</p>`;
+      else {
+        const k = state.turnPin ?? state.turns.length;
+        const tr = state.turns[k - 1];
+        body = `<div class="turn-nav"><button type="button" data-turn="${k - 1}"${k <= 1 ? ' disabled' : ''} aria-label="‹">‹</button><button type="button" data-turn="${k + 1}"${k >= state.turns.length ? ' disabled' : ''} aria-label="›">›</button>${esc(t('turnOf', { k, n: state.turns.length }))}<span>· ${esc(t('elapsed', { s: tr.secs }))}</span></div>
+          <p class="quote">${esc(tr.q)}</p>
+          ${tr.tools.length ? `<ol class="trace">${tr.tools.map((x) => `<li>${ic('check')}<span><strong>${esc(L(x.label))}</strong><span class="sum">${esc(L(x.sum))}</span><span class="mono">${esc(x.name)}</span></span></li>`).join('')}</ol>` : `<p class="muted">${esc(t('noTools'))}</p>`}
+          <div class="sources">${esc(t('sources'))}：${tr.sources.map((s) => `<span class="src">${esc(t('src.' + s))}</span>`).join('')}</div>
+          ${tr.degraded ? `<div class="degraded">${ic('alert')}<span>${esc(t('degraded') + L(tr.degraded))}</span></div>` : ''}`;
+      }
+    } else if (tab === 'memory') {
+      if (!state.bound) body = `<p class="muted">${esc(t('memGuest'))}</p><div><button type="button" class="solid-btn" data-bind>${esc(t('bind'))}</button></div>`;
+      else {
+        body = `<div class="switch-row"><span>${esc(t('memToggle'))}<small>${esc(t('memToggleHint'))}</small></span><button type="button" class="switch" role="switch" aria-checked="${state.memOn}" data-mem-toggle aria-label="${esc(t('memToggle'))}"></button></div>
+          ${!state.memOn ? `<p class="muted">${esc(t('memOff'))}</p>` : state.memories.length ? state.memories.map((m) => `<div class="mem"><span class="t">${esc(L(m.text))}<small>${esc(L(m.when))}</small></span><button type="button" class="icon-btn" data-mem-del="${m.id}" aria-label="${esc(t('delete'))}">${ic('trash')}</button></div>`).join('') : `<p class="muted">${esc(t('memEmpty'))}</p>`}`;
+      }
+    } else {
+      const cur = state.thread.length ? [`<button type="button" class="conv" aria-current="true" data-conv="current"><span class="t"><strong>${esc(L(state.thread[0].text))}</strong><small>${esc(t('current'))} · ${esc(t('msgs', { n: state.thread.length }))}</small></span></button>`] : [];
+      const past = state.history.map((h) => `<div class="conv"><button type="button" class="t" data-conv="${h.id}" style="border:0;background:none;padding:0;text-align:left"><strong>${esc(L(h.title))}</strong><small>${esc(L(h.when))} · ${esc(t('msgs', { n: h.msgs.length }))}</small></button><button type="button" class="icon-btn" data-conv-del="${h.id}" aria-label="${esc(t('delete'))}">${ic('trash')}</button></div>`);
+      body = `<div><button type="button" class="ghost-btn" data-new-chat>${ic('plus')}${esc(t('newChat'))}</button></div>${cur.concat(past).join('') || `<p class="muted">${esc(t('historyEmpty'))}</p>`}`;
+    }
+    $('#overlay').innerHTML = `<div class="scrim" data-close></div>
+      <aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
+        <div class="drawer-head"><h2 id="drawerTitle">${esc(t('activity'))}</h2><button type="button" class="icon-btn" data-close aria-label="${esc(t('close'))}">${ic('x')}</button></div>
+        <div class="seg" role="tablist">${[['steps', 'tabSteps'], ['memory', 'tabMemory'], ['history', 'tabHistory']].map(([id, k]) => `<button type="button" role="tab" aria-selected="${tab === id}" data-dtab="${id}">${esc(t(k))}</button>`).join('')}</div>
+        <div class="drawer-body">${body}</div>
+      </aside>`;
+  }
+
+  /* ================= 其它 ================= */
+  let toastTimer;
+  function showToast(msg) {
+    clearTimeout(toastTimer);
+    $('#toastHost').innerHTML = `<div class="toast">${esc(msg)}</div>`;
+    toastTimer = setTimeout(() => { $('#toastHost').innerHTML = ''; }, 2400);
+  }
+  function applyPrefs() {
+    const root = document.documentElement;
+    root.dataset.theme = prefs.theme; root.dataset.size = prefs.size; root.lang = prefs.lang;
+    document.querySelectorAll('[data-i18n]').forEach((el) => { el.textContent = t(el.dataset.i18n); });
+    document.querySelectorAll('[data-i18n-label]').forEach((el) => { el.setAttribute('aria-label', t(el.dataset.i18nLabel)); });
+    document.title = en() ? 'Borough store' : 'Borough 店铺';
+    $('#prefTheme').value = prefs.theme; $('#prefLang').value = prefs.lang; $('#prefSize').value = prefs.size;
+  }
+  function renderAll(animate) {
+    renderBar(); renderPage(animate); renderCart();
+    if (state.overlay && state.overlay.kind === 'drawer') renderOverlay();
+  }
+  function setBound(v) {
+    state.bound = v;
+    state.expanded = null; state.asForm = null;
+    // 身份一变，原对话不再属于当前主体：回到新建态（与现有 AssistantClient 的规则一致）
+    state.thread = []; state.convId = null;
+    showToast(t(v ? 'toast.bound' : 'toast.unbound'));
+    renderAll(true);
+  }
+  function newChat() {
+    if (state.thread.length) {
+      state.history.unshift({ id: state.convId, title: state.thread[0].text && typeof state.thread[0].text === 'object' ? state.thread[0].text : T2(state.thread[0].text, state.thread[0].text), when: T2('刚刚', 'just now'), msgs: state.thread.filter((m) => !m.pending) });
+    }
+    state.thread = []; state.convId = null; state.view = 'assistant';
+    closeOverlay();
+    renderAll(true);
+  }
+
+  /* ================= 事件 ================= */
+  document.addEventListener('click', (e) => {
+    const el = e.target.closest('button, a, [data-close]');
+    // 点在菜单外时收起身份菜单与偏好面板
+    if (!e.target.closest('#acct')) { const m = $('#acct .menu'); if (m && !m.hidden) { m.hidden = true; $('#acctBtn').setAttribute('aria-expanded', 'false'); } }
+    if (!e.target.closest('#prefs') && !e.target.closest('#prefsBtn') && !$('#prefs').hidden) togglePrefs(false);
+    if (!el) return;
+    const d = el.dataset;
+    if (el.id === 'homeLink') { e.preventDefault(); state.view = 'assistant'; if (state.thread.length) newChat(); else renderAll(true); return; }
+    if (d.view) { state.view = d.view; state.expanded = null; state.asForm = null; renderAll(true); $('#scroll').scrollTop = 0; return; }
+    if (el.id === 'acctBtn') { const m = $('#acct .menu'); m.hidden = !m.hidden; el.setAttribute('aria-expanded', String(!m.hidden)); return; }
+    if (el.id === 'bindBtn') { setBound(!state.bound); return; }
+    if (d.bind !== undefined) { closeOverlay(); setBound(true); return; }
+    if (el.id === 'activityBtn') { state.drawerTab = state.drawerTab || 'steps'; openOverlay('drawer'); return; }
+    if (el.id === 'cartBtn') { $('#app').dataset.cart = 'open'; $('#cart .close').focus(); return; }
+    if (d.closeCart !== undefined) { $('#app').dataset.cart = 'closed'; $('#cartBtn').focus(); return; }
+    if (el.id === 'prefsBtn') { togglePrefs($('#prefs').hidden); return; }
+    if (el.id === 'prefsClose') { togglePrefs(false); $('#prefsBtn').focus(); return; }
+    if (d.close !== undefined) { closeOverlay(); return; }
+    if (d.quick) { const q = QUICK.find((x) => x.id === d.quick); send(L(q.text), { q: q.id }); return; }
+    if (d.askOrder) { const o = orders.find((x) => x.id === d.askOrder); send(en() ? `Where is my order “${orderTitle(o)}”?` : `「${orderTitle(o)}」这单到哪了？`, { order: o.id }); return; }
+    if (d.openOrder) { state.view = 'orders'; state.expanded = d.openOrder; renderAll(true); return; }
+    if (d.product) { openOverlay('product', Number(d.product)); return; }
+    if (d.toggleAll !== undefined) { state.showAll = !state.showAll; renderPage(); return; }
+    if (d.add) { addToCart(Number(d.add)); return; }
+    if (d.askProduct) { const i = Number(d.askProduct); send(en() ? `Tell me about the ${nm(i)}` : `介绍一下${nm(i)}`, { product: i }); return; }
+    if (d.gap) { const i = Number(d.gap); send(en() ? `Where are the ${nm(i)} made?` : `${nm(i)}是哪里产的？`, { gap: i }); return; }
+    if (d.sugg !== undefined) { const last = state.thread[state.thread.length - 1]; const s = last.sugg[Number(d.sugg)]; send(L(s.label), s.intent); return; }
+    if (d.steps) { const m = state.thread[Number(d.steps)]; m.open = !m.open; renderPage(); return; }
+    if (d.newChat !== undefined) { newChat(); return; }
+    if (d.openHistory !== undefined) { state.drawerTab = 'history'; openOverlay('drawer'); return; }
+    if (d.dtab) { state.drawerTab = d.dtab; renderOverlay(); $(`[data-dtab="${d.dtab}"]`).focus(); return; }
+    if (d.turn) { const k = Number(d.turn); state.turnPin = k >= state.turns.length ? null : Math.max(1, k); renderOverlay(); return; }
+    if (d.memToggle !== undefined) {
+      if (state.memOn && state.memories.length && !window.confirm(t('memConfirmOff', { n: state.memories.length }))) return;
+      state.memOn = !state.memOn; if (!state.memOn) state.memories = [];
+      renderOverlay(); $('[data-mem-toggle]').focus(); return;
+    }
+    if (d.memDel) { state.memories = state.memories.filter((m) => m.id !== d.memDel); renderOverlay(); return; }
+    if (d.conv) {
+      if (d.conv !== 'current') {
+        const h = state.history.find((x) => x.id === d.conv);
+        if (state.thread.length) newChat();
+        state.history = state.history.filter((x) => x.id !== h.id);
+        state.thread = h.msgs.map((m) => ({ ...m })); state.convId = h.id;
+        showToast(t('toast.history'));
+      }
+      state.view = 'assistant'; closeOverlay(); renderAll(true); return;
+    }
+    if (d.convDel) { state.history = state.history.filter((x) => x.id !== d.convDel); renderOverlay(); return; }
+    if (d.dec || d.inc || d.remove) {
+      const i = Number(d.dec || d.inc || d.remove);
+      const line = state.cart.find((l) => l.i === i);
+      if (d.remove) state.cart = state.cart.filter((l) => l.i !== i);
+      else line.q = Math.max(1, line.q + (d.inc ? 1 : -1));
+      renderCart(); renderBar(); return;
+    }
+    if (el.id === 'submitBtn') { submitOrder(); return; }
+    if (d.expand) { state.expanded = state.expanded === d.expand ? null : d.expand; state.asForm = null; renderPage(); return; }
+    if (d.pay) {
+      const o = orders.find((x) => x.id === d.pay);
+      o.pay = 'PAID'; o.events.push(['PAYMENT_CONFIRMED', T2('刚刚', 'Just now')]); o.updated = T2('刚刚', 'just now');
+      showToast(t('toast.paid')); renderAll(); return;
+    }
+    if (d.cancel) {
+      const o = orders.find((x) => x.id === d.cancel);
+      o.pay = 'CLOSED'; o.events.push(['ORDER_CLOSED', T2('刚刚', 'Just now')]); o.updated = T2('刚刚', 'just now');
+      showToast(t('toast.closed')); renderAll(); return;
+    }
+    if (d.as) { state.asForm = d.as; renderPage(); return; }
+    if (d.asCancel !== undefined) { state.asForm = null; renderPage(); return; }
+  });
+  document.addEventListener('submit', (e) => {
+    const f = e.target.closest('[data-as-form]');
+    if (!f) return;
+    e.preventDefault();
+    const o = orders.find((x) => x.id === f.dataset.asForm);
+    const fd = new FormData(f);
+    afterSales.unshift({ id: `AS-0928-${String(Math.floor(Math.random() * 900) + 100).padStart(4, '0')}`, order: o.id, item: o.items[0][0], type: fd.get('type'), reason: fd.get('reason'), status: T2('待商家处理', 'Awaiting the merchant'), when: T2('今天', 'Today') });
+    o.asActive = true; state.asForm = null;
+    showToast(t('toast.as')); renderPage();
+  });
+  document.addEventListener('change', (e) => {
+    if (e.target.id === 'couponSel') { state.coupon = e.target.value; return; }
+    if (e.target.id === 'prefTheme') { prefs.theme = e.target.value; savePrefs(); applyPrefs(); }
+    if (e.target.id === 'prefSize') { prefs.size = e.target.value; savePrefs(); applyPrefs(); }
+    if (e.target.id === 'prefLang') { prefs.lang = e.target.value; savePrefs(); applyPrefs(); renderAll(); if (state.overlay) renderOverlay(); }
+  });
+  $('#ask').addEventListener('input', () => { $('#sendBtn').disabled = state.streaming || !$('#ask').value.trim(); });
+  $('#composer').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const v = $('#ask').value;
+    $('#ask').value = '';
+    send(v);
+  });
+  function togglePrefs(open) {
+    $('#prefs').hidden = !open;
+    $('#prefsBtn').setAttribute('aria-expanded', String(open));
+    if (open) $('#prefTheme').focus();
+  }
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (!$('#prefs').hidden) { togglePrefs(false); $('#prefsBtn').focus(); return; }
+    if (state.overlay) { closeOverlay(); return; }
+    if ($('#app').dataset.cart === 'open') { $('#app').dataset.cart = 'closed'; $('#cartBtn').focus(); return; }
+    const m = $('#acct .menu'); if (m && !m.hidden) { m.hidden = true; $('#acctBtn').setAttribute('aria-expanded', 'false'); $('#acctBtn').focus(); }
+  });
+
+  applyPrefs();
+  renderAll(true);
+})();
+</script>
+</body>
+</html>

@@ -1,23 +1,72 @@
+/*
+ * Borough 共享设计 token：「市集大厅」色板（奶油纸面、铸铁绿、金色细线、砖红主操作）。
+ * 视觉定稿见 frontend/prototypes/borough-merchant-redesign.html（第三版）与
+ * docs/specs/2026-09-28-merchant-workbench-ui-design.md §2.3。
+ *
+ * 本文件会被 shop/scripts/sync-tokens.mjs 原样复制给顾客端，所以只放两端共用的
+ * 色板、字体、间距、字号档与深色定义；侧栏等商家端专有样式在 merchant-shell.css
+ * 与各组件里。改动后在 shop/ 执行 `npm run tokens:sync`，并通知顾客端重新同步。
+ *
+ * 深色模式定义两份，取值必须一致：
+ * - 显式选择：`<html data-theme="dark">`；
+ * - 跟随系统：`<html data-theme="system">` 且系统为深色。
+ * 没有 data-theme 属性的页面（例如尚未接入偏好设置的顾客端）保持浅色。
+ */
 :root {
-  font-family: Inter, 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  color: #182033;
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
+  /* ---------- 色板（浅色） ---------- */
+  --ground: #f6f1e7;
+  --chrome: #fffdf8;
+  --card: #fffdf8;
+  --raised: #fffdf8;
+  --well: #efe8da;
+  --hover: #f3ede1;
+  --ink: #1b2420;
+  --ink-2: #435049;
+  --ink-soft: #6f7a73;
+  --ink-faint: #9aa39c;
+  --line: rgba(31, 59, 47, 0.12);
+  --line-strong: rgba(31, 59, 47, 0.22);
+  --iron: #1f3b2f;
+  --gilt: #c39a3a;
+  --gilt-soft: #f4e9cf;
+  --gilt-ink: #6a5116;
+  --accent: #b5502f;
+  --accent-strong: #9c3f22;
+  --accent-soft: #f5e3d9;
+  --accent-ink: #7a2f16;
+  --on-accent: #ffffff;
+  --ok: #2d7a4c;
+  --ok-soft: #e1f0e5;
+  --warn: #a8690f;
+  --warn-soft: #faedd3;
+  --danger: #b3261e;
+  --danger-soft: #f9e2df;
+  --info: #2b5f8a;
+  --info-soft: #e2edf6;
+  --violet: #5a48b0;
+  --violet-soft: #ebe7fa;
 
-  --color-primary: #4f6ef7;
-  --color-primary-strong: #3f5bd8;
-  --color-primary-soft: #eef2ff;
-  --color-teal: #18a999;
-  --color-surface: rgba(255, 255, 255, 0.94);
-  --color-surface-muted: #f7f9fc;
-  --color-border: #e1e7f0;
-  --color-border-strong: #d6deea;
-  --color-text: #182033;
-  --color-text-secondary: #596579;
-  --color-text-muted: #8a95a7;
-  --color-danger-surface: #fdecea;
-  --color-danger-text: #611a15;
+  --shadow-sm: 0 1px 2px rgba(31, 59, 47, 0.06);
+  --shadow: 0 1px 2px rgba(31, 59, 47, 0.06), 0 8px 24px -12px rgba(31, 59, 47, 0.18);
+  --shadow-lg: 0 24px 60px -20px rgba(20, 38, 30, 0.4);
+  --radius: 14px;
 
+  /* 纸面颗粒：极淡的噪点，叠在 --ground 上，让奶油底不像纯色块 */
+  --paper-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .12 0 0 0 0 .2 0 0 0 0 .16 0 0 0 .05 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+  --paper-grain-opacity: 0.35;
+
+  /* ---------- 字体 ---------- */
+  /* 网络字体只做增强（font-display: swap），回退字体必须本身可读。 */
+  --font-display: 'Fraunces', 'Noto Serif SC', 'Songti SC', 'STSong', Georgia, serif;
+  --font-body:
+    'Instrument Sans', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'Cascadia Mono', 'SFMono-Regular', monospace;
+
+  /* 界面字号档：sm / md / lg = 0.92 / 1 / 1.1，由 <html data-size> 选择 */
+  --scale: 1;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+
+  /* ---------- 间距、字阶与控件（沿用原有名称） ---------- */
   --space-0-5: 0.125rem;
   --space-1: 0.25rem;
   --space-1-5: 0.375rem;
@@ -34,9 +83,9 @@
   --font-size-section-title: 1rem;
   --font-size-page-title: 1.1875rem;
   --line-height-body: 1.5;
-  --font-weight-control: 680;
-  --font-weight-emphasis: 750;
-  --font-weight-title: 780;
+  --font-weight-control: 600;
+  --font-weight-emphasis: 650;
+  --font-weight-title: 650;
 
   --control-height: 2.25rem;
   --transition-colors: color 180ms ease, background-color 180ms ease, border-color 180ms ease;
@@ -44,10 +93,102 @@
     color 180ms ease, background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease,
     transform 180ms ease;
 
-  --radius-small: 9px;
-  --radius-control: 10px;
-  --radius-card: 13px;
+  --radius-small: 8px;
+  --radius-control: 9px;
+  --radius-card: var(--radius);
   --radius-column: 18px;
-  --shadow-card: 0 12px 34px rgba(37, 52, 82, 0.08);
-  --shadow-control: 0 5px 16px rgba(37, 52, 82, 0.05);
+
+  font-family: var(--font-body);
+  color: var(--ink);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  color-scheme: light;
+}
+
+/* 深色 ①：显式选择 */
+:root[data-theme='dark'] {
+  --ground: #131816;
+  --chrome: #181e1b;
+  --card: #1b221f;
+  --raised: #212a26;
+  --well: #242d29;
+  --hover: #26302b;
+  --ink: #ece7db;
+  --ink-2: #c9cdc6;
+  --ink-soft: #9ba49e;
+  --ink-faint: #6f7973;
+  --line: rgba(236, 231, 219, 0.09);
+  --line-strong: rgba(236, 231, 219, 0.17);
+  --gilt: #d4b060;
+  --gilt-soft: rgba(212, 176, 96, 0.12);
+  --gilt-ink: #e2c681;
+  --accent: #db7552;
+  --accent-strong: #e58a69;
+  --accent-soft: rgba(219, 117, 82, 0.16);
+  --accent-ink: #f0a88c;
+  --on-accent: #1b1410;
+  --ok: #6cc592;
+  --ok-soft: rgba(108, 197, 146, 0.14);
+  --warn: #e3ae52;
+  --warn-soft: rgba(227, 174, 82, 0.14);
+  --danger: #f08378;
+  --danger-soft: rgba(240, 131, 120, 0.14);
+  --info: #80b4e0;
+  --info-soft: rgba(128, 180, 224, 0.14);
+  --violet: #ada1f0;
+  --violet-soft: rgba(173, 161, 240, 0.15);
+  --shadow-sm: none;
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.03);
+  --shadow-lg: 0 20px 50px -12px rgba(0, 0, 0, 0.6);
+  --paper-grain-opacity: 0.12;
+  color-scheme: dark;
+}
+
+/* 深色 ②：跟随系统且系统为深色（取值与上一段逐项一致） */
+@media (prefers-color-scheme: dark) {
+  :root[data-theme='system'] {
+    --ground: #131816;
+    --chrome: #181e1b;
+    --card: #1b221f;
+    --raised: #212a26;
+    --well: #242d29;
+    --hover: #26302b;
+    --ink: #ece7db;
+    --ink-2: #c9cdc6;
+    --ink-soft: #9ba49e;
+    --ink-faint: #6f7973;
+    --line: rgba(236, 231, 219, 0.09);
+    --line-strong: rgba(236, 231, 219, 0.17);
+    --gilt: #d4b060;
+    --gilt-soft: rgba(212, 176, 96, 0.12);
+    --gilt-ink: #e2c681;
+    --accent: #db7552;
+    --accent-strong: #e58a69;
+    --accent-soft: rgba(219, 117, 82, 0.16);
+    --accent-ink: #f0a88c;
+    --on-accent: #1b1410;
+    --ok: #6cc592;
+    --ok-soft: rgba(108, 197, 146, 0.14);
+    --warn: #e3ae52;
+    --warn-soft: rgba(227, 174, 82, 0.14);
+    --danger: #f08378;
+    --danger-soft: rgba(240, 131, 120, 0.14);
+    --info: #80b4e0;
+    --info-soft: rgba(128, 180, 224, 0.14);
+    --violet: #ada1f0;
+    --violet-soft: rgba(173, 161, 240, 0.15);
+    --shadow-sm: none;
+    --shadow: 0 1px 0 rgba(255, 255, 255, 0.03);
+    --shadow-lg: 0 20px 50px -12px rgba(0, 0, 0, 0.6);
+    --paper-grain-opacity: 0.12;
+    color-scheme: dark;
+  }
+}
+
+:root[data-size='sm'] {
+  --scale: 0.92;
+}
+
+:root[data-size='lg'] {
+  --scale: 1.1;
 }

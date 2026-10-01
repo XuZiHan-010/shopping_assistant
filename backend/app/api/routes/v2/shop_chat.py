@@ -104,6 +104,7 @@ async def post_shop_chat(
         locale=locale,
         principal_secret=principal_secret,
         skills=request.app.state.skill_registry,
+        history_turns=settings.chat_history_max_turns,
     )
 
     async def run(on_event: EventSink | None = None) -> dict[str, Any]:

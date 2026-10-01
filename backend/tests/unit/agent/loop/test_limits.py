@@ -11,6 +11,7 @@ import pytest
 from pydantic import ValidationError
 from pydantic_settings import EnvSettingsSource
 
+from app.agent.loop.compaction import CompactionPolicy, CompactionStrategy
 from app.agent.loop.limits import LoopLimits
 from app.core.config import AppEnvironment, Settings, agent_loop_llm_call_floor
 
@@ -112,6 +113,8 @@ def test_loop_settings_use_unprefixed_environment_names(monkeypatch: pytest.Monk
     monkeypatch.setenv("AGENT_LOOP_MAX_LLM_CALLS", "8")
     monkeypatch.setenv("AGENT_LOOP_QUALITY_MAX_ATTEMPTS", "1")
     monkeypatch.setenv("COMPACTION_MAX_CALLS", "0")
+    monkeypatch.setenv("COMPACTION_STRATEGY", "SUMMARIZATION")
+    monkeypatch.setenv("COMPACTION_TRIGGER_TOKENS", "9000")
     read = EnvSettingsSource(Settings)()
     assert {k: read[k] for k in read if k.startswith(("agent_loop_", "compaction_"))} == {
         "agent_loop_max_turns": "4",
@@ -120,6 +123,8 @@ def test_loop_settings_use_unprefixed_environment_names(monkeypatch: pytest.Monk
         "agent_loop_max_llm_calls": "8",
         "agent_loop_quality_max_attempts": "1",
         "compaction_max_calls": "0",
+        "compaction_strategy": "SUMMARIZATION",
+        "compaction_trigger_tokens": "9000",
     }
 
 
@@ -133,6 +138,11 @@ def test_loop_limits_from_settings() -> None:
         wall_clock_seconds=60,
         max_tokens=s.llm_max_tokens_per_request,
         quality_max_attempts=2,
+        compaction=CompactionPolicy(
+            strategy=CompactionStrategy.TOOL_RESULT_PRUNING,
+            trigger_tokens=8_000,
+            max_calls=1,
+        ),
     )
     budget = limits.new_budget()
     assert (budget.max_calls, budget.max_tokens) == (12, s.llm_max_tokens_per_request)
@@ -153,3 +163,30 @@ def test_loop_limits_reject_non_positive(field: str) -> None:
     values[field] = 0
     with pytest.raises(ValueError, match=field):
         LoopLimits(**values)
+
+
+def test_raising_compaction_calls_without_raising_budget_fails_startup() -> None:
+    """N4-A Task 4：COMPACTION_MAX_CALLS=3 而 AGENT_LOOP_MAX_LLM_CALLS=12 时拒绝启动。"""
+
+    with pytest.raises(ValidationError, match="COMPACTION_MAX_CALLS 3"):
+        _settings(compaction_max_calls=3, agent_loop_max_llm_calls=12)  # 8 + 3 + 3 = 14 > 12
+
+
+def test_compaction_defaults_are_conservative() -> None:
+    """未经真实模型对比前，生产默认零 LLM 调用的工具结果清理（计划 Task 5 保守默认）。"""
+
+    s = _settings()
+    assert s.compaction_strategy == "TOOL_RESULT_PRUNING"
+    assert s.compaction_trigger_tokens == 8_000
+
+
+def test_unknown_compaction_strategy_fails_startup() -> None:
+    with pytest.raises(ValidationError, match="compaction_strategy"):
+        _settings(compaction_strategy="TRUNCATE")
+
+
+def test_compaction_policy_rejects_invalid_values() -> None:
+    with pytest.raises(ValueError, match="trigger_tokens"):
+        CompactionPolicy(strategy=CompactionStrategy.SUMMARIZATION, trigger_tokens=0, max_calls=1)
+    with pytest.raises(ValueError, match="max_calls"):
+        CompactionPolicy(strategy=CompactionStrategy.SUMMARIZATION, trigger_tokens=1, max_calls=-1)

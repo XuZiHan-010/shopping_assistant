@@ -6,13 +6,14 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Final
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.analytics import Product
+from app.models.analytics import Order, OrderItem, Product
 from app.models.merchant import Merchant
 from app.models.promotion import Coupon
 from app.services.v2.coupons import CouponRow
@@ -44,6 +45,22 @@ class CatalogReadRepository:
             .order_by(Product.created_at.desc(), Product.id.desc())
         )
         return list(result.scalars().all())
+
+    async def recent_paid_quantities(self, merchant_id: UUID, *, since: date) -> dict[UUID, int]:
+        """按近 30 个业务日的已支付订单件数汇总，仅供排序。"""
+
+        rows = await self._session.execute(
+            select(OrderItem.product_id, func.sum(OrderItem.quantity))
+            .join(Order, Order.id == OrderItem.order_id)
+            .where(
+                Order.merchant_id == merchant_id,
+                OrderItem.merchant_id == merchant_id,
+                Order.payment_status == "PAID",
+                Order.business_date >= since,
+            )
+            .group_by(OrderItem.product_id)
+        )
+        return {product_id: int(total) for product_id, total in rows.tuples().all()}
 
     async def merchant_products(self, merchant_id: UUID) -> list[Product]:
         """商家只读内容面包含本店所有状态商品，按创建时间倒序。"""

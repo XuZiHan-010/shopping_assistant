@@ -10,6 +10,7 @@ import { getOrder } from '@/api/shopApi'
 import { formatPrice } from '@/lib/format'
 import type { AfterSaleChallenge, AfterSaleDetail, AfterSaleSummary, AfterSaleType } from '@/types/afterSales'
 import type { Order } from '@/types/shop'
+import '@/views/storefront-views.css'
 
 const TYPE_LABEL: Record<AfterSaleType, string> = {
   RETURN_REFUND: '退货退款', REFUND_ONLY: '仅退款', TICKET: '客服工单',
@@ -59,7 +60,7 @@ function previewError(error: unknown, english: boolean): string {
     : '预检暂时失败，请核对订单和申请原因后重试'
 }
 
-export function AfterSalesClient({ orderId, locale = 'zh-CN' }: { orderId?: string; locale?: 'zh-CN' | 'en-US' }) {
+export function AfterSalesClient({ orderId, caseId, locale = 'zh-CN' }: { orderId?: string; caseId?: string; locale?: 'zh-CN' | 'en-US' }) {
   const english = locale === 'en-US'
   const copy = (zh: string, en: string) => english ? en : zh
   const types = english ? TYPE_LABEL_EN : TYPE_LABEL
@@ -93,6 +94,11 @@ export function AfterSalesClient({ orderId, locale = 'zh-CN' }: { orderId?: stri
       setSelected(value.items.map((item) => item.orderItemId))
     }).catch(() => setError(english ? 'Could not load order.' : '暂时无法加载订单'))
   }, [orderId, english])
+  useEffect(() => {
+    if (!caseId) return
+    void getAfterSale(caseId).then(setDetail).catch(() => setError(
+      english ? 'Could not load case details.' : '暂时无法加载售后详情'))
+  }, [caseId, english])
 
   function changeInput() {
     setChallenge(null)
@@ -167,7 +173,7 @@ export function AfterSalesClient({ orderId, locale = 'zh-CN' }: { orderId?: stri
     }
   }
 
-  return <main className="stack" style={{ maxWidth: 760, minWidth: 0 }}>
+  return <main className="stack ws-after-sales">
     <h1>{copy('售后服务', 'After-sales service')}</h1>
     {error && <p className="notice notice-error" role="alert">{error}</p>}
     {success && <p className="notice">{copy('申请已提交。', 'Request submitted. ')}{success === 'INCLUDED'
@@ -175,7 +181,7 @@ export function AfterSalesClient({ orderId, locale = 'zh-CN' }: { orderId?: stri
       : success === 'UNAVAILABLE' ? copy('对话摘要暂不可用，商家将查看申请并处理。', 'The conversation summary is unavailable; the merchant can still review the request.')
         : copy('商家将查看申请并处理。', 'The merchant will review the request.')}</p>}
 
-    {order && <section className="card card-body stack" aria-label={copy('发起售后', 'Start an after-sales request')}>
+    {order && <section className="card card-body stack ws-after-sales-card" aria-label={copy('发起售后', 'Start an after-sales request')}>
       <h2>{copy('订单', 'Order')} {order.id}</h2>
       <label>{copy('售后类型', 'Request type')}
         <select value={type} onChange={(event) => { changeInput(); setType(event.target.value as AfterSaleType) }}>
@@ -219,7 +225,7 @@ export function AfterSalesClient({ orderId, locale = 'zh-CN' }: { orderId?: stri
       </section>}
     </section>}
 
-    <section className="card card-body stack" aria-label={copy('我的售后', 'My after-sales cases')}>
+    <section className="card card-body stack ws-after-sales-card" aria-label={copy('我的售后', 'My after-sales cases')}>
       <h2>{copy('我的售后', 'My after-sales cases')}</h2>
       {items.length === 0 && <p className="muted">{copy('暂无售后记录', 'No after-sales cases yet')}</p>}
       {items.map((item) => <button key={item.id} className="btn" onClick={() => void open(item.id)}>
@@ -227,7 +233,7 @@ export function AfterSalesClient({ orderId, locale = 'zh-CN' }: { orderId?: stri
       </button>)}
     </section>
 
-    {detail && <section className="card card-body stack" aria-label={copy('售后详情', 'Case details')}>
+    {detail && <section className="card card-body stack ws-after-sales-card" aria-label={copy('售后详情', 'Case details')}>
       <h2>{copy('售后详情', 'Case details')}</h2>
       <p>{types[detail.type]} · {states[detail.state]}</p>
       {detail.reason && <p>{copy('申请原因', 'Request reason')}：{detail.reason}</p>}

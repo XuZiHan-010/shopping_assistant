@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from collections.abc import Sequence
 from typing import Any
 from uuid import UUID
@@ -40,6 +41,7 @@ S1_SHOP_ORIGIN = "http://127.0.0.1:3275"
 S1_FRONTEND_ORIGIN = "http://127.0.0.1:5275"
 
 _COMPARE_TRIGGER = "围巾"
+_ORDER_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
 
 
 def _answer(text: str) -> LlmTurn:
@@ -70,7 +72,15 @@ def _latest_turn(messages: Sequence[LlmMessage]) -> tuple[str, int]:
     if last_user < 0:
         return "", 0
     tool_results = sum(1 for message in messages[last_user + 1 :] if message.role == "tool")
-    return messages[last_user].content, tool_results
+    content = messages[last_user].content
+    # 顾客输入在正式工具循环中带 A11 围栏。脚本按顾客原文分支，不能把
+    # 围栏里的中文安全声明误判成顾客语言，否则 en-US 验收会返回中文回答。
+    if content.startswith('<external-data source="customer"'):
+        payload_start = content.find("\n", content.find("\n") + 1)
+        payload_end = content.rfind("\n</external-data")
+        if payload_start >= 0 and payload_end > payload_start:
+            content = content[payload_start + 1 : payload_end]
+    return content, tool_results
 
 
 class ScriptedS1Llm(FakeLlmClient):
@@ -92,8 +102,31 @@ class ScriptedS1Llm(FakeLlmClient):
     @staticmethod
     def _next_turn(messages: Sequence[LlmMessage]) -> LlmTurn:
         text, tool_results = _latest_turn(messages)
+        order_id = _ORDER_ID.search(text)
+        if order_id and ("订单" in text or "order" in text.lower()):
+            if tool_results == 0:
+                return _call("get_my_order", "s1-my-order", order_id=order_id.group())
+            tool_message = next(
+                (message.content for message in reversed(messages) if message.role == "tool"), ""
+            )
+            try:
+                payload = json.loads(tool_message)
+                if isinstance(payload, dict) and isinstance(payload.get("payload"), dict):
+                    payload = payload["payload"]
+                fulfillment = str(payload.get("fulfillment_status", ""))
+            except (ValueError, AttributeError):
+                fulfillment = ""
+            if "order" in text.lower():
+                return _answer(f"Your order status is {fulfillment or 'being checked'}.")
+            return _answer(
+                f"这笔订单当前状态：{fulfillment or '正在查询'}。具体进度以订单视图为准。"
+            )
         if _COMPARE_TRIGGER not in text:
-            return _answer("你好，我可以帮你在本店挑选商品。")
+            return _answer(
+                "Hello, I can help with products and orders in this store."
+                if text.isascii()
+                else "你好，我可以帮你在本店挑选商品。"
+            )
         script: tuple[tuple[str, str, dict[str, Any]], ...] = (
             ("search_products", "s1-search", {"query": "围巾"}),
             ("get_product", "s1-wool", {"product_id": str(S1_WOOL_ID), "attributes": ["材质"]}),

@@ -569,10 +569,15 @@ uv run pytest -rs; uv run ruff check .; uv run mypy app
 留作未来对照评测的已知基线特征）：CHAT 问候语路径产出内部占位文案而非真正问候语；
 显示语言与消息语言不一致时分类会误判为 INVALID。
 
-- [ ] **步骤 3：与冻结基线对照**（**N2 工具循环可用后才能执行**）
+- [x] **步骤 3：与冻结基线对照**（**N2 工具循环可用后才能执行**；2026-09-22 已由 `n2-tool-loop-and-registry` Task 5 完成，补勾）
 
 **只比双方共有的旧能力**（A2），不要求新功能实现两遍。报告落
 `docs/history/eval/`，并在 `docs/project-progress.md` 记录结论。
+
+**实际交付**：`tests/eval/baseline_comparison.py` + 报告 `docs/history/eval/n2-baseline-comparison.md`
+（`n2-tool-loop-and-registry` Task 5，2026-09-22 完成，2026-09-24 Astra 独立复审通过）。范围符合本步骤要求：
+只比 v1/v2 共有的指标查询、规则问答、闲聊、拒答四类，全部 Fake LLM，比较代码断言通过率、降级率、
+LLM 调用次数、工具调用次数；报告写明 Fake LLM 对照只能证明结构正确，不能证明回答质量更好。
 
 ---
 

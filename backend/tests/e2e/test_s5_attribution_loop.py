@@ -35,8 +35,9 @@ async def test_s5_query_and_attribution_share_backend_facts_and_chart(
 ) -> None:
     database: Database = postgres_app.state.database
     product = await seed_product(database, MERCHANT_ONE_ID, title="S5 类目商品")
-    await seed_paid_order(database, MERCHANT_ONE_ID, product, quantity=1, days_ago=2)
-    await seed_paid_order(database, MERCHANT_ONE_ID, product, quantity=3, days_ago=9)
+    # 周一也要在「本周」和等长的「上周」窗口各有一笔支付单。
+    await seed_paid_order(database, MERCHANT_ONE_ID, product, quantity=1, days_ago=0)
+    await seed_paid_order(database, MERCHANT_ONE_ID, product, quantity=3, days_ago=7)
     today = datetime.now(UTC).date()
     fake = FakeLlmClient(
         turns=[

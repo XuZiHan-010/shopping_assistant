@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from hashlib import sha256
 from typing import Any, Final
@@ -40,7 +40,13 @@ from app.schemas.v2.trade import UnavailableItemDetail
 from app.services.v2.cart import owner_filter
 from app.services.v2.coupons import CouponNotApplicableError, CouponRow, allocate_discounts
 from app.services.v2.idempotency import run_idempotent
-from app.services.v2.orders import SOURCE_TIMEZONE, V2_ORIGIN, to_order_detail
+from app.services.v2.orders import (
+    SOURCE_TIMEZONE,
+    V2_ORIGIN,
+    business_date_of,
+    order_leads,
+    to_order_detail,
+)
 from app.services.v2.stock_tier import stock_band
 
 CREATE_OPERATION: Final = "shop.orders.create"
@@ -126,7 +132,7 @@ async def _create(
     order_id = uuid4()
     totals = [line.gross_cents - discount for line, discount in zip(lines, discounts, strict=True)]
     total_cents = sum(totals)
-    business_date = now.astimezone(_BUSINESS_ZONE).date()
+    business_date = business_date_of(now)
     order = Order(
         id=order_id,
         merchant_id=ctx.merchant_id,
@@ -161,8 +167,15 @@ async def _create(
             line_total=cents_to_yuan(line_total),
             item_amount=cents_to_yuan(line_total),
             title_snapshot=line.product.title,
+            # 同批插入的行如果都吃数据库默认值，`created_at` 会完全相同，
+            # `order_items()` / `order_leads()` 按 `created_at, id` 排序时首行就变成
+            # 随机的 UUID 大小比较。这里按购物车顺序（`lines` 已按 `created_at, id`
+            # 升序）显式给出严格递增的时间戳，让「首件商品」与价格快照顺序确定。
+            created_at=now + timedelta(microseconds=index),
         )
-        for line, discount, line_total in zip(lines, discounts, totals, strict=True)
+        for index, (line, discount, line_total) in enumerate(
+            zip(lines, discounts, totals, strict=True)
+        )
     ]
     session.add_all(items)
 
@@ -192,7 +205,13 @@ async def _create(
     # 已下单的购物车在同一事务里清空；回滚时购物车原样保留。
     await session.execute(delete(CartLine).where(owner_filter(ctx)))
     await session.flush()
-    return to_order_detail(order, items).model_dump(mode="json")
+    leads = await order_leads(session, [order])
+    return to_order_detail(
+        order,
+        items,
+        lead_image_url=leads[order.id].image_url,
+        last_event_at=now,
+    ).model_dump(mode="json")
 
 
 async def _cart_lines(session: AsyncSession, ctx: SessionContext) -> list[_Line]:

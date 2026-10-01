@@ -18,6 +18,7 @@ from enum import StrEnum
 from typing import Protocol
 
 from app.analytics.contract import metric_spec
+from app.analytics.dates import business_today
 from app.core.security import MerchantContext
 from app.intent.models import ComparisonMode, DateRange, QueryIntent
 from app.metrics.caliber import METRIC_CALIBER_VERSION
@@ -138,6 +139,38 @@ def _equal_length_baseline(current: DateRange, *, today: date) -> tuple[DateRang
     baseline_end = baseline_start + timedelta(days=span - 1)
     baseline = DateRange(start=baseline_start, end=baseline_end)
     return baseline, f"本周前 {span} 天" if span < 7 else "本周期", f"上周前 {span} 天"
+
+
+@dataclass(frozen=True)
+class ComparisonPeriods:
+    """归因与首页主指标共用的对比周期：本周一至今天 vs. 上周等长区间（D19、§8.12.4）。"""
+
+    current: DateRange
+    baseline: DateRange
+    #: 与本期、基期一一对应的中文说明，如 ("本周前 3 天", "上周前 3 天")。
+    comparison_label: tuple[str, str]
+
+    @property
+    def span_days(self) -> int:
+        return (self.current.end - self.current.start).days + 1
+
+
+def comparison_periods(today: date) -> ComparisonPeriods:
+    """周期计算的唯一实现：`attribute_change` 与首页指标总览都从这里取，不另写一套。
+
+    `today` 必须是业务时区下的日期（调用方负责换算）。
+    """
+
+    week_start = today - timedelta(days=today.weekday())
+    current_range = DateRange(start=week_start, end=today)
+    baseline_range, current_label, baseline_label = _equal_length_baseline(
+        current_range, today=today
+    )
+    return ComparisonPeriods(
+        current=current_range,
+        baseline=baseline_range,
+        comparison_label=(current_label, baseline_label),
+    )
 
 
 def _intent_for_segment(metric: str, *, date_range: DateRange, dimension: str) -> QueryIntent:
@@ -327,22 +360,24 @@ class AttributionService:
         *,
         metric: str,
         dimension: str = _ATTRIBUTION_DIMENSION,
-        today: datetime,
-        now: datetime | None = None,
+        now: datetime,
+        business_timezone: str,
     ) -> AttributionResult:
         """五步归因中的确定性部分：定位贡献最大的细分、按幅度选择占比或绝对贡献值。
 
         模型只负责组织语言；本方法产出的数字是唯一允许被引用的归因结论。
+
+        「今天」在这里按业务时区换算，调用方只传当前时刻：上海 00:00–08:00 时
+        UTC 仍是前一天，由调用方各自取日期曾让助手工具与首页落在不同周期。
         """
 
-        now = now or today
-        today_date = today.date()
+        if now.tzinfo is None:
+            raise ValueError("now 必须带时区，否则无法换算业务日")
+        today_date = business_today(now, timezone=business_timezone)
         # 本周（周一起算）到目前为止的天数，用作等长基期的窗口长度。
-        week_start = today_date - timedelta(days=today_date.weekday())
-        current_range = DateRange(start=week_start, end=today_date)
-        baseline_range, current_label, baseline_label = _equal_length_baseline(
-            current_range, today=today_date
-        )
+        periods = comparison_periods(today_date)
+        current_range, baseline_range = periods.current, periods.baseline
+        current_label, baseline_label = periods.comparison_label
 
         current_values, current_source = await self._segment_values(
             context, metric=metric, date_range=current_range, dimension=dimension, now=now

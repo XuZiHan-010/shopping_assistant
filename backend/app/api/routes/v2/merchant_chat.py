@@ -74,6 +74,7 @@ def _service(
         locale=locale,
         principal_secret=principal_secret,
         skills=skills,
+        history_turns=settings.chat_history_max_turns,
     )
 
 

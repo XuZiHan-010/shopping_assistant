@@ -119,6 +119,7 @@ async def test_merchant_surface_has_no_apply_or_approve_tool(
 
     registry = postgres_app.state.tool_registry
     names = {spec.name for spec in registry.surface_for(SessionRole.MERCHANT)}
+    assert "recall_merchant_preferences" in names
 
     # 具体工具集随各阶段新增（N3 阶段 C 加了 query_metrics/attribute_change/
     # draft_price_change/draft_coupon/list_coupons，阶段 B 加了售后工具）；

@@ -208,6 +208,81 @@ def test_scenarios_are_stable_and_cover_s1_to_s4() -> None:
     assert first.inventory_events[0]["payload"]["quantity"] == -item["quantity"]
 
 
+def test_orders_page_scenario_covers_five_statuses() -> None:
+    """W 与 WS 的订单演示覆盖超时关闭、待发货、运输、派送、签收及售后。
+
+    契约 §8.12.4「订单只读、按商家隔离」要求列表只返回本店具备 v2 交易投影的订单；
+    原 S1–S4 场景只有 S4 一笔「已签收」订单，本测试钉住补齐后的六单覆盖，
+    防止未来改动误删其中任一状态。
+    """
+
+    catalog = build_demo_catalog(merchant_id=MERCHANT_ONE, seed=DEMO_ANALYTICS_SEED_BASE)
+    first = _scenario_module.build_scenario_rows(
+        merchant_id=MERCHANT_ONE, business_day=END_DATE, catalog=catalog
+    )
+    second = _scenario_module.build_scenario_rows(
+        merchant_id=MERCHANT_ONE, business_day=END_DATE, catalog=catalog
+    )
+    assert first == second
+
+    all_orders = [*first.orders, *first.orders_page_orders]
+    assert len(all_orders) == 6
+    assert all(order["lifecycle_origin"] == "V2" for order in all_orders)
+    assert len({order["id"] for order in all_orders}) == 6  # 无重复 id
+
+    statuses = {
+        (order["order_status"], order["payment_status"], order["fulfillment_status"])
+        for order in all_orders
+    }
+    assert statuses == {
+        ("CLOSED", "CLOSED", "NOT_SHIPPED"),  # 超时关闭（不预置待支付，见下方断言）
+        ("PAID", "PAID", "NOT_SHIPPED"),  # 待发货
+        ("SHIPPED", "PAID", "IN_TRANSIT"),  # 运输中
+        ("SHIPPED", "PAID", "OUT_FOR_DELIVERY"),  # 派送中
+        ("COMPLETED", "PAID", "DELIVERED"),  # 已签收（S4 原单）与售后中共用该组合
+    }
+    # 种子没有库存占用，且按营业日锚定：预置的待支付单写入即过期，超时关单会把
+    # `stock_reserved` 减成负数。只允许已关闭终态，且事件账本与投影一致。
+    assert all(order["payment_status"] != "PENDING" for order in all_orders)
+    (closed,) = [order for order in all_orders if order["payment_status"] == "CLOSED"]
+    assert closed["close_reason"] == "TIMEOUT"
+    assert closed["closed_at"] - closed["placed_at"] == timedelta(minutes=30)
+    closed_events = [
+        event
+        for event in first.orders_page_fulfillment_events
+        if event["subject_id"] == closed["id"]
+    ]
+    assert [event["event_type"] for event in closed_events] == ["ORDER_PLACED", "ORDER_CLOSED"]
+    assert closed_events[1]["occurred_at"] == closed["closed_at"]
+    assert closed_events[1]["payload"]["close_reason"] == "TIMEOUT"
+
+    after_sale_statuses = {order["after_sale_status"] for order in all_orders}
+    assert after_sale_statuses == {"NONE", "ACTIVE"}
+    active_orders = [o for o in all_orders if o["after_sale_status"] == "ACTIVE"]
+    assert len(active_orders) == 1
+
+    # 售后中订单必须有匹配的 after_sales 记录，且 order_id 对应关系正确
+    # （与生产写路径 `after_sale_machine.py` 的隐含约定一致，不是纯展示字段）。
+    assert len(first.after_sales) == 1
+    assert first.after_sales[0]["order_id"] == active_orders[0]["id"]
+    assert len(first.after_sale_lines) == 1
+    assert first.after_sale_lines[0]["after_sale_id"] == first.after_sales[0]["id"]
+
+    # 订单行、履约事件与订单一一对应，不遗漏。
+    order_ids = {order["id"] for order in first.orders_page_orders}
+    assert {item["order_id"] for item in first.orders_page_items} == order_ids
+    assert {event["subject_id"] for event in first.orders_page_fulfillment_events} == order_ids
+
+    # `rebuild_projections` 只认事件账本：payload 必须同时带 order_id 与
+    # after_sale_status，否则「售后中」订单会被判定为投影漂移（详见
+    # `app/jobs/rebuild_projections.py` 的 `after_by_order` 匹配逻辑）。
+    assert len(first.after_sale_events) == 1
+    after_sale_event = first.after_sale_events[0]
+    assert after_sale_event["subject_id"] == first.after_sales[0]["id"]
+    assert after_sale_event["payload"]["order_id"] == str(active_orders[0]["id"])
+    assert after_sale_event["payload"]["after_sale_status"] == "ACTIVE"
+
+
 @pytest.mark.asyncio
 async def test_three_merchant_seed_is_repeatable_in_postgres(db_session: AsyncSession) -> None:
     from app.jobs.rebuild_projections import rebuild_projections
@@ -297,11 +372,12 @@ async def test_rolling_prunes_legacy_orders_but_keeps_v2_order_and_event_audit(
     )
     await roll_forward(db_session, settings=settings, business_day=date(2026, 8, 25), window_days=5)
 
+    # 每个商家的 S1–S4 场景写 1 单（已签收）+ 订单页补齐的 5 单。
     assert (
         await db_session.scalar(
             select(func.count()).select_from(Order).where(Order.lifecycle_origin == "V2")
         )
-        == 3
+        == 6 * len(default_merchants())
     )
     assert (
         await db_session.scalar(

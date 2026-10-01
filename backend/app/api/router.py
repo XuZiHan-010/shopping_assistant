@@ -20,7 +20,10 @@ from app.api.routes.v2.merchant_chat import router as merchant_chat_router
 from app.api.routes.v2.merchant_conversations import router as merchant_conversations_router
 from app.api.routes.v2.merchant_drafts import router as merchant_drafts_router
 from app.api.routes.v2.merchant_feedback import router as merchant_feedback_router
+from app.api.routes.v2.merchant_insights import router as merchant_insights_router
 from app.api.routes.v2.merchant_inventory import router as merchant_inventory_router
+from app.api.routes.v2.merchant_memory import router as merchant_memory_router
+from app.api.routes.v2.merchant_orders import router as merchant_orders_router
 from app.api.routes.v2.merchant_sessions import router as merchant_sessions_router
 from app.api.routes.v2.merchant_signals import router as merchant_signals_router
 from app.api.routes.v2.shop_after_sales import router as shop_after_sales_router
@@ -28,6 +31,7 @@ from app.api.routes.v2.shop_cart import router as shop_cart_router
 from app.api.routes.v2.shop_catalog import router as shop_catalog_router
 from app.api.routes.v2.shop_chat import router as shop_chat_router
 from app.api.routes.v2.shop_conversations import router as shop_conversations_router
+from app.api.routes.v2.shop_memory import router as shop_memory_router
 from app.api.routes.v2.shop_orders import router as shop_orders_router
 from app.api.routes.v2.shop_sessions import router as shop_sessions_router
 
@@ -46,12 +50,18 @@ api_router.include_router(merchant_sessions_router)
 api_router.include_router(merchant_feedback_router)
 api_router.include_router(merchant_conversations_router)
 api_router.include_router(shop_conversations_router)
+api_router.include_router(shop_memory_router)
 api_router.include_router(merchant_inventory_router)
+api_router.include_router(merchant_memory_router)
 api_router.include_router(merchant_catalog_router)
 api_router.include_router(merchant_after_sales_router)
 api_router.include_router(merchant_signals_router)
 api_router.include_router(merchant_drafts_router)
 api_router.include_router(merchant_brief_router)
+# W 阶段 Task 2：首页经营主指标（§8.12.4）。
+api_router.include_router(merchant_insights_router)
+# W 阶段 Task 3：商家订单只读面（§8.12.4）。
+api_router.include_router(merchant_orders_router)
 api_router.include_router(merchant_chat_router)
 # N2 模块 B Task 1：顾客端店铺、商品与券的公开浏览。
 api_router.include_router(shop_catalog_router)

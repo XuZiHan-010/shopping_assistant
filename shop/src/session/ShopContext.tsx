@@ -6,6 +6,11 @@ import type { BindResult, ShopSession } from '@/types/session'
 
 export interface ShopContextValue {
   shopSlug: string
+  view: 'assistant' | 'orders'
+  panel: 'cart' | 'activity' | 'memory' | 'history' | 'product' | null
+  productId: string | null
+  openPanel: (panel: 'cart' | 'activity' | 'memory' | 'history' | 'product', productId?: string) => void
+  closePanel: () => void
   session: ShopSession | null
   /** 最近一次从服务端 `GET /cart` 读到的购物车；角标与购物车页都以它为准。 */
   cart: Cart | null

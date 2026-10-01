@@ -6,6 +6,7 @@ import { createCheckout } from './checkout'
 const order = {
   id: 'o1', payment_status: 'PENDING', fulfillment_status: 'NOT_SHIPPED', after_sale_status: 'NONE',
   total_cents: 25900, item_count: 1, created_at: '2026-09-01T00:00:00Z', pay_by: '2026-09-01T00:30:00Z',
+  lead_item: { product_id: 'p1', name: '演示商品', image_url: null }, last_event_at: '2026-09-01T00:00:00Z',
   items: [], subtotal_cents: 25900, discount_cents: 0, coupon_id: null, paid_at: null, closed_at: null,
   close_reason: null, is_demo: true,
 }

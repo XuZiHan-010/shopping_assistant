@@ -13,15 +13,35 @@ body,
 
 body {
   overflow-x: clip;
-  background:
-    radial-gradient(circle at 8% 0%, rgba(79, 110, 247, 0.1), transparent 30%),
-    radial-gradient(circle at 94% 4%, rgba(24, 169, 153, 0.09), transparent 27%),
-    linear-gradient(180deg, #f3f6fb 0%, #f7f9fc 100%);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--ink);
+  background: var(--ground);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 纸面颗粒：固定在视口上的极淡噪点，不参与指针事件，内容层（#app）叠在它上面。 */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: var(--paper-grain-opacity);
+  background-image: var(--paper-grain);
+}
+
+#app {
+  position: relative;
+  z-index: 1;
 }
 
 button,
 input,
-textarea {
+textarea,
+select {
   font: inherit;
 }
 
@@ -30,10 +50,8 @@ button {
   cursor: pointer;
 }
 
-button:focus-visible,
-a:focus-visible,
-textarea:focus-visible {
-  outline: 3px solid rgba(79, 110, 247, 0.25);
+:focus-visible {
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -45,6 +63,24 @@ svg {
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 1.8;
+}
+
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 @media (prefers-reduced-motion: reduce) {

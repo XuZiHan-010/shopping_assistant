@@ -20,6 +20,7 @@ from app.schemas.v2.merchant_ops import (
     SignalIgnoreRequest,
 )
 from app.services.v2.idempotency import run_idempotent
+from app.services.v2.orders import business_date_of
 
 _KIND = {
     AfterSaleType.RETURN_REFUND: CustomerSignalKind.RETURN_REQUESTS,
@@ -44,21 +45,22 @@ async def derive_after_sale_signals(
     """与售后单同事务调用；相同来源重试不重复计数。"""
 
     signal_kind = _KIND[kind].value
+    signal_date = business_date_of(now)
     source = {"source_type": "AFTER_SALE", "source_id": str(sale_id)}
     for product_id, name in dict(products).items():
-        key = f"{merchant_id}:{signal_kind}:{product_id}:{now.date()}"
+        key = f"{merchant_id}:{signal_kind}:{product_id}:{signal_date}"
         # 事务级锁将并发 upsert 串行化，唯一索引提供第二道数据库约束。
         await session.scalar(select(func.pg_advisory_xact_lock(func.hashtextextended(key, 0))))
         row = await session.scalar(select(SignalRow).where(
             SignalRow.merchant_id == merchant_id,
             SignalRow.kind == signal_kind,
             SignalRow.product_id == product_id,
-            SignalRow.signal_date == now.date(),
+            SignalRow.signal_date == signal_date,
         ).with_for_update())
         if row is None:
             session.add(SignalRow(
                 merchant_id=merchant_id, kind=signal_kind, product_id=product_id,
-                product_name=name, signal_date=now.date(), count=1,
+                product_name=name, signal_date=signal_date, count=1,
                 derived_from=[source], is_ignored=False,
             ))
         elif all(ref["source_id"] != str(sale_id) for ref in row.derived_from):
@@ -80,14 +82,15 @@ async def derive_content_gap_signal(
     版本变化后如果缺口仍在，才重新计数一次，让信号如实反映"现在还缺"。
     """
 
-    key = f"{merchant_id}:CONTENT_GAP:{product_id}:{now.date()}"
+    signal_date = business_date_of(now)
+    key = f"{merchant_id}:CONTENT_GAP:{product_id}:{signal_date}"
     # 与售后信号同样用事务级锁串行化并发 upsert，唯一索引提供第二道数据库约束。
     await session.scalar(select(func.pg_advisory_xact_lock(func.hashtextextended(key, 0))))
     row = await session.scalar(select(SignalRow).where(
         SignalRow.merchant_id == merchant_id,
         SignalRow.kind == CustomerSignalKind.CONTENT_GAP.value,
         SignalRow.product_id == product_id,
-        SignalRow.signal_date == now.date(),
+        SignalRow.signal_date == signal_date,
     ).with_for_update())
     source = {
         "source_type": "PRODUCT", "source_id": str(product_id), "content_version": content_version,
@@ -95,7 +98,7 @@ async def derive_content_gap_signal(
     if row is None:
         session.add(SignalRow(
             merchant_id=merchant_id, kind=CustomerSignalKind.CONTENT_GAP.value,
-            product_id=product_id, product_name=product_name, signal_date=now.date(),
+            product_id=product_id, product_name=product_name, signal_date=signal_date,
             count=1, derived_from=[source], is_ignored=False,
         ))
     elif row.derived_from[0].get("content_version") != content_version:

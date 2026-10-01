@@ -26,7 +26,7 @@ from app.models.promotion import Coupon
 from app.prompts.localization import LOCALIZATION_PROMPT_VERSION
 from app.repositories.localization import LocalizationRepository
 from tests.conftest import MERCHANT_ONE_ID, MERCHANT_TWO_ID
-from tests.support.merchant_v2 import seed_product
+from tests.support.merchant_v2 import seed_paid_order, seed_product
 
 SHOP = "borough-api-100"
 OTHER_SHOP = "borough-api-101"
@@ -159,6 +159,140 @@ async def test_product_response_never_exposes_stock_quantity(
         assert leak not in flat
     assert "merchant_id" not in flat and str(MERCHANT_ONE_ID) not in flat
     assert body["stock_band"] == "LOW_STOCK"
+
+
+@pytest.mark.asyncio
+async def test_product_detail_reports_missing_source_attributes(
+    postgres_app: FastAPI, postgres_client: AsyncClient
+) -> None:
+    database = _database(postgres_app)
+    product = await seed_product(database, MERCHANT_ONE_ID)
+    await _set_product(
+        database,
+        product,
+        category="鞋靴",
+        attributes={
+            "材质": {"value": "皮革", "source": "MERCHANT"},
+            "尺码": {"value": "  ", "source": "MERCHANT"},
+        },
+    )
+
+    body = await _ok(postgres_client, f"/api/v2/shop/stores/{SHOP}/products/{product}")
+
+    assert body["missing_attributes"] == ["产地", "尺码"]
+    assert all(item["name"] != "尺码" for item in body["attributes"])
+    english = await postgres_client.get(
+        f"/api/v2/shop/stores/{SHOP}/products/{product}",
+        headers={"Accept-Language": "en-US"},
+    )
+    assert english.json()["missing_attributes"] == ["产地", "尺码"]
+    listing = await _ok(postgres_client, f"/api/v2/shop/stores/{SHOP}/products")
+    assert all("missing_attributes" not in item for item in listing["items"])
+
+
+@pytest.mark.asyncio
+async def test_product_category_is_the_untranslated_source_value(
+    postgres_app: FastAPI, postgres_client: AsyncClient
+) -> None:
+    database = _database(postgres_app)
+    product = await seed_product(database, MERCHANT_ONE_ID)
+    await _set_product(database, product, category="鞋靴")
+    path = f"/api/v2/shop/stores/{SHOP}/products"
+
+    detail = await _ok(postgres_client, f"{path}/{product}")
+    listing = await _ok(postgres_client, path)
+    english = await postgres_client.get(path, headers={"Accept-Language": "en-US"})
+
+    assert detail["category"] == "鞋靴"
+    assert [item["category"] for item in listing["items"]] == ["鞋靴"]
+    # 类目不翻译：前端用固定词表显示，契约 §8.8.1。
+    assert [item["category"] for item in english.json()["items"]] == ["鞋靴"]
+
+
+@pytest.mark.asyncio
+async def test_unregistered_category_has_no_required_attributes(
+    postgres_app: FastAPI, postgres_client: AsyncClient
+) -> None:
+    product = await seed_product(_database(postgres_app), MERCHANT_ONE_ID)
+    body = await _ok(postgres_client, f"/api/v2/shop/stores/{SHOP}/products/{product}")
+    assert body["missing_attributes"] == []
+
+
+@pytest.mark.asyncio
+async def test_popular_sort_uses_recent_paid_quantity(
+    postgres_app: FastAPI, postgres_client: AsyncClient
+) -> None:
+    database = _database(postgres_app)
+    slow = await seed_product(database, MERCHANT_ONE_ID, title="慢销")
+    hot = await seed_product(database, MERCHANT_ONE_ID, title="热销")
+    warm = await seed_product(database, MERCHANT_ONE_ID, title="温和")
+    await seed_paid_order(database, MERCHANT_ONE_ID, hot, quantity=5, days_ago=2)
+    await seed_paid_order(database, MERCHANT_ONE_ID, warm, quantity=2, days_ago=3)
+    await seed_paid_order(database, MERCHANT_ONE_ID, slow, quantity=9, days_ago=45)
+
+    body = await _ok(postgres_client, f"/api/v2/shop/stores/{SHOP}/products", sort="popular")
+
+    assert [item["name"] for item in body["items"]] == ["热销", "温和", "慢销"]
+    assert "sales" not in json.dumps(body)
+
+
+@pytest.mark.asyncio
+async def test_popular_sort_ignores_other_shop_sales(
+    postgres_app: FastAPI, postgres_client: AsyncClient
+) -> None:
+    database = _database(postgres_app)
+    mine = await seed_product(database, MERCHANT_ONE_ID, title="本店")
+    older = await seed_product(database, MERCHANT_ONE_ID, title="本店旧品")
+    await _set_product(database, older, created_at=datetime.now(UTC) - timedelta(days=30))
+    foreign = await seed_product(database, MERCHANT_TWO_ID, title="别家")
+    await seed_paid_order(database, MERCHANT_TWO_ID, foreign, quantity=50, days_ago=1)
+
+    body = await _ok(postgres_client, f"/api/v2/shop/stores/{SHOP}/products", sort="popular")
+
+    assert [item["id"] for item in body["items"]] == [str(mine), str(older)]
+
+
+@pytest.mark.asyncio
+async def test_popular_sort_without_sales_uses_newest(
+    postgres_app: FastAPI, postgres_client: AsyncClient
+) -> None:
+    database = _database(postgres_app)
+    base = datetime.now(UTC)
+    created = []
+    for index in range(3):
+        product = await seed_product(database, MERCHANT_ONE_ID, title=f"新品{index}")
+        await _set_product(database, product, created_at=base - timedelta(minutes=10 - index))
+        created.append(str(product))
+
+    body = await _ok(postgres_client, f"/api/v2/shop/stores/{SHOP}/products", sort="popular")
+
+    assert [item["id"] for item in body["items"]] == list(reversed(created))
+
+
+@pytest.mark.asyncio
+async def test_product_cursor_binds_sort(
+    postgres_app: FastAPI, postgres_client: AsyncClient
+) -> None:
+    database = _database(postgres_app)
+    for index in range(3):
+        await seed_product(database, MERCHANT_ONE_ID, title=f"甲{index}")
+    path = f"/api/v2/shop/stores/{SHOP}/products"
+    first = await _ok(postgres_client, path, limit=1)
+
+    response = await postgres_client.get(
+        path, params={"limit": 1, "sort": "popular", "cursor": first["next_cursor"]}
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "INVALID_CURSOR"
+
+
+@pytest.mark.asyncio
+async def test_unknown_product_sort_is_rejected(postgres_client: AsyncClient) -> None:
+    response = await postgres_client.get(
+        f"/api/v2/shop/stores/{SHOP}/products", params={"sort": "price"}
+    )
+    assert response.status_code == 422
 
 
 @pytest.mark.asyncio
@@ -517,6 +651,7 @@ async def test_product_list_only_shows_this_shops_online_products(
         "requested_locale",
         "name_translation_status",
         "short_description_translation_status",
+        "category",  # 契约 §8.8.1：类目源值（WS 商品浮层与占位色）
     }
     assert body["has_more"] is False and body["next_cursor"] is None
 

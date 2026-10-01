@@ -100,6 +100,72 @@ async def _seed_order(database: Database, merchant_id: Any) -> str:
         return str(order.order_no)
 
 
+async def _create_export_link(app: FastAPI, database: Database) -> tuple[str, str]:
+    """直接调用 `create_export` 工具，用与下载端点相同的签名密钥拿到签名链接。"""
+
+    secret = app.state.settings.export_signing_secret or "development-export-signing-secret"
+    spec = build_export_tools(
+        database, AuditRepository(database), signing_secret=secret, export_url_ttl_minutes=15
+    )[0]
+    ctx = ToolContext(
+        session=SessionContext(
+            session_record_id=uuid4(),
+            role=SessionRole.MERCHANT,
+            merchant_id=MERCHANT_ONE_ID,
+            buyer_key=None,
+            shop_slug=None,
+        ),
+        conversation_id=str(uuid4()),
+        request_id="export-download-audit",
+    )
+    today = datetime.now(UTC).date()
+    output = await spec.executor(
+        ctx, CreateExportArgs(kind="orders", start=today - timedelta(days=7), end=today)
+    )
+    return str(output.payload["export_id"]), str(output.payload["url"])
+
+
+async def _download_events(database: Database) -> list[AuditLog]:
+    async with database.session() as session:
+        statement = select(AuditLog).where(AuditLog.event_type == "EXPORT_DOWNLOADED")
+        return list((await session.execute(statement)).scalars().all())
+
+
+@pytest.mark.asyncio
+async def test_signed_download_is_audited_separately_from_creation(
+    postgres_app: FastAPI, postgres_client: AsyncClient
+) -> None:
+    """PRD M7 / SEC10：创建导出与实际下载分别审计。"""
+
+    database = _database(postgres_app)
+    await _seed_order(database, MERCHANT_ONE_ID)
+    export_id, url = await _create_export_link(postgres_app, database)
+
+    response = await postgres_client.get(url)
+
+    assert response.status_code == 200, response.text
+    events = await _download_events(database)
+    assert len(events) == 1
+    assert events[0].merchant_id == MERCHANT_ONE_ID
+    assert events[0].resource_type == "EXPORT"
+    assert events[0].resource_id == export_id
+
+
+@pytest.mark.asyncio
+async def test_rejected_download_writes_no_download_audit(
+    postgres_app: FastAPI, postgres_client: AsyncClient
+) -> None:
+    database = _database(postgres_app)
+    await _seed_order(database, MERCHANT_ONE_ID)
+    _, url = await _create_export_link(postgres_app, database)
+    tampered = url.replace("signature=", "signature=0")
+
+    response = await postgres_client.get(tampered)
+
+    assert response.status_code == 403, response.text
+    assert await _download_events(database) == []
+
+
 @pytest.mark.asyncio
 async def test_export_creation_rejects_over_limit_before_writing_link(
     postgres_app: FastAPI, monkeypatch: pytest.MonkeyPatch

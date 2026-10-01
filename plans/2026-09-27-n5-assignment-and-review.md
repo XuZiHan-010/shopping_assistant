@@ -31,11 +31,11 @@ N5 另加一条：
 | --- | --- | --- | --- | --- | --- |
 | **0** 入口核对与 N4 收口 | Astra 清单「入口-N5」 | **Astra**（审查） | 入口审查本就规定由 Astra 做 | 入口-N5 | 待做 |
 | **A** MCP 只读服务 | `n5-mcp-readonly` | **Opus** | MCP 是工具注册表的另一个出口：`registry.surface_for_mcp()`、工具闸门与 `merchant_id` 注入路径都由 Opus 在 N2-A 建立；凭证复用的 `new_session_token()` / `token_fingerprint()` 来自 Opus 实现的 N1-D 会话身份。「鉴权先于解析」「撤销不缓存」与 N1-D 已审过的会话校验是同一类问题 | N5-1、N5-2（必审） | 待排期 |
-| **B** 预算、成本与可观测 | `n5-budget-ops-and-railway` Task 1–3 | **Sonnet** | 三级预算扩展的是 `app/llm/guard.py` 与适配器「先扣后发」的计量路径，建在 Sonnet 实现的 N1-B LLM 客户端上（缓存命中计量也是 N1-B 冒烟测过的字段）；看板前端在 Sonnet 熟悉的 `frontend/` 里。价格表的追加写触发器借用 Sol 在 N1-C 事件账本上的做法，开工前先读那份迁移 | N5-3（预算与 ops/status 部分，必审） | 待排期 |
+| **B** 预算、成本与可观测 | `n5-budget-ops-and-railway` Task 1–3 | **Sonnet** | 三级预算扩展的是 `app/llm/guard.py` 与适配器「先扣后发」的计量路径，建在 Sonnet 实现的 N1-B LLM 客户端上（缓存命中计量也是 N1-B 冒烟测过的字段）；看板前端在 Sonnet 熟悉的 `frontend/` 里。价格表的追加写触发器借用 Sol 在 N1-C 事件账本上的做法，开工前先读那份迁移 | N5-3（预算与 ops/status 部分，必审） | 待排期。看板页面放在 W 新外壳的「管理」分组，复用 `AdminGate`（2026-09-28，PRD §15「W」） |
 | **C** Cron 与 Railway 部署 | `n5-budget-ops-and-railway` Task 4–7 | **Sol**（配置、分发器、验收脚本）；**用户**（逐项同意，或亲自执行控制台操作） | 分发器的 advisory lock、重叠执行、漏跑追赶与 Sol 在 N2-B（超时关闭竞争）、N4-B（outbox 租约与 `SKIP LOCKED`）做过的问题同类；要接线的任务里，超时关单、outbox 排空、记忆过期都是 Sol 的模块 | N5-3（前置条件部分，必审）、N5-4（抽审） | 待排期 |
 | **D** 全量评测（Task 1–6） | `n5-final-eval-and-closeout` Task 1–6 | **Sonnet** | 路由对账、验收矩阵、E1–E5 报告、E6 回流互斥、冻结基线对照，全部建在 Sonnet 于 N1-E 实现、N4-C 扩展的评测骨架上 | N5-5（抽审） | 待排期 |
 | **D** 演示与文档收口（Task 7–9） | `n5-final-eval-and-closeout` Task 7–9 | **Opus** | Task 9 的核心是复核所有裁定在 PRD、契约、实现、测试四层一致；N3 中契约先行的补录（`batch_id`、图表可视化 §8.7.11）大多经 Opus 之手。演示脚本「此处体现的规则」一列同样要求熟悉审批、护栏与受信通道 | N5-5（「不把局部通过称为全量通过」部分） | 待排期 |
-| D Task 9 步骤 1a 的 E2E 重建（D-N5-2 裁定为重建时） | — | **Sonnet**（`frontend/`） | v2 fetch Mock 基础设施与会话目录、双语两组 E2E 都在商家端 Vue 里 | 随 D 抽审 | 待裁定 |
+| D-N5-2 剩余 E2E 项 | N4 阶段 0 复核；`n5-budget-ops-and-railway` Task 3 步骤 3 的 `ops-status.spec.ts`；D Task 9 步骤 1a 收口核对 | **Sonnet**（`frontend/`） | 会话目录与双语两组已在 2026-09-27 重建（`e2e/support/v2MerchantMock.ts`）；剩余的 §12.4 逐条对照、§10.6 回退标注用例与看板 E2E 都在商家端 Vue 里 | 随 D 抽审 | 待排期（复核部分宜在 N4 开工前） |
 
 ### 与上游模块的对应关系
 
@@ -51,7 +51,9 @@ N5 另加一条：
 
 ## 三、执行者之间的交接约定
 
-- **0 → A / B / C**：N4 完成、入口-N5 通过后才开工。D-N5-1 至 D-N5-3 可与此并行裁定。
+- **0 → A / B / C**：N4 完成、入口-N5 通过后才开工。D-N5-1 至 D-N5-3 已于 2026-09-28 裁定。
+- **D-N5-3 折中（默认不启用）**：用户提出时间节点时，Opus 完成 N4-A 后直接接做 N5-A，此时 A 的入口条件改为
+  「N3 验收通过 + N4-A 完成」，其余阶段不变；Astra 批次 1（N5-1、N5-2）随之前移，其他批次不动。
 - **A ‖ B 在 `app/main.py` 与中间件上串行**：A 挂 MCP 路由（不挂 `X-Session-Id` 依赖），B 加追踪中间件（不得在鉴权前解析 MCP 正文）。
   先完成的一方在进度快照写明中间件实际顺序，另一方改完后同时跑 A 的鉴权顺序测试与 B 的追踪测试。
 - **A、B 在 Alembic 上串行**：`mcp_credentials` 与 `model_price_versions` / `llm_usage` 新列各一份迁移；创建前后确认唯一 head。

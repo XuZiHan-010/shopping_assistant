@@ -33,8 +33,18 @@ export async function getProduct(slug: string, productId: string, locale?: strin
   )
 }
 
-export async function listCoupons(slug: string): Promise<Coupon[]> {
-  const page = await requestJson<S['CursorPage_CouponSummary_']>(`${store(slug)}/coupons?limit=100`)
+export async function listCoupons(slug: string, locale?: string): Promise<Coupon[]> {
+  const page = await requestJson<S['CursorPage_CouponSummary_']>(
+    `${store(slug)}/coupons?limit=100`, { headers: locale ? { 'Accept-Language': locale } : undefined },
+  )
   return page.items.map(toCoupon)
 }
 
+
+export async function listPopularProducts(slug: string, locale?: string): Promise<Product[]> {
+  const page = await requestJson<S['CursorPage_ProductSummary_']>(
+    `${store(slug)}/products?sort=popular&limit=8`,
+    { headers: locale ? { 'Accept-Language': locale } : undefined },
+  )
+  return page.items.map(toProduct)
+}

@@ -34,7 +34,10 @@ export default async function startS4Shop() {
     stopShop = await startManagedServer({
       label: 'S4 E2E shop', port: 3276, cwd: SHOP_ROOT, healthPath: '/health',
       args: ['node_modules/next/dist/bin/next', 'dev', '--hostname', '127.0.0.1', '--port', '3276'],
-      env: { NEXT_PUBLIC_API_BASE_URL: 'http://127.0.0.1:8014' },
+      env: {
+        NEXT_PUBLIC_API_BASE_URL: 'http://127.0.0.1:8014',
+        E2E_NEXT_DIST_DIR: '.next-s4-e2e',
+      },
     })
   } catch (error) {
     await stopBackend()

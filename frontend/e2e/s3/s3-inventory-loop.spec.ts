@@ -80,8 +80,8 @@ test('S3：简报出现低库存 → 对话起草补货 → 聊天里「批准�
   // 0. 顾客端起点：紧张（在库 3 ≤ 阈值 5）。
   expect(await customerStockBand()).toBe('LOW_STOCK')
 
-  // 1. 今日简报：确定性来源、低库存条目、暂无待批准草稿。
-  await page.goto('/today')
+  // 1. 今日简报（W Task 8 起并入首页简报卡）：确定性来源、低库存条目、暂无待批准草稿。
+  await page.goto('/')
   await expect(page.getByRole('heading', { name: '今日简报' })).toBeVisible()
   await expect(page.getByText(`库存偏低：${PRODUCT}`)).toBeVisible()
   await expect(page.getByText('暂无待批准草稿。')).toBeVisible()
@@ -111,11 +111,12 @@ test('S3：简报出现低库存 → 对话起草补货 → 聊天里「批准�
   await expect(page.getByRole('row', { name: new RegExp(PRODUCT) })).toBeVisible()
   expect(await customerStockBand()).toBe('LOW_STOCK')
 
-  // 4. 今日页出现待批准草稿 → 进入审批页核对 diff。
-  await page.goto('/today')
-  const pending = page.locator('.today-view__pending-drafts li')
+  // 4. 首页简报卡出现「去审批（1）」→ 审批列表恰好一份待批准草稿 → 进入审批页核对 diff。
+  await page.goto('/')
+  await page.getByRole('link', { name: '去审批（1）' }).click()
+  const pending = page.getByRole('main').getByRole('listitem')
   await expect(pending).toHaveCount(1)
-  await pending.getByRole('link', { name: '去审批' }).click()
+  await pending.getByRole('link', { name: '查看详情' }).click()
   await expect(page).toHaveURL(/\/approvals\/[^/]+$/)
 
   await expect(page.locator('[data-test=diff-row] td')).toHaveText(['stock_on_hand', '3', '63'])

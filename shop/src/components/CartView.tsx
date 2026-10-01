@@ -1,6 +1,7 @@
 'use client'
 
 import type { UnavailableItem } from '@/checkout/checkout'
+import { useLocale } from '@/i18n/LocaleProvider'
 import { formatPrice } from '@/lib/format'
 import { UNAVAILABLE_LABEL } from '@/lib/labels'
 import type { ShopSession } from '@/types/session'
@@ -28,6 +29,7 @@ export interface CartViewProps {
  * 不求和、不乘单价、不算优惠。
  */
 export function CartView(props: CartViewProps) {
+  const { t, locale } = useLocale()
   const { session, cart, coupons, couponId, unavailable, error, submitting } = props
   const isBound = session?.isBound === true
   const items = cart?.items ?? []
@@ -35,28 +37,28 @@ export function CartView(props: CartViewProps) {
 
   return (
     <div className="stack">
-      <h1>购物车</h1>
+      <h1>{t('cart')}</h1>
 
       {!isBound ? (
         <div className="notice" role="note">
           <p style={{ margin: 0 }}>
-            未绑定身份时刷新后无法找回购物车；绑定演示身份后可恢复。
+            {t('cartUnbound')}
           </p>
           <p className="muted" style={{ margin: '8px 0 0' }}>
-            演示身份，非真实登录。
+            {t('notReal')}
           </p>
           <button className="btn" style={{ marginTop: 8 }} onClick={props.onBind}>
-            绑定演示顾客
+            {t('bind')}
           </button>
         </div>
       ) : null}
 
       {unavailable.length > 0 ? (
         <div className="notice notice-error" role="alert">
-          <strong>以下商品当前无法下单，请调整后重试：</strong>
+          <strong>{t('cartUnavailable')}</strong>
           {unavailable.map((entry) => (
             <p key={entry.productId} style={{ margin: '4px 0 0' }}>
-              {nameOf(entry.productId)}：{UNAVAILABLE_LABEL[entry.reason]}
+              {nameOf(entry.productId)}：{locale === 'en-US' ? entry.reason.replaceAll('_', ' ').toLowerCase() : UNAVAILABLE_LABEL[entry.reason]}
             </p>
           ))}
         </div>
@@ -69,7 +71,7 @@ export function CartView(props: CartViewProps) {
       ) : null}
 
       {items.length === 0 ? (
-        <p className="muted">购物车还是空的，去店铺里逛逛，或者让导购助手帮你挑。</p>
+        <p className="muted">{t('cartEmpty')} {t('cartEmptyHint')}</p>
       ) : (
         <ul className="stack" style={{ listStyle: 'none', padding: 0, margin: 0 }}>
           {items.map((item) => (
@@ -79,16 +81,16 @@ export function CartView(props: CartViewProps) {
                 <StockBadge band={item.stockBand} />
               </div>
               <div className="row spread">
-                <span className="muted">单价 {formatPrice(item.unitPriceCents)}</span>
+                <span className="muted">{t('unit', { p: formatPrice(item.unitPriceCents) })}</span>
                 <span className="price">{formatPrice(item.lineTotalCents)}</span>
               </div>
               <div className="row">
                 <label>
-                  <span className="muted">数量 </span>
+                  <span className="muted">{t('items', { n: item.quantity })} </span>
                   <input
                     type="number"
                     min={1}
-                    aria-label={`${item.name} 数量`}
+                    aria-label={t('quantityLabel', { name: item.name })}
                     value={item.quantity}
                     onChange={(event) => {
                       const next = Number(event.target.value)
@@ -97,7 +99,7 @@ export function CartView(props: CartViewProps) {
                   />
                 </label>
                 <button className="btn" onClick={() => props.onRemove(item.productId)}>
-                  移除
+                  {t('remove')}
                 </button>
               </div>
             </li>
@@ -106,15 +108,15 @@ export function CartView(props: CartViewProps) {
       )}
 
       {items.length > 0 ? (
-        <section className="card card-body" aria-label="结账">
+        <section className="card card-body" aria-label={t('checkoutLabel')}>
           {coupons.length > 0 ? (
             <label className="row">
-              <span>优惠券</span>
+              <span>{t('coupon')}</span>
               <select
                 value={couponId ?? ''}
                 onChange={(event) => props.onCouponChange(event.target.value || null)}
               >
-                <option value="">不使用</option>
+                <option value="">{t('noCoupon')}</option>
                 {coupons.map((coupon) => (
                   <option key={coupon.id} value={coupon.id}>
                     {coupon.name}
@@ -124,21 +126,21 @@ export function CartView(props: CartViewProps) {
             </label>
           ) : null}
           <div className="row spread">
-            <span>小计</span>
+            <span>{t('subtotal')}</span>
             <span className="price">{formatPrice(cart?.subtotalCents ?? 0)}</span>
           </div>
           <p className="muted" style={{ margin: 0 }}>
-            优惠与应付金额以提交订单后后端计算的结果为准。
+            {t('calcNote')}
           </p>
           <p className="notice notice-demo" style={{ margin: 0 }}>
-            演示结账，不产生真实扣款。
+            {t('demoNote')}
           </p>
           <button
             className="btn btn-primary"
             disabled={!isBound || submitting}
             onClick={props.onSubmit}
           >
-            提交订单
+            {t('submit')}
           </button>
         </section>
       ) : null}

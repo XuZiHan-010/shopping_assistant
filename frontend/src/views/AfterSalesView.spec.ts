@@ -7,6 +7,7 @@ import { i18n } from '@/i18n'
 import { routes } from '@/router'
 import { useAfterSalesStore } from '@/stores/afterSales'
 import { useOpsChatStore } from '@/stores/opsChat'
+import { useRailStore } from '@/stores/rail'
 import AfterSalesView from './AfterSalesView.vue'
 
 it('shows alias and summary, and only prefills the assistant without submitting or approving', async () => {
@@ -26,7 +27,7 @@ it('shows alias and summary, and only prefills the assistant without submitting 
   const router = createRouter({ history: createMemoryHistory(), routes })
   await router.push('/after-sales')
   await router.isReady()
-  vi.spyOn(router, 'push').mockResolvedValue(undefined)
+  const push = vi.spyOn(router, 'push').mockResolvedValue(undefined)
   const wrapper = mount(AfterSalesView, { global: { plugins: [pinia, i18n, router] } })
   expect(wrapper.text()).toContain('顾客 #abcd1234')
   expect(wrapper.text()).toContain('商品有瑕疵')
@@ -36,4 +37,8 @@ it('shows alias and summary, and only prefills the assistant without submitting 
   await flushPromises()
   expect(prefill).toHaveBeenCalledOnce()
   expect(prefill.mock.calls[0]?.[0]).toContain('sale-1')
+  // W Task 6：打开常驻外壳的助手栏，留在售后页，不跳转、不发送。
+  expect(useRailStore().open).toBe(true)
+  expect(push).not.toHaveBeenCalled()
+  expect(chat.busy).toBe(false)
 })

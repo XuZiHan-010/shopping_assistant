@@ -465,6 +465,65 @@ async def _resolve_shop_slugs(ctx: PrimitiveContext) -> PrimitiveOutcome:
     return PrimitiveOutcome()
 
 
+async def _mint_merchant_orders_cursor(ctx: PrimitiveContext) -> PrimitiveOutcome:
+    """W3-004 turn0：签发一枚绑定 `payment_status` 筛选的真实商家订单列表游标。
+
+    与生产路由完全同一签名逻辑（`merchant_cursor_scope` + `CursorCodec`），只是绕开
+    HTTP 往返直接调用——现有 YAML 用例结构没有「捕获上一条响应字段」的机制，
+    只能在原语里现算一枚合法游标，再让后续 HTTP turn 用不同筛选重放它。
+    密钥用与 `security_app` 同一套开发期回退值：测试从不配置 `EXPORT_SIGNING_SECRET`。
+    绑定的 `locale` 固定为 `en-US`，调用方 YAML 用例的 `locale` 字段必须同为 `en-US`，
+    否则后续 HTTP turn 解析出的语言与游标绑定不一致，会被误判为跨查询形状复用。
+    """
+
+    from app.api.dependencies import _DEV_BUYER_ALIAS_SECRET
+    from app.api.v2_deps import _DEV_SIGNING_SECRET, merchant_cursor_scope
+    from app.localization.locales import SupportedLocale
+    from app.services.v2.cursor import CursorCodec
+
+    payment_status = str(ctx.args.get("payment_status", "PAID"))
+    scope = merchant_cursor_scope(
+        ctx.actor_ctx,
+        endpoint="merchant.orders.list",
+        resource="ORDER",
+        filters={
+            "payment_status": payment_status,
+            "fulfillment_status": None,
+            "after_sale_status": None,
+        },
+        locale=SupportedLocale.EN_US,
+        limit=1,
+        secret=_DEV_BUYER_ALIAS_SECRET.encode(),
+    )
+    codec = CursorCodec(secret=_DEV_SIGNING_SECRET)
+    ctx.state["merchant_orders_cursor"] = codec.encode(
+        scope, key=("anchor",), now=datetime.now(UTC)
+    )
+    return PrimitiveOutcome()
+
+
+async def _mint_newest_products_cursor(ctx: PrimitiveContext) -> PrimitiveOutcome:
+    """WS：签发真实 newest 商品游标，供 popular 查询验证筛选绑定。"""
+
+    from app.api.routes.v2.shop_catalog import _public_scope
+    from app.api.v2_deps import _DEV_SIGNING_SECRET
+    from app.localization.locales import SupportedLocale
+    from app.services.v2.cursor import CursorCodec
+
+    scope = _public_scope(
+        endpoint="shop.products.list",
+        resource="PRODUCT",
+        merchant_id=ctx.actor_ctx.merchant_id,
+        locale=SupportedLocale.ZH_CN,
+        limit=1,
+        filters={"sort": "newest"},
+    )
+    ctx.state["newest_products_cursor"] = CursorCodec(secret=_DEV_SIGNING_SECRET).encode(
+        scope, key=("anchor",), now=datetime.now(UTC)
+    )
+    return PrimitiveOutcome()
+
+
 PRIMITIVES: dict[str, PrimitiveFn] = {
     "resource_scope.resolve_shop_slugs": _resolve_shop_slugs,
     "resource_scope.seed_foreign_product": _seed_foreign_product,
@@ -481,6 +540,8 @@ PRIMITIVES: dict[str, PrimitiveFn] = {
     "injection.seed_product_description": _seed_injected_product,
     "injection.seed_knowledge_document": _seed_injected_knowledge,
     "session.attempt_conflicting_rebind": _attempt_conflicting_rebind,
+    "orders.mint_merchant_orders_cursor": _mint_merchant_orders_cursor,
+    "catalog.mint_newest_products_cursor": _mint_newest_products_cursor,
 }
 
 

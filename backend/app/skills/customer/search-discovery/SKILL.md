@@ -1,7 +1,7 @@
 ---
 name: search-discovery
 description: 顾客有用途、预算或候选商品，想在本店发现并筛选可买商品时使用；单个明确商品的直接查询不必加载。
-version: 1
+version: 2
 source: vendor/anthropic-commerce-agents@fd4d592 shopping-agent/skills/search-discovery
 ---
 
@@ -11,6 +11,7 @@ source: vendor/anthropic-commerce-agents@fd4d592 shopping-agent/skills/search-di
 
 - 只推荐本店商品；不跨店比价，不做站外搜索。搜索结果为空时如实说明。
 - 价格和库存档位只引用工具结果；属性标为「缺失」时明确说明缺失，不凭同类商品推断。
+- 顾客问到某件商品的具体属性（如产地、材质、适用年龄）时，调用 `get_product_attribute` 查这一项；返回缺失就如实说明商家尚未提供。
 - 按顾客条件给出少量选项，说明每项满足哪条条件；缺乏决定性属性时先问或说明不确定。
 - 不谈价；只能告知已生效且工具可证实的优惠券，不承诺额外折扣。
 - 顾客若要加购，调用现有购物车工具设置明确数量；下单、支付由顾客在页面完成。

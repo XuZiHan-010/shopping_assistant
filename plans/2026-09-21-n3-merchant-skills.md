@@ -1,5 +1,10 @@
 # N3 阶段 C · 商家经营 Skill 实施计划
 
+> **2026-09-28 勾选说明：** 34 步于 2026-09-28 N3 验收时统一补勾。逐步证据在
+> `.superpowers/sdd/2026-09-21-n3-merchant-skills/progress.md`；验收时补做 Task 7 步骤 3（两个顾客 Skill 正文
+> 指向 `get_product_attribute`，版本升至 2）。入口条件由 2026-09-26 独立审查「入口-N3 有条件通过」及台账入口复核覆盖。
+> Task 8 按 2026-09-27 两页合并裁定交付（经营图表区并入运营助手 `MetricChartPanel`）。
+>
 > **给执行者：** 用 `superpowers:executing-plans` 逐任务推进。步骤用 `- [ ]` 复选框跟踪。
 > **本计划不含任何 Git 提交步骤**（R2）。全程 Fake LLM，零费用。
 > 简报的真实生成、定时预生成的首次上线均属 R3 范围，需单独授权。
@@ -28,14 +33,14 @@
 > **预写计划不是已验证实现。** 本计划最初写于上游代码尚不存在时；2026-09-24 已按 N2 实际代码核对一轮（见下），
 > 开工前仍须再核对一次。不一致时先按 PRD → 契约 → 计划的顺序修正，**再动代码**，不得在实现里默默适配或绕过。
 
-- [ ] 阶段 A（`n3-skill-loader`）Task 1–6 已完成：Skill 能加载；草稿分派表可注册新种类；
-- [ ] `n2-merchant-drafts-and-inventory`、`n2-merchant-vue-v2-migration` 已通过 N2 验收（审批界面、最小简报、`/ops-assistant` 可复用）；
-- [ ] **M5、M6 在库**（2026-09-24 已核对模型层，开工时对真实库再查）：`coupons`、`guardrail_configs`、`customer_signals`、
+- [x] 阶段 A（`n3-skill-loader`）Task 1–6 已完成：Skill 能加载；草稿分派表可注册新种类；
+- [x] `n2-merchant-drafts-and-inventory`、`n2-merchant-vue-v2-migration` 已通过 N2 验收（审批界面、最小简报、`/ops-assistant` 可复用）；
+- [x] **M5、M6 在库**（2026-09-24 已核对模型层，开工时对真实库再查）：`coupons`、`guardrail_configs`、`customer_signals`、
       `daily_briefs`（`uq_daily_briefs_merchant_date`）；
-- [ ] **复用的 v1 服务接口与本计划描述一致**（2026-09-24 已核对存在性）：`intent/models.py:48` `ComparisonMode`、
+- [x] **复用的 v1 服务接口与本计划描述一致**（2026-09-24 已核对存在性）：`intent/models.py:48` `ComparisonMode`、
       `services/export_service.py` 约 307 行的公式注入转义、`metrics/catalog.py` 的 `UNVERIFIED` 状态、`knowledge/retrieval.py`；
       开工时逐个读签名，如需改签名**先确认 v1 零回归**；
-- [ ] Astra「入口-N3」中本计划部分已核对。
+- [x] Astra「入口-N3」中本计划部分已核对。
 
 与阶段 B 的任务级依赖**不写在入口**，而写在各自任务开头的前置复选框：Task 2（完整简报）、Task 3 步骤 3（S2）、
 Task 7（内容缺口信号）需要 B Task 11 的顾客信号服务。
@@ -72,9 +77,9 @@ Task 7（内容缺口信号）需要 B Task 11 的顾客信号服务。
 
 ### Task 0：Skill 文件
 
-- [ ] **步骤 1：** 复制 4 个蓝图 Skill 到 `app/skills/merchant/`，按阶段 A 计划的「复制后改」三步处理；**不复制 `marketing-campaigns`**
-- [ ] **步骤 2：** 新写 2 个 Skill（`source: borough`）：明细导出、规则与指标口径问答
-- [ ] **步骤 3：** 每个 Skill 写 `cases.yaml`：2 条正确触发、1 条误触发、1 条边界反例；另写 1 条与阶段 B 客服回复 Skill 的
+- [x] **步骤 1：** 复制 4 个蓝图 Skill 到 `app/skills/merchant/`，按阶段 A 计划的「复制后改」三步处理；**不复制 `marketing-campaigns`**
+- [x] **步骤 2：** 新写 2 个 Skill（`source: borough`）：明细导出、规则与指标口径问答
+- [x] **步骤 3：** 每个 Skill 写 `cases.yaml`：2 条正确触发、1 条误触发、1 条边界反例；另写 1 条与阶段 B 客服回复 Skill 的
       **冲突用例**（同一句「这单怎么处理、顺便看看本周退款率」同时命中两个 Skill），按阶段 A Task 4 的裁决规则断言
 
 必须写进 Skill 的边界：
@@ -107,7 +112,7 @@ Task 7（内容缺口信号）需要 B Task 11 的顾客信号服务。
 
 五步归因中**模型负责组织语言，数字全部来自 `attribute_change` 的确定性输出**。
 
-- [ ] **步骤 1：写失败测试**
+- [x] **步骤 1：写失败测试**
 
 ```python
 async def test_incomplete_week_uses_equal_length_comparison(tool) -> None:
@@ -150,8 +155,8 @@ def test_refund_adjusted_value_never_labelled_gmv() -> None:
             assert "gmv" not in code or code == "net_gmv"
 ```
 
-- [ ] **步骤 2：确认失败 → 实现 → 确认通过**
-- [ ] **步骤 3：S5 场景**——"为什么本周下滑" → 五步归因 → 分项贡献 + 数据截至时间 + 证据分级表述。
+- [x] **步骤 2：确认失败 → 实现 → 确认通过**
+- [x] **步骤 3：S5 场景**——"为什么本周下滑" → 五步归因 → 分项贡献 + 数据截至时间 + 证据分级表述。
       断言回答中出现"线索"而**不出现**"导致""造成"等因果词，除非工具结果带了机制证据标记。
       登记 `app/eval/datasets/quality/scenarios/n3_s5_attribution.yaml`。
 
@@ -179,7 +184,7 @@ def test_refund_adjusted_value_never_labelled_gmv() -> None:
 
 N2 最小简报「来源如实标注为确定性规则」的约定保留：完整简报中由 LLM 组织的部分与确定性条目**分别标注来源**（R7）。
 
-- [ ] **步骤 1：写失败测试**
+- [x] **步骤 1：写失败测试**
 
 ```python
 def test_unknown_amount_is_not_sunk_to_bottom() -> None:
@@ -214,7 +219,7 @@ def test_scheduled_generation_disabled_by_default() -> None:
     assert Settings().daily_brief_schedule_enabled is False
 ```
 
-- [ ] **步骤 2：确认失败 → 实现 → 确认通过 → 同次变更内导出 OpenAPI、codegen、Adapter 与快照测试**；
+- [x] **步骤 2：确认失败 → 实现 → 确认通过 → 同次变更内导出 OpenAPI、codegen、Adapter 与快照测试**；
       重新生成路由的越权用例登记进关键安全集（`introduced_in: N3`）
 
 ---
@@ -239,11 +244,11 @@ M4 要求审批绑定完整条目清单、每项 diff 与目标版本，并**支
 **2026-09-24 核对发现：`batch_id` 目前不存在**于 `drafts` 表、契约 §8.13 与 `DraftSummary`。按契约先行（`AGENTS.md` §8.5），
 先做步骤 0，再写实现。
 
-- [ ] **步骤 0：契约先行**——`docs/backend-development-plan.md` §8.13 的 `DraftSummary` 增加 `batch_id: PublicId或null`
+- [x] **步骤 0：契约先行**——`docs/backend-development-plan.md` §8.13 的 `DraftSummary` 增加 `batch_id: PublicId或null`
       （仅 `CONTENT_CHANGE` 可非空；列表支持按 `batch_id` 过滤则同时写查询参数）→ `app/schemas/v2/drafts.py` 与单测 →
       新迁移（接在当时唯一 head 之后，`uv run alembic heads` 前后各确认一次）→ 导出 OpenAPI 与两端 codegen。
       这是字段新增、不改变既有语义，不涉及 PRD 修改。
-- [ ] **步骤 1：写失败测试**
+- [x] **步骤 1：写失败测试**
 
 ```python
 async def test_missing_attribute_is_listed_not_invented(merchant_turn, db) -> None:
@@ -272,8 +277,8 @@ async def test_partial_batch_approval_leaves_others_staged(client, db) -> None:
     assert [d.state for d in await drafts_by_id(db, ids)] == ["APPLIED", "STAGED", "STAGED"]
 ```
 
-- [ ] **步骤 2：确认失败 → 实现 `draft_content_change` 与 `ContentChangeHandler`（注册进分派表、加入 `ENABLED_DRAFT_KINDS`）→ 确认通过**
-- [ ] **步骤 3：S2 场景**（**前置：** 阶段 B Task 11 与本计划 Task 7 已完成）——顾客问未填写的产地 → 顾客端 Agent 说明缺失、
+- [x] **步骤 2：确认失败 → 实现 `draft_content_change` 与 `ContentChangeHandler`（注册进分派表、加入 `ENABLED_DRAFT_KINDS`）→ 确认通过**
+- [x] **步骤 3：S2 场景**（**前置：** 阶段 B Task 11 与本计划 Task 7 已完成）——顾客问未填写的产地 → 顾客端 Agent 说明缺失、
       内容缺口信号 +1 → 商家简报出现该信号 → 商家让 Agent 起草补充 → 审批应用 → **顾客端再问同一问题能回答**、
       该信号不再计数。最后一步通过顾客端接口断言，证明两端共享同一商品事实。
 
@@ -295,7 +300,7 @@ async def test_partial_batch_approval_leaves_others_staged(client, db) -> None:
 - 金额最小货币单位，舍入规则见契约 §8.7.8；
 - 护栏读 N2 `services/v2/guardrails.py` 的 `load_limits()`，**应用时按当时生效配置复检**（D9②），不沿用起草时快照。
 
-- [ ] **步骤 1：写失败测试**
+- [x] **步骤 1：写失败测试**
 
 ```python
 async def test_price_draft_blocked_when_min_price_unconfigured(apply) -> None:
@@ -326,8 +331,8 @@ async def test_coupons_do_not_stack(checkout) -> None:
     assert r.status_code == 422
 ```
 
-- [ ] **步骤 2：确认失败 → 实现 `PriceChangeHandler`、`CouponHandler`（注册进分派表、加入 `ENABLED_DRAFT_KINDS`）→ 确认通过**
-- [ ] **步骤 3：S6 场景**——滞销告警 → 商家让 Agent 起草折扣券 → 护栏校验 → 批准生效 → **顾客端券列表出现该券**。
+- [x] **步骤 2：确认失败 → 实现 `PriceChangeHandler`、`CouponHandler`（注册进分派表、加入 `ENABLED_DRAFT_KINDS`）→ 确认通过**
+- [x] **步骤 3：S6 场景**——滞销告警 → 商家让 Agent 起草折扣券 → 护栏校验 → 批准生效 → **顾客端券列表出现该券**。
       登记 `app/eval/datasets/quality/scenarios/n3_s6_promotion.yaml`。
 
 ---
@@ -343,7 +348,7 @@ async def test_coupons_do_not_stack(checkout) -> None:
 - **不承诺异步导出**：超出行数上限时拒绝并建议缩小范围；
 - **创建导出与实际下载分别审计**。
 
-- [ ] **步骤 1：写失败测试**
+- [x] **步骤 1：写失败测试**
 
 ```python
 async def test_export_rows_never_enter_model_context(merchant_turn, fake_llm) -> None:
@@ -370,7 +375,7 @@ def test_formula_injection_escaped(prefix) -> None:
 
 最后一条是**回归哨兵**——v1 已实现，确保 v2 复用时没有绕过它。审计事件名以 v1 现有常量为准，开工时核对后写死。
 
-- [ ] **步骤 2：确认失败 → 实现 → 确认通过**
+- [x] **步骤 2：确认失败 → 实现 → 确认通过**
 
 ---
 
@@ -383,7 +388,7 @@ def test_formula_injection_escaped(prefix) -> None:
 - 同时展示单位、来源层级、负责人、来源库表、可用维度与可选关联报表；
 - **正式指标资产未命中时标"待核验"**（v1 目录已有 `UNVERIFIED` 状态），不得把生成说明冒充正式口径。
 
-- [ ] **步骤 1：写失败测试**
+- [x] **步骤 1：写失败测试**
 
 ```python
 async def test_sql_caliber_is_display_only(tool, spy_db) -> None:
@@ -401,8 +406,8 @@ async def test_rule_answer_cites_document(merchant_turn) -> None:
     assert outcome.citations and outcome.citations[0].document_path
 ```
 
-- [ ] **步骤 2：确认失败 → 实现 → 确认通过**
-- [ ] **步骤 3：S7 场景**——"净成交额怎么算" → 检索口径文档 → 带引用回答并声明定义版本。
+- [x] **步骤 2：确认失败 → 实现 → 确认通过**
+- [x] **步骤 3：S7 场景**——"净成交额怎么算" → 检索口径文档 → 带引用回答并声明定义版本。
       N3 用关键词检索跑通；**N4 换成混合检索后此场景必须回归通过**。登记 `n3_s7_metric_caliber.yaml`。
 
 ---
@@ -423,7 +428,7 @@ async def test_rule_answer_cites_document(merchant_turn) -> None:
   开工时读 §6.9 与 `registry.py` `_check_policy()`；若不允许，先在 §6.9 补一条明确例外或改为路由层计数，
   **不在实现里默默绕过**。
 
-- [ ] **步骤 1：写失败测试**
+- [x] **步骤 1：写失败测试**
 
 ```python
 async def test_missing_required_attribute_counts_content_gap(shop_gates, customer_ctx, db) -> None:
@@ -447,8 +452,8 @@ async def test_content_gap_signal_never_stores_question_text(db) -> None:
     assert "产地" not in json.dumps((await signal(P, "CONTENT_GAP", TODAY)).derived_from, ensure_ascii=False)
 ```
 
-- [ ] **步骤 2：确认失败 → 实现 → 确认通过**
-- [ ] **步骤 3：更新搜索发现、选购研究两个顾客 Skill 的正文**，指示「问到具体属性时调用 `get_product_attribute`」，
+- [x] **步骤 2：确认失败 → 实现 → 确认通过**
+- [x] **步骤 3：更新搜索发现、选购研究两个顾客 Skill 的正文**，指示「问到具体属性时调用 `get_product_attribute`」，
       `version + 1` 并重跑两者的 `cases.yaml`（阶段 A Task 4 的更新后回归规则）
 
 ---
@@ -468,16 +473,16 @@ async def test_content_gap_signal_never_stores_question_text(db) -> None:
 - **知识库不进普通商家工作台**（M1）；
 - 字段流向 `generated.ts → adapters → types → stores → 组件`。
 
-- [ ] **步骤 1：写组件测试**——动作按钮不触发请求；图表不在前端计算数据点；批次勾选只对选中子草稿发起应用；
+- [x] **步骤 1：写组件测试**——动作按钮不触发请求；图表不在前端计算数据点；批次勾选只对选中子草稿发起应用；
       重新生成在冷却期内禁用。
-- [ ] **步骤 2：确认失败 → 实现 → 确认通过**；`npm run test`、`typecheck`、`lint`、`codegen:check`、`build` 通过
-- [ ] **步骤 3：S2、S5、S6、S7 浏览器 E2E**（Fake LLM、一次性库；S2 的顾客端部分走 `shop/` 的 Playwright）
+- [x] **步骤 2：确认失败 → 实现 → 确认通过**；`npm run test`、`typecheck`、`lint`、`codegen:check`、`build` 通过
+- [x] **步骤 3：S2、S5、S6、S7 浏览器 E2E**（Fake LLM、一次性库；S2 的顾客端部分走 `shop/` 的 Playwright）
 
 ---
 
 ### Task 9：自检与两页合并评审
 
-- [ ] **步骤 1：跑检查**
+- [x] **步骤 1：跑检查**
 
 ```powershell
 cd backend
@@ -490,11 +495,11 @@ cd ..; git status --porcelain vendor/
 
 三条 `rg` 期望零命中：工具不经冻结基线；无营销 Skill；口径工具不执行任何 SQL。最后一条期望无输出（R8）。
 
-- [ ] **步骤 2：v2 运营助手页与 v1 分析助手合并评审**（PRD §15 N2：「两页是否合并在 N3 商家 Skill 迁完后另行评审」）——
+- [x] **步骤 2：v2 运营助手页与 v1 分析助手合并评审**（PRD §15 N2：「两页是否合并在 N3 商家 Skill 迁完后另行评审」）——
       逐项对照 v1 分析助手的能力（指标、明细、规则、图表、导出、猜你想问、反馈）在 v2 是否已有等价证据，
       写成 `docs/specs/<评审当日 YYYY-MM-DD>-merchant-assistant-page-merge-review.md`，给出建议并**交用户裁定**；
       **本计划不执行合并**，裁定为合并时另立计划并先改 PRD。
-- [ ] **步骤 3：同步文档**——`docs/project-progress.md`：6 个 Skill 用例、S2/S5/S6/S7 两层结果、**S7 待 N4 混合检索后回归**、
+- [x] **步骤 3：同步文档**——`docs/project-progress.md`：6 个 Skill 用例、S2/S5/S6/S7 两层结果、**S7 待 N4 混合检索后回归**、
       简报真实生成「待人工验收」、未执行 Git、未调用 LLM；`docs/project-navigation.md` 登记新文件；
       `plans/2026-09-24-n3-module-roadmap.md` §一状态。
 

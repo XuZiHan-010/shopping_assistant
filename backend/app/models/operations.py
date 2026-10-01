@@ -53,7 +53,10 @@ class LlmUsage(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
     __table_args__ = (
         Index("ix_llm_usage_usage_date", "usage_date"),
         CheckConstraint("reserved_tokens >= 0", name="ck_llm_usage_reserved_tokens_nonnegative"),
-        CheckConstraint("purpose IN ('AGENT', 'LOCALIZATION')", name="ck_llm_usage_purpose"),
+        CheckConstraint(
+            "purpose IN ('AGENT', 'LOCALIZATION', 'MEMORY')",
+            name="ck_llm_usage_purpose",
+        ),
     )
 
     merchant_id: Mapped[UUID | None] = mapped_column(

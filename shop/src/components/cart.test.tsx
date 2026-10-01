@@ -99,7 +99,7 @@ describe('C3 购物车页', () => {
   })
 
   it('前端不计算订单合计（源码不含 reduce 求和与金额乘法）', () => {
-    for (const file of ['src/components/CartView.tsx', 'src/app/[shop_slug]/cart/CartClient.tsx']) {
+    for (const file of ['src/components/CartView.tsx', 'src/shell/CartPanel.tsx']) {
       const source = readFileSync(file, 'utf-8')
       expect(source).not.toMatch(/\.reduce\(/)
       expect(source).not.toMatch(/(?:priceCents|PriceCents)\s*\*/)

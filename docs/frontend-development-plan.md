@@ -1128,7 +1128,18 @@ npm run test:e2e
 10. 后端提供知识库；
 11. 前端完成知识后台；
 12. N1 先冻结 v2 字段契约，再迁移商家身份、聊天、库存、售后、草稿和 MCP 客户端；
-13. N2 另建 Next.js 顾客端计划与工程，不在 Vue 商家端内混建。
+13. N2 另建 Next.js 顾客端计划与工程，不在 Vue 商家端内混建；
+14. N4 新增商家记忆最小面板 `MerchantMemoryView.vue`（PRD M11，D-N4-3，第一个可砍项），顾客记忆页在 `shop/`；
+15. N5 新建只读运维看板 `OpsStatusView.vue`，取代已下线的 `OpsDashboardView.vue`（PRD §14，D-N5-1），不提供写操作入口。
+    W 完成后，它放在侧栏「管理」分组，复用 `AdminGate`。
+16. **W · 商家工作台界面重设计**（PRD M1、§15「W」，2026-09-28 用户裁定，插在 N4 剩余前端任务之前）——**已实施（2026-09-30，Task 0–11）**：
+    - 外壳 `layouts/MerchantShell.vue`：侧栏四个分组（工作区 / 运营 / 运营助手 / 管理，无「对话记录」）、默认收起的助手栏 `AssistantRail`（`Ctrl/⌘ + J`、「问助手」只预填不发送，1100px 以下为抽屉）、偏好设置（主题、字号、语言）、「管理」分组的 `AdminGate` 令牌关卡；
+    - 视觉 token 换为「市集大厅」色板（`assets/tokens.css`，浅色与两份深色），`frontend/src` 与 `shop/src` 旧变量名引用清零，兼容映射已删除（两端各有防回归测试）；
+    - `/` 为首页（今日简报、经营主指标 `metrics/overview`、需要你处理、最近订单），`/today`、`/ops-assistant` 重定向到首页；`TodayView`、`OpsAssistantView` 已删除；
+    - 新增只读订单页 `/orders`（筛选、游标翻页、详情抽屉）与商品页 `/catalog`；库存、审批、售后、顾客信号、商家记忆、知识库迁入外壳并换样式，行为不变。
+
+    验收结果与已知红项见 `docs/project-progress.md`。实施计划见 `plans/2026-09-28-merchant-workbench-redesign.md`，设计说明见 `docs/specs/2026-09-28-merchant-workbench-ui-design.md`。
+17. **WS · 顾客端店面重设计**（PRD C1–C2、§15「WS」）：`shop/` 沿用 W 完成的共享 token，重建智能助手首页、订单视图、购物车侧栏、动态抽屉与偏好设置；商品热门排序、缺失属性、订单摘要及只读订单工具先由后端提供确定性事实。实施计划见 `plans/2026-09-28-shop-storefront-redesign.md`，设计说明见 `docs/specs/2026-09-28-shop-storefront-ui-design.md`。
 
 Mock 字段与 OpenAPI 不一致时，以 OpenAPI 为准并修 Mock，不要反过来改契约。
 

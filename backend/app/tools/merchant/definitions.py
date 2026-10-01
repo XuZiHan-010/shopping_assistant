@@ -25,8 +25,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.agent.prefilter import tokenize
 from app.db.session import Database
 from app.knowledge.retrieval import KnowledgeRetrieval
-from app.metrics.field_comments import find_field_comment
 from app.metrics.caliber import METRIC_CALIBER_VERSION, VERSIONED_TRADE_METRICS
+from app.metrics.field_comments import find_field_comment
 from app.repositories.knowledge import KnowledgeRepository
 from app.repositories.metric import MetricRepository
 from app.schemas.chat import QuestionCategory

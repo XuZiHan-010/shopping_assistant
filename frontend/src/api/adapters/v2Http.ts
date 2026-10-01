@@ -7,6 +7,7 @@
  * 由商家端 v2 迁移在接入会话 Store 时一并收敛。
  */
 import { resolveApiBaseUrl } from '@/api/client'
+import { buildLocaleHeaders } from '@/api/credentials'
 import { AppError, toAppError } from '@/api/errors'
 import type { components } from '@/api/generated'
 
@@ -50,7 +51,7 @@ export async function merchantRequest(
   try {
     response = await fetch(`${base}${path}`, {
       ...init,
-      headers: { ...(init.headers ?? {}), 'X-Session-Id': sessionId },
+      headers: { ...buildLocaleHeaders(), ...(init.headers ?? {}), 'X-Session-Id': sessionId },
       credentials: 'omit',
       // 草稿详情带一次性审批证据，后端已声明 no-store；这里再确保不进 HTTP 缓存。
       cache: 'no-store',

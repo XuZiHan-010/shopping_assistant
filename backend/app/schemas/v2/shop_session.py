@@ -125,6 +125,8 @@ class ProductSummary(ShopModel):
     requested_locale: Literal["zh-CN", "en-US"]
     name_translation_status: Literal["SOURCE", "MACHINE", "FALLBACK"]
     short_description_translation_status: Literal["SOURCE", "MACHINE", "FALLBACK"]
+    #: 类目源值，不翻译；前端按固定词表显示（契约 §8.8.1）。
+    category: str = Field(min_length=1, max_length=64)
 
 
 def is_trusted_image_host(url: str, allowed_hosts: Collection[str]) -> bool:
@@ -152,11 +154,14 @@ class ProductDetailResponse(ProductSummary):
     description: str = Field(max_length=20000)
     attributes: list[ProductAttribute] = Field(max_length=100)
     description_translation_status: Literal["SOURCE", "MACHINE", "FALLBACK"]
+    missing_attributes: list[str] = Field(max_length=20)
 
     @model_validator(mode="after")
     def unique_attributes(self) -> Self:
         if len({item.name for item in self.attributes}) != len(self.attributes):
             raise ValueError("属性名称不得重复")
+        if len(set(self.missing_attributes)) != len(self.missing_attributes):
+            raise ValueError("缺失属性名称不得重复")
         return self
 
 

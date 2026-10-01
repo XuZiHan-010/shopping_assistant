@@ -14,13 +14,26 @@ from pydantic import (
     model_validator,
 )
 
-from app.schemas.v2.common import DegradationMixin, IdempotentWriteRequest, MoneyCents
+from app.schemas.v2.common import (
+    MAX_MONEY_CENTS,
+    DegradationMixin,
+    IdempotentWriteRequest,
+    MoneyCents,
+)
 from app.schemas.v2.shop_session import CouponSummary
 
 PublicId = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)]
 UtcDatetime = Annotated[AwareDatetime, AfterValidator(lambda value: value.astimezone(UTC))]
 MAX_BRIEF_ITEMS = 6
 MAX_SIGNAL_REFS = 50
+MAX_ATTRIBUTION_SEGMENTS = 5
+MAX_SECONDARY_METRICS = 3
+MAX_RATIO_BP = 1_000_000
+
+SignedMoneyCents = Annotated[int, Field(strict=True, ge=-MAX_MONEY_CENTS, le=MAX_MONEY_CENTS)]
+"""净成交额与贡献值可为负（退款大于成交），不能用非负的 MoneyCents 表示（§8.12.4）。"""
+
+RatioBp = Annotated[int, Field(strict=True, ge=-MAX_RATIO_BP, le=MAX_RATIO_BP)]
 
 
 class OpsModel(BaseModel):
@@ -191,3 +204,182 @@ class CustomerSignal(OpsModel):
 
 class SignalIgnoreRequest(IdempotentWriteRequest):
     reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
+
+
+# ---------------------------------------------------------------------------
+# 首页经营主指标与订单只读面（§8.12.4，2026-09-28 补入）
+# ---------------------------------------------------------------------------
+
+
+class OverviewPeriod(OpsModel):
+    start: date
+    end: date
+    label: str = Field(min_length=1, max_length=40)
+
+    @model_validator(mode="after")
+    def consistent_period(self) -> Self:
+        if self.start > self.end:
+            raise ValueError("周期起始不得晚于结束")
+        if (self.end - self.start).days > 6:
+            raise ValueError("周期跨度不得超过 7 天")
+        return self
+
+
+class OverviewMetricPoint(OpsModel):
+    date: date
+    value_cents: SignedMoneyCents
+
+
+class OverviewHeadline(OpsModel):
+    metric_code: Literal["net_gmv"] = "net_gmv"
+    current_cents: SignedMoneyCents
+    baseline_cents: SignedMoneyCents | None
+    change_ratio_bp: RatioBp | None
+    current_series: list[OverviewMetricPoint]
+    baseline_series: list[OverviewMetricPoint]
+
+    @model_validator(mode="after")
+    def consistent_headline(self) -> Self:
+        if self.current_cents != sum(point.value_cents for point in self.current_series):
+            raise ValueError("本期主指标必须等于本期序列之和")
+        if self.baseline_cents is not None:
+            if self.baseline_cents != sum(point.value_cents for point in self.baseline_series):
+                raise ValueError("基期主指标必须等于基期序列之和")
+            if len(self.baseline_series) != len(self.current_series):
+                raise ValueError("基期序列必须与本期序列等长")
+        elif self.baseline_series:
+            raise ValueError("基期无可比数据时基期序列必须为空")
+        if self.change_ratio_bp is not None and (
+            self.baseline_cents is None or self.baseline_cents <= 0
+        ):
+            raise ValueError("基期为空或非正时相对变化必须为 null")
+        return self
+
+
+class OverviewAttributionMode(StrEnum):
+    SHARE = "SHARE"
+    ABSOLUTE_CONTRIBUTION = "ABSOLUTE_CONTRIBUTION"
+    STOPPED = "STOPPED"
+
+
+class OverviewAttributionSegment(OpsModel):
+    name: str = Field(min_length=1, max_length=64)
+    current_cents: SignedMoneyCents
+    baseline_cents: SignedMoneyCents
+    contribution_cents: SignedMoneyCents
+    share_bp: RatioBp | None
+
+    @model_validator(mode="after")
+    def consistent_segment(self) -> Self:
+        if self.contribution_cents != self.current_cents - self.baseline_cents:
+            raise ValueError("类目贡献必须等于本期减基期")
+        return self
+
+
+class OverviewAttribution(OpsModel):
+    dimension: Literal["category"] = "category"
+    mode: OverviewAttributionMode
+    segments: list[OverviewAttributionSegment] = Field(max_length=MAX_ATTRIBUTION_SEGMENTS)
+    remaining_count: int = Field(strict=True, ge=0)
+    remaining_contribution_cents: SignedMoneyCents
+    stopped_reason: str | None = Field(min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def consistent_attribution(self) -> Self:
+        if self.mode == OverviewAttributionMode.STOPPED:
+            if self.segments:
+                raise ValueError("STOPPED 时归因分项必须为空")
+            if self.stopped_reason is None:
+                raise ValueError("STOPPED 时必须给出安全可理解的原因")
+        elif self.stopped_reason is not None:
+            raise ValueError("非 STOPPED 时不得给出停止原因")
+        for item in self.segments:
+            has_share = item.share_bp is not None
+            if (self.mode == OverviewAttributionMode.SHARE) != has_share:
+                raise ValueError("share_bp 只能在 SHARE 模式下非空")
+        return self
+
+
+# 机器码须与 `app/analytics/contract.py` 的受控指标注册表一致；注册表变动时需同步本处字面值。
+OverviewSecondaryMetricCode = Literal["order_count", "refund_amount", "return_rate"]
+
+
+class OverviewSecondaryUnit(StrEnum):
+    COUNT = "COUNT"
+    CENTS = "CENTS"
+    RATIO_BP = "RATIO_BP"
+
+
+_SECONDARY_UNIT_BY_CODE: dict[str, OverviewSecondaryUnit] = {
+    "order_count": OverviewSecondaryUnit.COUNT,
+    "refund_amount": OverviewSecondaryUnit.CENTS,
+    "return_rate": OverviewSecondaryUnit.RATIO_BP,
+}
+
+
+class OverviewSecondaryMetric(OpsModel):
+    metric_code: OverviewSecondaryMetricCode
+    unit: OverviewSecondaryUnit
+    current_value: int | None = Field(strict=True, ge=0)
+    baseline_value: int | None = Field(strict=True, ge=0)
+
+    @model_validator(mode="after")
+    def unit_matches_code(self) -> Self:
+        if self.unit != _SECONDARY_UNIT_BY_CODE[self.metric_code]:
+            raise ValueError("辅助指标单位必须与固定映射一致")
+        return self
+
+
+class MerchantMetricsOverviewSource(StrEnum):
+    REALTIME = "REALTIME"
+    DAILY_ROLLUP = "DAILY_ROLLUP"
+    MIXED = "MIXED"
+
+
+_SECONDARY_ORDER: tuple[OverviewSecondaryMetricCode, ...] = (
+    "order_count",
+    "refund_amount",
+    "return_rate",
+)
+
+
+class MerchantMetricsOverviewResponse(DegradationMixin):
+    business_timezone: str = Field(min_length=1, max_length=64)
+    data_as_of: UtcDatetime
+    source: MerchantMetricsOverviewSource
+    definition_version: str = Field(min_length=1, max_length=64)
+    current_period: OverviewPeriod
+    baseline_period: OverviewPeriod
+    headline: OverviewHeadline
+    attribution: OverviewAttribution
+    secondary: list[OverviewSecondaryMetric] = Field(
+        min_length=MAX_SECONDARY_METRICS, max_length=MAX_SECONDARY_METRICS
+    )
+
+    @model_validator(mode="after")
+    def consistent_secondary(self) -> Self:
+        codes = tuple(item.metric_code for item in self.secondary)
+        if codes != _SECONDARY_ORDER:
+            raise ValueError(
+                "辅助指标必须恰好 3 项且顺序固定为 order_count、refund_amount、return_rate"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def consistent_attribution_identity(self) -> Self:
+        """归因贡献恒等式（§8.12.4）：仅在 mode ≠ STOPPED 且基期有可比数据时可计算左右两侧，
+        因此只在这一无歧义切片上强制校验；STOPPED 或基期为空的语义留给 Task 2 服务层。"""
+        if (
+            self.attribution.mode != OverviewAttributionMode.STOPPED
+            and self.headline.baseline_cents is not None
+        ):
+            segment_total = sum(
+                segment.contribution_cents for segment in self.attribution.segments
+            )
+            left = segment_total + self.attribution.remaining_contribution_cents
+            right = self.headline.current_cents - self.headline.baseline_cents
+            if left != right:
+                raise ValueError(
+                    "归因分项贡献与剩余贡献之和必须等于主指标本期与基期之差"
+                )
+        return self

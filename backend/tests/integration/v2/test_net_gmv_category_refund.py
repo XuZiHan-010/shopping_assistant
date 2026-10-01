@@ -55,7 +55,7 @@ async def test_net_gmv_category_subtracts_refund_from_same_category(
         )
         result = await service.attribute_change(
             MerchantContext(merchant_id=MERCHANT_ONE_ID),
-            metric="net_gmv", dimension="category", today=now,
+            metric="net_gmv", dimension="category", now=now, business_timezone="UTC",
         )
     assert result.stopped is False
     assert len(result.segments) == 1

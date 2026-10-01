@@ -4,6 +4,7 @@ import type {
   Coupon,
   FulfillmentEvent,
   Order,
+  OrderSummaryView,
   Product,
   ProductAttribute,
   ProductDetail,
@@ -30,6 +31,7 @@ export function toProduct(raw: S['ProductSummary']): Product {
     requestedLocale: raw.requested_locale,
     nameTranslationStatus: raw.name_translation_status,
     shortDescriptionTranslationStatus: raw.short_description_translation_status,
+    category: raw.category,
   }
 }
 
@@ -46,6 +48,7 @@ export function toProductDetail(raw: S['ProductDetailResponse']): ProductDetail 
   return {
     ...toProduct(raw),
     description: raw.description,
+    missingAttributes: raw.missing_attributes,
     attributes: raw.attributes.map(toAttribute),
     descriptionTranslationStatus: raw.description_translation_status,
   }
@@ -80,7 +83,7 @@ export function toCart(raw: S['CartResponse']): Cart {
   }
 }
 
-export function toOrder(raw: S['OrderDetailResponse']): Order {
+export function toOrderSummary(raw: S['OrderSummary']): OrderSummaryView {
   return {
     id: raw.id,
     paymentStatus: raw.payment_status,
@@ -90,6 +93,14 @@ export function toOrder(raw: S['OrderDetailResponse']): Order {
     itemCount: raw.item_count,
     createdAt: raw.created_at,
     payBy: raw.pay_by,
+    leadItem: { productId: raw.lead_item.product_id, name: raw.lead_item.name, imageUrl: raw.lead_item.image_url },
+    lastEventAt: raw.last_event_at,
+  }
+}
+
+export function toOrder(raw: S['OrderDetailResponse']): Order {
+  return {
+    ...toOrderSummary(raw),
     items: raw.items.map((line) => ({
       orderItemId: line.order_item_id,
       productId: line.product_id,

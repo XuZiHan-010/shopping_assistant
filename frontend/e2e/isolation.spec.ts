@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test'
 
+import { openAssistant } from './support/assistantRail'
+
 /**
  * F3 Task 7：Playwright 强制 VITE_USE_MOCK=true 跑 e2e，若隔离只由一张全局
  * 会话表兜底，这条断言在 Mock 上永远为真、在真实后端商家隔离被打破时也不会
@@ -48,7 +50,8 @@ test('切换商家后看不到上一个商家的会话', async ({ page }) => {
     await route.fulfill({ json: { items, next_cursor: null, has_more: false } })
   })
 
-  await page.goto('/')
+  // W Task 6：会话目录在助手栏的「历史」面板里。
+  await openAssistant(page, { history: true })
 
   // 商家 A（默认选中的 Borough商家100）能看到自己的会话。
   await expect(page.getByText('商家 A 的会话')).toBeVisible()

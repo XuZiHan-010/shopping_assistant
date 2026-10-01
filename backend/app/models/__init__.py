@@ -26,8 +26,10 @@ from app.models.knowledge import KnowledgeDocument, MerchantMemory, MetricDefini
 from app.models.localization import MachineTranslationCache, ResourceLocalization
 from app.models.memory_v2 import (
     CustomerMemory,
+    CustomerMemoryPreference,
     CustomerSignal,
     DailyBrief,
+    MemoryExtractionJob,
     MerchantMemoryFact,
     MerchantMemorySummary,
 )
@@ -60,6 +62,7 @@ __all__ = [
     "ConversationProvenance",
     "Coupon",
     "CustomerMemory",
+    "CustomerMemoryPreference",
     "CustomerSignal",
     "DailyBrief",
     "Draft",
@@ -73,6 +76,7 @@ __all__ = [
     "LlmDailyBudget",
     "LlmUsage",
     "MachineTranslationCache",
+    "MemoryExtractionJob",
     "Merchant",
     "MerchantMemory",
     "MerchantMemoryFact",

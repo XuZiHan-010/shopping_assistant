@@ -34,6 +34,7 @@ async def seed_product(
     low_stock_threshold: int | None = 5,
     listed_days_ago: int = 400,
     status: str = "ONLINE",
+    image_url: str | None = None,
     now: datetime | None = None,
 ) -> UUID:
     moment = now or datetime.now(UTC)
@@ -51,6 +52,7 @@ async def seed_product(
             stock_on_hand=on_hand,
             stock_reserved=reserved,
             low_stock_threshold=low_stock_threshold,
+            image_url=image_url,
         )
         session.add(product)
         await session.commit()

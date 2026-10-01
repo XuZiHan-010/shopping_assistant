@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import AdminTokenDialog from '@/components/knowledge/AdminTokenDialog.vue'
 import ConfirmDeleteDialog from '@/components/knowledge/ConfirmDeleteDialog.vue'
 import DocumentEditor from '@/components/knowledge/DocumentEditor.vue'
 import KnowledgeTree from '@/components/knowledge/KnowledgeTree.vue'
 import LanguageSwitcher from '@/components/layout/LanguageSwitcher.vue'
 import PromptDialog from '@/components/knowledge/PromptDialog.vue'
+import AdminGate from '@/components/shell/AdminGate.vue'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { canDeleteNode, isBusinessDomain, isDocumentParent } from '@/utils/knowledgeTree'
 
@@ -15,7 +15,6 @@ type DialogType = 'create-document' | 'create-domain' | 'rename-domain' | 'delet
 
 const { t } = useI18n()
 const knowledgeStore = useKnowledgeStore()
-const authorizationError = ref('')
 const dialog = ref<DialogType>(null)
 const dialogError = ref('')
 const dialogPending = ref(false)
@@ -24,18 +23,6 @@ const selectedNode = computed(() => knowledgeStore.selectedNode)
 const canCreateDocument = computed(() => isDocumentParent(selectedNode.value))
 const canRenameDomain = computed(() => isBusinessDomain(selectedNode.value))
 const canDelete = computed(() => canDeleteNode(selectedNode.value))
-
-async function authorize(token: string): Promise<void> {
-  authorizationError.value = ''
-  knowledgeStore.setAdminToken(token)
-  try {
-    await knowledgeStore.loadTree()
-  } catch (error) {
-    authorizationError.value =
-      error instanceof Error ? error.message : t('knowledgeBaseView.tokenVerificationFailed')
-    knowledgeStore.signOut()
-  }
-}
 
 async function selectPath(path: string): Promise<void> {
   await knowledgeStore.selectNode(path)
@@ -89,52 +76,47 @@ async function confirmDelete(): Promise<void> {
     dialogPending.value = false
   }
 }
-
-onMounted(() => {
-  if (knowledgeStore.adminToken) {
-    void knowledgeStore.loadTree().catch((error: unknown) => {
-      authorizationError.value =
-        error instanceof Error ? error.message : t('knowledgeBaseView.tokenVerificationFailed')
-      knowledgeStore.signOut()
-    })
-  }
-})
 </script>
 
 <template>
-  <main class="knowledge-base">
-    <template v-if="!knowledgeStore.adminToken">
-      <div class="knowledge-base__pre-auth-actions">
-        <LanguageSwitcher />
-      </div>
-      <AdminTokenDialog @submit="authorize" />
-      <p v-if="authorizationError" class="knowledge-base__authorization-error" role="alert">
-        {{ authorizationError }}
-      </p>
-    </template>
-    <template v-else>
-      <header class="knowledge-base__header">
-        <div>
-          <p>BOROUGH · KNOWLEDGE OPS</p>
+  <!-- 外壳已经提供 <main id="main">；本页只用普通容器，不再嵌套第二个 main 地标。 -->
+  <div class="kb">
+    <!-- 全页唯一的语言切换器：放在令牌闸门之外，授权前后都能切换（AdminGate 不再自带一个）。 -->
+    <div class="kb__locale">
+      <LanguageSwitcher />
+    </div>
+    <AdminGate>
+      <header class="kb__head">
+        <div class="kb__intro">
+          <p class="kb__eyebrow">{{ t('knowledgeBaseView.eyebrow') }}</p>
           <h1>{{ t('knowledgeBaseView.title') }}</h1>
+          <p class="kb__sub">{{ t('knowledgeBaseView.sub') }}</p>
         </div>
-        <div class="knowledge-base__header-actions">
-          <LanguageSwitcher />
-          <button class="knowledge-base__sign-out" type="button" @click="knowledgeStore.signOut">
-            {{ t('knowledgeBaseView.signOut') }}
-          </button>
-        </div>
+        <button class="kb__sign-out" type="button" @click="knowledgeStore.signOut">
+          {{ t('knowledgeBaseView.signOut') }}
+        </button>
       </header>
-      <p v-if="knowledgeStore.errorMessage" role="alert">{{ knowledgeStore.errorMessage }}</p>
-      <section class="knowledge-base__workspace">
+      <p v-if="knowledgeStore.errorMessage" class="kb__error" role="alert">
+        {{ knowledgeStore.errorMessage }}
+      </p>
+      <section class="kb__workspace">
         <KnowledgeTree
           :roots="knowledgeStore.roots"
           :selected-path="knowledgeStore.selectedPath"
+          :read-only-access="knowledgeStore.isReadOnlyToken"
           @select="selectPath"
           @create-domain="openDialog('create-domain')"
         />
-        <div class="knowledge-base__content">
-          <div class="knowledge-base__toolbar">
+        <div class="kb__content">
+          <p
+            v-if="knowledgeStore.isReadOnlyToken"
+            class="kb__readonly"
+            data-testid="readonly-notice"
+            role="status"
+          >
+            {{ t('knowledgeBaseView.readOnlyNotice') }}
+          </p>
+          <div v-else class="kb__toolbar">
             <button
               type="button"
               data-testid="create-document"
@@ -153,6 +135,7 @@ onMounted(() => {
             </button>
             <button
               type="button"
+              class="kb__danger"
               data-testid="delete-node"
               :disabled="!canDelete"
               @click="openDialog('delete')"
@@ -160,16 +143,19 @@ onMounted(() => {
               {{ t('knowledgeBaseView.deleteNode') }}
             </button>
           </div>
-          <p v-if="knowledgeStore.loading">{{ t('knowledgeBaseView.loadingTree') }}</p>
+          <p v-if="knowledgeStore.loading" class="kb__placeholder">
+            {{ t('knowledgeBaseView.loadingTree') }}
+          </p>
           <DocumentEditor
             v-else-if="knowledgeStore.selectedDocument"
             :document="knowledgeStore.selectedDocument"
+            :read-only-access="knowledgeStore.isReadOnlyToken"
             :save="knowledgeStore.saveDocument"
           />
-          <p v-else>{{ t('knowledgeBaseView.selectDocumentPrompt') }}</p>
+          <p v-else class="kb__placeholder">{{ t('knowledgeBaseView.selectDocumentPrompt') }}</p>
         </div>
       </section>
-    </template>
+    </AdminGate>
 
     <PromptDialog
       v-if="dialog === 'create-document'"
@@ -211,104 +197,171 @@ onMounted(() => {
       @confirm="confirmDelete"
       @cancel="closeDialog"
     />
-  </main>
+  </div>
 </template>
 
 <style scoped>
-.knowledge-base {
-  min-height: 100vh;
-  padding: var(--space-6);
-  background: var(--color-surface-muted);
-}
-
-.knowledge-base__header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  max-width: 76rem;
-  margin: 0 auto var(--space-4);
-}
-
-.knowledge-base__header p {
-  margin: 0;
-  color: var(--color-teal);
-  font-size: var(--font-size-caption);
-  font-weight: var(--font-weight-title);
-  letter-spacing: 0.12em;
-}
-
-.knowledge-base__header h1 {
-  margin: var(--space-1) 0 0;
-}
-
-.knowledge-base__header-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.knowledge-base__sign-out {
-  min-height: var(--control-height);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-control);
-  background: white;
-}
-
-.knowledge-base__workspace {
-  display: grid;
-  grid-template-columns: minmax(15rem, 0.28fr) 1fr;
-  min-height: 32rem;
-  max-width: 76rem;
+/*
+ * 知识库（「管理」分组，须管理员令牌）：铸铁绿页眉条 + 目录树 | 编辑器两栏，
+ * 与「运营」分组里卡片式的商家记忆页明确区分（PRD M11）。
+ */
+.kb {
+  max-width: 1160px;
   margin: 0 auto;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-column);
-  background: var(--color-surface);
-  box-shadow: var(--shadow-card);
+  padding: 30px 36px 56px;
 }
 
-.knowledge-base__content {
+.kb__locale {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+.kb__head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px 20px;
+  margin-bottom: 16px;
+  padding: 18px 22px;
+  border-radius: var(--radius);
+  background: var(--side-bg);
+  color: var(--side-ink);
+}
+
+.kb__intro {
+  min-width: 0;
+}
+
+.kb__eyebrow {
+  margin: 0 0 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--gilt);
+}
+
+.kb__head h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(24px, 2.4vw, 30px);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.15;
+}
+
+.kb__sub {
+  max-width: 64ch;
+  margin: 6px 0 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--side-2);
+}
+
+.kb__sign-out {
+  flex-shrink: 0;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--side-line);
+  border-radius: 8px;
+  background: var(--side-hover);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--side-ink);
+}
+
+.kb__sign-out:hover {
+  background: var(--side-active);
+}
+
+.kb__error {
+  margin: 0 0 12px;
+  padding: 9px 14px;
+  border-radius: 10px;
+  background: var(--danger-soft);
+  font-size: 13px;
+  color: var(--danger);
+}
+
+.kb__workspace {
+  display: grid;
+  grid-template-columns: minmax(14rem, 0.28fr) minmax(0, 1fr);
+  min-height: 32rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.kb__content {
   display: flex;
   flex-direction: column;
   min-width: 0;
 }
 
-.knowledge-base__toolbar {
+.kb__toolbar {
   display: flex;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
-  border-bottom: 1px solid var(--color-border);
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
 }
 
-.knowledge-base__toolbar button {
-  min-height: 2rem;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-small);
-  padding: 0 var(--space-3);
-  color: var(--color-text-secondary);
-  background: white;
-  font-size: var(--font-size-caption);
+.kb__toolbar button {
+  height: 30px;
+  padding: 0 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--raised);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
 }
 
-.knowledge-base__toolbar button:disabled {
-  color: var(--color-text-muted);
+.kb__toolbar button:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.kb__toolbar .kb__danger:not(:disabled) {
+  color: var(--danger);
+}
+
+.kb__toolbar button:disabled {
+  opacity: 0.45;
   cursor: not-allowed;
 }
 
-.knowledge-base__content > p {
-  padding: var(--space-5);
-  color: var(--color-text-secondary);
+.kb__readonly {
+  margin: 0;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--gilt-soft);
+  font-size: 12.5px;
+  color: var(--gilt-ink);
 }
 
-.knowledge-base__authorization-error {
-  width: min(100%, 31rem);
-  margin: calc(-1 * var(--space-6)) auto 0;
-  color: var(--color-danger-text);
+.kb__placeholder {
+  margin: 0;
+  padding: 22px 18px;
+  font-size: 13px;
+  color: var(--ink-soft);
 }
 
-.knowledge-base__pre-auth-actions {
-  display: flex;
-  justify-content: flex-end;
-  width: min(100%, 31rem);
-  margin: 0 auto var(--space-4);
+@media (max-width: 820px) {
+  .kb {
+    padding: 18px 16px 40px;
+  }
+
+  .kb__head {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 16px;
+  }
+
+  .kb__workspace {
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
+  }
 }
 </style>

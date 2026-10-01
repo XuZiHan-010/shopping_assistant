@@ -20,6 +20,7 @@ from app.tools.merchant.content import build_content_tools
 from app.tools.merchant.definitions import build_definitions_tools
 from app.tools.merchant.export import build_export_tools
 from app.tools.merchant.inventory import build_inventory_tools
+from app.tools.merchant.memory import build_memory_tools
 from app.tools.merchant.metrics import build_metrics_tools
 from app.tools.merchant.pricing import build_pricing_tools
 from app.tools.merchant.signals import build_signal_tools
@@ -51,6 +52,7 @@ def build_merchant_tools(
         )
         + build_definitions_tools(database)
         + build_content_tools(database)
+        + build_memory_tools(database)
     )
 
 

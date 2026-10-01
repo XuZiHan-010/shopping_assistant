@@ -36,7 +36,7 @@ Astra 是当前可用的最强模型，但额度有限。它不负责写大部�
 | N1-D 会话身份 | Opus；前轮 Codex 整改 | D1–D6 | ✅ 2026-09-23 Astra 完整审核通过 6/6；真实 PostgreSQL 并发、隔离与时序哨兵通过 |
 | N1-E 评测骨架 | Sonnet；Codex 整改 | E1–E3 | ✅ 2026-09-23 E1 整改已获 Astra 独立复审通过；E2/E3 沿用通过。评测集 99 passed；N1 最终回归另有阻塞，不能据此宣称整体验收完成；Task 7 步骤 3 属 N2 对照 |
 | N2 | A、C：Opus；B：Sol；D、E：Sonnet；F：Terra（Codex）（2026-09-22，见 `plans/2026-09-22-n2-assignment-and-review.md`） | N2-1 – N2-8 | ✅ 2026-09-24 Astra 独立复审 8/8 通过（3 项发现问题已修复复跑，详见 §五） |
-| N3 | 阶段 A：Opus；阶段 B/C：待排期 | N3-1 – N3-5 | 部分：N3-1、N3-5（阶段 A）✅ 2026-09-25 通过；N3-2、N3-3、N3-4（阶段 B/C）待实现 |
+| N3 | 阶段 A、C：Opus；阶段 B：Sol | N3-1 – N3-5 | ✅ 2026-09-28 全部通过：N3-1 于 2026-09-25 通过；N3-2 至 N3-5 经 2026-09-26 Codex 独立审查（F1–F4）与 2026-09-28 Opus 整改后复审通过（N3-5 为机制层，真实模型质量待 R3 人工验收） |
 | N4 | 拟定（待用户确认）：A Opus；B Sol（前端 Terra / Sonnet）；C Sonnet，见 `plans/2026-09-27-n4-assignment-and-review.md` | N4-1 – N4-4 | ⬜ |
 | N5 | 拟定（待用户确认）：A Opus；B Sonnet；C Sol；D Sonnet + Opus，见 `plans/2026-09-27-n5-assignment-and-review.md` | N5-1 – N5-5 | ⬜ |
 
@@ -196,14 +196,29 @@ Astra 是当前可用的最强模型，但额度有限。它不负责写大部�
     本机 Windows 实际执行通过（不需管理员权限）；受信通道判定（`runner.py::tool_content()`）核对
     工具名 + 成功 + `isinstance(payload, SkillSpec)` + 角色归属四者，结构上无法被其他工具伪造。
     `ruff check`、`mypy` 全绿。详见 `docs/project-progress.md` 本轮记录。
-- [ ] **N3-2【必审】`n3-customer-skills-and-after-sales` Task 3–4 退款计算与售后状态机**
+- [x] **N3-2【必审】`n3-customer-skills-and-after-sales` Task 3–4 退款计算与售后状态机**
   - 审查点：金额整数分、舍入顺序与契约一致；单行累计退款不超过快照金额；状态迁移按类型限定，非法迁移被拒。
   - 触发方已于 2026-09-24 由用户裁定并写入 PRD §7.2、契约 §8.11.2：审查时核对状态机同时校验迁移表与触发方，`SYSTEM` 跳只能同事务续跳。
-- [ ] **N3-3【必审】`n3-customer-skills-and-after-sales` Task 5 顾客发起售后两阶段确认**
+  - **2026-09-26 独立审查（Codex）核心通过，F2 预览金额不一致；2026-09-28 复审（Opus，非实现者）通过**，
+    F2 已修复并有回归测试。详见 `plans/2026-09-26-n3-independent-review.md`「整改后复审」。
+- [x] **N3-3【必审】`n3-customer-skills-and-after-sales` Task 5 顾客发起售后两阶段确认**
   - 审查点：确认令牌签名、一次性、绑定主体与资源；模型不能替顾客完成确认。
-- [ ] **N3-4【必审】`n3-merchant-skills` Task 5–6：导出、口径问答；`n3-customer-skills-and-after-sales` Task 8、10：售后决定处理器与客服回复**（2026-09-24 N3 分 A/B/C 阶段后客服回复移入阶段 B）
+  - **2026-09-26 独立审查（Codex）因 F3 不通过；2026-09-28 复审（Opus，非实现者）通过**：顺序为归属 → 验证 → 消费 →
+    加锁复检，已消费返回 `CONFIRMATION_REQUIRED`，失败随事务回滚；顾客工具只产出预览，拿不到令牌。
+- [x] **N3-4【必审】`n3-merchant-skills` Task 5–6：导出、口径问答；`n3-customer-skills-and-after-sales` Task 8、10：售后决定处理器与客服回复**（2026-09-24 N3 分 A/B/C 阶段后客服回复移入阶段 B）
   - 审查点：导出范围由后端强制商家范围与行数上限（R4）；指标口径的 SQL 只来自受控资产、不回流执行；
     商家售后决定统一走草稿审批（`DraftKind.AFTER_SALE_DECISION`，payload 不含金额）；商家只看到脱敏别名。
+  - **2026-09-28 审核记录（Opus；用户 2026-09-28 指示由本会话完成审查并收口，据此勾选。下载审计修复为本会话自审）：**
+    四个审查点在代码层成立——导出商家 ID 取自服务端会话并纳入签名、日期取自落库记录、创建与下载各卡
+    1000 行上限；`get_metric_definition` 只读正式目录与字段注释、不执行 SQL、不升级为 LLM 调用；
+    `DecisionPayload` `extra="forbid"` 无金额，退款在批准时按快照后端计算，回复随批准写入；商家端 Schema、
+    路由、工具无 `buyer_key`，只有 `buyer_alias`。
+    **发现并已修复 1 处阻塞项**：PRD §408 / SEC10 要求「创建与下载分别审计」，但 `/api/exports/{export_id}`
+    从未写下载审计（`export.py` 注释与此前台账均误称已覆盖）。已在签名校验通过、内容生成成功后写
+    `EXPORT_DOWNLOADED`，失败下载不写；新增 `test_signed_download_is_audited_separately_from_creation`、
+    `test_rejected_download_writes_no_download_audit`（先红后绿），OpenAPI 无变化。
+    **未修复的次要项**：CSV 公式转义未覆盖以 `\t`、`\r` 开头的单元格；`sale_detail` 对工单存在性用 `assert`；
+    售后工具显示语言写死中文。
 - [x] **N3-5【抽审】`n3-skill-loader` Task 4 冲突与回归**
   - 审查点：多个 Skill 同时命中时有确定性裁决，冲突测试真的覆盖了 11 个 Skill 的组合。
   - **2026-09-25 Astra 审查通过（有条件）。** 裁决顺序固定写在静态提示 `_INDEX_HEADER`、不依赖 Skill 正文，
@@ -211,6 +226,9 @@ Astra 是当前可用的最强模型，但额度有限。它不负责写大部�
     验证越界指令换不来新能力、两个互斥 Skill 加载时互不覆盖。**条件**：11 个 Skill 的真实组合尚不存在
     （B/C 阶段业务 Skill 未落地），"覆盖 11 个 Skill 组合"目前只在框架层面成立；B/C 各自 `cases.yaml`
     落地后需要补一次真实组合的回归复核。
+  - **2026-09-26 独立审查（Codex）因 F4 判不通过，不得沿用阶段 A 的有条件通过。2026-09-28 复审（Opus）通过（机制层）**：
+    `tests/unit/skills/test_real_skill_cases.py` 以 11 份真实 Skill 执行 44 条用例与 27 组同角色两两组合；跨角色加载被拒。
+    脚本化模型按 YAML 期望加载，只证明加载、角色、围栏与不覆盖；真实模型意图选择质量按 R3 待人工验收。
 
 ## 七、N4
 
@@ -243,7 +261,19 @@ Astra 是当前可用的最强模型，但额度有限。它不负责写大部�
 
 ### 入口审查（每个里程碑开工前一次）
 
-- [x] **入口-N2**（2026-09-24 Astra 独立复审：有条件通过 → 计划文字漂移已修正，见 §五） / [ ] **入口-N3** / [ ] **入口-N4** / [ ] **入口-N5**
+- [x] **入口-N2**（2026-09-24 Astra 独立复审：有条件通过 → 计划文字漂移已修正，见 §五） / [x] **入口-N3**（2026-09-26 Codex 独立审查：有条件通过） / [x] **入口-N4**（2026-09-28 Opus：有条件通过，见下） / [ ] **入口-N5**
+  - **入口-N4 结论（2026-09-28，按当日 00:34 后的计划版本核对）**：
+    - `n4-context-compaction`：通过。`agent_loop_max_llm_calls` 公式校验（`config.py:263`）与 `compaction_max_calls` 在位；§6.12 两策略、
+      三项必保留、历史数字无来源与计划一致；D-N4-1 已裁定。
+    - `n4-memory-pipeline`：通过。三张记忆表在真实库存在（迁移 `20260922_0022`）；`app/schemas/v2/memory.py` 有 `CustomerMemoryItem`
+      至 `MerchantMemoryDeleteResponse`，记忆路由未挂载；§6.13 的 outbox + `SKIP LOCKED`、禁用 `BackgroundTasks`、访客不抽取、
+      独立预算、180 天不续期、写入前后过滤均已写入计划。与压缩计划 Task 0 串行属流程约束。
+    - `n4-hybrid-retrieval`：**有条件**。S7 两层基准（`tests/e2e/test_s7_definitions_loop.py`、`frontend/e2e/n3/merchant-skills.spec.ts`）
+      存在且通过；§6.14 原子切换、失败沿用旧版并标陈旧、无旧版降级关键词三条必测均有计划用例。**阻塞**：本地镜像
+      `postgres:16-alpine` 无 pgvector（计划 Task 2 步骤 0 处理），**Railway Postgres 是否可启用 `vector` 须用户确认**，未确认前 C 不开工。
+      文字漂移：`load_domain` 实际在 `retrieval.py:200`（计划写 169，为类定义行）、`search_rules` 调用在 `definitions.py:145`（计划写 133），
+      已在计划中改正；Task 4 测试名 `test_retrieve_signature_unchanged` 为旧称，内容已按 `load_domain` 写，不影响。
+    - 三份计划共同的「N3 整体验收通过」条件以 `docs/project-progress.md` 2026-09-28 N3 验收记录为准。
   - 审查点：对照上游计划**实际落地**的接口，逐项核对本里程碑各计划的「入口条件」；
     发现不一致时列出需按 PRD → 契约 → 计划 → 索引修正的位置，不在实现里自选。
 

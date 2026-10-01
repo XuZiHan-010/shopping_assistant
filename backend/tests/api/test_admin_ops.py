@@ -15,7 +15,7 @@ from app.db.session import Database
 from app.main import create_app
 from app.repositories.llm_budget import DailyBudgetSnapshot
 from tests.conftest import MERCHANT_ONE_TOKEN
-from tests.postgres import TRUNCATE_ALL_TABLES
+from tests.postgres import truncate_all_tables
 
 ADMIN_TOKEN = "test-only-admin-token-value"
 
@@ -104,7 +104,7 @@ async def admin_app(migrated_postgres: str) -> AsyncIterator[FastAPI]:
     )
     database = Database(settings)
     async with database.session() as session:
-        await session.execute(text(TRUNCATE_ALL_TABLES))
+        await truncate_all_tables(session)
         await session.execute(text("TRUNCATE TABLE llm_daily_budget CASCADE"))
         await session.commit()
     app = create_app(settings, database=database)

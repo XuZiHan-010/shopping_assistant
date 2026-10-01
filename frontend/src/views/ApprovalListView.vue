@@ -11,13 +11,52 @@
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { applyDraft, fetchDraftDetail } from '@/api/adapters/merchantOps'
+import {
+  applyDraft,
+  fetchDraftDetail,
+  type DraftKind,
+  type DraftState,
+} from '@/api/adapters/merchantOps'
+import type { PillTone } from '@/components/layout/pillTone'
+import StatusPill from '@/components/layout/StatusPill.vue'
+import WorkspacePage from '@/components/layout/WorkspacePage.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useDraftsStore, type DraftGroup } from '@/stores/drafts'
+import { useLocaleStore } from '@/stores/locale'
+import { formatDate } from '@/utils/localizedFormat'
 
 const auth = useAuthStore()
 const draftsStore = useDraftsStore()
+const localeStore = useLocaleStore()
 const { t } = useI18n()
+
+/** 草稿状态 → 胶囊色调；文案键 `approvalListView.state.*`（纯展示，不参与勾选与批准逻辑）。 */
+const STATE_TONES: Record<DraftState, PillTone> = {
+  STAGED: 'warn',
+  APPLIED: 'ok',
+  DISCARDED: 'muted',
+  EXPIRED: 'muted',
+}
+
+function stateLabel(state: DraftState): string {
+  return state in STATE_TONES ? t(`approvalListView.state.${state}`) : state
+}
+
+function stateTone(state: DraftState): PillTone {
+  return STATE_TONES[state] ?? 'muted'
+}
+
+const KNOWN_KINDS: readonly DraftKind[] = [
+  'RESTOCK',
+  'CONTENT_CHANGE',
+  'PRICE_CHANGE',
+  'COUPON',
+  'AFTER_SALE_DECISION',
+]
+
+function kindLabel(kind: DraftKind): string {
+  return KNOWN_KINDS.includes(kind) ? t(`approvalListView.kind.${kind}`) : kind
+}
 
 const loading = ref(false)
 const loadErrorMessage = ref('')
@@ -116,38 +155,65 @@ async function approveSelected(): Promise<void> {
 </script>
 
 <template>
-  <section class="approval-list-view">
-    <h1>{{ t('approvalListView.title') }}</h1>
+  <WorkspacePage title-id="page-title-approvals" :title="t('approvalListView.title')">
+    <template #intro>
+      <p>{{ t('approvalListView.sub') }}</p>
+    </template>
 
-    <p v-if="loading">{{ t('approvalListView.loading') }}</p>
-    <p v-else-if="loadErrorMessage" role="alert">{{ loadErrorMessage }}</p>
-    <p v-else-if="draftsStore.groupedItems.length === 0">
-      {{ t('approvalListView.empty') }}
-    </p>
+    <div v-if="loading" class="ws-panel">
+      <p class="ws-state" role="status">{{ t('approvalListView.loading') }}</p>
+    </div>
+    <div v-else-if="loadErrorMessage" class="ws-panel">
+      <p class="ws-state" role="alert">{{ loadErrorMessage }}</p>
+    </div>
+    <div v-else-if="draftsStore.groupedItems.length === 0" class="ws-panel">
+      <p class="ws-state">{{ t('approvalListView.empty') }}</p>
+    </div>
 
     <template v-else>
+      <div class="ws-toolbar">
+        <span class="selection">
+          {{ t('approvalListView.selectedCount', { count: selected.size }) }}
+        </span>
+        <span class="ws-toolbar__spacer" />
+        <button
+          type="button"
+          class="ws-btn ws-btn--primary ws-btn--sm"
+          data-test="approve-selected"
+          :disabled="!canApprove"
+          @click="approveSelected"
+        >
+          {{ approving ? t('approvalListView.approving') : t('approvalListView.approveSelected') }}
+        </button>
+      </div>
+
+      <p v-if="approveErrorMessage" class="ws-alert" role="alert">{{ approveErrorMessage }}</p>
+
       <article
         v-for="group in draftsStore.groupedItems"
         :key="group.batchId ?? group.items[0]!.id"
         data-test="draft-group"
-        class="approval-list-view__group"
+        class="ws-panel batch"
       >
-        <header class="approval-list-view__group-header">
-          <label v-if="group.batchId !== null">
+        <!-- 单独一份的草稿不另起组标题（组标题就是它自己的标题），只给批次加「全选」表头。 -->
+        <header v-if="group.batchId !== null" class="batch__head">
+          <label class="ws-check batch__all">
             <input
               type="checkbox"
               :data-test="`select-all-${group.batchId}`"
               :checked="isAllSelectedInGroup(group)"
               @change="toggleAllInGroup(group, ($event.target as HTMLInputElement).checked)"
             />
-            {{ groupTitle(group) }}
+            <span class="batch__title">{{ groupTitle(group) }}</span>
           </label>
-          <span v-else>{{ groupTitle(group) }}</span>
+          <StatusPill tone="violet">
+            {{ t('approvalListView.batchLabel') }}
+          </StatusPill>
         </header>
 
-        <ul class="approval-list-view__items">
-          <li v-for="item in group.items" :key="item.id">
-            <label>
+        <ul class="batch__items">
+          <li v-for="item in group.items" :key="item.id" class="draft">
+            <label class="draft__pick">
               <input
                 type="checkbox"
                 :data-test="`select-${item.id}`"
@@ -155,57 +221,122 @@ async function approveSelected(): Promise<void> {
                 :checked="isSelected(item.id)"
                 @change="toggle(item.id, ($event.target as HTMLInputElement).checked)"
               />
-              {{ item.title }}
-              <span class="approval-list-view__state">{{ item.state }}</span>
+              <span class="draft__title">{{ item.title }}</span>
             </label>
-            <RouterLink :to="{ name: 'approval', params: { draftId: item.id } }">
+            <span class="draft__meta">
+              <StatusPill tone="muted">{{ kindLabel(item.kind) }}</StatusPill>
+              <StatusPill :tone="stateTone(item.state)">{{ stateLabel(item.state) }}</StatusPill>
+              <span class="ws-sub">
+                {{ t('approvalView.expiresAt') }}
+                {{ formatDate(item.expiresAt, localeStore.locale) }}
+              </span>
+            </span>
+            <RouterLink
+              class="ws-btn ws-btn--sm draft__open"
+              :to="{ name: 'approval', params: { draftId: item.id } }"
+            >
               {{ t('approvalListView.viewDetail') }}
             </RouterLink>
           </li>
         </ul>
       </article>
-
-      <p v-if="approveErrorMessage" role="alert">{{ approveErrorMessage }}</p>
-
-      <button
-        type="button"
-        data-test="approve-selected"
-        :disabled="!canApprove"
-        @click="approveSelected"
-      >
-        {{ approving ? t('approvalListView.approving') : t('approvalListView.approveSelected') }}
-      </button>
     </template>
-  </section>
+  </WorkspacePage>
 </template>
 
 <style scoped>
-.approval-list-view {
-  padding: var(--space-6);
+.selection {
+  font-size: 12.5px;
+  color: var(--ink-soft);
 }
 
-.approval-list-view__group {
-  margin-bottom: var(--space-4);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-control);
-  padding: var(--space-4);
+.batch {
+  overflow: hidden;
 }
 
-.approval-list-view__group-header {
-  font-weight: var(--font-weight-title);
-  margin-bottom: var(--space-2);
+.batch__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--well);
+  font-size: 13px;
 }
 
-.approval-list-view__items {
-  list-style: none;
-  padding: 0;
+.batch__title {
+  min-width: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.batch__items {
   margin: 0;
-  display: grid;
-  gap: var(--space-2);
+  padding: 0;
+  list-style: none;
 }
 
-.approval-list-view__state {
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-caption);
+.draft {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px 14px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--line);
+}
+
+.draft:first-child {
+  border-top: 0;
+}
+
+.draft__pick {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.draft__pick input {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.draft__title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.draft__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  grid-column: 1;
+  padding-left: 26px;
+}
+
+.draft__meta .ws-sub {
+  display: inline;
+}
+
+.draft__open {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
+@media (max-width: 520px) {
+  .draft {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .draft__open {
+    grid-column: 1;
+    grid-row: auto;
+    justify-self: start;
+    margin-left: 26px;
+  }
 }
 </style>

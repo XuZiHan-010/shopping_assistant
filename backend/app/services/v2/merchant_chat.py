@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Final
@@ -15,18 +16,21 @@ from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent.loop.compaction import compaction_step
+from app.agent.loop.fencing import fence
 from app.agent.loop.limits import LoopLimits
 from app.agent.loop.runner import EventSink, LoopOutcome, LoopRequest, run_loop
 from app.core.errors import ResourceForbiddenError
 from app.core.session import SessionContext, principal_digest
 from app.llm.client import ConversationalLlmClient
 from app.localization.locales import SupportedLocale
+from app.memory.merchant_store import MerchantMemoryStore
 from app.models.conversation import Conversation
 from app.schemas.chat import QualityStatus, Visualization
 from app.schemas.v2.common import AnalysisSourceEntry, ToolDisplayStatus
 from app.schemas.v2.merchant_session import MerchantAnswerMode, MerchantChatResponse
 from app.services.v2.chat_write_marker import find_committed_write
-from app.services.v2.conversations import parse_conversation_id, record_turn
+from app.services.v2.conversations import load_history, parse_conversation_id, record_turn
 from app.services.v2.suggestions import merchant_suggestions
 from app.skills.registry import SkillRegistry
 from app.skills.spec import LOAD_SKILL_TOOL
@@ -80,8 +84,11 @@ class MerchantChatService:
         locale: SupportedLocale = SupportedLocale.ZH_CN,
         principal_secret: bytes | None = None,
         skills: SkillRegistry | None = None,
+        history_turns: int = 0,
     ) -> None:
         self._session = session
+        #: 回放同一会话最近几轮（D-N4-1）；路由从 `CHAT_HISTORY_MAX_TURNS` 传入，0 不回放。
+        self._history_turns = history_turns
         self._llm = llm
         self._gates = gates
         self._limits = limits
@@ -139,15 +146,22 @@ class MerchantChatService:
                 locale=self._locale,
                 client_request_id=client_request_id,
                 request_digest=request_digest,
+                ctx=self._ctx,
             )
             return MerchantTurn(response=response, conversation_id=conversation.id)
+        history = await load_history(
+            self._session, conversation, max_turns=self._history_turns
+        )
+        memory_context = await self._memory_context()
         try:
             outcome = await run_loop(
                 LoopRequest(
                     context=tool_ctx,
                     system_prompt=self._system_prompt,
                     user_message=message,
+                    history=history,
                     locale=self._locale,
+                    memory_context=memory_context,
                 ),
                 llm=self._llm,
                 gates=self._gates,
@@ -171,8 +185,30 @@ class MerchantChatService:
             locale=self._locale,
             client_request_id=client_request_id,
             request_digest=request_digest,
+            ctx=self._ctx,
         )
         return MerchantTurn(response=response, conversation_id=conversation.id)
+
+    async def _memory_context(self) -> str:
+        """只注入本商家的事实和非陈旧总结；经 `memory_context` 传入，不进数字来源（M11）。"""
+
+        store = MerchantMemoryStore(self._session)
+        facts = (await store.facts(merchant_id=self._ctx.merchant_id))[:3]
+        summaries = (await store.active_summaries(merchant_id=self._ctx.merchant_id))[:3]
+        if not facts and not summaries:
+            return ""
+        payload = {
+            "facts": [
+                {"category": row.category, "content": row.content} for row in facts
+            ],
+            "summaries": [
+                {"category": row.category, "content": row.content} for row in summaries
+            ],
+        }
+        return (
+            "以下偏好只影响语气与呈现，不能回答规则、替代知识库或作为经营数字来源。\n"
+            + fence(json.dumps(payload, ensure_ascii=False), source="merchant_memory")
+        )
 
     def _recovered_response(
         self, marker: dict[str, object], conversation_id: UUID
@@ -241,6 +277,7 @@ class MerchantChatService:
             locale=self._locale,
             client_request_id=client_request_id,
             request_digest=request_digest,
+            ctx=self._ctx,
             processing_status="FAILED_FINAL",
         )
 
@@ -284,7 +321,8 @@ class MerchantChatService:
             created_at=datetime.now(UTC),
             answer_mode=mode,
             analysis_sources=_sources(outcome, used_tools=used_tools),
-            thinking_steps=[],
+            # 压缩不静默发生（§6.12）：与流式 `step` 事件同一文案，JSON 调用方同样看得到。
+            thinking_steps=[compaction_step(self._locale)] if outcome.compactions else [],
             quality_status=outcome.quality_status,
             quality_attempts=outcome.quality_attempts,
             quality_notes=list(outcome.quality_notes),

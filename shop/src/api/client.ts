@@ -9,6 +9,9 @@ import { ApiConfigError, ApiError, NetworkError } from './errors'
 
 export { ApiConfigError }
 
+let requestLocale: 'zh-CN' | 'en-US' = 'zh-CN'
+export function setRequestLocale(locale: 'zh-CN' | 'en-US'): void { requestLocale = locale }
+
 export function resolveApiBaseUrl(raw: string | undefined): string {
   const value = raw?.trim()
   if (!value) throw new ApiConfigError('MISSING_BASE_URL')
@@ -42,6 +45,7 @@ export interface RequestOptions {
 /** 组装请求；SSE 与普通 JSON 共用，区别只在 `Accept`。 */
 export async function rawRequest(path: string, options: RequestOptions = {}): Promise<Response> {
   const headers: Record<string, string> = { Accept: 'application/json', ...options.headers }
+  if (!Object.keys(headers).some(key => key.toLowerCase() === 'accept-language')) headers['Accept-Language'] = requestLocale
   if (options.body !== undefined) headers['Content-Type'] = 'application/json'
   if (options.sessionId) headers['X-Session-Id'] = options.sessionId
 

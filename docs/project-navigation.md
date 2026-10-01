@@ -126,8 +126,15 @@ N1–N5 默认不创建通用 `worker/` 或对象存储；只有出现可量化�
 | --- | --- |
 | `frontend/src/main.ts` | 创建 Vue 应用，注册 Router、Pinia、i18n 和全局样式 |
 | `frontend/src/App.vue` | 全局应用外壳，只放路由出口和全局通知 |
-| `frontend/src/router/index.ts` | `/` 是商家运营助手（`OpsAssistantView`，两页合并后取代 v1 `AssistantView`），另有知识库、审批 / 库存 / 今日等路由；`/ops-assistant` 与 `/ops-dashboard` 均为旧地址，前者重定向到 `/`，后者已无页面（回落 `not-found`）；演示会话不使用账号密码 `/login` |
-| `frontend/src/assets/` | 全局变量、基础布局和还原自 prototype 的视觉样式 |
+| `frontend/src/router/index.ts` | W Task 5 起所有业务页是外壳 `layouts/MerchantShell.vue` 的子路由，`/` 是首页；运营助手是外壳里默认收起的助手栏（W Task 6）。旧地址：`/today` → `/`，`/ops-assistant`（路由名 `assistant`）→ `/?assistant=open`（外壳读取后打开助手栏，可带 `conversation`），`/ops-dashboard` 已无页面（回落 `not-found`）；演示会话不使用账号密码 `/login` |
+| `frontend/src/components/shell/AssistantRail.vue`、`stores/rail.ts` | 运营助手栏（W Task 6，从已删除的 `OpsAssistantView` 抽出）：v2 Chat、工具行、降级、反馈、猜你想问、图表（`MetricChartPanel` 懒加载）；头部「历史」面板放会话目录（`components/opsChat/OpsConversationList.vue`）。开合、`Ctrl/⌘ + J`、Esc、「问助手」预填（`rail.ask()` → `opsChat.prefill()`，只填不发）在 `stores/rail.ts` 与外壳；对话数据仍在 `stores/opsChat.ts`。E2E 入口助手 `e2e/support/assistantRail.ts` |
+| `frontend/src/layouts/MerchantShell.vue` | W 商家工作台外壳（布局路由）：侧栏 + 主视图 `main#main`（唯一滚动容器）+ 助手栏插槽；1100px 以下助手栏为带遮罩抽屉，820px 以下侧栏为抽屉；按 `merchantEpoch` 重挂载子视图 |
+| `frontend/src/components/shell/SideNav.vue`、`BrandMark.vue` | 侧栏：品牌与商家切换、工作区 / 运营 / 运营助手 / 管理四组（无「对话记录」），`aria-current` 标当前页；左下角账号区打开偏好设置 |
+| `frontend/src/components/shell/PreferencesPanel.vue`、`stores/preferences.ts` | 偏好设置：主题三档写 `data-theme`、字号三档写 `data-size`（localStorage，读写均 try/catch），语言仍走 `stores/locale.ts`，附快捷键说明（`utils/platform.ts` 决定显示 ⌘ 或 Ctrl） |
+| `frontend/src/components/shell/AdminGate.vue` | 「管理」分组的令牌关卡（复用 `AdminTokenDialog.vue`）：未持令牌只显示令牌入口、不发任何 `/api/admin/*` 请求；只读令牌下隐藏写操作；仅 401/403 才登出，验证完成前不渲染受保护内容。N5 运维看板复用同一关卡 |
+| `frontend/src/assets/tokens.css` | 「市集大厅」共享 token（浅色、`[data-theme="dark"]` 与 `system` 下 `prefers-color-scheme` 两份深色、`--scale` 字号档），经 `shop/` 的 `npm run tokens:sync` 原样复制给顾客端；旧 `--color-*` 兼容映射已于 2026-09-30 删除（裁定 N） |
+| `frontend/src/assets/merchant-shell.css`、`workspace.css`、`base.css` | 商家端专有样式（侧栏 token，不同步给顾客端）；工作区页面共用 `ws-*` 列表、面板、胶囊样式；全局基础样式（`body` `overflow-x: clip`） |
+| `frontend/src/assets/tokens.legacy.spec.ts` | 防回归：`frontend/src`（含 `tokens.css`）内不得再引用或定义旧 `--color-*` 等变量名；顾客端同款为 `shop/src/styles/tokens.legacy.test.ts` |
 
 ### 4.2 页面
 
@@ -137,8 +144,11 @@ N1–N5 默认不创建通用 `worker/` 或对象存储；只有出现可量化�
 | `frontend/src/views/ApprovalView.vue` | N2 已实现 | `/approvals/:draftId` 草稿审批——商家端所有写操作的唯一出口；审批证据只存组件内存 |
 | `frontend/src/views/ApprovalListView.vue` | N3 阶段 C 已实现 | `/approvals` 草稿列表，按 `batch_id` 分组 + 勾选批准；批准整批时对每个勾选的子草稿依次签发新证据再应用，证据同样只存组件内存 |
 | `frontend/src/views/InventoryView.vue`、`stores/catalogOps.ts` | N3 阶段 C 扩展 | `/inventory` 库存告警、商品内容完整度及优惠券状态/优惠幅度；列表从 `api/adapters/merchantOps.ts` 接入 v2 游标接口 |
-| `frontend/src/views/TodayView.vue` | N2 已实现，N3 阶段 C 扩展 | `/today` 完整简报 + 待批准草稿；条目动作 `emit('fill-input')` 并预填到运营助手后跳转（只填不发）；"重新生成"按钮按后端同一套冷却规则自动禁用/启用 |
-| `frontend/src/views/OpsAssistantView.vue` | N3 阶段 C 已实现，两页合并（2026-09-27）后接管 `/` | 商家运营助手：v2 Chat（指标查询归因、商品内容、定价促销、库存、导出、售后、规则口径问答均已接入，写操作以草稿提交）+ v2 会话目录侧栏 + 图表可视化（契约 §8.7.11）；取代已下线的 v1 `AssistantView`。数据在 `stores/opsChat.ts`、`api/adapters/merchantConversations.ts`，侧栏 `components/opsChat/OpsConversationList.vue`；375px 验收 `e2e/s3/ops-assistant-responsive.spec.ts` |
+| `frontend/src/views/HomeView.vue`、`components/home/*` | W 已实现（Task 8） | `/` 首页：今日简报卡 `HomeBriefCard`（确定性规则汇总，逐条 `title` + `evidence`，「去审批（N）」N 来自草稿 Store，重新生成冷却沿用原 `TodayView`）、主指标面板 `HomeMetricPanel`（数字只来自 `metrics/overview`；趋势图 `HomeTrendChart` 懒加载、空闲且可见才挂载）、需要你处理 `HomeAttention`（库存 / 售后 / 内容缺口分源失败隔离，最多 5 行）、最近订单 `HomeRecentOrders`（订单列表前 3 条）；各区块取数推迟到浏览器空闲（`utils/idle.ts`、`composables/useIdleVisible.ts`） |
+| `frontend/src/views/OrdersView.vue`、`components/orders/*` | W 已实现（Task 9） | `/orders` 只读订单页：`OrderFilters` 三项筛选、游标翻页（`composables/useCursorList.ts`，`INVALID_CURSOR` 从第一页重读）、`OrderDetailDrawer` 详情抽屉（价格快照与支付 / 履约 / 售后三个状态维度，顾客只显示 `buyer_alias`，无写操作）；`orderStatus.ts` 状态到胶囊色调映射。顶部说明只列平台交易链路订单 |
+| `frontend/src/views/CatalogView.vue`、`components/catalog/productContent.ts` | W 已实现（Task 9） | `/catalog` 商品页：内容完整度与缺口标签逐字取自 `products/content`，页面不自行判定；「检查内容缺口」「起草补充」只经 `rail.ask()` 预填。`productContent.ts` 与库存页共用 |
+| `frontend/src/views/AfterSalesView.vue`、`SignalsView.vue` | N3 已实现，W Task 10 换样式 | `/after-sales` 售后队列与详情、`/customer-signals` 顾客信号（忽略须填原因） |
+| `frontend/src/views/MerchantMemoryView.vue` | N4 B Task 9 草稿，W Task 5 挂入「运营」分组、Task 10 换样式 | `/memories` 商家记忆；逻辑与测试归 N4（裁定 C），与「管理」分组的知识库在视觉与位置上区分 |
 | `frontend/src/views/LoginView.vue` | 不规划 | 真实 SSO 不在当前范围；演示会话交换不是账号密码登录 |
 
 **已下线（两页合并，2026-09-27，`docs/PRD.md` §15 N2 裁定「选项 C」）**：v1 `AssistantView.vue`
@@ -146,12 +156,17 @@ N1–N5 默认不创建通用 `worker/` 或对象存储；只有出现可量化�
 Adapter 已随两页合并移除；v1 **后端**（`graph.py` 冻结基线、`POST /api/chat` 等 v1 兼容接口）
 不受影响，继续作为评测基线保留。详见下方「已下线」小节。
 
+**已删除（W，2026-09-29/30）**：`views/TodayView.vue`（简报并入首页，断言迁到 `HomeView.spec.ts`）与
+`views/OpsAssistantView.vue`（抽成外壳助手栏 `components/shell/AssistantRail.vue`，断言迁到 `AssistantRail.spec.ts`）。
+
 ### 4.3 布局组件
 
 | 路径 | 职责 |
 | --- | --- |
-| `frontend/src/components/layout/MerchantSwitcher.vue` | 演示商家切换器，MVP 的唯一身份入口；两页合并后挂在 `OpsAssistantView` 头部 |
-| `frontend/src/components/layout/LanguageSwitcher.vue` | 中/英语言切换器；写入 `useLocaleStore()` 并持久化到 localStorage；两页合并后同样挂在 `OpsAssistantView` 头部，另见 `KnowledgeBaseView` |
+| `frontend/src/components/layout/MerchantSwitcher.vue` | 演示商家切换器，MVP 的唯一身份入口；W Task 5 起挂在外壳侧栏品牌区（`variant="side"`） |
+| `frontend/src/components/layout/LanguageSwitcher.vue` | 中/英语言切换器；写入 `useLocaleStore()` 并持久化到 localStorage；目前只剩 `KnowledgeBaseView` 使用（外壳的语言切换在偏好设置面板） |
+| `frontend/src/components/layout/WorkspacePage.vue` | W 工作区页面骨架（页标题、说明、右上动作插槽），各业务页共用 |
+| `frontend/src/components/layout/StatusPill.vue`、`pillTone.ts` | 状态胶囊与色调枚举；订单页、首页最近订单与各运营页同一套映射 |
 
 **已下线（两页合并，2026-09-27）**：v1 专属的 `ConversationDrawer.vue`（移动端会话抽屉）、
 `chat/ConversationColumn.vue`、`chat/ChatMessage.vue`、`chat/ChatComposer.vue`、
@@ -161,7 +176,7 @@ Adapter 已随两页合并移除；v1 **后端**（`graph.py` 冻结基线、`PO
 
 | 路径 | 职责 |
 | --- | --- |
-| `frontend/src/components/insights/MetricChartPanel.vue` | 折线图、柱状图和饼图；两页合并后 v2 `OpsAssistantView` 复用同一组件（props 收窄为纯 `chart`） |
+| `frontend/src/components/insights/MetricChartPanel.vue` | 折线图、柱状图和饼图；v2 助手栏 `AssistantRail` 复用同一组件（props 收窄为纯 `chart`，`defineAsyncComponent` + `v-if` 懒加载） |
 | `frontend/src/components/knowledge/KnowledgeTree.vue` | 知识库目录树 |
 | `frontend/src/components/knowledge/DocumentEditor.vue` | 知识文档编辑 |
 | `frontend/src/components/knowledge/AdminTokenDialog.vue` | 管理员令牌输入，仅内存持有 |
@@ -194,6 +209,11 @@ Adapter 已随两页合并移除；v1 **后端**（`graph.py` 冻结基线、`PO
 | `frontend/src/api/chat.ts` | v1 兼容接口封装；两页合并（2026-09-27）后仅 `listDemoMerchants` 仍被业务代码使用（`stores/auth.ts`），其余导出（`submitChat`/`listConversations`/`getConversation`/`deleteConversation`/`submitFeedback`）随 v1 前端页面下线成为文件内死代码，登记为后续清理项，未删除该文件 |
 | `frontend/src/api/knowledge.ts` | 知识库维护接口 |
 | `frontend/src/api/adapters/merchantConversations.ts` | v2 商家会话目录、Chat 发起、`visualization` → `ChartSeries` 映射 |
+| `frontend/src/api/adapters/merchantInsights.ts`、`types/merchantInsights.ts` | W：`GET /v2/merchant/metrics/overview` → 首页主指标领域模型；金额保持整数分，万分比交给 `utils/localizedFormat.ts`，降级字段完整映射 |
+| `frontend/src/api/adapters/merchantOrders.ts`、`types/merchantOrders.ts` | W：`GET /v2/merchant/orders`、`/orders/{order_id}` → 订单列表与详情领域模型（只含 `buyer_alias`） |
+| `frontend/src/composables/useCursorList.ts` | W：游标列表（加载更多、请求令牌、`INVALID_CURSOR` 回第一页），订单页与商品页共用 |
+| `frontend/src/composables/useIdleVisible.ts`、`utils/idle.ts` | W：浏览器空闲（且可见）后再取数或挂载，保证首屏不请求 ECharts |
+| `frontend/src/testing/homePayloads.ts`、`homeHarness.ts`、`workspacePayloads.ts` | 首页、订单页、商品页组件测试共用载荷与装配（只供 `*.spec.ts`） |
 | `frontend/src/api/credentials.ts` | 按接口分组装配 `Authorization` 与 `X-Admin-Token`，不做「有什么加什么」 |
 | `frontend/src/api/generated.ts` | **由 OpenAPI 生成，禁止手改** |
 | `frontend/src/api/adapters/` | 生成类型 → 前端领域模型的唯一转换点，每个 Adapter 配契约测试 |
@@ -237,21 +257,24 @@ OpenAPI → api/generated.ts → api/adapters/*.ts → types/*.ts → Store → 
 | `shop/package.json`、`next.config.ts`、`tsconfig.json`、`eslint.config.mjs`、`vitest.config.ts` | 工程骨架（`output: 'standalone'`） |
 | `shop/Dockerfile`、`railway.json`、`.dockerignore` | 独立镜像，监听 `PORT`，健康检查 `/health`；构建期不读 `../docs` 与 `../frontend` |
 | `shop/scripts/check-generated.mjs`、`check-tokens.mjs`、`sync-tokens.mjs` | 类型 / token / logo 副本漂移检查与同步 |
+| `scripts/demo_product_images.py`、`backend/tests/unit/analytics/test_demo_product_images.py` | WS 商品图片转换与校验：23 张 800×800 WebP、每张 ≤200KB、06 刻意无图；Pillow 通过 `uv run --with pillow` 临时加载；原图未交付时 CLI 校验失败，资源测试明确挂起 |
 | `shop/scripts/e2e-process.mjs` | E2E 子进程管理（参照商家端，不用 Playwright 自带 webServer） |
 | `shop/src/api/generated.ts` | codegen 产物，禁止手改 |
 | `shop/src/api/client.ts`、`errors.ts` | base URL 漏配响亮失败（不回退同源）、`ApiError` / `NetworkError` / `ApiConfigError` |
 | `shop/src/api/credentials.ts` | **会话凭证：只存内存**；导出 `getSession` / `setSession` / `clearSession` / `useSession` / `subscribeSession` |
-| `shop/src/api/sessionApi.ts`、`shopApi.ts`、`catalogApi.ts`、`chat.ts`、`conversationsApi.ts` | 会话端点、需会话的购物车/订单、**公开**店铺与商品读取（不碰凭证，服务端组件可用）、Chat 事件流、会话目录（列表 / 逐页取完历史 / 删除） |
+| `shop/src/api/sessionApi.ts`、`shopApi.ts`、`catalogApi.ts`、`chat.ts`、`conversationsApi.ts`、`memoryApi.ts` | 会话端点、需会话的购物车/订单/记忆、**公开**店铺与商品读取（不碰凭证，服务端组件可用）、Chat 事件流、会话目录（列表 / 逐页取完历史 / 删除） |
 | `shop/src/api/adapters/`、`sse.ts` | wire → 领域模型；v2 SSE 按字节流累积解析（`tool_call` / `tool_result` / `turn_complete` / `error`） |
-| `shop/src/session/` | `sessionService.ts`（创建访客 / 原地绑定 / 换身份，并发进入合并）、`ShopContext.tsx`、`ShopShell.tsx`（顶栏、身份、购物车角标） |
+| `shop/src/i18n/`、`preferences/` | 双语字典（`messages.ts`，英文缺键编译期失败，`pluralKey` 选英文单数）、商品类目固定词表与占位色调（`categories.ts`，后端只下发源类目）、工具显示名与服务端语言解析；语言 cookie、主题/字号本地偏好与首屏防闪烁脚本，均不保存身份 |
+| `shop/src/chat/ChatProvider.tsx` | 外壳级对话状态、流式工具事件、历史重放与主体切换隔离；切换订单视图时对话不丢 |
+| `shop/src/session/`、`shop/src/shell/` | `ShopShell.tsx` 组装顶栏视图切换、身份、常驻购物车、底部输入框、商品浮层及动态抽屉；`CartPanel.tsx` 承载购物车与演示结账，`ActivityDrawer.tsx` 承载过程、记忆和会话目录 |
+| `shop/src/views/` | `HomeView` 热门与进行中订单、`ThreadView` 对话、`OrdersView` 订单、`ProductSheet`/`ProductDetailBody` 商品详情、`ProductArt` 缺图占位 |
 | `shop/src/checkout/checkout.ts` | 提交订单：`client_request_id` 按提交意图复用、网络重试、不可用项逐项返回 |
 | `shop/src/components/` | `ProductCard`、`AttributeTable`、`StockBadge`、`CouponList`、`CartView`、`OrderView`、`AddToCartButton` |
-| `shop/src/app/[shop_slug]/` | 店铺页、`products/[product_id]`（服务端渲染）；`assistant`、`cart`、`orders/[order_id]`（客户端渲染） |
-| `shop/src/app/[shop_slug]/assistant/conversations/` | 会话目录面板 `ConversationDirectory.tsx`（嵌在导购页内，不是独立路由）；当前对话、打开历史、主体变化回到新建态由 `AssistantClient.tsx` 负责 |
+| `shop/src/app/[shop_slug]/` | 首页与商品详情由服务端读公开数据；`orders` 与 `orders/[order_id]` 用同一订单视图；`assistant`、`cart`、`memories` 旧路径重定向到首页与对应抽屉 |
 | `shop/src/styles/tokens.css`、`public/borough-logo.svg` | 商家端共享副本（**禁止手改**，`npm run tokens:sync`） |
-| `shop/src/styles/shop-tokens.css` | 顾客端追加 token（暖纸底、衬线标题、更大字阶） |
-| `shop/e2e/s1-presale-to-payment.spec.ts`、`global-setup.mjs`、`playwright.config.ts` | S1 浏览器 E2E（真实后端 + PostgreSQL + 脚本化模型）；后端侧 `backend/tests/support/e2e_s1_app.py`、`backend/scripts/seed_s1_e2e.py` |
-| `shop/e2e/conversations-responsive.spec.ts` | 375px 下会话目录新建 / 浏览 / 跳转 / 删除全程无横向溢出（同一套 S1 后端与种子） |
+| `shop/src/styles/shop-tokens.css` | 顾客端追加 token（选中态、已自托管的字体、更大字阶、五个类目的图片加载占位色，浅深色各一份）；色板与深色背景沿用共享 token |
+| `shop/e2e/s1-presale-to-payment.spec.ts`、`global-setup.mjs`、`playwright.config.ts` | S1 浏览器 E2E（真实后端 + PostgreSQL + 脚本化模型）；后端侧 `backend/tests/support/e2e_s1_app.py`、`backend/scripts/seed_s1_e2e.py`；默认配置固定 `zh-CN` 浏览器语言并排除 `e2e/s4`（S4 走 `playwright.s4.config.ts`） |
+| `shop/e2e/conversations-responsive.spec.ts`、`memories-responsive.spec.ts`、`storefront-home.spec.ts` | 375px 下动态抽屉、记忆与会话目录、首页与订单“问问”、双语和旧路由验收（同一套 S1 脚本化后端与种子） |
 
 
 ---
@@ -284,10 +307,12 @@ OpenAPI → api/generated.ts → api/adapters/*.ts → types/*.ts → Store → 
 | `backend/app/api/routes/v2/shop_sessions.py` | `POST /v2/shop/sessions`、`POST /v2/shop/sessions/demo-customer`、`DELETE /v2/shop/sessions/current` |
 | `backend/app/api/routes/v2/merchant_sessions.py` | `POST /v2/merchant/sessions`、`DELETE /v2/merchant/sessions/current` |
 | `backend/app/api/routes/v2/shop_catalog.py` | 顾客端公开浏览（N2 模块 B Task 1）：`GET /v2/shop/stores/{shop_slug}`、`/products`、`/products/{product_id}`、`/coupons`；映射在 `services/v2/catalog.py`，库存三档在 `services/v2/stock_tier.py`（阈值与商家库存告警共用），券换算唯一出口 `services/v2/coupons.py`，查询在 `repositories/v2/catalog.py` |
+| `backend/app/api/routes/v2/merchant_insights.py` | W：`GET /v2/merchant/metrics/overview` 首页主指标（字段契约 §8.12.4，不调用 LLM）；服务在 `services/v2/metrics_overview.py` |
+| `backend/app/api/routes/v2/merchant_orders.py` | W：`GET /v2/merchant/orders`（三项筛选 + 绑定筛选的游标）、`GET /v2/merchant/orders/{order_id}`（他店与历史订单同一 `RESOURCE_FORBIDDEN` 并写审计）；服务在 `services/v2/merchant_orders.py` |
 | `backend/app/api/routes/chat.py` | `/api/chat` 与会话接口 |
 | `backend/app/api/routes/feedback.py` | 回答反馈 |
 | `backend/app/api/routes/reports.py` | 每日经营报告；管理员重算 |
-| `backend/app/api/routes/exports.py` | CSV 导出（签名 URL） |
+| `backend/app/api/routes/exports.py` | CSV 导出（签名 URL）；成功下载写 `EXPORT_DOWNLOADED` 审计（创建审计 `EXPORT_CREATED` 在 `tools/merchant/export.py`） |
 | `backend/app/api/routes/knowledge.py` | 管理员知识库目录树、文档 CRUD、业务域维护和手动记忆压缩 |
 | `backend/app/api/routes/analytics.py` | Chat BI 管理员总览、分类下钻与汇总重刷 |
 | `backend/app/api/routes/admin.py` | `/api/admin/ops/status` 等运维端点 |
@@ -356,6 +381,7 @@ N3 阶段 C（2026-09-25）追加 `price_change.py`、`coupon.py`、`content_cha
 明细导出、指标口径与规则问答、商品内容起草五组只读/起草工具）。
 
 上下文压缩（§6.12）不单独建目录，随 `app/agent/loop/` 一并实现。
+N4-A（2026-09-30）已落地：`app/agent/loop/compaction/`（`__init__.py` 策略枚举、`CompactionPolicy`、`compaction_step`；`anchors.py` 三项锚点；`pruning.py` 工具结果清理；`summarization.py` 摘要压缩），由 `LoopLimits.compaction` 接入 `runner.py`，配置 `COMPACTION_STRATEGY` / `COMPACTION_TRIGGER_TOKENS` / `COMPACTION_MAX_CALLS`；E5 压缩评测 `app/eval/compaction_e5.py` + `app/eval/datasets/compaction/`，报告 `docs/history/eval/n4-e5-compaction-fake.md`。
 
 ### 5.4 业务服务与领域模块
 
@@ -375,6 +401,8 @@ N3 阶段 C（2026-09-25）追加 `price_change.py`、`coupon.py`、`content_cha
 | `backend/app/services/memory_service.py`、`memory_agent.py`、`memory_admin_service.py` | 商家记忆提取、压缩和召回 |
 | `backend/app/services/knowledge_admin_service.py` | 知识库后台的文档与业务域维护 |
 | `backend/app/services/merchant_scope.py` | v1 商家隔离范围的统一出口 |
+| `backend/app/services/v2/metrics_overview.py` | W：组合 `AttributionService` 的周期、序列、类目归因（前 5 项 + 其余合计）与三项辅助指标，分项失败整体 `degraded` 且失败项为空值，不出现示意数字 |
+| `backend/app/services/v2/merchant_orders.py` | W：本店 v2 订单列表与详情、`buyer_alias` 派生（与售后同一别名），复用 `services/v2/orders.py` 的订单摘要（`lead_item` / `last_event_at`，与 WS 共用） |
 | `backend/app/services/resource_scope.py` | v2 统一越权判定 `require_owned()`：目标不存在与不属于当前主体走同一条 403（R5、O1） |
 | `backend/app/services/session_service.py` | 可信店铺解析、演示顾客绑定与购物车合并事务边界；`CartMergePort` / `EmptyCartMerge` |
 | `backend/app/services/session_reconciliation.py` | 启动时按指纹把 `DEMO_MERCHANT_TOKENS` 与已签发商家会话对账，撤销已移除 issuer 的会话（由 `app/main.py` lifespan 调用） |
@@ -502,6 +530,13 @@ backend/tests/unit/services/v2/test_draft_dispatch.py      # 草稿分派表自�
 backend/tests/integration/v2/test_draft_dispatch_db.py     # 分派经真实路由：处理器看不到证据、失败回滚证据、未注册种类 500
 backend/tests/integration/tools/ # 闸门接真实来源状态与审计仓储
 backend/tests/eval/baseline_comparison.py # N2 新循环与冻结基线结构对照（Fake LLM），生成 docs/history/eval/n2-baseline-comparison.md
+backend/tests/eval/test_n4_compaction_e5_fake.py # N4-A：E5 压缩评测结构校验（两策略四项保持率，Fake LLM）
+backend/tests/integration/v2/test_chat_compaction.py # N4-A：压缩在两端 Chat 中可见（SSE step 与 thinking_steps）
+backend/tests/unit/schemas/v2/test_merchant_overview_orders.py  # W：§8.12.4 指标总览与商家订单 Schema 约束
+backend/tests/unit/services/v2/test_metrics_overview.py         # W：周期、归因合计、分项降级、不调用 LLM
+backend/tests/integration/v2/test_merchant_metrics_overview.py  # W：与 query_metrics / attribute_change 工具数字一致
+backend/tests/api/v2/test_merchant_orders.py                    # W：本店隔离、筛选、游标绑定、403 同构与审计、别名一致
+backend/app/eval/datasets/security/w_merchant_metrics_overview.yaml、w_merchant_orders.yaml # W 三条路径的安全用例
 backend/tests/postgres.py      # 集成测试的库连接辅助
 ```
 
@@ -516,6 +551,11 @@ LLM 输出非法 JSON 时的处理；本地化级联与预算降级。
 ```text
 frontend/src/**/*.spec.ts       # Vitest 单测与 Adapter 契约测试
 frontend/e2e/                   # Playwright Mock 套件（VITE_USE_MOCK=true）
+frontend/e2e/support/v2MerchantMock.ts # v2 商家端点的 page.route 共用打桩层（会话按演示 Token 分发、目录可按会话归属、Chat SSE、反馈、首页载荷）
+frontend/e2e/support/workspaceMock.ts  # W：订单页、商品页与运营页（库存、审批、售后、信号、记忆、知识库）打桩
+frontend/e2e/support/assistantRail.ts  # W：助手栏入口（/?assistant=open、历史面板、经偏好设置切语言）
+frontend/e2e/support/overflow.ts       # W：横向溢出检查——页面、main#main（须存在）与展开的助手栏都不得溢出
+frontend/e2e/home.spec.ts、workspace-pages.spec.ts、operations-pages.spec.ts # W：首页、订单/商品页、换样式运营页与知识库（含 375px、深色、双语）
 frontend/e2e/real-api/          # 需要真实 v1 后端 + PostgreSQL，独立 playwright.real-api.config.ts
 frontend/e2e/s3/、s4/、n3/      # 需要真实 v2 后端 + PostgreSQL + 脚本化模型（零 LLM 费用），各自独立 config
 frontend/e2e/first-paint.spec.ts # 需要生产构建 preview，独立 playwright.first-paint.config.ts
@@ -535,6 +575,12 @@ v2 层（`OpsAssistantView` 走裸 `fetch` 的 `/api/v2/merchant/*`）目前没�
 `responsive.spec.ts`、`first-paint.spec.ts` 已改写为验证 v2 `OpsAssistantView` 的等价最小场景
 （首屏可达、无控制台错误、导航齐全、商家/语言切换、响应式布局），用 `page.route` 直接 mock
 `POST /api/v2/merchant/sessions`/`GET /api/v2/merchant/conversations` 两个端点。
+**2026-09-27/28 补齐**：新增 `e2e/support/v2MerchantMock.ts` 打桩层，据此重建
+`e2e/ops-assistant-conversation.spec.ts`（问答、打开历史、删除、采纳与赞踩、换商家清空）与
+`e2e/ops-assistant-localization.spec.ts`（切语言头部与导航、新提问按新语言请求）；
+`real-api/analytics.spec.ts` 按 D-N5-2 不在浏览器层重建，由后端导出/隔离集成测试覆盖。
+组件属性是 `data-test`（不是 `data-testid`），定位用 `page.locator('[data-test="..."]')`；
+Playwright glob 里 `?` 是单字符通配，查询串路由写 `conversations*`。
 
 **真实 LLM 不进入自动化测试**（`AGENTS.md` R3）。
 
@@ -547,8 +593,10 @@ v2 层（`OpsAssistantView` 走裸 `fetch` 的 `/api/v2/merchant/*`）目前没�
 | `plans/2026-09-21-n1-module-roadmap.md` | **N1 总览**：模块 A–E 的划分、框架层、难度、依赖、出口标准与进度快照；不含实施步骤 |
 | `plans/2026-09-22-n2-module-roadmap.md` | **N2 总览**：模块 0 与 A–F（工具循环、交易闭环、草稿与库存、会话目录与反馈、商家端 Vue 迁移、顾客端 Next.js）的划分、依赖、难度、出口标准与已知缺口；不含实施步骤 |
 | `plans/2026-09-24-n3-module-roadmap.md` | **N3 总览**：阶段 0 与 A–C（A Skill 底座：加载器、`load_skill` 受信通道、草稿按种类分派；B 售后闭环与顾客 Skill，收口 S4；C 商家经营 Skill，收口 S2、S5、S6、S7）的划分、依赖、难度与出口标准；三份 N3 实施计划 `n3-skill-loader` / `n3-customer-skills-and-after-sales` / `n3-merchant-skills` 分别对应 A / B / C；不含实施步骤 |
-| `plans/2026-09-27-n4-module-roadmap.md` | **N4 总览**：阶段 0 与 A–C（A 上下文与压缩，含多轮历史回放；B 双端记忆，含 outbox 异步管线与两端记忆界面；C 混合检索，含 pgvector 与索引原子切换）的划分、依赖、难度、费用点与出口标准；三份 N4 实施计划 `n4-context-compaction` / `n4-memory-pipeline` / `n4-hybrid-retrieval` 分别对应 A / B / C；待裁定 D-N4-1–D-N4-3；不含实施步骤 |
-| `plans/2026-09-27-n5-module-roadmap.md` | **N5 总览**：阶段 0 与 A–D（A MCP 只读，收口 S8；B 预算、成本与可观测；C Cron 与 Railway 部署；D 全量评测与收口）的划分、依赖、费用与生产变更点、出口标准，及 N1–N5 路线完成定义；`n5-budget-ops-and-railway` 拆给 B（Task 1–3）与 C（Task 4–7）；待裁定 D-N5-1–D-N5-3；不含实施步骤 |
+| `plans/2026-09-27-n4-module-roadmap.md` | **N4 总览**：阶段 0 与 A–C（A 上下文与压缩，含多轮历史回放；B 双端记忆，含 outbox 异步管线与两端记忆界面；C 混合检索，含 pgvector 与索引原子切换）的划分、依赖、难度、费用点与出口标准；三份 N4 实施计划 `n4-context-compaction` / `n4-memory-pipeline` / `n4-hybrid-retrieval` 分别对应 A / B / C；裁定记录 D-N4-1–D-N4-3（2026-09-28 采纳推荐方案）；不含实施步骤 |
+| `plans/2026-09-27-n5-module-roadmap.md` | **N5 总览**：阶段 0 与 A–D（A MCP 只读，收口 S8；B 预算、成本与可观测；C Cron 与 Railway 部署；D 全量评测与收口）的划分、依赖、费用与生产变更点、出口标准，及 N1–N5 路线完成定义；`n5-budget-ops-and-railway` 拆给 B（Task 1–3）与 C（Task 4–7）；裁定记录 D-N5-1–D-N5-3（2026-09-28 采纳推荐方案）；不含实施步骤 |
+| `plans/2026-09-28-merchant-workbench-redesign.md` | **W · 商家工作台界面重设计**实施计划（PRD §15「W」，2026-09-28 用户裁定，插在 N4 剩余前端任务之前）：<br>- 三条商家只读路径（`metrics/overview`、`orders`、`orders/{order_id}`，契约 §8.12.4）；<br>- 新外壳与助手栏、管理分组与管理员令牌入口、首页、订单页与商品页，其余页面迁入外壳；<br>- §三列出与 N4、N5 各任务的冲突规则。<br>设计说明 `docs/specs/2026-09-28-merchant-workbench-ui-design.md`；定稿原型 `frontend/prototypes/borough-merchant-redesign.html` |
+| `plans/2026-09-28-shop-storefront-redesign.md` | **WS · 顾客端店面重设计**实施计划（2026-09-28 用户定稿；PRD §15「WS」已同步）：智能助手首页、右侧常驻购物车、订单视图、动态抽屉、偏好设置；后端增量包括热门排序、商品缺失属性、订单摘要首件商品与最近更新时间、只读工具 `get_my_order`，演示商品换成真实名与图片。前端外壳依赖 W Task 5，现已解锁。规格见 `docs/specs/2026-09-28-shop-storefront-ui-design.md` |
 | `plans/2026-09-22-n2-assignment-and-review.md` | **N2 分工与 Astra 审查排期**（2026-09-22 已确认）：各模块实现模型（A、C Opus；B Sol；D、E Sonnet；F Codex Terra）、N2-1–N2-8 的证据要求与审查批次；不含实施步骤 |
 | `plans/2026-09-24-n3-assignment-and-review.md` | **N3 分工与 Astra 审查排期**（2026-09-24 建立，待排期）：各阶段实现模型（A、C Opus；B Sol；前端补全 Sonnet + Terra，沿用各自在 N2 建立的地基）、N3-1–N3-5 的证据要求与审查批次；不含实施步骤 |
 | `plans/2026-09-27-n4-assignment-and-review.md` | **N4 分工与 Astra 审查排期**（2026-09-27 拟定，待用户确认）：A Opus；B 后端 Sol、顾客记忆页 Terra、商家记忆面板 Sonnet；C Sonnet；N4-1–N4-4 的证据要求与审查批次；不含实施步骤 |
@@ -580,7 +628,7 @@ N1 审查整改记录：`plans/2026-09-22-n1-review-remediation.md`。自动验�
 安全评测语言传递与真实错误响应验证见 `backend/tests/eval/test_security_locale.py`；
 实际被测对象登记、阶段配额和端点分层的反向验证见 `backend/tests/eval/test_security_gate_guards.py`。
 
-`plans/` **不是空目录**，当前有 51 份计划，其中 N1–N5 新路线实施计划 20 份（不含总览），另有 N1 总览 `2026-09-21-n1-module-roadmap.md`、N2 总览 `2026-09-22-n2-module-roadmap.md`、N3 总览 `2026-09-24-n3-module-roadmap.md`、N4 总览 `2026-09-27-n4-module-roadmap.md`、N5 总览 `2026-09-27-n5-module-roadmap.md`、N2 分工与审查排期 `2026-09-22-n2-assignment-and-review.md`、N3 分工与审查排期 `2026-09-24-n3-assignment-and-review.md`、N4 分工与审查排期 `2026-09-27-n4-assignment-and-review.md`、N5 分工与审查排期 `2026-09-27-n5-assignment-and-review.md` 各 1 份、
+`plans/` **不是空目录**，当前有 53 份计划，其中 N1–N5 新路线实施计划 20 份（不含总览），W（商家工作台界面重设计）与 WS（顾客端店面重设计）实施计划各 1 份，另有 N1 总览 `2026-09-21-n1-module-roadmap.md`、N2 总览 `2026-09-22-n2-module-roadmap.md`、N3 总览 `2026-09-24-n3-module-roadmap.md`、N4 总览 `2026-09-27-n4-module-roadmap.md`、N5 总览 `2026-09-27-n5-module-roadmap.md`、N2 分工与审查排期 `2026-09-22-n2-assignment-and-review.md`、N3 分工与审查排期 `2026-09-24-n3-assignment-and-review.md`、N4 分工与审查排期 `2026-09-27-n4-assignment-and-review.md`、N5 分工与审查排期 `2026-09-27-n5-assignment-and-review.md` 各 1 份、
 跨阶段审查清单 `2026-09-22-astra-checklist.md` 1 份；执行顺序与依赖见该总览与 `docs/project-progress.md` §四。其余为已完成或已登记状态的历史计划。开工前先查是否已有覆盖同一范围的计划。
 
 ---

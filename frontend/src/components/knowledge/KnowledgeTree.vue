@@ -6,9 +6,10 @@ import type { KnowledgeTreeNode } from '@/api/adapters/knowledge'
 import { useLocaleStore } from '@/stores/locale'
 import { displayNodeName } from '@/utils/knowledgeTree'
 
-const props = withDefaults(defineProps<{ roots: KnowledgeTreeNode[]; selectedPath?: string }>(), {
-  selectedPath: '',
-})
+const props = withDefaults(
+  defineProps<{ roots: KnowledgeTreeNode[]; selectedPath?: string; readOnlyAccess?: boolean }>(),
+  { selectedPath: '', readOnlyAccess: false },
+)
 const emit = defineEmits<{ select: [path: string]; 'create-domain': [] }>()
 
 const { t } = useI18n()
@@ -35,6 +36,7 @@ const nodes = computed<FlattenedNode[]>(() => {
     <div class="knowledge-tree__header">
       <p class="knowledge-tree__title">{{ t('knowledgeTree.title') }}</p>
       <button
+        v-if="!props.readOnlyAccess"
         type="button"
         data-testid="create-domain"
         :title="t('knowledgeTree.createDomainAria')"
@@ -65,40 +67,48 @@ const nodes = computed<FlattenedNode[]>(() => {
 
 <style scoped>
 .knowledge-tree {
-  min-width: 15rem;
-  padding: var(--space-4);
-  border-right: 1px solid var(--color-border);
+  min-width: 0;
+  padding: 12px 10px;
+  border-right: 1px solid var(--line);
+  background: var(--chrome);
 }
 .knowledge-tree__header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: var(--space-2);
-  margin-bottom: var(--space-3);
+  margin-bottom: var(--space-2);
+  padding: 0 6px;
 }
 
 .knowledge-tree__title {
   margin: 0;
-  font-weight: var(--font-weight-title);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
 }
 
 .knowledge-tree__header button {
+  width: auto;
   min-height: 1.75rem;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius-small);
   padding: 0 var(--space-2);
-  color: var(--color-text-secondary);
-  background: white;
+  color: var(--ink-2);
+  background: var(--raised);
   font-size: var(--font-size-caption);
+  font-weight: 600;
 }
 
-.knowledge-tree__item--selected {
-  color: var(--color-primary-strong);
-  background: var(--color-primary-soft);
+.knowledge-tree__header button:hover {
+  color: var(--ink);
+  background: var(--hover);
 }
+
 ul {
   display: grid;
-  gap: var(--space-1);
+  gap: 1px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -108,19 +118,47 @@ button {
   display: flex;
   gap: var(--space-2);
   align-items: center;
-  padding: var(--space-2);
+  min-width: 0;
+  padding: 6px 9px;
   border: 0;
-  border-radius: var(--radius-small);
-  color: var(--color-text-secondary);
+  border-radius: 7px;
+  color: var(--ink-2);
   background: transparent;
+  font-size: 13.5px;
   text-align: left;
+  overflow-wrap: anywhere;
+}
+button > span {
+  flex-shrink: 0;
+  color: var(--ink-faint);
 }
 button:hover {
-  color: var(--color-primary-strong);
-  background: var(--color-primary-soft);
+  color: var(--ink);
+  background: var(--hover);
+}
+.knowledge-tree__item--selected,
+.knowledge-tree__item--selected:hover {
+  color: var(--ink);
+  background: var(--well);
+  font-weight: 600;
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 small {
+  flex-shrink: 0;
   margin-left: auto;
-  color: var(--color-text-muted);
+  padding: 0 6px;
+  border-radius: 99px;
+  background: var(--gilt-soft);
+  color: var(--gilt-ink);
+  font-size: 11px;
+  font-weight: 600;
+}
+@media (max-width: 820px) {
+  .knowledge-tree {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    max-height: 18rem;
+    overflow-y: auto;
+  }
 }
 </style>

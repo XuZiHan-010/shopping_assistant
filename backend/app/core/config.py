@@ -125,6 +125,19 @@ class Settings(BaseSettings):
     agent_loop_quality_max_attempts: int = Field(default=2, ge=1, le=3)
     # N4 摘要压缩（§6.12）的调用额度。N2 循环不发起压缩调用，默认的 1 是提前计入公式的预留。
     compaction_max_calls: int = Field(default=1, ge=0, le=4)
+    # 压缩策略与触发阈值（§6.12，N4-A）。未经真实模型对比前默认零 LLM 调用的工具结果清理；
+    # 阈值按字符估算（与 `estimate_tokens` 同口径）。单请求 token 预算按多次调用累计，每次决策都重发
+    # 整段上下文，所以阈值要远低于 MAX_LLM_TOKENS_PER_REQUEST，否则压缩来不及生效预算就先耗尽。
+    # 取值与 `app.agent.loop.compaction.CompactionStrategy` 一致；
+    # core 不反向依赖 agent，故写成字面量。
+    compaction_strategy: Literal["TOOL_RESULT_PRUNING", "SUMMARIZATION"] = "TOOL_RESULT_PRUNING"
+    compaction_trigger_tokens: int = Field(default=8_000, ge=1_000, le=200_000)
+    # v2 两端 Chat 回放同一会话最近几轮的用户与助手文字（D-N4-1，契约 §6.10 / §8.8.3）。
+    # 0 表示不回放。只回放文字，不回放工具结果；更早的部分交给 N4 压缩。
+    chat_history_max_turns: int = Field(default=6, ge=0, le=20)
+    # N4 回合结束后的记忆抽取预算，与主工具循环分开；仍受每日预算总熔断限制。
+    memory_extraction_max_calls: int = Field(default=1, ge=1, le=4)
+    memory_extraction_max_tokens: int = Field(default=4_000, ge=100, le=20_000)
     # 受信 Skill 的两项上限（PRD A4）：单个正文字符数与单回合 `load_skill` 次数。
     # 超限都是拒绝而非截断；默认值与 `app.skills.loader` 的常量一致（有测试守着）。
     skill_max_chars: int = Field(default=8_000, ge=500, le=64_000)

@@ -8,10 +8,13 @@ from app.skills.loader import load_skills
 from app.tools.types import ToolRole
 
 ROOT = Path(__file__).resolve().parents[3] / "app" / "skills" / "customer"
-EXPECTED = {"search-discovery", "purchase-research", "planning-goals", "after-sales-service"}
+EXPECTED = {
+    "search-discovery", "purchase-research", "planning-goals", "after-sales-service",
+    "memory-personalization",
+}
 
 
-def test_four_customer_skills_load_with_cases() -> None:
+def test_five_customer_skills_load_with_cases() -> None:
     specs = load_skills(ROOT, roles=frozenset({ToolRole.CUSTOMER}))
     assert {spec.name for spec in specs} == EXPECTED
     cases = load_skill_cases(ROOT)
@@ -24,6 +27,11 @@ def test_skills_keep_borough_boundaries_and_sources() -> None:
     for name in ("search-discovery", "purchase-research", "planning-goals"):
         assert "vendor/anthropic-commerce-agents@fd4d592" in specs[name].source
     assert specs["after-sales-service"].source == "borough"
+    memory = specs["memory-personalization"]
+    assert "vendor/anthropic-commerce-agents@fd4d592" in memory.source
+    assert "recall_preferences" in memory.body
+    assert "本次" in memory.body and "记忆" in memory.body
+    assert "save_memory" not in memory.body
     for spec in specs.values():
         assert "不谈价" in spec.body
     for name in ("search-discovery", "purchase-research"):

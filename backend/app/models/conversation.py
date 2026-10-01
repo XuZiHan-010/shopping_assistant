@@ -112,3 +112,7 @@ class Message(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
     source_locale: Mapped[str] = mapped_column(String(16), nullable=False)
     #: v2 助手消息的完整最终响应（与 Chat 响应逐字段相同）；用户消息与 v1 消息为空。
     response_payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    #: N4 记忆任务只存消息 ID；从用户消息反查当时由服务端验证的会话身份。
+    session_record_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("agent_sessions.id", ondelete="SET NULL"), nullable=True
+    )

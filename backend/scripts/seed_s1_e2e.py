@@ -15,8 +15,11 @@ from sqlalchemy import text
 
 from app.core.runtime import configure_event_loop_policy
 from app.db.session import Database
+from app.localization.locales import hash_source_text
 from app.models.analytics import Product
+from app.models.localization import MachineTranslationCache
 from app.models.merchant import Merchant
+from app.prompts.localization import LOCALIZATION_PROMPT_VERSION
 from tests.postgres import TRUNCATE_ALL_TABLES
 from tests.support.e2e_s1_app import (
     S1_CASHMERE_ID,
@@ -73,6 +76,23 @@ async def main() -> None:
                         stock_on_hand=on_hand,
                         stock_reserved=0,
                         low_stock_threshold=5,
+                    )
+                )
+            # 固定英文目录译文只供一次性 S1/WS 浏览器库使用；公开 GET 不触发真实模型。
+            for source, translated in (
+                ("羊毛围巾", "Wool scarf"),
+                ("羊绒围巾", "Cashmere scarf"),
+            ):
+                session.add(
+                    MachineTranslationCache(
+                        scope_kind="MERCHANT",
+                        merchant_id=S1_MERCHANT_ID,
+                        source_hash=hash_source_text(source),
+                        source_language="zh-CN",
+                        target_locale="en-US",
+                        translated_text=translated,
+                        model="scripted-e2e-fixture",
+                        prompt_version=LOCALIZATION_PROMPT_VERSION,
                     )
                 )
             await session.commit()

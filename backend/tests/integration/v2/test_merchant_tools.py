@@ -167,6 +167,33 @@ async def test_restock_over_guardrail_is_rejected_with_a_fixable_reason(
 
 
 @pytest.mark.asyncio
+async def test_full_reduction_coupon_is_blocked_before_draft_when_over_limit(
+    db_session: AsyncSession, merchant_one_id: UUID, integration_database: Database
+) -> None:
+    await db_session.commit()
+    gates = _gates(integration_database)
+    now = datetime.now(UTC)
+    result = await gates.invoke(
+        _ctx(merchant_one_id),
+        "draft_coupon",
+        {
+            "name": "超过折扣上限的满减券",
+            "kind": "FULL_REDUCTION",
+            "threshold_amount": "100.00",
+            "discount_amount": "25.00",
+            "starts_at": now.isoformat(),
+            "ends_at": (now + timedelta(days=1)).isoformat(),
+        },
+    )
+
+    assert result.ok is False
+    assert result.guardrail is not None
+    assert result.guardrail.code == "DISCOUNT_RATE_EXCEEDS_LIMIT"
+    assert result.guardrail.current_limit and result.guardrail.remediation
+    assert (await db_session.execute(select(Draft))).scalars().all() == []
+
+
+@pytest.mark.asyncio
 async def test_restock_for_an_unseen_product_is_fatal(
     db_session: AsyncSession, merchant_one_id: UUID, integration_database: Database
 ) -> None:

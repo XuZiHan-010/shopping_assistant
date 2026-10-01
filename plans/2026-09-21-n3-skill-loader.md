@@ -28,7 +28,7 @@
 - [x] **N2 验收通过**：`plans/2026-09-24-n2-review-remediation.md` Task 5 独立复审完成，Astra N2-1～N2-8 已审。
       本计划要改 `agent/loop/runner.py`（N2-1/N2-2 审查对象）与 `services/v2/draft_apply.py`（N2-3/N2-4 审查对象），
       未审先改会让审查结论对不上版本；
-- [ ] **Astra「入口-N3」**（未做：用户 2026-09-24 指示直接开工 A；实现者已自查下两项形状一致）：逐份核对三份 N3 计划的入口条件，结论写入 `plans/2026-09-22-astra-checklist.md`；
+- [x] **Astra「入口-N3」**（2026-09-26 独立审查：有条件通过，见 `plans/2026-09-26-n3-independent-review.md`；此前用户 2026-09-24 指示直接开工 A）：逐份核对三份 N3 计划的入口条件，结论写入 `plans/2026-09-22-astra-checklist.md`；
 - [x] **核对 §6.11 `SkillSpec`**：契约写的是 `roles: frozenset[ToolRole]`（`app/tools/types.py` 的
       `CUSTOMER / MERCHANT / MCP_READONLY`），本计划的注册表按会话角色查询时用 `SessionRole` → `ToolRole` 的既有映射，
       **不另建第三种角色枚举**；

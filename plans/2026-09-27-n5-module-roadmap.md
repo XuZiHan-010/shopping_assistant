@@ -6,6 +6,19 @@
 > **进度只在 `docs/project-progress.md` 维护**；下文「状态快照」标注了日期，过期以进度快照为准。
 > **本文件不含任何 Git 提交步骤**（R2），也不触发任何 LLM 调用（R3）；**也不授权任何 Railway 或生产操作**。
 > 写法仿照 `plans/2026-09-24-n3-module-roadmap.md`。
+> **2026-09-28 修订**：D-N5-1 至 D-N5-3 已由用户裁定（采纳推荐方案），见 §六；D-N5-2 的主体已随 N3 收尾完成，只剩复核。
+> **2026-09-28 再修订（PRD §15「W」）**：商家工作台界面重设计插在 N4 剩余任务之前（`plans/2026-09-28-merchant-workbench-redesign.md`）。它对 N5 的影响：
+> - B Task 3 步骤 3 的运维看板放进侧栏「管理」分组，复用 W 的管理员令牌入口；
+> - D Task 1 路由对账以 PRD 当前 53 条路径为准，含 W 新增的 3 条；
+> - D Task 7 在新界面上演示；
+> - D Task 9 步骤 1a 以 W 改过入口后的 E2E 为准。
+> 
+> 各计划对应位置已同步。
+>
+> 同日另有**顾客端店面重设计 WS**（`plans/2026-09-28-shop-storefront-redesign.md`），它对 N5 的影响：
+> - 不新增路径，只改顾客端商品列表参数与订单摘要字段，D Task 1 对账不受影响；
+> - D Task 7 顾客端在新外壳上演示，商品图片未交付时如实演示“暂无图片”占位；
+> - D Task 9 步骤 1a 复核的顾客端 E2E 以 WS Task 13 改过入口后的版本为准。
 
 **目标：** 给 N5（PRD §15「MCP 与运维收尾」）画一张可核对的地图：切成 A、B、C、D 四个阶段，
 写清每阶段的范围、撞点、**费用与生产变更点**与出口标准，并把 2026-09-21 预写的三份 N5 计划按
@@ -41,8 +54,8 @@
 | Railway 五服务部署与 Cron 幂等任务（§10.7） | C |
 | 全量评测报告、双端对外演示、文档收口 | D |
 
-N5 只新增 **1 条** v2 路径 `POST /api/v2/merchant/mcp`（A）。2026-09-27 以 PRD §11.2 对 `docs/api.json` 预跑：
-PRD 50 条、已导出 42 条、缺 8 条（N3 残留 2、N4 记忆 5、N5 MCP 1）、多 0 条。D Task 1 在收口时以 `app.routes` 重跑，
+N5 只新增 **1 条** v2 路径 `POST /api/v2/merchant/mcp`（A）。2026-09-28 以 PRD §11.2 对 `docs/api.json` 预跑：
+PRD 50 条、已导出 44 条、缺 6 条（N4 记忆 5、N5 MCP 1）、多 0 条。D Task 1 在收口时以 `app.routes` 重跑，
 期望缺 0、多 0。
 
 难度与 N4 不同：N5 的代码量不大，**危险来自「上线」与「宣称」两件事**。C 的每一步 Railway 操作都是生产变更，
@@ -67,14 +80,14 @@ PRD 50 条、已导出 42 条、缺 8 条（N3 残留 2、N4 记忆 5、N5 MCP 1
 | 缺口 | 证据 | 补在 |
 | --- | --- | --- |
 | MCP 白名单 7 个工具中 `attribute_change` 未标 `MCP_READONLY` | 契约 §8.14.3；`app/tools/merchant/metrics.py:164` 只有 `ToolRole.MERCHANT`；`registry.surface_for_mcp()` 已存在（`app/tools/registry.py:99`） | **A Task 0**：补角色，并用「白名单与注册表双向相等」的测试防止以后漂移；MCP 输出不含 `chart_data` |
-| **看板前端已不存在**：`OpsDashboardView.vue` 随 2026-09-27 两页合并下线（工作树删除，尚未提交） | `frontend/src/views/` 无该文件；`/api/admin/ops/status` 无前端消费方 | **B Task 3 步骤 3**，载体待裁定 **D-N5-1** |
-| **PRD 内部冲突**：§14 需求迁移表写「Chat BI 运维看板 · 保留并扩展 · §10.4」，但 §15 N2 的两页合并裁定下线了承载它的页面与 Chat BI 组件 | `docs/PRD.md` §14、§15 N2 | 同 **D-N5-1**：裁定后先改 PRD §14 一行，再做 B Task 3 |
+| **看板前端已不存在**：`OpsDashboardView.vue` 随 2026-09-27 两页合并下线（工作树删除，尚未提交） | `frontend/src/views/` 无该文件；`/api/admin/ops/status` 无前端消费方 | **B Task 3 步骤 3**：按 **D-N5-1** 新建只读 `OpsStatusView.vue` |
+| **PRD 内部冲突**：§14 需求迁移表写「Chat BI 运维看板 · 保留并扩展 · §10.4」，但 §15 N2 的两页合并裁定下线了承载它的页面与 Chat BI 组件 | `docs/PRD.md` §14、§15 N2 | **D-N5-1** 已裁定：B Task 3 步骤 3 的第一件事是改 PRD §14 这一行，再写页面 |
 | 三级预算、价格版本都是新增：`LlmCostGuard` 只有全局日预算；`llm_usage` 已有 `request_id` 与 `purpose`，缺角色、价格版本、缓存命中 token | `app/llm/guard.py`；`app/models/operations.py` | **B Task 1–2**；Task 1 补一条：记忆抽取、压缩摘要、简报预生成这些**非对话调用同样计入三级预算** |
 | `X-Request-Id` 只出现在 `app/main.py` 与安全评测工具，未贯穿工具调用与 `llm_usage` 写入路径 | `rg X-Request-Id app` | **B Task 3** |
 | Cron 配置已有 **3 份**（原计划写 2 份）；`close_expired_orders`、`expire_drafts`、`rebuild_projections` 有任务模块但无调度；操作证据 nonce 清理**连任务模块都没有**；N4 新增 outbox 排空、记忆过期、总结重建、索引构建 | `backend/railway*.json`；`app/jobs/` | **C Task 4** 任务表已补齐 |
 | Railway Postgres 需要 pgvector；本地镜像由 N4 C Task 2 步骤 0 切换 | `docker-compose.yml`；N4 总览 §二 | **C Task 5**：上线顺序第一步「postgres 启用扩展」先确认 Railway 方案支持 |
-| 两页合并时整份删除 4 份前端 E2E（`conversation.spec.ts` 13 例、`ops-dashboard.spec.ts`、`localization.spec.ts`、`real-api/analytics.spec.ts` 8 例），原因是 v2 层缺少 fetch Mock 基础设施 | `docs/project-progress.md` 2026-09-27 | **D Task 9 步骤 1a**，处置方式待裁定 **D-N5-2** |
-| 收口复核表只列了 2026-09-21 的 7 项裁定，此后又有 5 项 | `n5-final-eval-and-closeout` Task 9 | **D Task 9** 已补录；N4、N5 的待裁定项结论一并复核 |
+| 两页合并时整份删除 4 份前端 E2E（`conversation.spec.ts` 13 例、`ops-dashboard.spec.ts`、`localization.spec.ts`、`real-api/analytics.spec.ts` 8 例），原因是 v2 层缺少 fetch Mock 基础设施 | `docs/project-progress.md` 2026-09-27 | **D-N5-2**：会话目录 5 例、双语 2 例已于 2026-09-27 用 `e2e/support/v2MerchantMock.ts` 重建；`ops-dashboard.spec.ts` 随新看板重写；`real-api/analytics.spec.ts` 不在浏览器层重建。剩余复核在 N4 阶段 0 与 **D Task 9 步骤 1a** |
+| 收口复核表只列了 2026-09-21 的 7 项裁定，此后又有 5 项 | `n5-final-eval-and-closeout` Task 9 | **D Task 9** 已补录，含 D-N4-1 至 D-N5-3 六项裁定 |
 
 ---
 
@@ -95,7 +108,7 @@ PRD 50 条、已导出 42 条、缺 8 条（N3 残留 2、N4 记忆 5、N5 MCP 1
 | --- | --- | --- |
 | A、B、C、D 全部 | 阶段 0：N4 整体完成（N4 总览 §五） | PRD 里程碑顺序；也保证 C Task 4 要接线的 N4 任务模块已存在 |
 | A Task 1 起 | A Task 0；开工当天核对 MCP SDK 对 `2026-07-28` 的支持 | SDK 默认旧协议时必须显式配置版本，并保留握手被拒的反例测试 |
-| B Task 3 步骤 3（看板前端） | 用户裁定 D-N5-1；PRD §14 先改 | 载体未定不写页面 |
+| B Task 3 步骤 3（看板前端） | PRD §14 先改（D-N5-1 已裁定） | 契约先行，再写页面 |
 | C Task 4 | N4 B Task 3、4、5（outbox 排空、记忆过期、总结重建）与 N4 C（索引构建）的任务模块 | 分发器只调度已存在的模块 |
 | C Task 5 步骤 3（本地 compose 跑 S1–S8） | A Task 4（S8）；N3、N4 的场景测试 | S8 在 A 之前无法跑 |
 | C Task 5 步骤 4（Railway 部署） | A、B、C Task 4 全部完成；**用户逐项同意** | 顺序：postgres 启用扩展 → 单独执行迁移 → backend → cron → shop / merchant |
@@ -124,8 +137,10 @@ PRD 50 条、已导出 42 条、缺 8 条（N3 残留 2、N4 记忆 5、N5 MCP 1
 7. **推荐顺序：** 0 →（A ‖ B ‖ C Task 4）→ C Task 5 步骤 1–3 → 【同意】C Task 5 步骤 4 → C Task 6 →
    【同意 + R3】真实 Key → D（Task 1、2、5、6、9 可先在本地做；Task 3、4、7 等部署与授权）。
 
-**可选的提速方案（待裁定 D-N5-3）：** A 只依赖 N3 的商家只读工具，功能上不依赖 N4。若希望缩短总周期，
-A 可在 N3 验收通过后与 N4 并行开工；里程碑验收仍在 N4 之后，Astra 审查编号不变。
+**提速方案（D-N5-3 已裁定：默认不启用）：** A 只依赖 N3 的商家只读工具，功能上不依赖 N4，但 A 与 N4-A 都由 Opus 负责，
+提前会让 MCP 与改 `runner.py` 的 N4-A 抢同一个执行者。因此**默认按里程碑顺序**。用户提出时间节点（例如求职演示日期）时，
+启用预先定好的折中：**Opus 完成 N4-A 后立即接做 N5-A**，与 Sol、Sonnet 收尾 N4-B、N4-C 并行；里程碑验收仍在 N4 之后，
+Astra 审查编号与批次不变。启用时只需在进度快照登记，不必重新编组。
 
 ### 费用点与生产变更点
 
@@ -149,9 +164,8 @@ N5 所有本地开发与自动化验证零费用。**上表每一项都要单独
 
 - **内容：**
   1. **N4 收口**：N4 总览 §五 的 8 项完成定义，含 `CURRENT_MILESTONE` 切到 `"N4"`、E5 三份报告、四层同步 D-N4-1 至 D-N4-3；
-  2. **Astra「入口-N5」**：逐份核对三份 N5 计划入口条件与 N4 **最终**接口（本次编组已预核对，见 §二）；
-  3. **用户裁定 D-N5-1 至 D-N5-3**（§六），可与 1、2 同时进行。
-- **性质：** 审查 + 裁定，无 N5 业务代码。
+  2. **Astra「入口-N5」**：逐份核对三份 N5 计划入口条件与 N4 **最终**接口（本次编组已预核对，见 §二）。
+- **性质：** 审查，无 N5 业务代码。D-N5-1 至 D-N5-3 已裁定，不再阻塞。
 
 ### 阶段 A · MCP 只读服务（`n5-mcp-readonly`）
 
@@ -180,7 +194,7 @@ N5 所有本地开发与自动化验证零费用。**上表每一项都要单独
   - 成本在写入时按当时价格版本算好并存储，价格变动只追加新行，历史成本不重算；价格数值从 DeepSeek 官方文档核实（O7），**不得凭记忆填写**；
   - `/api/admin/ops/status` 的四类禁止返回项（Token、Prompt、经营数据、完整请求正文）扩展看板后仍不得出现。
 - **出口标准：** Task 1–3 全绿、零费用；三级隔离、先查后发、价格追加写、追踪 ID 贯穿到 `llm_usage` 各有测试；
-  看板按裁定落地且只读；Astra **N5-3** 中预算部分通过。
+  `OpsStatusView.vue` 落地且只读，PRD §14 已改；Astra **N5-3** 中预算部分通过。
 - **本阶段不做：** 任何 Railway 操作；Redis（仅在多实例共享限流有证据时另行评审）。
 
 ### 阶段 C · Cron 与 Railway 部署（`n5-budget-ops-and-railway` Task 4–7）
@@ -231,7 +245,7 @@ N5 完成当且仅当：
 5. 公开部署前置条件三项已在公网验收；真实 Key 是否配置、依据哪两项授权，如实记录；
 6. 性能报告与全量评测报告存在，写明数据快照、并发数、版本、原始统计，以及哪些是 Fake、哪些是真实模型；
 7. `CURRENT_MILESTONE` 为 `"N5"`，关键安全集零失败；冻结基线 `test_frozen_graph_nodes_unchanged` 仍通过，`graph.py` 未部署到生产；
-8. 前端 E2E 缺口按 D-N5-2 裁定处置完毕（重建或逐条列为未覆盖），没有被静默略过；
+8. 前端 E2E 缺口按 D-N5-2 处置完毕：D Task 9 步骤 1a 的四行各有落点（已重建 / 已重写 / 列出替代证据文件），没有被静默略过；
 9. 所有裁定（D Task 9 两张表）在 PRD、契约、实现与测试中一致；`docs/project-progress.md`、`docs/project-navigation.md` 为最终快照；
    仅当稳定约束变化时更新 `AGENTS.md`；`git status --porcelain vendor/ "yshopping-merchant-ai 4/" yshopping-prototype/` 无输出（R8）。
 
@@ -239,13 +253,16 @@ N5 完成当且仅当：
 
 ---
 
-## 六、待裁定
+## 六、裁定记录（2026-09-28 用户采纳推荐方案）
 
-| 编号 | 问题 | 推荐 | 阻塞 |
+原「待裁定」三项已由用户裁定，**PRD 已于 2026-09-28 同步**（§14 Chat BI 运维看板一行、§15 N5），前端计划同步第 15 条。
+本节只记录结论与落点，权威定义以 PRD 为准。
+
+| 编号 | 问题 | 裁定 | 落点 |
 | --- | --- | --- | --- |
-| **D-N5-1** | 运维看板的前端载体。PRD §14 写 Chat BI 运维看板「保留并扩展」，§10.4 要求看板展示预算余量等；但 2026-09-27 两页合并已下线 `OpsDashboardView.vue` 与 Chat BI 组件 | **新建只读管理员页**（建议 `frontend/src/views/OpsStatusView.vue`），合并展示 Chat BI 概览与 §10.4 指标，走 `X-Admin-Token`，可用 `VIEWER_TOKEN` 只读访问；原组件可用只读的 `git show HEAD:frontend/src/views/OpsDashboardView.vue` 参考（不做 checkout / reset）。PRD §14 同一行改为写明新载体。另一选项是只保留 API 并改 PRD §14 与 §10.4，不推荐——§10.4 明确要求看板 | B Task 3 步骤 3 |
-| **D-N5-2** | 两页合并时删除的 4 份前端 E2E 如何处置 | **补 v2 fetch Mock 基础设施，并按 PRD 条款重建两组**：会话目录（§12.4「新建、浏览、跳转、删除」）与双语（§10.6）。`ops-dashboard.spec.ts` 随 D-N5-1 的新页面重写；`real-api/analytics.spec.ts` 对应的 v1 前端已下线，列为「未覆盖（v1 前端已退役）」 | D Task 9 步骤 1a；§12.4、§10.6 能否标「通过」 |
-| **D-N5-3** | A（MCP）是否提前到 N3 验收后、与 N4 并行开工 | **不提前**，除非需要压缩总周期。理由：A 本身量小（14 步），提前带来的收益有限，却让 Astra 的 N4、N5 审查交错；若提前，里程碑验收顺序与审查编号保持不变 | 排期，不阻塞功能 |
+| **D-N5-1** | 运维看板的前端载体（PRD §14「Chat BI 运维看板保留并扩展」与 2026-09-27 下线 `OpsDashboardView.vue` 冲突） | **新建只读管理员页 `OpsStatusView.vue`**：一页合并 Chat BI 概览与 §10.4 指标；走 `X-Admin-Token`，`VIEWER_TOKEN` 只读；不恢复旧页，旧页只用 `git show HEAD:` 只读参考；范围为表格加至多两张趋势图 | 先改 PRD §14 与 `docs/frontend-development-plan.md`；`n5-budget-ops-and-railway` Task 3 步骤 3 |
+| **D-N5-2** | 两页合并时删除的 4 份前端 E2E | **会话目录与双语用轻量 `page.route` 类型化打桩重建**（2026-09-27 已完成 5 + 2 例，`e2e/support/v2MerchantMock.ts`）；`ops-dashboard.spec.ts` 随新看板重写为 `ops-status.spec.ts`；`real-api/analytics.spec.ts` **不在浏览器层重建**，以后端集成、`tests/e2e/` 场景与安全集为替代证据；**剩余复核提前到 N4 阶段 0**（§12.4 逐条对照、§10.6 缺译文回退标注），不等到 N5 | N4 总览阶段 0；`n5-final-eval-and-closeout` Task 9 步骤 1a |
+| **D-N5-3** | A（MCP）是否提前 | **默认不提前**；用户提出时间节点时启用折中「Opus 完成 N4-A 后接做 N5-A」（§三） | 排期，不改 PRD |
 
 **后置裁定（不在开工前决定）：** v1 端点是否退役、何时退役，由 D Task 8 产出就绪清单与弃用公告草稿后交用户决定。
 
@@ -253,8 +270,8 @@ N5 完成当且仅当：
 
 ## 七、状态快照与维护规则
 
-- 截至 **2026-09-27**：N5 未开工，三份计划 0 / 68。阶段 0 阻塞在 N4 完成（N4 本身阻塞在 N3 验收）；
-  D-N5-1 至 D-N5-3 待用户裁定；分工见 `plans/2026-09-27-n5-assignment-and-review.md`。
+- 截至 **2026-09-28**：N5 未开工，三份计划 0 / 68。阶段 0 阻塞在 N4 完成（N4 本身阻塞在 N3 独立验收）；
+  D-N5-1 至 D-N5-3 已裁定；分工见 `plans/2026-09-27-n5-assignment-and-review.md`（待用户确认）。
 - 阶段完成后：先在该阶段的实施计划里勾选步骤，再更新 `docs/project-progress.md`，最后回到本文件更新 §一。
   **不要只改本文件。**
 - 某阶段计划新增或删减步骤时，同步本文件 §一 的步骤数。

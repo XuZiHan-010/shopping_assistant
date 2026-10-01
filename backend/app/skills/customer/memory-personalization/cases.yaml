@@ -1,0 +1,88 @@
+# 记忆触发与当前回合覆盖旧偏好的边界。
+- id: memory-personalization-hit1
+  introduced_in: N4
+  role: CUSTOMER
+  skill: memory-personalization
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: skill_trigger
+  turns:
+    - actor: customer
+      request:
+        method: POST
+        path: /api/v2/shop/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json: {message: "你还记得我喜欢什么风格吗？", client_request_id: skill-memory-hit1}
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: tool_calls_include
+      expected: load_skill:memory-personalization
+
+- id: memory-personalization-hit2
+  introduced_in: N4
+  role: CUSTOMER
+  skill: memory-personalization
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: skill_trigger
+  turns:
+    - actor: customer
+      request:
+        method: POST
+        path: /api/v2/shop/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json: {message: "按我以前说的喜好推荐本店商品", client_request_id: skill-memory-hit2}
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: tool_calls_include
+      expected: load_skill:memory-personalization
+
+- id: memory-personalization-miss1
+  introduced_in: N4
+  role: CUSTOMER
+  skill: memory-personalization
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: skill_trigger
+  turns:
+    - actor: customer
+      request:
+        method: POST
+        path: /api/v2/shop/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json: {message: "这件商品现在多少钱？", client_request_id: skill-memory-miss1}
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: tool_calls_exclude
+      expected: load_skill:memory-personalization
+
+- id: memory-personalization-current-turn-wins
+  introduced_in: N4
+  role: CUSTOMER
+  skill: memory-personalization
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: skill_trigger
+  turns:
+    - actor: customer
+      request:
+        method: POST
+        path: /api/v2/shop/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json: {message: "我以前喜欢素色，这次想要彩色的。请按这次需求推荐。", client_request_id: skill-memory-override}
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: tool_calls_exclude
+      expected: memory_write

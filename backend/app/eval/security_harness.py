@@ -98,6 +98,16 @@ def _resolve_path(path: str, state: Mapping[str, Any]) -> str:
     return _STATE_PLACEHOLDER.sub(_substitute, path)
 
 
+def _resolve_query(query: Mapping[str, str], state: Mapping[str, Any]) -> dict[str, str]:
+    """同一套 `{state:key}` 占位符规则，应用到查询参数值（例如伪造游标用例）。
+
+    httpx 的 `params=` 会整体替换 URL 已有的查询串（空字典即清空），所以游标这类
+    运行时才知道的值不能像路径那样拼进 `path` 字符串，必须经这里换成真正的查询参数。
+    """
+
+    return {key: _resolve_path(value, state) for key, value in query.items()}
+
+
 class SecurityHarness:
     """安全硬门禁的执行器：真实 PostgreSQL、真实 ASGI 应用、白名单原语。"""
 
@@ -240,7 +250,7 @@ class SecurityHarness:
                 request.method,
                 _resolve_path(request.path, state),
                 headers=headers,
-                params=request.query,
+                params=_resolve_query(request.query, state),
                 json=request.json_body,
             )
         code: str | None = None

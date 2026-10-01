@@ -77,7 +77,7 @@ from app.services.v2.conversation_summary import (
 )
 from app.services.v2.customer_signals import derive_after_sale_signals
 from app.services.v2.idempotency import run_idempotent
-from app.services.v2.orders import require_owned_order
+from app.services.v2.orders import business_date_of, require_owned_order
 from app.services.v2.refund_calc import RefundLine, refundable
 
 CREATE_OPERATION: Final = "shop.after_sales.create"
@@ -396,7 +396,7 @@ async def confirm_after_sale(
         session.add(
             SupportTicket(
                 merchant_id=ctx.merchant_id,
-                business_date=now.date(),
+                business_date=business_date_of(now),
                 ticket_no=f"as-{record.id.hex[:16]}",
                 order_id=precheck.order.id,
                 after_sale_id=record.id,

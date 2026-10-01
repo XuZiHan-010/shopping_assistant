@@ -20,6 +20,8 @@ export interface Product {
   requestedLocale: ProductLocale
   nameTranslationStatus: TranslationStatus
   shortDescriptionTranslationStatus: TranslationStatus
+  /** 类目源值（如「鞋靴」），不翻译；显示时查固定词表，未登记的原样显示。 */
+  category: string
 }
 
 export interface ProductAttribute {
@@ -33,6 +35,7 @@ export interface ProductAttribute {
 
 export interface ProductDetail extends Product {
   description: string
+  missingAttributes: string[]
   attributes: ProductAttribute[]
   descriptionTranslationStatus: TranslationStatus
 }
@@ -85,7 +88,7 @@ export interface OrderLine {
   lineTotalCents: number
 }
 
-export interface Order {
+export interface OrderSummaryView {
   id: string
   paymentStatus: PaymentStatus
   fulfillmentStatus: FulfillmentStatus
@@ -94,6 +97,11 @@ export interface Order {
   itemCount: number
   createdAt: string
   payBy: string
+  leadItem: { productId: string; name: string; imageUrl: string | null }
+  lastEventAt: string
+}
+
+export interface Order extends OrderSummaryView {
   items: OrderLine[]
   subtotalCents: number
   discountCents: number

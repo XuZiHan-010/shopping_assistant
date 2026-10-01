@@ -1,0 +1,78 @@
+# N4 B：5 条双端记忆路径的跨角色越权门禁。
+- id: SEC-N4M-001
+  introduced_in: N4
+  role: MERCHANT
+  skill: memory-personalization
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: merchant_a
+      request: {method: GET, path: /api/v2/shop/memories}
+  assertions:
+    - {type: http_status, expected: 403}
+    - {type: error_code, expected: SESSION_ROLE_MISMATCH}
+    - {type: audit_written, event_type: SESSION_ROLE_MISMATCH}
+
+- id: SEC-N4M-002
+  introduced_in: N4
+  role: MERCHANT
+  skill: memory-personalization
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: merchant_a
+      request: {method: DELETE, path: "/api/v2/shop/memories/{memory_id}"}
+  assertions:
+    - {type: http_status, expected: 403}
+    - {type: error_code, expected: SESSION_ROLE_MISMATCH}
+    - {type: audit_written, event_type: SESSION_ROLE_MISMATCH}
+    - {type: no_side_effect, table: customer_memories}
+
+- id: SEC-N4M-003
+  introduced_in: N4
+  role: MERCHANT
+  skill: memory-personalization
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: merchant_a
+      request: {method: PUT, path: /api/v2/shop/memory-preference, json: {enabled: false, purge_confirmation: 'yes'}}
+  assertions:
+    - {type: http_status, expected: 403}
+    - {type: error_code, expected: SESSION_ROLE_MISMATCH}
+    - {type: audit_written, event_type: SESSION_ROLE_MISMATCH}
+    - {type: no_side_effect, table: customer_memory_preferences}
+
+- id: SEC-N4M-004
+  introduced_in: N4
+  role: CUSTOMER
+  skill: memory-personalization
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: customer_a
+      request: {method: GET, path: /api/v2/merchant/memories}
+  assertions:
+    - {type: http_status, expected: 403}
+    - {type: error_code, expected: SESSION_ROLE_MISMATCH}
+    - {type: audit_written, event_type: SESSION_ROLE_MISMATCH}
+
+- id: SEC-N4M-005
+  introduced_in: N4
+  role: CUSTOMER
+  skill: memory-personalization
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: customer_a
+      request: {method: DELETE, path: "/api/v2/merchant/memories/{memory_id}"}
+  assertions:
+    - {type: http_status, expected: 403}
+    - {type: error_code, expected: SESSION_ROLE_MISMATCH}
+    - {type: audit_written, event_type: SESSION_ROLE_MISMATCH}
+    - {type: no_side_effect, table: merchant_memory_facts}

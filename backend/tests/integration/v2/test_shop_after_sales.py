@@ -1,7 +1,7 @@
 """顾客售后两阶段提交的证据、幂等和金额边界。"""
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
@@ -9,8 +9,10 @@ from fastapi import FastAPI
 from httpx import AsyncClient
 from sqlalchemy import func, select
 
+import app.api.routes.v2.shop_after_sales as shop_after_sales_route
 from app.core.session import SessionContext, SessionRole
 from app.models.after_sales import AfterSale
+from app.models.analytics import SupportTicket
 from app.models.operations import OperationEvidenceNonce
 from app.schemas.v2.after_sales import AfterSaleActor, AfterSaleState
 from app.services.v2.after_sale_machine import transition
@@ -65,6 +67,41 @@ async def test_challenge_writes_no_sale_then_confirm_creates_once(
     assert retry.status_code == 201 and retry.json() == second.json()
     async with database.session() as session:
         assert await session.scalar(select(func.count()).select_from(AfterSale)) == 1
+
+
+@pytest.mark.asyncio
+async def test_ticket_business_date_is_business_day_across_utc_midnight(
+    postgres_app: FastAPI, postgres_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """UTC 9/24 20:00 = 上海 9/25 04:00：售后工单记在业务日 9/25。"""
+
+    cross_day = datetime(2026, 9, 24, 20, tzinfo=UTC)
+
+    class _Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):  # type: ignore[no-untyped-def, override]
+            return cross_day if tz is None else cross_day.astimezone(tz)
+
+    database = database_of(postgres_app)
+    product_id = await seed_product(database, MERCHANT_ONE_ID, now=cross_day - timedelta(days=2))
+    order_id = await seed_paid_order(
+        database, MERCHANT_ONE_ID, product_id, quantity=1, now=cross_day
+    )
+    headers = await bound_customer(
+        postgres_client, postgres_app, buyer_key="demo-buyer-1", shop_slug=SHOP
+    )
+    monkeypatch.setattr(shop_after_sales_route, "datetime", _Frozen)
+
+    first = await postgres_client.post(PATH, headers=headers, json=request(order_id))
+    assert first.status_code == 200, first.text
+    confirmed = request(order_id, token=first.json()["confirmation_token"])
+    second = await postgres_client.post(PATH, headers=headers, json=confirmed)
+    assert second.status_code == 201, second.text
+    async with database.session() as session:
+        ticket = await session.scalar(
+            select(SupportTicket).where(SupportTicket.order_id == order_id)
+        )
+    assert ticket is not None and ticket.business_date == date(2026, 9, 25)
 
 
 @pytest.mark.asyncio

@@ -12,6 +12,8 @@ const order = (over: Partial<Order> = {}): Order => ({
   itemCount: 1,
   createdAt: '2026-09-01T00:00:00Z',
   payBy: '2026-09-01T00:30:00Z',
+  leadItem: { productId: 'p1', name: '羊绒围巾', imageUrl: null },
+  lastEventAt: '2026-09-01T00:00:00Z',
   items: [
     {
       orderItemId: 'i1',

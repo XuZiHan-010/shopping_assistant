@@ -205,7 +205,7 @@ def build_guarded_llm(
     *,
     request_id: str,
     merchant_id: UUID | None,
-    purpose: Literal["AGENT", "LOCALIZATION"] = "AGENT",
+    purpose: Literal["AGENT", "LOCALIZATION", "MEMORY"] = "AGENT",
 ) -> LlmCostGuard:
     """构造带费用守卫的模型客户端。
 

@@ -51,11 +51,15 @@ class MerchantMemoryFact(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
     content: Mapped[str] = mapped_column(String(4000), nullable=False)
     source_ref: Mapped[str] = mapped_column(String(256), nullable=False)
     category: Mapped[str] = mapped_column(String(64), nullable=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class MerchantMemorySummary(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
     __tablename__ = "merchant_memory_summaries"
-    __table_args__ = (Index("ix_merchant_memory_summaries_merchant", "merchant_id"),)
+    __table_args__ = (
+        Index("ix_merchant_memory_summaries_merchant", "merchant_id"),
+        UniqueConstraint("merchant_id", "category", name="uq_merchant_memory_summaries_category"),
+    )
 
     merchant_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("merchants.id", ondelete="CASCADE"), nullable=False
@@ -63,6 +67,46 @@ class MerchantMemorySummary(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
     content: Mapped[str] = mapped_column(String(4000), nullable=False)
     category: Mapped[str] = mapped_column(String(64), nullable=False)
     rebuilt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    is_stale: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    source_fact_ids: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+
+
+class CustomerMemoryPreference(Base):
+    __tablename__ = "customer_memory_preferences"
+
+    merchant_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("merchants.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    buyer_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    memory_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
+
+
+class MemoryExtractionJob(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
+    __tablename__ = "memory_extraction_jobs"
+    __table_args__ = (
+        UniqueConstraint("message_id", name="uq_memory_extraction_jobs_message"),
+        CheckConstraint(
+            "status IN ('PENDING','PROCESSING','DONE','FAILED')",
+            name="ck_memory_extraction_jobs_status",
+        ),
+        CheckConstraint("attempts >= 0", name="ck_memory_extraction_jobs_attempts"),
+        Index("ix_memory_extraction_jobs_claim", "status", "lease_until"),
+    )
+
+    message_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("messages.id", ondelete="CASCADE"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default=text("'PENDING'")
+    )
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
 
 class CustomerSignal(UuidPrimaryKeyMixin, CreatedAtMixin, Base):

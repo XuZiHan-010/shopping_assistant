@@ -10,7 +10,6 @@ from alembic import command
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
-from sqlalchemy import text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,11 +19,11 @@ from app.main import create_app
 from app.models.merchant import Merchant
 from tests.postgres import (
     DEFAULT_TEST_DATABASE_URL,
-    TRUNCATE_ALL_TABLES,
     alembic_config,
     assert_test_database,
     database_is_reachable,
     integration_db_is_required,
+    truncate_all_tables,
 )
 
 MERCHANT_ONE_ID = UUID("00000000-0000-0000-0000-0000000001a1")
@@ -165,11 +164,7 @@ async def integration_database(migrated_postgres: str) -> AsyncIterator[Database
 @pytest_asyncio.fixture
 async def db_session(integration_database: Database) -> AsyncIterator[AsyncSession]:
     async with integration_database.session() as session:
-        # 测试库的清空维护语句需要对所有业务表取得排他锁并同步 WAL；Docker Desktop
-        # 磁盘繁忙时可能超过应用请求的 5 秒 statement timeout。仅在当前清理事务中取消
-        # 超时，commit 后 SET LOCAL 自动还原，业务会话仍由集成测试验证 timeout 已启用。
-        await session.execute(text("SET LOCAL statement_timeout = 0"))
-        await session.execute(text(TRUNCATE_ALL_TABLES))
+        await truncate_all_tables(session)
         await session.commit()
         yield session
         await session.rollback()
@@ -223,7 +218,7 @@ async def postgres_app(migrated_postgres: str) -> AsyncIterator[FastAPI]:
     )
     database = Database(settings)
     async with database.session() as session:
-        await session.execute(text(TRUNCATE_ALL_TABLES))
+        await truncate_all_tables(session)
         session.add_all(
             [
                 Merchant(

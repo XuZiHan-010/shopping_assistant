@@ -4,7 +4,7 @@
 
 - `search_products` / `get_product` / `get_shop_policy`：`READ_ONLY`，可并行；
 - `set_cart_item`：`CUSTOMER_DIRECT`，设置绝对数量，天然幂等。
-- `check_after_sale_eligibility`：`READ_ONLY`；`prepare_after_sale`：
+- `get_my_order` / `check_after_sale_eligibility`：`READ_ONLY`；`prepare_after_sale`：
   `CUSTOMER_CONFIRMATION`，只产出预览，界面另行确认。
 
 没有下单、支付或取消工具——它们只走带 `client_request_id` 的界面路由，
@@ -17,6 +17,8 @@ from app.db.session import Database
 from app.tools.customer.after_sale import build_after_sale_tools
 from app.tools.customer.cart import build_cart_tools
 from app.tools.customer.catalog import build_catalog_tools
+from app.tools.customer.memory import build_memory_tools
+from app.tools.customer.orders import build_order_tools
 from app.tools.types import ToolSpec
 
 
@@ -27,6 +29,8 @@ def build_customer_tools(database: Database) -> tuple[ToolSpec, ...]:
         *build_catalog_tools(database),
         *build_cart_tools(database),
         *build_after_sale_tools(database),
+        *build_order_tools(database),
+        *build_memory_tools(database),
     )
 
 

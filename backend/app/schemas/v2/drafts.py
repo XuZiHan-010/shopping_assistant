@@ -23,6 +23,9 @@ ApprovalEvidence = Annotated[
 ]
 MAX_ENTRIES = 100
 MAX_GUARDRAILS = 20
+#: 新起草的草稿版本号。聊天工具只起草、不编辑，模型在回合内见到的草稿版本都是它
+#: （D9⑦ 批准绑定版本）。
+INITIAL_DRAFT_VERSION = 1
 
 
 class DraftModel(BaseModel):

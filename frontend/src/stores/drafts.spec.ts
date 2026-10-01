@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AppError } from '@/api/errors'
 import { createMockTransport } from '@/api/mock/transport'
 import { setChatTransport } from '@/api/transport'
+import { deferred } from '@/testing/workspacePayloads'
 
 import { useAuthStore } from './auth'
 import { useDraftsStore } from './drafts'
@@ -61,6 +62,78 @@ afterEach(() => {
 })
 
 describe('useDraftsStore', () => {
+  it.each([false, true])('换商家后丢弃旧请求的结果或错误（失败=%s）', async (fail) => {
+    await openTestSession()
+    const store = useDraftsStore()
+    const auth = useAuthStore()
+    const old = deferred<Response>()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: unknown, init: RequestInit) => {
+        if (init.method === 'DELETE') return Promise.resolve(new Response(null, { status: 204 }))
+        if (new Headers(init.headers).get('X-Session-Id') === 'sid'.padEnd(43, '0'))
+          return old.promise
+        return Promise.resolve(
+          jsonResponse({
+            items: [draftSummary({ id: 'new-shop' })],
+            next_cursor: null,
+            has_more: false,
+          }),
+        )
+      }),
+    )
+    const pending = store.loadDrafts().catch(() => undefined)
+    await Promise.resolve()
+    auth.selectByDisplayName(auth.merchants[1]!.displayName)
+    auth.sessionId = 'new-session'.padEnd(43, '0')
+    await store.loadDrafts()
+    if (fail)
+      old.resolve(
+        jsonResponse(
+          {
+            code: 'DATA_SOURCE_UNAVAILABLE',
+            message: '旧商家的失败',
+            request_id: 'old',
+            retryable: true,
+          },
+          503,
+        ),
+      )
+    else
+      old.resolve(
+        jsonResponse({ items: [draftSummary()], next_cursor: 'old-cursor', has_more: true }),
+      )
+    await pending
+    expect(store.items.map((item) => item.id)).toEqual(['new-shop'])
+    expect(store.nextCursor).toBeNull()
+    expect(store.hasMore).toBe(false)
+    expect(store.errorMessage).toBe('')
+    expect(store.loading).toBe(false)
+  })
+
+  it('先发后至的列表不能覆盖后发列表或提前结束 loading', async () => {
+    await openTestSession()
+    const store = useDraftsStore()
+    const old = deferred<Response>()
+    const latest = deferred<Response>()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockReturnValueOnce(old.promise).mockReturnValueOnce(latest.promise),
+    )
+    const first = store.loadDrafts()
+    await Promise.resolve()
+    const second = store.loadDrafts()
+    await Promise.resolve()
+    old.resolve(jsonResponse({ items: [draftSummary()], next_cursor: 'old', has_more: true }))
+    await first
+    expect(store.loading).toBe(true)
+    expect(store.items).toEqual([])
+    latest.resolve(
+      jsonResponse({ items: [draftSummary({ id: 'latest' })], next_cursor: null, has_more: false }),
+    )
+    await second
+    expect(store.items.map((item) => item.id)).toEqual(['latest'])
+  })
   it('loadDrafts 通过会话重试机制拉取列表并写入 Store', async () => {
     await openTestSession()
     const store = useDraftsStore()
@@ -189,7 +262,10 @@ describe('useDraftsStore', () => {
           items: [
             draftSummary({ id: 'd-b1-a', kind: 'CONTENT_CHANGE', batch_id: 'batch-1' }),
             draftSummary({
-              id: 'd-b1-b', kind: 'CONTENT_CHANGE', batch_id: 'batch-1', state: 'APPLIED',
+              id: 'd-b1-b',
+              kind: 'CONTENT_CHANGE',
+              batch_id: 'batch-1',
+              state: 'APPLIED',
             }),
           ],
           next_cursor: null,
@@ -201,8 +277,9 @@ describe('useDraftsStore', () => {
 
     const batchGroup = store.groupedItems.find((group) => group.batchId === 'batch-1')
     // 只有仍处于 STAGED 的子草稿需要（也应该能）被批准；已应用的不重复处理。
-    expect(batchGroup?.items.filter((item) => item.state === 'STAGED').map((item) => item.id))
-      .toEqual(['d-b1-a'])
+    expect(
+      batchGroup?.items.filter((item) => item.state === 'STAGED').map((item) => item.id),
+    ).toEqual(['d-b1-a'])
   })
 
   it('切换商家会话时草稿列表被清空（复用 registerSessionScopedReset 钩子）', async () => {

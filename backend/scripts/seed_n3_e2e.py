@@ -36,22 +36,26 @@ async def main() -> None:
             )
             session.add(product)
             await session.flush()
-            order = Order(
-                merchant_id=S3_MERCHANT_ID, business_date=(now - timedelta(days=9)).date(),
-                order_no="N3-E2E-O001", buyer_key="n3-e2e-buyer",
-                order_status="PAID", total_amount=Decimal("300.00"),
-                paid_amount=Decimal("300.00"), placed_at=now - timedelta(days=9),
-                paid_at=now - timedelta(days=9), payment_status="PAID",
-                fulfillment_status="NOT_SHIPPED", lifecycle_origin="V2",
-            )
-            session.add(order)
-            await session.flush()
-            session.add(OrderItem(
-                merchant_id=S3_MERCHANT_ID, business_date=order.business_date,
-                order_id=order.id, product_id=S3_PRODUCT_ID, quantity=3,
-                unit_price=Decimal("100.00"), item_amount=Decimal("300.00"),
-                discount_amount=Decimal("0.00"), line_total=Decimal("300.00"),
-            ))
+            # 归因窗口在周一会切换：始终播种一笔当日支付单，保证当前窗口有数据。
+            for index, (days_ago, quantity) in enumerate(((7, 3), (0, 1)), start=1):
+                paid_at = now - timedelta(days=days_ago)
+                amount = Decimal("100.00") * quantity
+                order = Order(
+                    merchant_id=S3_MERCHANT_ID, business_date=paid_at.date(),
+                    order_no=f"N3-E2E-O{index:03d}", buyer_key="n3-e2e-buyer",
+                    order_status="PAID", total_amount=amount,
+                    paid_amount=amount, placed_at=paid_at,
+                    paid_at=paid_at, payment_status="PAID",
+                    fulfillment_status="NOT_SHIPPED", lifecycle_origin="V2",
+                )
+                session.add(order)
+                await session.flush()
+                session.add(OrderItem(
+                    merchant_id=S3_MERCHANT_ID, business_date=order.business_date,
+                    order_id=order.id, product_id=S3_PRODUCT_ID, quantity=quantity,
+                    unit_price=Decimal("100.00"), item_amount=amount,
+                    discount_amount=Decimal("0.00"), line_total=amount,
+                ))
             metric = await session.scalar(
                 select(MetricDefinition).where(MetricDefinition.metric_code == "net_gmv")
             )

@@ -12,7 +12,7 @@ from sqlalchemy import text
 
 from app.db.session import Database
 from app.repositories.llm_budget import LlmBudgetRepository
-from tests.postgres import TRUNCATE_ALL_TABLES
+from tests.postgres import truncate_all_tables
 
 USAGE_DATE = date(2026, 8, 6)
 
@@ -22,7 +22,7 @@ async def clean_database(integration_database: Database) -> AsyncIterator[Databa
     """为仓储自行管理的事务显式清理数据库。"""
 
     async with integration_database.session() as session:
-        await session.execute(text(TRUNCATE_ALL_TABLES))
+        await truncate_all_tables(session)
         # 通用的经营数据截断集合不含这个 B7 新表；测试必须可重复执行。
         await session.execute(text("TRUNCATE TABLE llm_daily_budget CASCADE"))
         await session.commit()

@@ -62,8 +62,8 @@ for m, p in sorted(missing): print("  缺", m, p)
 for m, p in sorted(extra):   print("  多", m, p)
 ```
 
-2026-09-27 以同一口径对 `docs/api.json` 预跑：PRD 50 条、已导出 42 条、**缺 8、多 0**——
-N3 残留 2 条（`GET /merchant/products/content`、`GET /merchant/coupons`）、N4 记忆 5 条、N5 MCP 1 条。
+2026-09-28 以同一口径对 `docs/api.json` 预跑：PRD 50 条、已导出 44 条、**缺 6、多 0**——
+N4 记忆 5 条、N5 MCP 1 条（N3 的 `GET /merchant/products/content`、`GET /merchant/coupons` 已于 2026-09-27 补齐）。
 收口时以 `app.routes` 重跑为准，本数字只作进度参照。
 
 - [ ] **步骤 1：运行**，期望 **缺 0、多 0**
@@ -180,6 +180,11 @@ PRD §15 N5「双端对外演示」。
 演示脚本中"此处体现的规则"一列，是把工程约束**讲出来**的关键——
 例如 S3 批准时点出"批准绑定草案版本、应用时复检当前库存、聊天里的批准不生效"。
 可参考 `frontend/prototypes/borough-dual-end-prototype.html` 的治理标注方式组织讲解。
+商家端按 PRD §15「W」重设计后的界面演示：入口 URL 为首页 `/`，助手从助手栏打开；不再使用 `/ops-assistant` 整页。
+顾客端按「WS」重设计后的界面演示：
+- 入口 `/{shop_slug}` 为智能助手首页，购物车在右侧常驻；
+- 旧路径 `/assistant`、`/cart`、`/memories` 只做重定向；
+- 商品图片未交付时如实演示“暂无图片”占位。
 
 ---
 
@@ -220,7 +225,14 @@ PRD §11.1：v1 端点在"相应 v2 能力实现、前端切换、契约测试�
 | 商品内容批量草稿 `batch_id`（2026-09-25，契约先行） | M4 | 契约 §8.13.1–§8.13.3；`n3-merchant-skills` Task 3 |
 | 商品属性值统一为 Mapping 结构（2026-09-26） | M4、D11 | `n3-merchant-skills` Task 3、7 |
 | 两页合并「选项 C」：先补图表可视化再合并，v1 前端下线、v1 后端保留（2026-09-27） | §15 N2 | 契约 §8.7.11；`n3-merchant-skills` Task 9 |
-| N4 / N5 编组待裁定项 D-N4-1 至 D-N4-3、D-N5-1 至 D-N5-2 的最终结论 | 视裁定 | `plans/2026-09-27-n4-module-roadmap.md`、`2026-09-27-n5-module-roadmap.md` §六 |
+| D-N4-1 多轮历史回放：同会话最近 6 轮文字，不回放工具结果；**历史中的数字视为无来源**（2026-09-28） | A5 | 契约 §8.8.3 / §8.9.3、§6.10；`n4-context-compaction` Task 0 |
+| D-N4-2 访客回合不抽取记忆，绑定后不补抽（2026-09-28） | C7 | 后端计划 §6.13；`n4-memory-pipeline` Task 3 |
+| D-N4-3 商家记忆面板做最小版，列为 N4 第一个可砍项（2026-09-28） | M11（若被砍则改写） | `n4-memory-pipeline` Task 9 |
+| D-N5-1 运维看板为新建只读管理员页 `OpsStatusView.vue`（2026-09-28） | §14、§10.4 | `n5-budget-ops-and-railway` Task 3 步骤 3 |
+| D-N5-2 已删 E2E：会话目录与双语已重建；`real-api/analytics.spec.ts` 不在浏览器层重建；`ops-dashboard.spec.ts` 随新看板重写（2026-09-28） | §12.4、§10.6 | 本计划 Task 9 步骤 1a |
+| D-N5-3 MCP 默认不提前；用户提出时间节点时启用「N4-A 完成后 Opus 接做 N5-A」（2026-09-28） | —（排期） | `plans/2026-09-27-n5-module-roadmap.md` §三 |
+| W 商家工作台界面重设计：`/` 为首页、助手栏默认收起、知识库入「管理」分组须管理员令牌、新增订单区与首页主指标（2026-09-28） | M1、§11.2.3、§14、§15「W」 | 契约 §8.12.4；`plans/2026-09-28-merchant-workbench-redesign.md` |
+| WS 顾客端店面重设计：智能助手首页、右侧常驻购物车、订单视图、动态抽屉；热门排序、缺失属性、订单摘要首件商品、只读工具 `get_my_order`；演示商品换真实名与图片（2026-09-28） | C1、C2、§8.3、§11.2.2 语义、§15「WS」（由 WS Task 1 写入） | 契约 §8.8.1、§8.8.2、§8.10.1、顾客工具说明；`plans/2026-09-28-shop-storefront-redesign.md` |
 
 本任务在收口时**只做复核**：确认上表每一项在 PRD、契约、实现与测试中仍然一致；
 若实施中又出现新的不一致，它应当已在**发现当时**按四层顺序处理，
@@ -230,10 +242,18 @@ PRD §11.1：v1 端点在"相应 v2 能力实现、前端切换、契约测试�
 由 `n4-context-compaction` 在选定时写入后端计划 §6.12，本任务复核其已写入。
 
 - [ ] **步骤 1：逐项复核上表**，并检查 N2–N4 执行期间是否有新增的不一致被遗漏
-- [ ] **步骤 1a：前端 E2E 验证缺口复核**（2026-09-27 编组新增）——两页合并时整份删除的
-      `conversation.spec.ts`、`ops-dashboard.spec.ts`、`localization.spec.ts`、`real-api/analytics.spec.ts`
-      已登记为缺口，原因是 v2 层缺少 fetch Mock 基础设施。收口前二选一：补齐基础设施并重建等价 v2 场景；
-      或在验收矩阵中逐条列为「未覆盖」并写明影响的 PRD 条目（§12.4 会话目录、§10.6 双语）。**不得静默略过**
+- [ ] **步骤 1a：前端 E2E 验证缺口复核**（2026-09-27 编组新增；D-N5-2 于 2026-09-28 裁定）——两页合并时整份删除的
+      4 份 E2E 按下表逐项核对，**矩阵中每一行都要有落点，不得静默略过**：
+
+  | 已删除 | 处置 | 状态（2026-09-28） |
+  | --- | --- | --- |
+  | `conversation.spec.ts`（13 例） | 以 `e2e/support/v2MerchantMock.ts` 重建为 `ops-assistant-conversation.spec.ts` | 已重建 5 例（一问一答、打开历史、删除、反馈回执、切换商家清空）；收口时对照 §12.4「新建、浏览、跳转、删除」与移动端无横向溢出逐条核对，缺哪条补哪条 |
+  | `localization.spec.ts` | 重建为 `ops-assistant-localization.spec.ts` | 已重建 2 例；**§10.6「缺译文回退源文并标注」未见浏览器层用例**，收口时确认是否已由单测覆盖，否则补 1 例 |
+  | `ops-dashboard.spec.ts` | 随 D-N5-1 新页面重写为 `ops-status.spec.ts` | 待 `n5-budget-ops-and-railway` Task 3 步骤 3 |
+  | `real-api/analytics.spec.ts`（8 例） | **不在浏览器层重建**：对应的 v1 前端已下线；v1 后端能力由后端集成测试覆盖，v2 导出与隔离由后端集成、`tests/e2e/` 场景与安全集覆盖 | 矩阵中写「浏览器层不重复验证」并列出替代证据文件；**不得写成「已覆盖」而不给文件** |
+
+  前两行已重建的用例在 W Task 6 步骤 3 中只改入口（`/` 改为首页，助手从助手栏打开），不删断言。收口时以改入口后的版本核对。
+  顾客端的 `conversations-responsive.spec.ts`、`memories-responsive.spec.ts`、S1、S4 同理，以 WS Task 13 改过入口的版本为准，核对 375px 与 §12.4 断言都还在。
 - [ ] **步骤 2：更新 `docs/project-progress.md`** 为 N5 完成后的快照
 - [ ] **步骤 3：更新 `docs/project-navigation.md`**——新目录（`shop/`、`app/tools/` 等）
       的"尚未创建"标记改为实际状态

@@ -13,7 +13,12 @@
    受信 Skill（§6.11）：工具名为 `load_skill` **且** payload 类型为注册表产出的 `SkillSpec`、
    且该 Skill 属于当前会话角色时才免围栏——不看文本里有没有 `<skill>` 标记；
    单回合加载数超过 `max_skill_loads` 的调用被拒绝并告知模型，回合继续（PRD A4）；
-7. 客户端断开（`cancel` 被置位）时停止后续 LLM 调用；已完成的部分随 `LoopOutcome` 交给调用方落库。
+7. 客户端断开（`cancel` 被置位）时停止后续 LLM 调用；已完成的部分随 `LoopOutcome`
+   交给调用方落库；
+8. 每次工具轮决策前估算上下文，超过 `LoopLimits.compaction.trigger_tokens` 时按配置策略
+   压缩（§6.12）；压缩真正改变上下文时发出 `ContextCompacted`（SSE `step`），不静默发生。
+   摘要调用走同一份预算；确定性校验的来源（`sources` 与完整 `ToolResult`）在回合开始时固定，
+   不受压缩影响。
 
 本模块与冻结的 `app.agent.graph` 不共享代码路径（§5.6）。
 """
@@ -32,6 +37,13 @@ from dataclasses import dataclass, field
 from typing import Final, Literal, Protocol
 
 from app.agent.loop.checks import DEFAULT_CHECKS, DeterministicCheck
+from app.agent.loop.compaction import (
+    CompactionOutcome,
+    CompactionStrategy,
+    estimate_tokens,
+)
+from app.agent.loop.compaction.pruning import prune_tool_results
+from app.agent.loop.compaction.summarization import summarize_early_context
 from app.agent.loop.fencing import FENCE_POLICY, fence
 from app.agent.loop.limits import LoopLimits
 from app.core.errors import ErrorCode
@@ -147,6 +159,10 @@ _REVIEW_FALLBACK_NOTE: Final[dict[SupportedLocale, str]] = {
     SupportedLocale.EN_US: "The independent review did not pass",
 }
 
+#: DeepSeek 内部工具调用标记（半角或全角竖线，如 `<｜｜DSML｜｜ calls>`）。
+#: 2026-09-30 E5 真实对比中，不给工具时模型把这段语法直接写进了正文。
+_TOOL_CALL_MARKUP: Final = re.compile(r"<\s*/?\s*[|｜]+\s*DSML\s*[|｜]+")
+
 
 # --- 输入输出 --------------------------------------------------------------------
 
@@ -158,6 +174,9 @@ class LoopRequest:
     user_message: str
     history: Sequence[LlmMessage] = ()
     locale: SupportedLocale = SupportedLocale.ZH_CN
+    #: 按用户变化的记忆段（调用方已围栏）。模型看得到，但**不是数字来源**（M11、A6）：
+    #: 与 `system_prompt` 分开传，确定性校验只把后者算作来源；放在稳定前缀之后（A9）。
+    memory_context: str = ""
 
 
 @dataclass
@@ -177,6 +196,8 @@ class LoopOutcome:
     #: 只给后端与评测，不进 SSE、不进响应契约。
     loaded_skills: list[str] = field(default_factory=list)
     skill_limit_hit: bool = False
+    #: 本回合每次实际生效的压缩所用策略（按发生顺序）；调用方据此写 `thinking_steps`。
+    compactions: list[CompactionStrategy] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -194,7 +215,14 @@ class ToolCallFinished:
     display: ToolDisplay
 
 
-LoopEvent = ToolCallStarted | ToolCallFinished
+@dataclass(frozen=True)
+class ContextCompacted:
+    """一次压缩改变了模型可见的上下文；路由投影成 `step` 事件。只含策略，不含任何上下文内容。"""
+
+    strategy: CompactionStrategy
+
+
+LoopEvent = ToolCallStarted | ToolCallFinished | ContextCompacted
 #: 循环进行中的事件出口，供 SSE 在回合结束前逐步推送；事件里只有 `ToolDisplay` 级别的信息。
 EventSink = Callable[[LoopEvent], Awaitable[None]]
 
@@ -276,11 +304,13 @@ class _Run:
         self.deadline = clock() + limits.wall_clock_seconds
         self.budget = limits.new_budget()
         self.messages = _initial_messages(request)
-        #: 回答里的数字可以引用的非工具来源：系统提示词（店名等）、本轮与历史消息。
+        #: 回答里的数字可以引用的非工具来源：系统提示词（店名等）、本轮与历史中的**用户**消息。
+        #: 历史里的助手回答是模型生成内容，不能给本轮数字作证（D-N4-1，契约 §6.12）——
+        #: 否则模型复述一次自己编的数字，下一轮就能凭「历史」通过校验。
         self.sources = [
             request.system_prompt,
             request.user_message,
-            *(m.content for m in request.history),
+            *(m.content for m in request.history if m.role == "user"),
         ]
         self.displays: list[ToolDisplay] = []
         self.results: list[ToolResult] = []
@@ -291,11 +321,14 @@ class _Run:
         self.skill_loads = 0
         self.loaded_skills: list[str] = []
         self.skill_limit_hit = False
+        self.compactions: list[CompactionStrategy] = []
+        self.compaction_calls = 0
 
     # --- 工具轮 ------------------------------------------------------------------
 
     async def tool_loop(self) -> str:
         for turn_number in range(1, self.limits.max_turns + 1):
+            await self.maybe_compact()
             turn = await self.converse(self.tools)
             if turn.stop_reason == "END_TURN":
                 if not (turn.text or "").strip():
@@ -320,6 +353,38 @@ class _Run:
             await self.run_batch(turn.tool_calls)
         raise _Stop("MAX_TURNS")  # pragma: no cover - 循环体已覆盖所有出口
 
+    async def maybe_compact(self) -> None:
+        policy = self.limits.compaction
+        if policy is None or estimate_tokens(self.messages) <= policy.trigger_tokens:
+            return
+        locale = self.request.locale
+        outcome: CompactionOutcome
+        if policy.strategy is CompactionStrategy.SUMMARIZATION:
+            outcome = await self.guard(
+                summarize_early_context(
+                    self.messages,
+                    self.results,
+                    llm=self.llm,
+                    budget=self.budget,
+                    locale=locale,
+                    remaining_calls=policy.max_calls - self.compaction_calls,
+                    keep_recent_rounds=policy.keep_recent_rounds,
+                )
+            )
+        else:
+            outcome = prune_tool_results(
+                self.messages,
+                self.results,
+                locale=locale,
+                keep_recent_rounds=policy.keep_recent_rounds,
+            )
+        self.compaction_calls += outcome.llm_calls
+        if not outcome.changed:
+            return
+        self.messages = outcome.messages
+        self.compactions.append(outcome.strategy_used)
+        await self.emit(ContextCompacted(strategy=outcome.strategy_used))
+
     async def converse(self, tools: list[ToolSchema]) -> LlmTurn:
         try:
             turn = await self.guard(
@@ -333,6 +398,13 @@ class _Run:
         except LlmUnavailableError:
             raise _Stop("UPSTREAM") from None
         if turn.degraded or turn.stop_reason == "ERROR":
+            raise _Stop("UPSTREAM")
+        if turn.text and _TOOL_CALL_MARKUP.search(turn.text):
+            # 上游把内部工具调用语法写进了正文（常见于不给工具的质量重写）：这不是回答，
+            # 不能原样展示给用户，也不能当成工具调用执行（R7：按上游异常可见降级）。
+            logger.warning(
+                "tool_call_markup_in_text request_id=%s", self.request.context.request_id
+            )
             raise _Stop("UPSTREAM")
         return turn
 
@@ -529,6 +601,7 @@ class _Run:
             tool_results=list(self.results),
             loaded_skills=list(self.loaded_skills),
             skill_limit_hit=self.skill_limit_hit,
+            compactions=list(self.compactions),
         )
 
     async def emit(self, event: LoopEvent) -> None:
@@ -609,7 +682,10 @@ def _parallel_safe(call: AdmittedCall) -> bool:
 
 def _initial_messages(request: LoopRequest) -> list[LlmMessage]:
     customer = request.context.session.role is SessionRole.CUSTOMER
-    messages = [LlmMessage(role="system", content=f"{request.system_prompt}\n\n{FENCE_POLICY}")]
+    system = f"{request.system_prompt}\n\n{FENCE_POLICY}"
+    if request.memory_context:
+        system = f"{system}\n\n{request.memory_context}"
+    messages = [LlmMessage(role="system", content=system)]
     for message in request.history:
         if customer and message.role == "user":
             message = LlmMessage(role="user", content=fence(message.content, source="customer"))

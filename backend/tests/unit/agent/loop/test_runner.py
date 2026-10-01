@@ -12,7 +12,7 @@ import pytest
 
 from app.agent.loop import runner as runner_module
 from app.agent.loop.checks import ungrounded_numbers
-from app.agent.loop.fencing import FENCE_NOTICE
+from app.agent.loop.fencing import FENCE_NOTICE, FENCE_POLICY
 from app.agent.loop.runner import (
     LoopEvent,
     LoopRequest,
@@ -717,6 +717,50 @@ async def test_customer_history_messages_are_fenced() -> None:
     assert sent[2].content == "好的，我来看看。"  # 助手历史不是外部文本
 
 
+# --- 历史回放：助手旧回答不是事实来源（D-N4-1，PRD A5，契约 §6.12） -------------------
+
+
+async def test_number_only_in_replayed_assistant_history_is_unsourced() -> None:
+    """模型只复述历史回答里的数字、本轮没调用工具：数字无来源，按 VALIDATION 降级。"""
+
+    llm = FakeLlmClient(turns=[end_turn("净成交额是 12.3 万"), end_turn("净成交额是 12.3 万")])
+    request = LoopRequest(
+        context=merchant_request().context,
+        system_prompt="你是 Borough 商家经营助手。",
+        user_message="再说一遍净成交额",
+        history=(
+            LlmMessage(role="user", content="本周净成交额多少"),
+            LlmMessage(role="assistant", content="净成交额是 12.3 万"),
+        ),
+    )
+
+    out = await _run(llm, request, reviewer=ScriptedReviewer())
+
+    assert out.degraded is True
+    assert out.degraded_reason is DegradeReason.VALIDATION
+    assert "12.3" not in out.answer
+
+
+async def test_number_stated_by_user_in_history_is_a_source() -> None:
+    """用户自己在历史里说过的数字仍可引用：那是用户的输入，不是模型生成内容。"""
+
+    llm = FakeLlmClient(turns=[end_turn("收到，按上周卖出 350 件来安排")])
+    request = LoopRequest(
+        context=merchant_request().context,
+        system_prompt="你是 Borough 商家经营助手。",
+        user_message="按我刚才说的数来安排",
+        history=(
+            LlmMessage(role="user", content="上周卖了 350 件"),
+            LlmMessage(role="assistant", content="好的，记下了。"),
+        ),
+    )
+
+    out = await _run(llm, request, reviewer=ScriptedReviewer())
+
+    assert out.degraded is False
+    assert "350" in out.answer
+
+
 # --- 英文降级文案 -------------------------------------------------------------------
 
 
@@ -773,3 +817,62 @@ def test_loop_does_not_import_frozen_graph() -> None:
     )
     for path in Path(runner_module.__file__).parent.glob("*.py"):
         assert not frozen_import.search(path.read_text(encoding="utf-8")), path.name
+
+
+# --- 记忆不是事实来源（M11、A6，N4-B Task 5）-----------------------------------------
+
+
+async def test_number_only_in_memory_context_is_unsourced() -> None:
+    """记忆随系统消息注入但不进数字来源：只凭记忆复述的数字判无来源并降级。"""
+
+    llm = FakeLlmClient(turns=[end_turn("净成交额是 50 万"), end_turn("净成交额是 50 万")])
+    request = LoopRequest(
+        context=merchant_request().context,
+        system_prompt="你是 Borough 商家经营助手。",
+        user_message="上个月卖得怎么样",
+        memory_context="商家偏好：上月净成交额大约 50 万",
+    )
+
+    out = await _run(llm, request)
+
+    assert out.degraded is True and out.degraded_reason is DegradeReason.VALIDATION
+    system = llm.converse_calls[0].messages[0].content
+    assert "上月净成交额大约 50 万" in system  # 模型看得到记忆
+    assert system.index(FENCE_POLICY) < system.index("上月净成交额")  # 变化段落在稳定前缀之后
+
+
+async def test_empty_memory_context_leaves_system_message_unchanged() -> None:
+    llm = FakeLlmClient(turns=[end_turn("你好")])
+
+    await _run(llm, merchant_request())
+
+    assert llm.converse_calls[0].messages[0].content == (
+        f"你是 Borough 商家经营助手。\n\n{FENCE_POLICY}"
+    )
+
+
+# --- 上游把工具调用写进正文（2026-09-30 E5 真实对比发现）----------------------------
+
+_DSML = "<｜｜DSML｜｜ calls> <｜｜DSML｜｜ invoke name=\"query_metrics\"> </｜｜DSML｜｜ invoke>"
+
+
+async def test_tool_call_markup_in_answer_is_upstream_degradation() -> None:
+    """DeepSeek 在不给工具或解析失败时，可能把内部工具调用语法写进正文；不得当回答展示。"""
+
+    llm = FakeLlmClient(turns=[end_turn(_DSML)])
+
+    out = await _run(llm)
+
+    assert out.stop_reason == "UPSTREAM" and out.degraded is True
+    assert "DSML" not in out.answer
+
+
+async def test_tool_call_markup_in_regenerated_answer_is_upstream_degradation() -> None:
+    """质量重写不给工具，最容易出现这种输出。"""
+
+    llm = FakeLlmClient(turns=[end_turn("净成交额是 777 万"), end_turn(_DSML)])
+
+    out = await _run(llm)
+
+    assert out.stop_reason == "UPSTREAM" and out.degraded is True
+    assert "DSML" not in out.answer

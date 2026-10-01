@@ -46,6 +46,7 @@ export default async function startN3E2EServers() {
     })
     stopShop = await startManagedServer({
       label: 'N3 E2E shop', port: 3275, cwd: SHOP_ROOT, healthPath: '/health',
+      startupTimeoutMs: 90_000,
       args: ['node_modules/next/dist/bin/next', 'dev', '--hostname', '127.0.0.1', '--port', '3275'],
       env: { NEXT_PUBLIC_API_BASE_URL: `http://127.0.0.1:${BACKEND_PORT}` },
     })

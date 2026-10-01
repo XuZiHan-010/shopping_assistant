@@ -85,3 +85,30 @@ uv run pytest tests/unit/skills tests/unit/services/v2 tests/unit/tools tests/in
 - **F4**：移除 `skill_conflict_resolved` 伪响应字段；评测断言从评测侧加载轨迹读取 `tool_calls_include/exclude`，不污染产品响应。44 条 YAML 用例和 27 个实际 Skill 两两组合已在 Fake LLM 工具循环中执行。此验证覆盖加载与冲突机制，不代表真实模型意图选择质量；后者仍须遵守 R3 单独取得费用授权。
 
 整改定向回归：**241 passed / 3 skipped / 0 failed**（3 项仍为 Windows 符号链接权限）；`mypy app` 检查 264 个文件通过。首次审查所记的简报模块静态错误在复核时已不再出现；本次没有把并行工作树的变化归功于上述四项修复。N3 阶段 C 出口、浏览器场景与真实模型质量仍待各自验收，因此本记录不改判为 N3 整体通过。未调用真实 LLM、未使用生产数据、未执行 Git 发布操作。
+
+## 整改后复审（2026-09-28，Opus）
+
+审查者：Opus。N3-2、N3-3、F2–F4 的实现者不是本会话（阶段 B 由 Sol 实现，F1–F4 整改由其他会话完成），对这几项算独立复审；
+N3-4 的下载审计修复由本会话完成，属于自审。未调用真实 LLM，未执行 Git 发布操作。
+
+| 项 | 复审结论 | 依据 |
+| --- | --- | --- |
+| F1 导出护栏 | 通过 | `CreateExportArgs` 拒绝倒置与超过 90 天；签发前计数，超过 1000 行拒绝且不写 `ExportFile`；下载按落库记录重查、取 1001 行探测超限并拒绝。复审另发现 **下载审计从未实现**（PRD §408、SEC10），已补 `EXPORT_DOWNLOADED`（签名校验与内容生成成功后才写），新增 2 条先红后绿的集成测试。 |
+| F2 预览金额 | 通过 | 工具预览与界面预检使用同一退款查询（`REFUNDED`、同商家）与 `refundable`，逐行换算为分后求和；`test_chat_preview_matches_confirmation_after_partial_refund` 复现原探针（实付 100 元、已退 30 元 → 7000 分）。非阻塞缺口：「选中已退完的行」「多行混合」未单独成测，走同一代码路径。 |
+| F3 已消费令牌 | 通过 | 新请求顺序为订单归属 → 验证 → 消费 → 加锁复检；已消费返回 `CONFIRMATION_REQUIRED`（`test_consumed_confirmation_with_new_request_id_uses_confirmation_error`）。路由只在成功后提交，复检失败时消费随事务回滚。过期与篡改由共用证据服务单测覆盖，售后端点未单独成测（非阻塞）。 |
+| F4 Skill 用例 | 通过（机制层） | `skill_conflict_resolved` 已移除；`test_real_skill_cases.py` 用 11 份真实 Skill 执行 44 条用例与 27 组同角色两两组合。脚本化模型按 YAML 期望加载，故只证明加载、角色、围栏与不覆盖，不证明意图选择质量（R3 待人工验收）。 |
+| N3-2 退款与状态机 | 通过 | `refundable` 只接受有限 `Decimal`、累计超快照即拒、逐行舍入到分；状态机同时校验迁移表与触发方，外部不能以 `SYSTEM` 发起，续跳同事务生成；除初始 `PENDING_MERCHANT` 外所有状态写入都经 `transition()`。 |
+| N3-3 两阶段确认 | 通过 | 令牌绑定会话、商家、顾客摘要、订单、类型与请求摘要；一次性消费；顾客工具只产出 `ConfirmationPreview`，任何工具都拿不到令牌、调不到确认端点。 |
+| N3-4 | 通过（下载审计为自审修复） | 见 F1；口径 SQL 只读不执行；售后决定载荷 `extra="forbid"` 无金额，退款批准时后端计算；商家端只有 `buyer_alias`。 |
+| N3-5 | 通过（机制层） | 同 F4；跨角色加载被拒且不泄露正文（`test_other_role_skill_name_is_rejected_without_leaking_body`）。 |
+
+复审中另发现并修复一处阶段 C 遗漏：Task 7 步骤 3（两个顾客 Skill 正文指向 `get_product_attribute`）从未执行，已补并升版本至 2，
+`tests/unit/skills` 179 passed。
+
+**验证：** 后端全量 `REQUIRE_INTEGRATION_DB=1` **3949 passed / 4 skipped / 0 failed**；4 项跳过另行补跑——时序哨兵在独占库
+`REQUIRE_SECURITY_TIMING=1` **1 passed**，3 项符号链接用例在 Linux 容器 `tests/unit/skills` **181 passed**（唯一跳过为 Windows 专属 junction，Windows 上实际执行）。
+`CURRENT_MILESTONE` 切到 `"N3"` 后 `tests/eval` **140 passed**。浏览器层：S1（`shop` 5 passed）、S2/S5/S6/S7（`frontend` n3 4 passed）、
+S3（2 passed）、S4 商家端 1 passed、顾客端 1 passed。`ruff check .`、`mypy app`（267 文件）通过；`shop` 单测 93 passed、类型检查、lint、构建、
+codegen/tokens 检查通过。复审时修正 `shop/playwright.config.ts` 两处配置疏漏（未排除 `e2e/s4`；未固定 `zh-CN` 浏览器语言导致 S1 中文断言在英文页面失败）。
+
+**结论：** F1–F4 整改有效，N3-2 至 N3-5 通过。N3 整体验收结论见 `docs/project-progress.md` 2026-09-28 记录。

@@ -6,7 +6,7 @@
 不能像售后那样累积多条来源历史——`count` 递增但 `derived_from` 只保留"当前这一条"。
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -21,6 +21,8 @@ from app.services.v2.customer_signals import derive_after_sale_signals, derive_c
 
 pytestmark = pytest.mark.integration
 NOW = datetime(2026, 9, 25, 12, tzinfo=UTC)
+# UTC 9/24 20:00 = 上海 9/25 04:00：信号日期必须按业务日记。
+CROSS_DAY = datetime(2026, 9, 24, 20, tzinfo=UTC)
 
 
 @pytest.mark.asyncio
@@ -137,3 +139,25 @@ async def test_content_gap_signal_recounts_after_content_version_changes(
     assert row.derived_from == [
         {"source_type": "PRODUCT", "source_id": str(product_id), "content_version": 2}
     ]
+
+
+@pytest.mark.asyncio
+async def test_signal_date_is_business_day_across_utc_midnight(
+    db_session: AsyncSession, merchant_one_id: UUID
+) -> None:
+    after_sale_product = await _seed_product(db_session, merchant_one_id, "测试")
+    gap_product = await _seed_product(db_session, merchant_one_id, "女装")
+    await derive_after_sale_signals(
+        db_session, merchant_id=merchant_one_id,
+        kind=AfterSaleType.REFUND_ONLY, sale_id=uuid4(),
+        products=[(after_sale_product, "商品")], now=CROSS_DAY,
+    )
+    await derive_content_gap_signal(
+        db_session, merchant_id=merchant_one_id, product_id=gap_product,
+        product_name="商品", content_version=1, now=CROSS_DAY,
+    )
+    rows = list((await db_session.scalars(select(CustomerSignal).where(
+        CustomerSignal.merchant_id == merchant_one_id
+    ))).all())
+    assert sorted(row.kind for row in rows) == ["CONTENT_GAP", "REFUND_REQUESTS"]
+    assert {row.signal_date for row in rows} == {date(2026, 9, 25)}

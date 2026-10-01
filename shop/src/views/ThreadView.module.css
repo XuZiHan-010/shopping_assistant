@@ -1,0 +1,18 @@
+.thread{width:min(100%,850px);margin:0 auto;padding:clamp(1rem,3vw,2rem);min-width:0}
+.header{display:flex;align-items:center;justify-content:space-between;gap:1rem;border-bottom:1px solid var(--line,#ddd5c7);padding-bottom:1rem}
+.header h1{font-size:clamp(1.3rem,2.4vw,1.8rem);margin:0;color:var(--iron,#1f3b2f)}
+.actions{display:flex;gap:.5rem;flex-wrap:wrap}
+.actions button,.byline button,.suggestions button{border:1px solid var(--line,#d7cdbb);border-radius:999px;background:var(--card,#fffdf8);color:var(--iron,#1f3b2f);padding:.45rem .8rem;cursor:pointer}
+.actions button:hover,.byline button:hover,.suggestions button:hover{border-color:var(--gilt,#c39a3a)}
+.log{list-style:none;display:grid;gap:1.2rem;padding:1.25rem 0 7rem;margin:0;min-width:0}
+.userRow{display:flex;justify-content:flex-end}
+.userBubble{max-width:min(85%,560px);margin:0;padding:.85rem 1rem;border-radius:1rem 1rem .2rem 1rem;background:color-mix(in srgb,var(--iron,#1f3b2f) 9%,var(--card,#fffdf8));white-space:pre-wrap;overflow-wrap:anywhere}
+.assistantRow{display:flex;align-items:flex-start;gap:.65rem;min-width:0}
+.avatar{display:grid;place-items:center;flex:0 0 2rem;height:2rem;color:var(--accent,#b5502f);font-size:1.25rem}
+.answer{min-width:0;flex:1}.byline{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap}.byline strong{color:var(--iron,#1f3b2f)}
+.answerText{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.75;margin:.55rem 0}
+.steps{list-style:none;display:grid;gap:.4rem;margin:.6rem 0;padding:.65rem .8rem;border-left:2px solid var(--gilt,#c39a3a);background:var(--card,#fffdf8)}
+.steps li{display:flex;gap:.5rem;align-items:baseline;flex-wrap:wrap}.steps li span{font-size:.75rem;color:var(--muted,#6d716d)}.steps p{margin:0;width:100%;overflow-wrap:anywhere}
+.warning{color:var(--accent,#b5502f);background:color-mix(in srgb,var(--accent,#b5502f) 11%,var(--card,#fffdf8));border-radius:.4rem;padding:.6rem .75rem;overflow-wrap:anywhere}
+.suggestions{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.7rem}
+@media(max-width:600px){.header{align-items:flex-start;flex-direction:column}.userBubble{max-width:92%}}

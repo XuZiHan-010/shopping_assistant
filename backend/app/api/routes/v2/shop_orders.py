@@ -37,8 +37,10 @@ from app.services.v2.checkout import place_order
 from app.services.v2.cursor import CursorCodec, CursorScope, descending
 from app.services.v2.orders import (
     fulfillment_events,
+    last_event_times,
     list_owned_orders,
     order_items,
+    order_leads,
     require_owned_order,
     sort_timestamp,
     to_order_detail,
@@ -176,8 +178,20 @@ async def list_orders(
         audits=audits,
         request_id=_request_id(request),
     )
+    # 只对分页后的当前页批量取首件商品与最近事件时间，避免全量查询（Task 3 步骤 5）。
+    page_orders = [order for order, _ in page.items]
+    leads = await order_leads(session, page_orders)
+    last_events = await last_event_times(session, page_orders)
     return CursorPage[OrderSummary](
-        items=[to_order_summary(order, item_count=count) for order, count in page.items],
+        items=[
+            to_order_summary(
+                order,
+                item_count=count,
+                lead_item=leads[order.id],
+                last_event_at=last_events[order.id],
+            )
+            for order, count in page.items
+        ],
         next_cursor=page.next_cursor,
         has_more=page.has_more,
     )
@@ -200,7 +214,14 @@ async def get_order(
     order = await require_owned_order(
         session, ctx=ctx, order_id=order_id, audits=audits, request_id=_request_id(request)
     )
-    return to_order_detail(order, await order_items(session, order.id))
+    leads = await order_leads(session, [order])
+    last_events = await last_event_times(session, [order])
+    return to_order_detail(
+        order,
+        await order_items(session, order.id),
+        lead_image_url=leads[order.id].image_url,
+        last_event_at=last_events[order.id],
+    )
 
 
 @router.get(

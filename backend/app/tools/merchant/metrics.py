@@ -112,7 +112,8 @@ def build_metrics_tools(database: Database, *, business_timezone: str) -> tuple[
                     MerchantContext(merchant_id=ctx.session.merchant_id),
                     metric=args.metric,
                     dimension=args.dimension,
-                    today=now,
+                    now=now,
+                    business_timezone=business_timezone,
                 )
             except ChartPointLimitExceeded as error:
                 raise FatalToolError(

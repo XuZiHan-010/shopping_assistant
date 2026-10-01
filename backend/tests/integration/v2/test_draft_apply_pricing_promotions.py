@@ -306,6 +306,28 @@ async def test_coupon_discount_over_20_percent_rejected(
 
 
 @pytest.mark.asyncio
+async def test_full_reduction_coupon_over_20_percent_rejected_on_apply(
+    postgres_app: FastAPI, postgres_client: AsyncClient
+) -> None:
+    database = _database(postgres_app)
+    await _set_guardrail(database, MERCHANT_ONE_ID, max_discount_rate=Decimal("0.20"))
+    draft_id, coupon_id = await _stage_coupon(
+        database,
+        MERCHANT_ONE_ID,
+        kind="FULL_REDUCTION",
+        threshold_amount=Decimal("100.00"),
+        discount_amount=Decimal("25.00"),
+    )
+    headers = await merchant_session_headers(postgres_client, MERCHANT_ONE_AUTH)
+    evidence = await _evidence(postgres_client, headers, draft_id)
+    resp = await _apply(postgres_client, headers, draft_id, evidence=evidence, target_version=0)
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["code"] == "GUARDRAIL_REJECTED"
+    async with database.session() as session:
+        assert await session.get(Coupon, coupon_id) is None
+
+
+@pytest.mark.asyncio
 async def test_coupon_replay_after_apply_is_a_target_conflict_not_a_duplicate_insert(
     postgres_app: FastAPI, postgres_client: AsyncClient
 ) -> None:

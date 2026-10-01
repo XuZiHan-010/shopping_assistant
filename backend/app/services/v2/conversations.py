@@ -25,7 +25,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import InvalidCursorError
 from app.core.session import SessionContext, principal_digest
+from app.llm.client import LlmMessage
 from app.localization.locales import SupportedLocale
+from app.memory.pipeline import enqueue_turn
 from app.models.answer import Answer
 from app.models.conversation import Conversation, Message
 from app.repositories.audit import AuditRepository
@@ -61,6 +63,7 @@ async def record_turn(
     locale: SupportedLocale,
     client_request_id: str,
     request_digest: str,
+    ctx: SessionContext,
     processing_status: str = "SUCCEEDED",
 ) -> None:
     """写入一轮的两条消息与回答行，并把对话的最近活动时间推到这一轮。
@@ -83,6 +86,7 @@ async def record_turn(
         content=message,
         source_locale=locale.value,
         created_at=started,
+        session_record_id=ctx.session_record_id,
     )
     session.add_all(
         [
@@ -99,6 +103,7 @@ async def record_turn(
         ]
     )
     await session.flush()
+    await enqueue_turn(session, message=user_message, ctx=ctx)
     session.add(
         Answer(
             id=UUID(response.id),
@@ -117,6 +122,42 @@ async def record_turn(
     )
     conversation.updated_at = answered_at
     await session.flush()
+
+
+async def load_history(
+    session: AsyncSession, conversation: Conversation, *, max_turns: int
+) -> list[LlmMessage]:
+    """同一会话最近 `max_turns` 轮的用户与助手文字，按时间正序（D-N4-1，契约 §8.8.3 / §8.9.3）。
+
+    调用方必须先经 `require_owned()` / 本端 `_conversation()` 确认对话归属且未删除；这里再按
+    对话的 `merchant_id` 过滤一次，归属查询出错时也不会读到别店的消息（R5）。
+
+    只回放文字：工具结果从不落库，推理内容不跨回合回放（§6.17）。顾客原话的围栏由循环统一加
+    （`_initial_messages`），这里不做——同一段文字只在一处决定怎么进提示词。截断落在一轮中间时，
+    丢掉开头孤立的助手回答，让模型看到的每轮都是「问 → 答」。
+    """
+
+    if max_turns <= 0:
+        return []
+    rows = (
+        await session.scalars(
+            select(Message)
+            .where(
+                Message.conversation_id == conversation.id,
+                Message.merchant_id == conversation.merchant_id,
+                Message.role.in_(_VISIBLE_ROLES),
+            )
+            .order_by(Message.created_at.desc(), Message.id.desc())
+            .limit(max_turns * 2)
+        )
+    ).all()
+    ordered = list(reversed(rows))
+    if ordered and ordered[0].role == "ASSISTANT":
+        ordered = ordered[1:]
+    return [
+        LlmMessage(role="user" if row.role == "USER" else "assistant", content=row.content)
+        for row in ordered
+    ]
 
 
 @dataclass(frozen=True)

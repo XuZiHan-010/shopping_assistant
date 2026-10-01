@@ -587,3 +587,138 @@ async def test_guest_cannot_read_orders(
 
     assert resp.status_code == 403
     assert resp.json()["code"] == "CUSTOMER_BINDING_REQUIRED"
+
+
+# ---- 首件商品与最近更新时间（Task 3）------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_lead_item_reflects_the_first_line_price_snapshot(
+    postgres_app: FastAPI, postgres_client: AsyncClient
+) -> None:
+    database = database_of(postgres_app)
+    pid_a = await seed_product(
+        database, MERCHANT_ONE_ID, title="首件商品", image_url="/demo/products/01.webp"
+    )
+    pid_b = await seed_product(database, MERCHANT_ONE_ID, title="第二件商品")
+    headers = await bound_customer(postgres_client, postgres_app, buyer_key="buyer-a")
+    await put_cart(postgres_client, headers, pid_a, 1)
+    await put_cart(postgres_client, headers, pid_b, 1)
+
+    order = (await _order(postgres_client, headers)).json()
+
+    assert order["lead_item"] == {
+        "product_id": str(pid_a),
+        "name": "首件商品",
+        "image_url": "/demo/products/01.webp",
+    }
+
+
+@pytest.mark.asyncio
+async def test_last_event_at_matches_payment_confirmed_and_is_consistent_across_views(
+    postgres_app: FastAPI, postgres_client: AsyncClient
+) -> None:
+    headers, oid, _ = await _placed(postgres_client, postgres_app)
+
+    paid = await postgres_client.post(
+        f"{ORDERS}/{oid}/pay", json={"client_request_id": "p1"}, headers=headers
+    )
+    detail = await postgres_client.get(f"{ORDERS}/{oid}", headers=headers)
+    listing = await postgres_client.get(ORDERS, headers=headers)
+
+    events = await postgres_client.get(f"{ORDERS}/{oid}/events", headers=headers)
+    confirmed = next(
+        e for e in events.json()["items"] if e["event_type"] == "PAYMENT_CONFIRMED"
+    )
+    assert paid.json()["last_event_at"] == confirmed["occurred_at"]
+    assert detail.json()["last_event_at"] == confirmed["occurred_at"]
+    assert listing.json()["items"][0]["last_event_at"] == confirmed["occurred_at"]
+
+
+@pytest.mark.asyncio
+async def test_create_pay_cancel_responses_all_carry_lead_item_and_last_event_at(
+    postgres_app: FastAPI, postgres_client: AsyncClient
+) -> None:
+    database = database_of(postgres_app)
+    pid = await seed_product(database, MERCHANT_ONE_ID, on_hand=10)
+    headers = await bound_customer(postgres_client, postgres_app, buyer_key="buyer-a")
+    await put_cart(postgres_client, headers, pid, 1)
+
+    created = (await _order(postgres_client, headers, "create-1")).json()
+    assert {"lead_item", "last_event_at"} <= set(created)
+
+    paid = (
+        await postgres_client.post(
+            f"{ORDERS}/{created['id']}/pay", json={"client_request_id": "pay-1"}, headers=headers
+        )
+    ).json()
+    assert {"lead_item", "last_event_at"} <= set(paid)
+
+    headers2 = await bound_customer(postgres_client, postgres_app, buyer_key="buyer-b")
+    await put_cart(postgres_client, headers2, pid, 1)
+    created2 = (await _order(postgres_client, headers2, "create-2")).json()
+    cancelled = (
+        await postgres_client.post(
+            f"{ORDERS}/{created2['id']}/cancel",
+            json={"client_request_id": "cancel-1"},
+            headers=headers2,
+        )
+    ).json()
+    assert {"lead_item", "last_event_at"} <= set(cancelled)
+
+
+@pytest.mark.asyncio
+async def test_delisted_lead_item_keeps_snapshot_name_and_current_image(
+    postgres_app: FastAPI, postgres_client: AsyncClient
+) -> None:
+    database = database_of(postgres_app)
+    pid = await seed_product(
+        database, MERCHANT_ONE_ID, title="即将下架", image_url="/demo/products/02.webp"
+    )
+    headers = await bound_customer(postgres_client, postgres_app, buyer_key="buyer-a")
+    await put_cart(postgres_client, headers, pid, 1)
+    order = (await _order(postgres_client, headers)).json()
+    await set_product(database, pid, status="OFFLINE")
+
+    listing = await postgres_client.get(ORDERS, headers=headers)
+    detail = await postgres_client.get(f"{ORDERS}/{order['id']}", headers=headers)
+
+    assert listing.status_code == detail.status_code == 200
+    assert listing.json()["items"][0]["lead_item"] == {
+        "product_id": str(pid),
+        "name": "即将下架",
+        "image_url": "/demo/products/02.webp",
+    }
+    assert detail.json()["lead_item"]["name"] == "即将下架"
+
+
+@pytest.mark.asyncio
+async def test_lead_item_and_last_event_at_do_not_change_cross_customer_403(
+    postgres_app: FastAPI, postgres_client: AsyncClient
+) -> None:
+    """回归：批量首件/最近事件查询不改变越权响应结构（仍统一 RESOURCE_FORBIDDEN）。"""
+
+    _, alice_order, _ = await _placed(postgres_client, postgres_app, buyer_key="alice")
+    bob = await bound_customer(postgres_client, postgres_app, buyer_key="bob")
+
+    resp = await postgres_client.get(f"{ORDERS}/{alice_order}", headers=bob)
+
+    assert resp.status_code == 403
+    assert resp.json()["code"] == "RESOURCE_FORBIDDEN"
+    assert resp.json()["details"] == []
+
+
+@pytest.mark.asyncio
+async def test_order_list_does_not_expose_another_buyers_lead_item(
+    postgres_app: FastAPI, postgres_client: AsyncClient
+) -> None:
+    """WS 首件商品摘要仍受同店 buyer_key 隔离，列表不回传他人的订单或首件。"""
+
+    _, alice_order, _ = await _placed(postgres_client, postgres_app, buyer_key="ws-alice")
+    bob = await bound_customer(postgres_client, postgres_app, buyer_key="ws-bob")
+
+    response = await postgres_client.get(ORDERS, headers=bob)
+
+    assert response.status_code == 200
+    assert all(item["id"] != alice_order for item in response.json()["items"])
+    assert response.json()["items"] == []

@@ -131,6 +131,10 @@ class Order(_MerchantScopedMixin, UuidPrimaryKeyMixin, CreatedAtMixin, UpdatedAt
         Index("ix_orders_merchant_status", "merchant_id", "order_status"),
         Index("ix_orders_merchant_address_city", "merchant_id", "address_city_name"),
         Index(
+            "ix_orders_v2_merchant_placed_id", "merchant_id", "placed_at", "id",
+            postgresql_where=text("lifecycle_origin = 'V2'"),
+        ),
+        Index(
             "ix_orders_v2_pending_placed_at",
             "placed_at",
             postgresql_where=text("payment_status = 'PENDING' AND lifecycle_origin = 'V2'"),

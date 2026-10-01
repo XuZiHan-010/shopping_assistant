@@ -1,0 +1,340 @@
+/*
+ * 工作区页面共用的列表与控件样式（W Task 10）：面板、状态行、表格（820px 以下改卡片）、
+ * 「加载更多」、按钮、工具栏与表单控件。
+ *
+ * 由 `components/layout/WorkspacePage.vue` 以非 scoped `<style src>` 引入，所以只随使用
+ * WorkspacePage 的懒加载页面进入它们的 chunk，不进首屏入口 CSS。类名统一带 `ws-` 前缀，
+ * 避免与各组件 scoped 样式里的 `.panel`、`.state` 等同名类互相影响。颜色只取 token。
+ */
+
+/* ---------- 面板与状态行 ---------- */
+.ws-panel {
+  min-width: 0;
+  outline: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: var(--shadow-sm);
+}
+
+.ws-panel + .ws-panel {
+  margin-top: 14px;
+}
+
+.ws-notice {
+  margin: 0;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--info-soft);
+  font-size: 12.5px;
+  color: var(--info);
+}
+
+.ws-state {
+  margin: 0;
+  padding: 22px 18px;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.ws-alert {
+  margin: 0 0 12px;
+  padding: 9px 14px;
+  border: 1px solid var(--danger-soft);
+  border-radius: 10px;
+  background: var(--danger-soft);
+  font-size: 13px;
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+.ws-success {
+  margin: 0 0 12px;
+  padding: 9px 14px;
+  border-radius: 10px;
+  background: var(--ok-soft);
+  font-size: 13px;
+  color: var(--ok);
+}
+
+.ws-link {
+  margin-left: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--accent-ink);
+  text-decoration: none;
+}
+
+.ws-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* 面板内的小节标题（h2），与首页面板标题同一字族 */
+.ws-section-title {
+  margin: 28px 0 10px;
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+.ws-section-note {
+  margin: -4px 0 12px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--ink-soft);
+}
+
+/* ---------- 表格 ---------- */
+.ws-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+
+.ws-table th {
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+.ws-table td {
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+
+.ws-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.ws-table tbody tr:hover td {
+  background: var(--hover);
+}
+
+.ws-table .r {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.ws-sub {
+  display: block;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ink-soft);
+}
+
+.ws-mono {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.ws-sub.ws-mono {
+  font-size: 12px;
+}
+
+.ws-alias {
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--well);
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* ---------- 加载更多 ---------- */
+.ws-more {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px 14px;
+  padding: 12px 18px;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+}
+
+.ws-table + .ws-more {
+  border-top: 1px solid var(--line);
+}
+
+.ws-more__count {
+  margin-right: auto;
+}
+
+.ws-more__error {
+  flex: 1;
+  color: var(--danger);
+}
+
+/* ---------- 按钮 ---------- */
+.ws-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 13px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--raised);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: var(--transition-colors);
+}
+
+.ws-btn:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.ws-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ws-btn--sm {
+  height: 30px;
+  padding: 0 11px;
+  border-radius: 8px;
+  font-size: 12.5px;
+}
+
+.ws-btn--primary {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.ws-btn--primary:hover:not(:disabled) {
+  background: var(--accent-strong);
+}
+
+.ws-btn--danger {
+  border-color: transparent;
+  background: var(--danger);
+  color: var(--on-accent);
+}
+
+.ws-btn--danger:hover:not(:disabled) {
+  background: var(--danger);
+  filter: brightness(0.92);
+}
+
+.ws-btn--ghost {
+  border-color: transparent;
+  background: none;
+}
+
+/* ---------- 工具栏与表单控件 ---------- */
+.ws-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.ws-toolbar__spacer {
+  flex: 1;
+}
+
+.ws-field {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.ws-select,
+.ws-input {
+  min-width: 0;
+  max-width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--raised);
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--ink);
+}
+
+.ws-select:hover,
+.ws-input:hover {
+  border-color: var(--ink-faint);
+}
+
+.ws-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.ws-check input[type='checkbox'],
+.ws-table input[type='checkbox'],
+.ws-panel input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+/* 820px 以下表格改为逐行卡片：表头只留给读屏，每行两列排布，不产生横向溢出。
+ * 各页只需在自己的 scoped 样式里安排单元格落在哪一列。 */
+@media (max-width: 820px) {
+  .ws-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .ws-table,
+  .ws-table tbody,
+  .ws-table td {
+    display: block;
+  }
+
+  .ws-table tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .ws-table tbody tr:last-child {
+    border-bottom: 0;
+  }
+
+  .ws-table td {
+    min-width: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  .ws-table tbody tr:hover td {
+    background: none;
+  }
+}

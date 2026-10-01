@@ -27,6 +27,7 @@ from app.schemas.v2.drafts import DraftKind
 from app.services.v2.after_sale_machine import IllegalTransition, transition
 from app.services.v2.draft_handlers import HandlerRequest, HandlerResult
 from app.services.v2.drafts import to_diff
+from app.services.v2.orders import business_date_of
 from app.services.v2.refund_calc import RefundLine, refundable
 
 
@@ -157,7 +158,7 @@ async def _record_refund(session: AsyncSession, sale: AfterSale, *, now: datetim
         line.refund_amount = amount
         if amount > 0:
             session.add(Refund(
-                merchant_id=sale.merchant_id, business_date=now.date(),
+                merchant_id=sale.merchant_id, business_date=business_date_of(now),
                 order_item_id=item.id, after_sale_id=sale.id,
                 refund_amount=amount, refund_reason="AFTER_SALE",
                 refund_status="REFUNDED", refunded_at=now,
@@ -186,7 +187,7 @@ async def _receive_return(
         if item is None:
             raise VersionConflictError(scope="TARGET")
         session.add(ReturnRecord(
-            merchant_id=sale.merchant_id, business_date=now.date(),
+            merchant_id=sale.merchant_id, business_date=business_date_of(now),
             order_item_id=item.id, after_sale_id=sale.id,
             return_quantity=line.quantity, return_reason="AFTER_SALE",
             return_status="RECEIVED", logistics_status="DELIVERED", returned_at=now,

@@ -175,7 +175,8 @@ async def test_customer_surface_contains_guide_and_after_sale_preview_tools(
 
     assert names == {
         "search_products", "get_product", "get_product_attribute", "get_shop_policy",
-        "set_cart_item", "check_after_sale_eligibility", "prepare_after_sale", "load_skill",
+        "set_cart_item", "get_my_order", "check_after_sale_eligibility", "prepare_after_sale",
+        "recall_preferences", "load_skill",
     }
     merchant = {spec.name for spec in registry.surface_for(SessionRole.MERCHANT)}
     # `load_skill` 是唯一按设计跨角色共享的工具名（两端各自的 Skill 索引不同，

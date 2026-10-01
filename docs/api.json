@@ -1930,6 +1930,287 @@
         }
       }
     },
+    "/api/v2/shop/memories": {
+      "get": {
+        "tags": [
+          "v2-shop-memory"
+        ],
+        "summary": "List Shop Memories",
+        "operationId": "list_shop_memories_api_v2_shop_memories_get",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2048
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "X-Session-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerMemoriesResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "缺少或提供了无效的商家凭证",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权访问该资源或管理端点",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "请求参数不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "依赖服务暂时不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/shop/memories/{memory_id}": {
+      "delete": {
+        "tags": [
+          "v2-shop-memory"
+        ],
+        "summary": "Delete Shop Memory",
+        "operationId": "delete_shop_memory_api_v2_shop_memories__memory_id__delete",
+        "parameters": [
+          {
+            "name": "memory_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "Memory Id"
+            }
+          },
+          {
+            "name": "X-Session-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "缺少或提供了无效的商家凭证",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权访问该资源或管理端点",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "请求参数不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "依赖服务暂时不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/shop/memory-preference": {
+      "put": {
+        "tags": [
+          "v2-shop-memory"
+        ],
+        "summary": "Set Shop Memory Preference",
+        "operationId": "set_shop_memory_preference_api_v2_shop_memory_preference_put",
+        "parameters": [
+          {
+            "name": "X-Session-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryPreferenceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryPreferenceResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "缺少或提供了无效的商家凭证",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权访问该资源或管理端点",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "请求参数不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "依赖服务暂时不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v2/merchant/inventory/alerts": {
       "get": {
         "tags": [
@@ -2008,6 +2289,205 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/CursorPage_InventoryAlert_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "缺少或提供了无效的商家凭证",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权访问该资源或管理端点",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "请求参数不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "依赖服务暂时不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/merchant/memories": {
+      "get": {
+        "tags": [
+          "v2-merchant-memory"
+        ],
+        "summary": "List Merchant Memories",
+        "operationId": "list_merchant_memories_api_v2_merchant_memories_get",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2048
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "X-Session-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MerchantMemoriesResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "缺少或提供了无效的商家凭证",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权访问该资源或管理端点",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "请求参数不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "依赖服务暂时不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/merchant/memories/{memory_id}": {
+      "delete": {
+        "tags": [
+          "v2-merchant-memory"
+        ],
+        "summary": "Delete Merchant Memory",
+        "operationId": "delete_merchant_memory_api_v2_merchant_memories__memory_id__delete",
+        "parameters": [
+          {
+            "name": "memory_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "Memory Id"
+            }
+          },
+          {
+            "name": "X-Session-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MerchantMemoryDeleteResponse"
                 }
               }
             }
@@ -3345,6 +3825,332 @@
         }
       }
     },
+    "/api/v2/merchant/metrics/overview": {
+      "get": {
+        "tags": [
+          "v2-merchant-insights"
+        ],
+        "summary": "Get Metrics Overview",
+        "operationId": "get_metrics_overview_api_v2_merchant_metrics_overview_get",
+        "parameters": [
+          {
+            "name": "X-Session-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MerchantMetricsOverviewResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "缺少或提供了无效的商家凭证",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权访问该资源或管理端点",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "请求参数不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "依赖服务暂时不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/merchant/orders": {
+      "get": {
+        "tags": [
+          "v2-merchant-orders"
+        ],
+        "summary": "List Orders",
+        "description": "仅本店具备 v2 交易投影的订单；三项筛选均可选，游标绑定筛选（§8.7.4）。",
+        "operationId": "list_orders_api_v2_merchant_orders_get",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2048
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "payment_status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/PaymentStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Payment Status"
+            }
+          },
+          {
+            "name": "fulfillment_status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/FulfillmentStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Fulfillment Status"
+            }
+          },
+          {
+            "name": "after_sale_status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/OrderAfterSaleProjection"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After Sale Status"
+            }
+          },
+          {
+            "name": "X-Session-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CursorPage_MerchantOrderSummary_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "缺少或提供了无效的商家凭证",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权访问该资源或管理端点",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "请求参数不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "依赖服务暂时不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/merchant/orders/{order_id}": {
+      "get": {
+        "tags": [
+          "v2-merchant-orders"
+        ],
+        "summary": "Get Order",
+        "description": "不存在、他店订单与历史（非 v2）订单统一 403 RESOURCE_FORBIDDEN；不写查看审计。",
+        "operationId": "get_order_api_v2_merchant_orders__order_id__get",
+        "parameters": [
+          {
+            "name": "order_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Order Id"
+            }
+          },
+          {
+            "name": "X-Session-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MerchantOrderDetailResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "缺少或提供了无效的商家凭证",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权访问该资源或管理端点",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "请求参数不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "依赖服务暂时不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v2/merchant/chat": {
       "post": {
         "tags": [
@@ -3531,7 +4337,7 @@
           "v2-shop-catalog"
         ],
         "summary": "List Products",
-        "description": "只返回在售商品；排序 `created_at DESC, id DESC`。",
+        "description": "只返回在售商品；按上新或近 30 个业务日已支付件数排序。",
         "operationId": "list_products_api_v2_shop_stores__shop_slug__products_get",
         "parameters": [
           {
@@ -3574,6 +4380,20 @@
               "minimum": 1,
               "default": 20,
               "title": "Limit"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "newest",
+                "popular"
+              ],
+              "type": "string",
+              "default": "newest",
+              "title": "Sort"
             }
           }
         ],
@@ -8554,6 +9374,42 @@
         ],
         "title": "CursorPage[CouponSummary]"
       },
+      "CursorPage_CustomerMemoryItem_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CustomerMemoryItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2048,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor",
+          "has_more"
+        ],
+        "title": "CursorPage[CustomerMemoryItem]"
+      },
       "CursorPage_CustomerSignal_": {
         "properties": {
           "items": {
@@ -8805,6 +9661,78 @@
           "has_more"
         ],
         "title": "CursorPage[MerchantCoupon]"
+      },
+      "CursorPage_MerchantMemoryItem_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MerchantMemoryItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2048,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor",
+          "has_more"
+        ],
+        "title": "CursorPage[MerchantMemoryItem]"
+      },
+      "CursorPage_MerchantOrderSummary_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MerchantOrderSummary"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2048,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor",
+          "has_more"
+        ],
+        "title": "CursorPage[MerchantOrderSummary]"
       },
       "CursorPage_MerchantProductContent_": {
         "properties": {
@@ -9091,6 +10019,82 @@
         ],
         "title": "CustomerAfterSaleDetailResponse",
         "description": "顾客侧：无别名、无审计字段。"
+      },
+      "CustomerMemoriesResponse": {
+        "properties": {
+          "memory_enabled": {
+            "type": "boolean",
+            "title": "Memory Enabled"
+          },
+          "memories": {
+            "$ref": "#/components/schemas/CursorPage_CustomerMemoryItem_"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "memory_enabled",
+          "memories"
+        ],
+        "title": "CustomerMemoriesResponse"
+      },
+      "CustomerMemoryItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Id"
+          },
+          "shop_slug": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "title": "Shop Slug"
+          },
+          "category": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Category"
+          },
+          "key": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Key"
+          },
+          "value": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Value"
+          },
+          "last_confirmed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Confirmed At"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "shop_slug",
+          "category",
+          "key",
+          "value",
+          "last_confirmed_at",
+          "expires_at"
+        ],
+        "title": "CustomerMemoryItem",
+        "description": "按顾客 + 店铺隔离；不含服务端解析的顾客与商家内部标识。"
       },
       "CustomerSignal": {
         "properties": {
@@ -10666,6 +11670,84 @@
         ],
         "title": "MemoryCompressResponse"
       },
+      "MemoryLayer": {
+        "type": "string",
+        "enum": [
+          "FACT",
+          "SUMMARY"
+        ],
+        "title": "MemoryLayer"
+      },
+      "MemoryPreferenceRequest": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "purge_confirmation": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "yes"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purge Confirmation"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "title": "MemoryPreferenceRequest",
+        "description": "关闭记忆须显式确认：条件必填，不是无条件必填。设置绝对状态，天然幂等。"
+      },
+      "MemoryPreferenceResponse": {
+        "properties": {
+          "memory_enabled": {
+            "type": "boolean",
+            "title": "Memory Enabled"
+          },
+          "purged_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Purged Count"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "memory_enabled",
+          "purged_count"
+        ],
+        "title": "MemoryPreferenceResponse"
+      },
+      "MemorySourceRef": {
+        "properties": {
+          "conversation_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Conversation Id"
+          },
+          "message_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Message Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "conversation_id",
+          "message_id"
+        ],
+        "title": "MemorySourceRef"
+      },
       "MerchantAfterSaleDetailResponse": {
         "properties": {
           "id": {
@@ -11284,6 +12366,448 @@
         ],
         "title": "MerchantCoupon"
       },
+      "MerchantMemoriesResponse": {
+        "properties": {
+          "facts": {
+            "$ref": "#/components/schemas/CursorPage_MerchantMemoryItem_"
+          },
+          "summaries": {
+            "items": {
+              "$ref": "#/components/schemas/MerchantMemoryItem"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Summaries"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "facts",
+          "summaries"
+        ],
+        "title": "MerchantMemoriesResponse"
+      },
+      "MerchantMemoryDeleteResponse": {
+        "properties": {
+          "deleted_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Deleted Id"
+          },
+          "summary_rebuild_scheduled": {
+            "type": "boolean",
+            "title": "Summary Rebuild Scheduled"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "deleted_id",
+          "summary_rebuild_scheduled"
+        ],
+        "title": "MerchantMemoryDeleteResponse"
+      },
+      "MerchantMemoryItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Id"
+          },
+          "layer": {
+            "$ref": "#/components/schemas/MemoryLayer"
+          },
+          "category": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Category"
+          },
+          "content": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Content"
+          },
+          "source_ref": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MemorySourceRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "layer",
+          "category",
+          "content",
+          "source_ref",
+          "updated_at"
+        ],
+        "title": "MerchantMemoryItem"
+      },
+      "MerchantMetricsOverviewResponse": {
+        "properties": {
+          "analysis_sources": {
+            "items": {
+              "$ref": "#/components/schemas/AnalysisSourceEntry"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Analysis Sources"
+          },
+          "thinking_steps": {
+            "items": {
+              "$ref": "#/components/schemas/ThinkingStep"
+            },
+            "type": "array",
+            "title": "Thinking Steps"
+          },
+          "quality_status": {
+            "$ref": "#/components/schemas/QualityStatus"
+          },
+          "quality_attempts": {
+            "type": "integer",
+            "maximum": 3.0,
+            "minimum": 0.0,
+            "title": "Quality Attempts"
+          },
+          "quality_notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Quality Notes"
+          },
+          "degraded": {
+            "type": "boolean",
+            "title": "Degraded"
+          },
+          "degraded_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Degraded Reason"
+          },
+          "business_timezone": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Business Timezone"
+          },
+          "data_as_of": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Data As Of"
+          },
+          "source": {
+            "$ref": "#/components/schemas/MerchantMetricsOverviewSource"
+          },
+          "definition_version": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Definition Version"
+          },
+          "current_period": {
+            "$ref": "#/components/schemas/OverviewPeriod"
+          },
+          "baseline_period": {
+            "$ref": "#/components/schemas/OverviewPeriod"
+          },
+          "headline": {
+            "$ref": "#/components/schemas/OverviewHeadline"
+          },
+          "attribution": {
+            "$ref": "#/components/schemas/OverviewAttribution"
+          },
+          "secondary": {
+            "items": {
+              "$ref": "#/components/schemas/OverviewSecondaryMetric"
+            },
+            "type": "array",
+            "maxItems": 3,
+            "minItems": 3,
+            "title": "Secondary"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "analysis_sources",
+          "quality_status",
+          "quality_attempts",
+          "degraded",
+          "degraded_reason",
+          "business_timezone",
+          "data_as_of",
+          "source",
+          "definition_version",
+          "current_period",
+          "baseline_period",
+          "headline",
+          "attribution",
+          "secondary"
+        ],
+        "title": "MerchantMetricsOverviewResponse"
+      },
+      "MerchantMetricsOverviewSource": {
+        "type": "string",
+        "enum": [
+          "REALTIME",
+          "DAILY_ROLLUP",
+          "MIXED"
+        ],
+        "title": "MerchantMetricsOverviewSource"
+      },
+      "MerchantOrderDetailResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Id"
+          },
+          "payment_status": {
+            "$ref": "#/components/schemas/PaymentStatus"
+          },
+          "fulfillment_status": {
+            "$ref": "#/components/schemas/FulfillmentStatus"
+          },
+          "after_sale_status": {
+            "$ref": "#/components/schemas/OrderAfterSaleProjection"
+          },
+          "total_cents": {
+            "type": "integer",
+            "maximum": 99999999999999.0,
+            "minimum": 0.0,
+            "title": "Total Cents"
+          },
+          "item_count": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Item Count"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "pay_by": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Pay By"
+          },
+          "lead_item": {
+            "$ref": "#/components/schemas/OrderLeadItem"
+          },
+          "last_event_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Event At"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OrderItemPriceSnapshot"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "minItems": 1,
+            "title": "Items"
+          },
+          "subtotal_cents": {
+            "type": "integer",
+            "maximum": 99999999999999.0,
+            "minimum": 0.0,
+            "title": "Subtotal Cents"
+          },
+          "discount_cents": {
+            "type": "integer",
+            "maximum": 99999999999999.0,
+            "minimum": 0.0,
+            "title": "Discount Cents"
+          },
+          "coupon_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coupon Id"
+          },
+          "paid_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paid At"
+          },
+          "closed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed At"
+          },
+          "close_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CloseReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "is_demo": {
+            "type": "boolean",
+            "const": true,
+            "title": "Is Demo"
+          },
+          "buyer_alias": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Buyer Alias"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "payment_status",
+          "fulfillment_status",
+          "after_sale_status",
+          "total_cents",
+          "item_count",
+          "created_at",
+          "pay_by",
+          "lead_item",
+          "last_event_at",
+          "items",
+          "subtotal_cents",
+          "discount_cents",
+          "coupon_id",
+          "paid_at",
+          "closed_at",
+          "close_reason",
+          "is_demo",
+          "buyer_alias"
+        ],
+        "title": "MerchantOrderDetailResponse"
+      },
+      "MerchantOrderSummary": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Id"
+          },
+          "payment_status": {
+            "$ref": "#/components/schemas/PaymentStatus"
+          },
+          "fulfillment_status": {
+            "$ref": "#/components/schemas/FulfillmentStatus"
+          },
+          "after_sale_status": {
+            "$ref": "#/components/schemas/OrderAfterSaleProjection"
+          },
+          "total_cents": {
+            "type": "integer",
+            "maximum": 99999999999999.0,
+            "minimum": 0.0,
+            "title": "Total Cents"
+          },
+          "item_count": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Item Count"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "pay_by": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Pay By"
+          },
+          "lead_item": {
+            "$ref": "#/components/schemas/OrderLeadItem"
+          },
+          "last_event_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Event At"
+          },
+          "buyer_alias": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Buyer Alias"
+          },
+          "line_count": {
+            "type": "integer",
+            "maximum": 50.0,
+            "minimum": 1.0,
+            "title": "Line Count"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "payment_status",
+          "fulfillment_status",
+          "after_sale_status",
+          "total_cents",
+          "item_count",
+          "created_at",
+          "pay_by",
+          "lead_item",
+          "last_event_at",
+          "buyer_alias",
+          "line_count"
+        ],
+        "title": "MerchantOrderSummary",
+        "description": "商家侧订单摘要：顾客以店铺级脱敏别名出现，不含 buyer_key（§8.12.4）。"
+      },
       "MerchantProductContent": {
         "properties": {
           "id": {
@@ -11670,6 +13194,14 @@
             "format": "date-time",
             "title": "Pay By"
           },
+          "lead_item": {
+            "$ref": "#/components/schemas/OrderLeadItem"
+          },
+          "last_event_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Event At"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/OrderItemPriceSnapshot"
@@ -11755,6 +13287,8 @@
           "item_count",
           "created_at",
           "pay_by",
+          "lead_item",
+          "last_event_at",
           "items",
           "subtotal_cents",
           "discount_cents",
@@ -11825,6 +13359,44 @@
         ],
         "title": "OrderItemPriceSnapshot"
       },
+      "OrderLeadItem": {
+        "properties": {
+          "product_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Product Id"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "image_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2048,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Url"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "product_id",
+          "name",
+          "image_url"
+        ],
+        "title": "OrderLeadItem",
+        "description": "订单摘要用的首件商品展示信息，取订单首行价格快照名称与商品当前图片。"
+      },
       "OrderPayRequest": {
         "properties": {
           "client_request_id": {
@@ -11879,6 +13451,14 @@
             "type": "string",
             "format": "date-time",
             "title": "Pay By"
+          },
+          "lead_item": {
+            "$ref": "#/components/schemas/OrderLeadItem"
+          },
+          "last_event_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Event At"
           }
         },
         "additionalProperties": false,
@@ -11891,9 +13471,300 @@
           "total_cents",
           "item_count",
           "created_at",
-          "pay_by"
+          "pay_by",
+          "lead_item",
+          "last_event_at"
         ],
         "title": "OrderSummary"
+      },
+      "OverviewAttribution": {
+        "properties": {
+          "dimension": {
+            "type": "string",
+            "const": "category",
+            "title": "Dimension",
+            "default": "category"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/OverviewAttributionMode"
+          },
+          "segments": {
+            "items": {
+              "$ref": "#/components/schemas/OverviewAttributionSegment"
+            },
+            "type": "array",
+            "maxItems": 5,
+            "title": "Segments"
+          },
+          "remaining_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Remaining Count"
+          },
+          "remaining_contribution_cents": {
+            "type": "integer",
+            "maximum": 99999999999999.0,
+            "minimum": -99999999999999.0,
+            "title": "Remaining Contribution Cents"
+          },
+          "stopped_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stopped Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "mode",
+          "segments",
+          "remaining_count",
+          "remaining_contribution_cents",
+          "stopped_reason"
+        ],
+        "title": "OverviewAttribution"
+      },
+      "OverviewAttributionMode": {
+        "type": "string",
+        "enum": [
+          "SHARE",
+          "ABSOLUTE_CONTRIBUTION",
+          "STOPPED"
+        ],
+        "title": "OverviewAttributionMode"
+      },
+      "OverviewAttributionSegment": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "current_cents": {
+            "type": "integer",
+            "maximum": 99999999999999.0,
+            "minimum": -99999999999999.0,
+            "title": "Current Cents"
+          },
+          "baseline_cents": {
+            "type": "integer",
+            "maximum": 99999999999999.0,
+            "minimum": -99999999999999.0,
+            "title": "Baseline Cents"
+          },
+          "contribution_cents": {
+            "type": "integer",
+            "maximum": 99999999999999.0,
+            "minimum": -99999999999999.0,
+            "title": "Contribution Cents"
+          },
+          "share_bp": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 1000000.0,
+                "minimum": -1000000.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Share Bp"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "current_cents",
+          "baseline_cents",
+          "contribution_cents",
+          "share_bp"
+        ],
+        "title": "OverviewAttributionSegment"
+      },
+      "OverviewHeadline": {
+        "properties": {
+          "metric_code": {
+            "type": "string",
+            "const": "net_gmv",
+            "title": "Metric Code",
+            "default": "net_gmv"
+          },
+          "current_cents": {
+            "type": "integer",
+            "maximum": 99999999999999.0,
+            "minimum": -99999999999999.0,
+            "title": "Current Cents"
+          },
+          "baseline_cents": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 99999999999999.0,
+                "minimum": -99999999999999.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline Cents"
+          },
+          "change_ratio_bp": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 1000000.0,
+                "minimum": -1000000.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Ratio Bp"
+          },
+          "current_series": {
+            "items": {
+              "$ref": "#/components/schemas/OverviewMetricPoint"
+            },
+            "type": "array",
+            "title": "Current Series"
+          },
+          "baseline_series": {
+            "items": {
+              "$ref": "#/components/schemas/OverviewMetricPoint"
+            },
+            "type": "array",
+            "title": "Baseline Series"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "current_cents",
+          "baseline_cents",
+          "change_ratio_bp",
+          "current_series",
+          "baseline_series"
+        ],
+        "title": "OverviewHeadline"
+      },
+      "OverviewMetricPoint": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date"
+          },
+          "value_cents": {
+            "type": "integer",
+            "maximum": 99999999999999.0,
+            "minimum": -99999999999999.0,
+            "title": "Value Cents"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "date",
+          "value_cents"
+        ],
+        "title": "OverviewMetricPoint"
+      },
+      "OverviewPeriod": {
+        "properties": {
+          "start": {
+            "type": "string",
+            "format": "date",
+            "title": "Start"
+          },
+          "end": {
+            "type": "string",
+            "format": "date",
+            "title": "End"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Label"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "start",
+          "end",
+          "label"
+        ],
+        "title": "OverviewPeriod"
+      },
+      "OverviewSecondaryMetric": {
+        "properties": {
+          "metric_code": {
+            "type": "string",
+            "enum": [
+              "order_count",
+              "refund_amount",
+              "return_rate"
+            ],
+            "title": "Metric Code"
+          },
+          "unit": {
+            "$ref": "#/components/schemas/OverviewSecondaryUnit"
+          },
+          "current_value": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Value"
+          },
+          "baseline_value": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline Value"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "metric_code",
+          "unit",
+          "current_value",
+          "baseline_value"
+        ],
+        "title": "OverviewSecondaryMetric"
+      },
+      "OverviewSecondaryUnit": {
+        "type": "string",
+        "enum": [
+          "COUNT",
+          "CENTS",
+          "RATIO_BP"
+        ],
+        "title": "OverviewSecondaryUnit"
       },
       "PaymentStatus": {
         "type": "string",
@@ -12044,6 +13915,12 @@
             ],
             "title": "Short Description Translation Status"
           },
+          "category": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Category"
+          },
           "description": {
             "type": "string",
             "maxLength": 20000,
@@ -12065,6 +13942,14 @@
               "FALLBACK"
             ],
             "title": "Description Translation Status"
+          },
+          "missing_attributes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Missing Attributes"
           }
         },
         "additionalProperties": false,
@@ -12081,9 +13966,11 @@
           "requested_locale",
           "name_translation_status",
           "short_description_translation_status",
+          "category",
           "description",
           "attributes",
-          "description_translation_status"
+          "description_translation_status",
+          "missing_attributes"
         ],
         "title": "ProductDetailResponse"
       },
@@ -12168,6 +14055,12 @@
               "FALLBACK"
             ],
             "title": "Short Description Translation Status"
+          },
+          "category": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Category"
           }
         },
         "additionalProperties": false,
@@ -12183,7 +14076,8 @@
           "content_version",
           "requested_locale",
           "name_translation_status",
-          "short_description_translation_status"
+          "short_description_translation_status",
+          "category"
         ],
         "title": "ProductSummary"
       },

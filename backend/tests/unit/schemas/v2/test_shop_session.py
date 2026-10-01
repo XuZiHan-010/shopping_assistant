@@ -83,8 +83,20 @@ def product(**changes: object) -> dict[str, object]:
         "requested_locale": "zh-CN",
         "name_translation_status": "SOURCE",
         "short_description_translation_status": "SOURCE",
+        "category": "鞋靴",
         **changes,
     }
+
+
+def test_product_category_is_a_required_bounded_source_value() -> None:
+    assert ProductSummary.model_validate(product()).category == "鞋靴"
+    for bad in ("", "类" * 65):
+        with pytest.raises(ValidationError):
+            ProductSummary.model_validate(product(category=bad))
+    with pytest.raises(ValidationError):
+        ProductSummary.model_validate(
+            {key: value for key, value in product().items() if key != "category"}
+        )
 
 
 @pytest.mark.parametrize("field", ["stock", "stock_on_hand", "stock_reserved", "stock_available"])
@@ -146,9 +158,23 @@ def test_image_host_allowlist_rejects_structurally_unsafe_urls(url: str) -> None
 
 def test_product_detail_requires_version_and_rejects_duplicate_attributes() -> None:
     data = product(
-        description="", attributes=[], content_version=1, description_translation_status="SOURCE"
+        description="",
+        attributes=[],
+        content_version=1,
+        description_translation_status="SOURCE",
+        missing_attributes=[],
     )
     assert ProductDetailResponse.model_validate(data).content_version == 1
+    with pytest.raises(ValidationError):
+        ProductDetailResponse.model_validate(
+            {key: value for key, value in data.items() if key != "missing_attributes"}
+        )
+    with pytest.raises(ValidationError):
+        ProductDetailResponse.model_validate({**data, "missing_attributes": ["产地", "产地"]})
+    with pytest.raises(ValidationError):
+        ProductDetailResponse.model_validate(
+            {**data, "missing_attributes": [f"属性{index}" for index in range(21)]}
+        )
     attr = {
         "name": "颜色",
         "value": "蓝色",

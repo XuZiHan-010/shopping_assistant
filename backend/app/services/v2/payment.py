@@ -40,6 +40,7 @@ from app.services.v2.orders import (
     PAYMENT_WINDOW,
     V2_ORIGIN,
     order_items,
+    order_leads,
     order_uuid,
     owned_order_filter,
     require_owned_order,
@@ -130,7 +131,7 @@ async def pay_order(
             session, order, items, fulfillment=PAYMENT_CONFIRMED, inventory=PAYMENT_DEDUCT, now=now
         )
         await session.flush()
-        return await _detail(session, order, items)
+        return await _detail(session, order, items, last_event_at=now)
 
     return await _idempotent(
         session, ctx, principal_secret, PAY_OPERATION, client_request_id, order_id, execute
@@ -163,7 +164,7 @@ async def cancel_order(
         ):
             raise await _illegal(session, order)
         items = await order_items(session, order.id)
-        return await _detail(session, order, items)
+        return await _detail(session, order, items, last_event_at=now)
 
     return await _idempotent(
         session, ctx, principal_secret, CANCEL_OPERATION, client_request_id, order_id, execute
@@ -300,9 +301,17 @@ def _record_events(
     )
 
 
-async def _detail(session: AsyncSession, order: Order, items: list[OrderItem]) -> dict[str, Any]:
+async def _detail(
+    session: AsyncSession, order: Order, items: list[OrderItem], *, last_event_at: datetime
+) -> dict[str, Any]:
     await session.refresh(order)
-    return to_order_detail(order, items).model_dump(mode="json")
+    leads = await order_leads(session, [order])
+    return to_order_detail(
+        order,
+        items,
+        lead_image_url=leads[order.id].image_url,
+        last_event_at=last_event_at,
+    ).model_dump(mode="json")
 
 
 async def _idempotent(

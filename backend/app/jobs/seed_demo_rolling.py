@@ -45,11 +45,20 @@ async def _require_demo_merchants(session: AsyncSession) -> None:
 
 async def _catalog(session: AsyncSession, merchant_id: UUID, seed: int) -> list[dict[str, object]]:
     generated = build_demo_catalog(merchant_id=merchant_id, seed=seed)
-    statement = (
-        insert(Product)
-        .values(generated)
-        .on_conflict_do_nothing(index_elements=[Product.merchant_id, Product.product_code])
-    )
+    insert_stmt = insert(Product).values(generated)
+    statement = insert_stmt.on_conflict_do_update(
+            index_elements=[Product.merchant_id, Product.product_code],
+            set_={
+                "title": insert_stmt.excluded.title,
+                "short_description": insert_stmt.excluded.short_description,
+                "detail_description": insert_stmt.excluded.detail_description,
+                "attributes": insert_stmt.excluded.attributes,
+                "price": insert_stmt.excluded.price,
+                "image_url": insert_stmt.excluded.image_url,
+                "content_version": Product.content_version + 1,
+            },
+            where=(Product.content_version == 1) & Product.title.like("演示商品%"),
+        )
     await session.execute(statement)
     persisted = list(
         (await session.execute(select(Product.__table__).where(Product.merchant_id == merchant_id)))

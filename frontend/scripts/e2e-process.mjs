@@ -70,6 +70,7 @@ export async function startManagedServer({
   command = process.execPath,
   cwd = process.cwd(),
   healthPath = '',
+  startupTimeoutMs = STARTUP_TIMEOUT_MS,
 }) {
   const origin = `http://127.0.0.1:${port}`
   const probe = `${origin}${healthPath}`
@@ -90,7 +91,7 @@ export async function startManagedServer({
   })
 
   try {
-    const deadline = Date.now() + STARTUP_TIMEOUT_MS
+    const deadline = Date.now() + startupTimeoutMs
     while (Date.now() < deadline) {
       if (child.exitCode !== null) {
         throw new Error(`${label} 在启动前退出，退出码：${child.exitCode}`)
@@ -108,7 +109,7 @@ export async function startManagedServer({
       }
       await delay(100)
     }
-    throw new Error(`${label} 未在 ${STARTUP_TIMEOUT_MS}ms 内监听 ${origin}`)
+    throw new Error(`${label} 未在 ${startupTimeoutMs}ms 内监听 ${origin}`)
   } catch (error) {
     await forceStop(child)
     throw error

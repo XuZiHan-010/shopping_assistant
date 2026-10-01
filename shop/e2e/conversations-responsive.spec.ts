@@ -24,14 +24,19 @@ async function expectNoHorizontalOverflow(page: Page, state: string) {
 }
 
 function directory(page: Page) {
-  return page.getByRole('region', { name: '历史对话' })
+  return page.getByRole('dialog', { name: '动态' })
+}
+
+async function openHistory(page: Page) {
+  await page.getByRole('button', { name: '动态' }).click()
+  await directory(page).getByRole('tab', { name: '对话记录' }).click()
 }
 
 /** 发送一句并等到这一轮的回答气泡出现正文（`turn_complete` 已到）。 */
 async function ask(page: Page, text: string) {
-  const bubbles = page.locator('.chat-log .bubble')
+  const bubbles = page.locator('[aria-live="polite"] > li')
   const before = await bubbles.count()
-  await page.getByRole('textbox', { name: '向导购助手提问' }).fill(text)
+  await page.getByRole('textbox', { name: '向智能助手提问' }).fill(text)
   await page.getByRole('button', { name: '发送' }).click()
   await expect(bubbles).toHaveCount(before + 2)
   await expect(bubbles.nth(before + 1)).not.toBeEmpty()
@@ -40,38 +45,43 @@ async function ask(page: Page, text: string) {
 test('375px：会话目录新建、浏览、跳转、删除全程无横向溢出', async ({ page }) => {
   await page.goto(SHOP)
   await expect(page.getByTestId('identity')).toHaveText('访客')
-  await page.getByRole('banner').getByRole('button', { name: '绑定演示顾客' }).click()
+  await page.getByRole('button', { name: '访客' }).click()
+  await page.getByRole('group', { name: '访客' }).getByRole('button', { name: '绑定演示顾客' }).click()
   await expect(page.getByTestId('identity')).toHaveText('演示顾客')
   await expectNoHorizontalOverflow(page, '店铺首页')
 
-  await page.getByRole('navigation', { name: '店铺导航' }).getByRole('link', { name: /导购助手/ }).click()
-  await expect(page).toHaveURL(/\/assistant$/)
-  await expect(directory(page).getByText('还没有历史对话。')).toBeVisible()
+  await expect(page.getByRole('navigation', { name: '店铺视图' }).getByRole('link', { name: '智能助手' })).toHaveAttribute('aria-current', 'page')
+  await openHistory(page)
+  await expect(directory(page).getByText('还没有对话记录。')).toBeVisible()
+  await directory(page).getByRole('button', { name: '关闭' }).click()
   await expectNoHorizontalOverflow(page, '导购页空目录')
 
   // 第一段对话：带长串，检验气泡与目录标题的换行/截断。
   await ask(page, `你好 ${LONG_TOKEN}`)
+  await openHistory(page)
   const firstEntry = directory(page).getByRole('listitem')
   await expect(firstEntry).toHaveCount(1)
   await expectNoHorizontalOverflow(page, '第一段对话结束')
+  await directory(page).getByRole('button', { name: '关闭' }).click()
 
   // 新建：当前轮次清空，第二段对话成为目录里的第二条。
-  await directory(page).getByRole('button', { name: '新建对话' }).click()
-  await expect(page.locator('.chat-log .bubble')).toHaveCount(0)
+  await page.getByRole('button', { name: '新对话' }).click()
+  await expect(page.locator('[aria-live="polite"] > li')).toHaveCount(0)
   await ask(page, '你好，第二段')
+  await openHistory(page)
   await expect(directory(page).getByRole('listitem')).toHaveCount(2)
   await expectNoHorizontalOverflow(page, '第二段对话结束')
 
   // 跳转历史：打开第一段，看到当时的提问。
   const firstTitle = directory(page).getByRole('button', { name: /^你好 ORDER-REF-/ })
   await firstTitle.click()
-  await expect(firstTitle).toHaveAttribute('aria-current', 'true')
-  await expect(page.locator('.chat-log').getByText(LONG_TOKEN, { exact: false })).toBeVisible()
+  await expect(page.locator('[aria-live="polite"]').getByText(LONG_TOKEN, { exact: false })).toBeVisible()
   await expectNoHorizontalOverflow(page, '打开历史对话')
 
   // 删除当前对话：目录少一条，界面回到新建态。
-  await directory(page).getByRole('button', { name: /^删除对话：你好 ORDER-REF-/ }).click()
+  await openHistory(page)
+  await directory(page).getByRole('button', { name: /^删除：你好 ORDER-REF-/ }).click()
   await expect(directory(page).getByRole('listitem')).toHaveCount(1)
-  await expect(page.locator('.chat-log .bubble')).toHaveCount(0)
+  await expect(page.locator('[aria-live="polite"] > li')).toHaveCount(0)
   await expectNoHorizontalOverflow(page, '删除当前对话后')
 })

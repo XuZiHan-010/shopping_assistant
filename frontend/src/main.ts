@@ -7,6 +7,7 @@ import { setCredentialProvider, setLocaleProvider } from '@/api/credentials'
 import { useAuthStore } from '@/stores/auth'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { useLocaleStore } from '@/stores/locale'
+import { usePreferencesStore } from '@/stores/preferences'
 import App from './App.vue'
 import router from './router'
 
@@ -19,6 +20,8 @@ app.use(i18n)
 // 在挂载前同步完成，让首帧渲染就是恢复后的语言，不会先闪一下默认中文再
 // 跳到英文——localStorage 读取是同步操作，不需要 await。
 useLocaleStore(pinia).restore()
+// 主题与界面字号同理：挂载前写好 `<html data-theme / data-size>`（读写都容忍 localStorage 抛错）。
+usePreferencesStore(pinia).restore()
 
 // 显式传 pinia 实例，不依赖隐式 active pinia——provider 在请求发出的任意时刻
 // 都可能被调用，届时不一定处于 Vue 组件的 setup 上下文里，隐式 active pinia

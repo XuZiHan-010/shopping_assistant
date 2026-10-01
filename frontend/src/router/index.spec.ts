@@ -19,7 +19,7 @@ function buildRouter() {
 }
 
 describe('路由表', () => {
-  // OpsAssistantView 挂载后会加载 v2 会话目录。不注入 Mock 传输层的话，
+  // 外壳挂载后会恢复演示商家（知识库等子页还会加载自己的数据）。不注入 Mock 传输层的话，
   // 这里会打真实 fetch：本地没有后端时表现为慢速失败，在全量并发跑测试、
   // 事件循环繁忙时足以顶穿 5s 用例超时（单独跑这个文件不受影响、复现不稳定）。
   beforeEach(() => {
@@ -27,19 +27,65 @@ describe('路由表', () => {
     vi.stubEnv('VITE_API_BASE_URL', 'http://127.0.0.1:8000')
   })
 
-  it('注册助手与知识库入口；旧的 v1 看板路径不再存在', () => {
+  it('/ 是首页，挂在商家工作台外壳下；旧的 v1 看板路径不再存在', () => {
     const router = buildRouter()
 
-    expect(router.resolve('/').matched[0]?.name).toBe('assistant')
-    expect(router.resolve('/knowledge-base').matched).not.toHaveLength(0)
+    const home = router.resolve('/')
+    expect(home.name).toBe('home')
+    expect(home.matched).toHaveLength(2)
+    expect(home.matched[0]?.name).toBe('shell')
     expect(router.resolve('/ops-dashboard').matched[0]?.name).toBe('not-found')
   })
 
-  it('/ops-assistant 旧地址重定向到 /（两页合并，2026-09-27 用户裁定「选项 C」）', async () => {
+  it('所有业务页面都是外壳的子路由', () => {
+    const router = buildRouter()
+
+    for (const path of [
+      '/',
+      '/catalog',
+      '/orders',
+      '/inventory',
+      '/approvals',
+      '/approvals/d-1',
+      '/after-sales',
+      '/customer-signals',
+      '/memories',
+      '/knowledge-base',
+    ]) {
+      const resolved = router.resolve(path)
+      expect(resolved.matched[0]?.name, path).toBe('shell')
+      expect(resolved.matched, path).toHaveLength(2)
+    }
+  })
+
+  it('注册商品与订单页（W Task 9 填实现）', () => {
+    const router = buildRouter()
+
+    expect(router.resolve('/catalog').name).toBe('catalog')
+    expect(router.resolve('/orders').name).toBe('orders')
+  })
+
+  it('/ops-assistant 旧地址重定向到首页并要求打开助手栏（W 裁定 A）', async () => {
     const router = buildRouter()
 
     await router.push('/ops-assistant')
-    expect(router.currentRoute.value.name).toBe('assistant')
+    expect(router.currentRoute.value.name).toBe('home')
+    expect(router.currentRoute.value.fullPath).toBe('/?assistant=open')
+  })
+
+  it('「问助手」类跳转（name: assistant）落到首页并保留来源会话参数', async () => {
+    const router = buildRouter()
+
+    await router.push({ name: 'assistant', query: { conversation: 'c-1' } })
+    expect(router.currentRoute.value.name).toBe('home')
+    expect(router.currentRoute.value.query).toEqual({ conversation: 'c-1', assistant: 'open' })
+  })
+
+  it('/today 旧地址重定向到首页（简报并入首页）', async () => {
+    const router = buildRouter()
+
+    await router.push('/today')
+    expect(router.currentRoute.value.name).toBe('home')
     expect(router.currentRoute.value.fullPath).toBe('/')
   })
 
@@ -47,27 +93,26 @@ describe('路由表', () => {
     const router = buildRouter()
 
     const resolved = router.resolve('/approvals/d-1')
-    expect(resolved.matched[0]?.name).toBe('approval')
+    expect(resolved.name).toBe('approval')
     expect(resolved.params.draftId).toBe('d-1')
+    expect(resolved.matched[1]?.props).toEqual({ default: true })
   })
 
-  it('注册库存告警与今日简报路由', () => {
+  it('注册库存告警与商家记忆路由', () => {
     const router = buildRouter()
 
-    expect(router.resolve('/inventory').matched[0]?.name).toBe('inventory')
-    expect(router.resolve('/today').matched[0]?.name).toBe('today')
+    expect(router.resolve('/inventory').name).toBe('inventory')
+    expect(router.resolve('/memories').name).toBe('merchant-memory')
   })
 
   // 挂载完整 App 是全量套件里最重的用例之一；即使传输层已 Mock，全量并发跑
   // 测试时模块收集阶段的 CPU 争抢仍偶尔顶穿默认 5s 超时。加宽到 15s 只是给
   // 抖动留余量，不是掩盖真实变慢——单独跑这个文件通常 <300ms。
-  it('两条路由都能渲染', async () => {
+  it('外壳与子路由都能渲染', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const router = buildRouter()
-    // OpsAssistantView 需要已建立的商家会话才能正常渲染工作台标题
-    // （`auth.selected`），否则只会看到未选商家的空态——与
-    // `OpsAssistantView.spec.ts` 的 `mountOps()` 同一模式。
+    // 预先建立商家会话，外壳侧栏的商家切换器才有当前商家可显示。
     const auth = useAuthStore()
     await auth.loadMerchants()
     vi.stubGlobal(
@@ -101,6 +146,9 @@ describe('路由表', () => {
     await router.isReady()
     await flushPromises()
     expect(wrapper.text()).toContain('Borough')
+    expect(wrapper.find('nav').exists()).toBe(true)
+    // W Task 8：首页的 h1 是带商家名的问候语，页面区块以「首页」命名。
+    expect(wrapper.get('main#main section[aria-label="首页"] h1').text()).toContain('Borough商家100')
 
     await router.push('/knowledge-base')
     expect(wrapper.text()).toContain('知识库')

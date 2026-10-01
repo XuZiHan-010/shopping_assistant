@@ -102,9 +102,9 @@ const localeStore = useLocaleStore()
   gap: var(--space-2);
   min-width: 0;
   padding: var(--space-3);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--line);
   border-radius: var(--radius-card);
-  background: var(--color-surface);
+  background: var(--card);
 }
 .ops-directory__header {
   display: flex;
@@ -123,7 +123,7 @@ const localeStore = useLocaleStore()
   flex-wrap: wrap;
   gap: var(--space-2);
   align-items: center;
-  color: var(--color-text-secondary);
+  color: var(--ink-2);
   font-size: var(--font-size-caption);
 }
 .ops-directory__list {
@@ -148,13 +148,13 @@ const localeStore = useLocaleStore()
   border: 1px solid transparent;
   border-radius: var(--radius-control);
   background: transparent;
-  color: var(--color-text);
+  color: var(--ink);
   text-align: left;
   cursor: pointer;
 }
 .ops-directory__open[aria-current='true'] {
-  border-color: var(--color-primary);
-  background: var(--color-primary-soft);
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 .ops-directory__item-title {
   overflow: hidden;
@@ -162,16 +162,16 @@ const localeStore = useLocaleStore()
   white-space: nowrap;
 }
 .ops-directory__item-time {
-  color: var(--color-text-secondary);
+  color: var(--ink-2);
   font-size: var(--font-size-caption);
 }
 .ops-button {
   min-height: var(--control-height);
   padding: 0 var(--space-3);
-  border: 1px solid var(--color-border-strong);
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius-control);
-  background: var(--color-surface);
-  color: var(--color-text);
+  background: var(--card);
+  color: var(--ink);
   cursor: pointer;
 }
 .ops-button:disabled {

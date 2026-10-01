@@ -28,7 +28,7 @@
 
 - [x] 阶段 A（`n3-skill-loader`）Task 1–6 已完成：Skill 能加载进工具循环；草稿应用已按种类分派（`DraftHandler`、
       `build_handler_table`、`ENABLED_DRAFT_KINDS`）；
-- [ ] `n2-trade-closed-loop`、`n2-shop-nextjs-app`、`n2-merchant-vue-v2-migration` 已通过 N2 验收（售后建立在已签收订单与价格快照上）；
+- [x] `n2-trade-closed-loop`、`n2-shop-nextjs-app`、`n2-merchant-vue-v2-migration` 已通过 N2 验收（售后建立在已签收订单与价格快照上；2026-09-24/25 N2 独立复审与整改验收通过）；
 - [x] **M7 在库**（2026-09-24 已核对模型层，开工时对真实库再查）：`after_sales` / `after_sale_lines` 表；
       `refunds` / `returns` / `support_tickets` 的 `after_sale_id`；`support_tickets` 上
       `uq_support_tickets_after_sale_id`。**单行累计退款上限与状态迁移合法性由本计划实现**（M7 只建表与单条约束）；
@@ -41,7 +41,7 @@
       后续唯一且无需决定的跳（退货同意 → 待寄回、工单同意 → 关闭、已退款 → 关闭、已拒绝 → 关闭）由系统同事务续跳；
       待顾客补充信息 → 待商家处理由顾客在详情页提交补充说明触发（新接口）；不设超时迁移。
       日后若要改，先改 PRD → 契约 → 本计划 Task 4、7、8，再改状态机；
-- [ ] Astra「入口-N3」中本计划部分已核对。
+- [x] Astra「入口-N3」中本计划部分已核对（2026-09-26 独立审查：有条件通过）。
 
 ---
 

@@ -1,0 +1,75 @@
+# WS 店面新增查询形状的安全回归。订单列表的 buyer_key / lead_item 内容隔离
+# 由 tests/api/v2/test_shop_orders.py::test_order_list_does_not_expose_another_buyers_lead_item
+# 逐字段校验；安全 YAML 断言模型不读取响应体（见 app/eval/cases.py）。
+
+- id: SEC-CATALOG-101
+  introduced_in: N3
+  role: CUSTOMER
+  skill: v2_shop_catalog
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: customer_a
+      primitive:
+        name: resource_scope.resolve_shop_slugs
+    - actor: anonymous
+      request:
+        method: GET
+        path: /api/v2/shop/stores/{state:unknown_shop_slug}/products
+        query:
+          sort: popular
+          limit: "8"
+  assertions:
+    - type: http_status
+      expected: 403
+    - type: error_code
+      expected: RESOURCE_FORBIDDEN
+
+- id: SEC-CATALOG-102
+  introduced_in: N3
+  role: CUSTOMER
+  skill: v2_shop_catalog
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: customer_a
+      primitive:
+        name: resource_scope.resolve_shop_slugs
+    - actor: customer_a
+      primitive:
+        name: catalog.mint_newest_products_cursor
+    - actor: anonymous
+      request:
+        method: GET
+        path: /api/v2/shop/stores/{state:own_shop_slug}/products
+        query:
+          sort: popular
+          limit: "1"
+          cursor: "{state:newest_products_cursor}"
+  assertions:
+    - type: http_status
+      expected: 422
+    - type: error_code
+      expected: INVALID_CURSOR
+
+- id: SEC-ORDER-101
+  introduced_in: N3
+  role: CUSTOMER
+  skill: v2_shop_orders
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: customer_a
+      request:
+        method: GET
+        path: /api/v2/shop/orders
+  assertions:
+    - type: http_status
+      expected: 403
+    - type: error_code
+      expected: CUSTOMER_BINDING_REQUIRED
+    - type: no_side_effect
+      table: orders

@@ -35,9 +35,14 @@ describe('顾客端边界', () => {
     expect(offenders).toEqual([])
   })
 
-  it('会话凭证不写任何持久化存储或 cookie（credentials.ts 之外也不写）', () => {
+  it('会话凭证不写持久化存储；语言与外观偏好只保存无身份信息的设置', () => {
     for (const file of sources('src')) {
-      expect(code(file), file).not.toMatch(/localStorage|sessionStorage|document\.cookie/)
+      const normalized = file.split(sep).join('/')
+      if (normalized.startsWith('src/i18n/') || normalized.startsWith('src/preferences/')) {
+        expect(code(file), file).not.toMatch(/sessionId|X-Session-Id|getSession\(/)
+      } else {
+        expect(code(file), file).not.toMatch(/localStorage|sessionStorage|document\.cookie/)
+      }
     }
   })
 })

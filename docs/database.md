@@ -37,6 +37,22 @@ Chat BI 汇总及本地化表继续保留。`agent_sessions` 与来源状态表�
 `feedback` 表新增可空 `reason` 列（迁移 `20260923_0027`），只供 v2 反馈契约（§8.14.1）的
 赞踩原因使用；v1 反馈从不写入该列，v1 路径与响应不受影响。
 
+## N4 B 记忆内部状态
+
+迁移 `20260928_0042` 补齐 v2 记忆管线的内部状态，不改变 §8.14 的 API 字段，也不迁移 v1 `merchant_memories`。
+
+| 表 / 列 | 约束与用途 |
+| --- | --- |
+| `memory_extraction_jobs` | `message_id` 唯一并外键引用 `messages.id`，一条已落库的用户回合至多一项任务；仅保存消息 ID、状态（`PENDING` / `PROCESSING` / `DONE` / `FAILED`）、尝试次数、租约截止、最后错误与时间戳，不复制 `merchant_id` 或 `buyer_key`。按状态和租约截止建立领取索引；任务执行时从消息及会话解析身份 |
+| `messages.session_record_id` | v2 用户回合可空的服务端会话记录外键，历史/v1 消息保持 NULL；outbox 排空时由消息反查当时可信会话角色、商家和已绑定顾客。会话记录被清理时置空，该任务安全放弃，不猜测身份 |
+| `customer_memory_preferences` | `(merchant_id, buyer_key)` 复合主键；`memory_enabled` 默认为 true，未建行也视为开启；按店铺和已绑定顾客隔离。关闭开关与清空该顾客记忆必须在同一事务完成 |
+| `merchant_memory_summaries.is_stale`、`source_fact_ids` | 陈旧标记默认 false；`source_fact_ids` 为生成该总结时使用的事实 UUID 列表（JSONB，默认空数组）。删除事实后，依赖它的总结标为陈旧，重建前不注入 Chat |
+| `llm_usage.purpose = MEMORY` | N4 B 抽取用量与主回答 `AGENT`、本地化 `LOCALIZATION` 分列统计；三者共用同一每日预算熔断，抽取单任务另有独立调用与 token 上限。迁移 `20260928_0044` 扩展检查约束 |
+
+迁移 `20260928_0043` 为商家事实增加可空 `deleted_at` 墓碑，以区分「重复删除本人事实」与「目标不存在/跨商家」；事实列表、总结重建和召回均排除墓碑。总结表增加 `(merchant_id, category)` 唯一约束，保证每类一份文档。
+
+outbox 领取使用 `FOR UPDATE SKIP LOCKED`；任务租约到期后允许重新领取，完成写入以消息 ID 幂等。180 天顾客记忆过期在读取路径判断，清理 Cron 迟跑不能延长可召回期限。
+
 ## N3 B 售后闭环
 
 | 迁移 | 表 / 列 | 事实边界 |
@@ -48,6 +64,12 @@ Chat BI 汇总及本地化表继续保留。`agent_sessions` 与来源状态表�
 
 售后退款写 `refunds`，收到退货写 `returns`，可售回补写 `inventory_events`；
 `after_sale_events` 仍是状态迁移的追加写账本。历史退款/退货不回填售后主记录。
+
+## N3 C 商家经营指标
+
+迁移 `20260927_0041` 在既有 `metric_definitions` 中登记 `net_gmv` 的受控口径资产：
+净成交额按支付日毛成交额减去按退款发生日退款额，分类维度通过已退款订单项归属。
+该资产供口径问答展示，不作为可执行 SQL，也不扩大 v1 指标查询白名单。
 
 ## N2 交易闭环（模块 B）
 

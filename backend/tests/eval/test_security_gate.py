@@ -23,7 +23,7 @@ pytestmark = pytest.mark.integration
 
 _DATASET_DIR = Path(__file__).resolve().parents[2] / "app" / "eval" / "datasets" / "security"
 
-CURRENT_MILESTONE = "N2"
+CURRENT_MILESTONE = "N3"
 CATEGORY_INTRODUCED_IN = {
     "CROSS": "N1",
     "SQLI": "N1",

@@ -67,7 +67,10 @@ export default async function startS1E2EServers() {
       cwd: SHOP_ROOT,
       healthPath: '/health',
       args: ['node_modules/next/dist/bin/next', 'dev', '--hostname', '127.0.0.1', '--port', String(S1_SHOP_PORT)],
-      env: { NEXT_PUBLIC_API_BASE_URL: `http://127.0.0.1:${S1_BACKEND_PORT}` },
+      env: {
+        NEXT_PUBLIC_API_BASE_URL: `http://127.0.0.1:${S1_BACKEND_PORT}`,
+        E2E_NEXT_DIST_DIR: '.next-e2e',
+      },
     })
   } catch (error) {
     await stopBackend()

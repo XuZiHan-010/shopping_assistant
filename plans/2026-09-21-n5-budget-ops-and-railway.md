@@ -33,7 +33,7 @@
 > **2026-09-27 编组核对**（见 `plans/2026-09-27-n5-module-roadmap.md` §二），开工前按此修正：
 >
 > 1. **看板前端文件已不存在**：`frontend/src/views/OpsDashboardView.vue` 随 2026-09-27 两页合并下线，
->    `/api/admin/ops/status` 目前没有任何前端消费方。Task 3 的前端载体属待裁定 D-N5-1（见 N5 总览 §六）。
+>    `/api/admin/ops/status` 目前没有任何前端消费方。**D-N5-1 于 2026-09-28 裁定：新建只读管理员页**，见 Task 3 步骤 3。
 > 2. **Cron 配置已有 3 份**，不是 2 份：`railway.cron.json`（`seed_demo_rolling`）、`railway.chatbi-cron.json`
 >    （`chatbi_rollup`）、`railway.provenance-cron.json`（`purge_guest_provenance`，N2 新增）。
 >    另有 `close_expired_orders`、`expire_drafts`、`rebuild_projections` 三个任务模块**没有任何调度配置**；
@@ -87,7 +87,8 @@ Railway Cron 按 UTC 调度、不保证精确到秒、上一次未结束时可�
 | `backend/app/core/tracing.py` | `X-Request-Id` 贯穿 |
 | `backend/app/jobs/run_scheduled.py` | Cron 分发器 |
 | `backend/app/api/routes/admin_ops.py` | 看板数据扩展 |
-| 看板前端（原 `OpsDashboardView.vue` 已下线） | 载体按 D-N5-1 裁定；推荐新建只读 `frontend/src/views/OpsStatusView.vue`，走 `X-Admin-Token`（可用 `VIEWER_TOKEN`） |
+| `frontend/src/views/OpsStatusView.vue` | 只读运维看板（D-N5-1）：Chat BI 概览 + §10.4 指标，走 `X-Admin-Token`（可用 `VIEWER_TOKEN`） |
+| `frontend/e2e/ops-status.spec.ts` | 取代已删除的 `ops-dashboard.spec.ts`，复用 `e2e/support/v2MerchantMock.ts` 的 `page.route` 写法 |
 | `backend/railway.cron.json` | 统一 Cron 配置 |
 | `docs/deployment.md` | 五服务上线步骤 |
 
@@ -199,8 +200,24 @@ async def test_ops_status_never_leaks_forbidden_fields(client) -> None:
 ```
 
 - [ ] **步骤 2：确认失败 → 实现 → 确认通过**
-- [ ] **步骤 3：看板前端按 D-N5-1 裁定落地**（2026-09-27 编组新增）——组件测试断言页面不渲染 Token、Prompt、
-      经营数据或请求正文；`VIEWER_TOKEN` 只读访问正常，写操作按钮不存在；`npm run test`、`typecheck`、`build` 通过
+- [ ] **步骤 3：看板前端**（2026-09-27 编组新增；D-N5-1 于 2026-09-28 裁定）
+
+  裁定：**新建只读管理员页 `OpsStatusView.vue`**，一页合并 Chat BI 概览（既有 `/api/admin/analytics/chatbi/*`）与
+  §10.4 指标（三级预算余量、每回合 token 与成本、限流命中、降级计数、工具错误率、p95、缓存命中）。**不恢复旧页**——
+  旧页按 v1 结构组织，只作参考，用只读的 `git show HEAD:frontend/src/views/OpsDashboardView.vue` 查看，
+  不做 checkout / reset。范围克制：表格加至多两张趋势图，不做交互式 BI 下钻。
+
+  顺序：① **先改 PRD §14** 需求迁移表「Chat BI 运维看板」一行，写明新载体（消除与 §15 N2 两页合并裁定的冲突），
+  同步 `docs/frontend-development-plan.md`（**2026-09-28 已完成**：PRD §14、§15 N5；前端计划第 15 条）；② 再写页面、路由与导航入口（只对持管理令牌或只读令牌的访问显示）；
+  ③ 组件测试断言页面不渲染 Token、Prompt、经营数据或请求正文，`VIEWER_TOKEN` 下不存在任何写操作按钮
+  （含 Chat BI 手动 rollup）；④ `e2e/ops-status.spec.ts` 取代已删除的 `ops-dashboard.spec.ts`；
+  `npm run test`、`typecheck`、`lint`、`build` 通过
+
+  **（2026-09-28，PRD M1、§15「W」）** W 完成后，本步骤的做法：
+  - 「导航入口」即商家工作台侧栏的**「管理」分组**，与知识库并列；
+  - 令牌输入复用 W 的 `AdminGate`，未持令牌时不请求 `/api/admin/*`；
+  - 页面挂在 `MerchantShell` 下，使用新 token；
+  - `ops-status.spec.ts` 沿用 W 改过入口后的 `e2e/support/v2MerchantMock.ts` 写法。
 
 ---
 

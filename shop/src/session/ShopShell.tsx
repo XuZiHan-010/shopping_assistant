@@ -1,149 +1,162 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useSession } from '@/api/credentials'
 import { ApiError } from '@/api/errors'
-import { getCart } from '@/api/shopApi'
+import { getCart, listOrders } from '@/api/shopApi'
+import { CartPanel } from '@/shell/CartPanel'
+import { ChatProvider, useChat } from '@/chat/ChatProvider'
+import { useLocale } from '@/i18n/LocaleProvider'
+import { PreferencesPopover } from '@/preferences/PreferencesPopover'
+import { ActivityDrawer } from '@/shell/ActivityDrawer'
 import type { Cart } from '@/types/shop'
+import { ProductSheet } from '@/views/ProductSheet'
 import { ShopContext, type ShopContextValue } from './ShopContext'
 import { bindDemoCustomer, openShopSession, switchDemoIdentity } from './sessionService'
 
 type Phase = 'opening' | 'ready' | 'unavailable' | 'error'
+type Panel = ShopContextValue['panel']
 
-/**
- * 店铺外壳：进入 `/{shop_slug}` 时创建访客会话（只存内存），顶栏展示身份与购物车角标。
- * 公开页面（店铺页、商品详情）由服务端渲染并作为 children 传入，会话只影响这层外壳。
- */
 export function ShopShell({ shopSlug, children }: { shopSlug: string; children: ReactNode }) {
   const session = useSession()
   const pathname = usePathname()
+  const { t } = useLocale()
   const [phase, setPhase] = useState<Phase>('opening')
   const [cart, setCart] = useState<Cart | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-
-  const refreshCart = useCallback(async () => {
-    setCart(await getCart())
-  }, [])
+  const [panel, setPanel] = useState<Panel>(null)
+  const [productId, setProductId] = useState<string | null>(null)
+  const [pendingOrders, setPendingOrders] = useState<{ sessionId: string; count: number } | null>(null)
+  const [identityOpen, setIdentityOpen] = useState(false)
+  const view = pathname?.startsWith(`/${shopSlug}/orders`) ? 'orders' : 'assistant'
+  const refreshCart = useCallback(async () => setCart(await getCart()), [])
 
   useEffect(() => {
     let cancelled = false
-    openShopSession(shopSlug)
-      .then(async () => {
-        if (cancelled) return
-        setPhase('ready')
-        await refreshCart().catch(() => undefined)
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return
-        // 未知或未开放的店铺统一 403：不区分「不存在」与「未开放」。
-        setPhase(error instanceof ApiError && error.status === 403 ? 'unavailable' : 'error')
-      })
-    return () => {
-      cancelled = true
-    }
+    openShopSession(shopSlug).then(async () => {
+      if (cancelled) return
+      setPhase('ready')
+      await refreshCart().catch(() => undefined)
+    }).catch((error: unknown) => {
+      if (!cancelled) setPhase(error instanceof ApiError && error.status === 403 ? 'unavailable' : 'error')
+    })
+    return () => { cancelled = true }
   }, [shopSlug, refreshCart])
 
-  const value = useMemo<ShopContextValue>(
-    () => ({
-      shopSlug,
-      session,
-      cart,
-      refreshCart,
-      setCart,
-      bindDemoCustomer: async () => {
-        const result = await bindDemoCustomer()
-        if (result.cartAdjusted) setNotice('部分商品因售罄或数量上限已调整。')
-        await refreshCart()
-        return result
-      },
-      switchIdentity: async () => {
-        await switchDemoIdentity(shopSlug)
-        setNotice(null)
-        await refreshCart().catch(() => undefined)
-      },
-    }),
-    [shopSlug, session, cart, refreshCart],
-  )
+  useEffect(() => {
+    if (!session?.isBound) return
+    let cancelled = false
+    listOrders().then(orders => {
+      if (!cancelled) setPendingOrders({ sessionId: session.sessionId, count: orders.filter(order => order.paymentStatus === 'PENDING').length })
+    }, () => { if (!cancelled) setPendingOrders({ sessionId: session.sessionId, count: 0 }) })
+    return () => { cancelled = true }
+  }, [session?.sessionId, session?.isBound, pathname])
 
-  // 头部按钮没有别的调用方来接住异常：演示身份入口只在演示部署开放，失败要给出提示。
-  async function fromHeader(action: () => Promise<unknown>) {
-    try {
-      await action()
-    } catch {
-      setNotice('演示身份暂不可用，请稍后重试。')
+  useEffect(() => {
+    const queryPanel = new URLSearchParams(window.location.search).get('panel')
+    if (queryPanel === 'cart' || queryPanel === 'memory' || queryPanel === 'history' || queryPanel === 'activity') {
+      queueMicrotask(() => setPanel(queryPanel))
+      const url = new URL(window.location.href)
+      url.searchParams.delete('panel')
+      window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`)
     }
+  }, [pathname])
+
+  const value = useMemo<ShopContextValue>(() => ({
+    shopSlug, session, cart, refreshCart, setCart, view, panel, productId,
+    openPanel: (next, id) => { setProductId(next === 'product' ? id ?? null : null); setPanel(next) },
+    closePanel: () => { setPanel(null); setProductId(null) },
+    bindDemoCustomer: async () => {
+      const result = await bindDemoCustomer()
+      if (result.cartAdjusted) setNotice(t('cartAdjusted'))
+      await refreshCart()
+      return result
+    },
+    switchIdentity: async () => {
+      await switchDemoIdentity(shopSlug)
+      setNotice(null); setIdentityOpen(false)
+      await refreshCart().catch(() => undefined)
+    },
+  }), [shopSlug, session, cart, refreshCart, view, panel, productId, t])
+
+  async function fromHeader(action: () => Promise<unknown>) {
+    try { await action(); setIdentityOpen(false) }
+    catch { setNotice(t('demoUnavailable')) }
   }
 
-  const base = `/${shopSlug}`
-  const links = [
-    { href: base, label: '店铺' },
-    { href: `${base}/assistant`, label: '导购助手' },
-    { href: `${base}/cart`, label: '购物车' },
-  ]
-  const cartCount = cart?.items.length ?? 0
-
-  return (
-    <ShopContext.Provider value={value}>
-      <header className="topbar">
-        <Link href={base} className="brand">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/borough-logo.svg" alt="" width={24} height={24} />
-          Borough
-        </Link>
-        <nav aria-label="店铺导航">
-          {links.map((link) => (
-            <Link
-              key={link.href}
-              href={link.href}
-              aria-current={pathname === link.href ? 'page' : undefined}
-            >
-              {link.label}
-              {link.href.endsWith('/cart') && cartCount > 0 ? (
-                <span className="badge" aria-label={`购物车 ${cartCount} 件商品`}>
-                  {cartCount}
-                </span>
-              ) : null}
+  const cartCount = cart?.items.reduce((count, item) => count + item.quantity, 0) ?? 0
+  const visiblePending = session?.isBound && pendingOrders?.sessionId === session.sessionId ? pendingOrders.count : 0
+  return <ShopContext.Provider value={value}>
+    <ChatProvider>
+      <a className="skip-link" href="#shop-main">{t('skip')}</a>
+      <div className="shop-app" data-panel={panel ?? 'closed'}>
+        <header className="shop-topbar">
+          <Link href={`/${shopSlug}`} className="shop-brand" aria-label="Borough">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/borough-logo.svg" alt="" width={28} height={28} /> Borough
+          </Link>
+          <nav className="shop-tabs" aria-label={t('navLabel')}>
+            <Link href={`/${shopSlug}`} aria-label={t('tab.assistant')} aria-current={view === 'assistant' ? 'page' : undefined}><span className="shop-tab-icon" aria-hidden="true">✦</span><span className="shop-tab-text">{t('tab.assistant')}</span></Link>
+            <Link href={`/${shopSlug}/orders`} aria-label={t('tab.orders')} aria-current={view === 'orders' ? 'page' : undefined}>
+              <span className="shop-tab-icon" aria-hidden="true">▤</span><span className="shop-tab-text">{t('tab.orders')}</span>{visiblePending > 0 && <span className="shop-pending" aria-label={`${visiblePending} ${t('pendingAttn')}`}>{visiblePending}</span>}
             </Link>
-          ))}
-        </nav>
-        <div className="row">
-          <span className="muted" data-testid="identity">
-            {session?.isBound ? '演示顾客' : '访客'}
-          </span>
-          {session?.isBound ? (
-            <button className="btn" onClick={() => void fromHeader(value.switchIdentity)}>
-              退出演示身份
-            </button>
-          ) : session ? (
-            <button className="btn" onClick={() => void fromHeader(value.bindDemoCustomer)}>
-              绑定演示顾客
-            </button>
-          ) : null}
+          </nav>
+          <div className="shop-actions">
+            <button type="button" className="shop-icon-button" aria-label={t('activity')} onClick={() => value.openPanel('activity')}><span aria-hidden="true">◷</span><span className="shop-action-text">{t('activity')}</span></button>
+            <button type="button" className="shop-icon-button shop-cart-toggle" aria-label={t('cart')} onClick={() => value.openPanel('cart')}><span aria-hidden="true">▣</span><span className="shop-action-text">{t('cart')}</span>{cartCount > 0 && <span className="badge">{cartCount}</span>}</button>
+            <div className="shop-identity">
+              <button type="button" className="shop-identity-trigger" aria-expanded={identityOpen} onClick={() => setIdentityOpen(open => !open)}>
+                <span data-testid="identity">{session?.isBound ? t('demo') : t('guest')}</span>
+              </button>
+              {identityOpen && <div className="shop-identity-menu" role="group" aria-label={session?.isBound ? t('demo') : t('guest')}>
+                <p>{session?.isBound ? t('acctBound') : t('acctGuest')}</p><p className="muted">{t('notReal')}</p>
+                {session?.isBound ? <button className="btn" onClick={() => void fromHeader(value.switchIdentity)}>{t('unbind')}</button>
+                  : session ? <button className="btn" onClick={() => void fromHeader(value.bindDemoCustomer)}>{t('bind')}</button> : null}
+              </div>}
+            </div>
+          </div>
+        </header>
+        <div className="shop-layout">
+          <main id="shop-main" className="shop-main">
+            {notice && <p className="notice" role="status">{notice}</p>}
+            {phase === 'unavailable' ? <p className="notice notice-error" role="alert">{t('storeUnavailable')}</p>
+              : phase === 'error' ? <p className="notice notice-error" role="alert">{t('serviceUnavailable')}</p> : children}
+          </main>
+          <aside className="shop-cart-rail" aria-label={t('cart')}>
+            <div className="shop-cart-rail-head"><h2>{t('cart')}</h2><button className="shop-cart-close" aria-label={t('close')} onClick={value.closePanel}>×</button></div>
+            {phase === 'ready' && <CartPanel />}
+          </aside>
         </div>
-      </header>
-      <main className="page">
-        {notice ? (
-          <p className="notice" role="status">
-            {notice}
-          </p>
-        ) : null}
-        {phase === 'unavailable' ? (
-          <p className="notice notice-error" role="alert">
-            该店铺不存在或暂未开放。
-          </p>
-        ) : phase === 'error' ? (
-          <p className="notice notice-error" role="alert">
-            暂时无法连接服务，请稍后重试。
-          </p>
-        ) : (
-          children
-        )}
-        <p className="muted" style={{ marginTop: 32 }}>
-          演示环境：身份为演示身份，非真实登录；结账与支付均为演示，不产生真实扣款。
-        </p>
-      </main>
-    </ShopContext.Provider>
-  )
+        <PreferencesPopover />
+        {panel === 'cart' && <button className="shop-overlay" aria-label={t('close')} onClick={value.closePanel} />}
+        <ActivityDrawer open={panel === 'activity' || panel === 'memory' || panel === 'history'} onClose={value.closePanel} initialTab={panel === 'memory' ? 'memory' : panel === 'history' ? 'history' : 'steps'} onTabChange={tab => value.openPanel(tab === 'steps' ? 'activity' : tab)} />
+        {panel === 'product' && productId && <ProductSheet shopSlug={shopSlug} productId={productId} onClose={value.closePanel} />}
+        <ShopComposer view={view} shopSlug={shopSlug} />
+        <p className="shop-demo-fine">{t('demoFine')}</p>
+      </div>
+    </ChatProvider>
+  </ShopContext.Provider>
+}
+
+function ShopComposer({ view, shopSlug }: { view: 'assistant' | 'orders'; shopSlug: string }) {
+  const { send, busy } = useChat()
+  const { t } = useLocale()
+  const router = useRouter()
+  const [draft, setDraft] = useState('')
+  return <form className="shop-composer" onSubmit={event => {
+    event.preventDefault()
+    const text = draft.trim()
+    if (!text || busy) return
+    setDraft('')
+    if (view === 'orders') router.push(`/${shopSlug}`)
+    void send(text)
+  }}>
+    <label htmlFor="shop-ask" className="sr-only">{t('askLabel')}</label>
+    <textarea id="shop-ask" rows={1} aria-label={t('askLabel')} placeholder={view === 'orders' ? t('placeholderOrders') : t('placeholder')} value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={event => {
+      if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit() }
+    }} />
+    <button type="submit" className="btn btn-primary" disabled={busy || !draft.trim()}>{t('send')}</button>
+  </form>
 }

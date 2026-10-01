@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, fields
 from typing import TYPE_CHECKING
 
+from app.agent.loop.compaction import CompactionPolicy, CompactionStrategy
 from app.llm.client import LlmBudget
 
 if TYPE_CHECKING:
@@ -27,10 +28,14 @@ class LoopLimits:
     quality_max_attempts: int = 2
     #: 单回合 `load_skill` 次数上限（PRD A4）；超限的调用被拒绝并告知模型，回合继续。
     max_skill_loads: int = 3
+    #: 上下文压缩（§6.12）；None 表示本回合不压缩。自带校验，不参与下面的正数检查。
+    compaction: CompactionPolicy | None = None
 
     def __post_init__(self) -> None:
         for item in fields(self):
             value = getattr(self, item.name)
+            if item.name == "compaction":
+                continue
             if value <= 0:
                 raise ValueError(f"LoopLimits.{item.name} 必须为正数，实际为 {value}")
 
@@ -44,6 +49,11 @@ class LoopLimits:
             max_tokens=settings.llm_max_tokens_per_request,
             quality_max_attempts=settings.agent_loop_quality_max_attempts,
             max_skill_loads=settings.skill_max_per_turn,
+            compaction=CompactionPolicy(
+                strategy=CompactionStrategy(settings.compaction_strategy),
+                trigger_tokens=settings.compaction_trigger_tokens,
+                max_calls=settings.compaction_max_calls,
+            ),
         )
 
     def new_budget(self) -> LlmBudget:

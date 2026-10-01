@@ -91,6 +91,37 @@ def test_coupon_at_exactly_20_percent_passes() -> None:
     assert all(check.passed for check in checks)
 
 
+def test_full_reduction_coupon_over_20_percent_is_blocked() -> None:
+    checks = check_coupon(
+        threshold_amount=Decimal("100.00"),
+        discount_amount=Decimal("25.00"),
+        limits=_limits(),
+    )
+    failed = [check for check in checks if not check.passed]
+    assert len(failed) == 1
+    assert failed[0].code == "DISCOUNT_RATE_EXCEEDS_LIMIT"
+    assert failed[0].current_limit and failed[0].remediation
+
+
+def test_full_reduction_coupon_at_limit_passes_and_zero_threshold_fails() -> None:
+    assert all(
+        check.passed
+        for check in check_coupon(
+            threshold_amount=Decimal("100.00"),
+            discount_amount=Decimal("20.00"),
+            limits=_limits(),
+        )
+    )
+    assert any(
+        not check.passed
+        for check in check_coupon(
+            threshold_amount=Decimal("0.00"),
+            discount_amount=Decimal("1.00"),
+            limits=_limits(),
+        )
+    )
+
+
 def test_coupon_guardrail_tightened_after_drafting_is_enforced_at_apply() -> None:
     """起草时用旧配置通过，应用时护栏收紧后必须按当时生效配置复检（D9②）。"""
 

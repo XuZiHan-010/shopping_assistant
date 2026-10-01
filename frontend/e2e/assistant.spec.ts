@@ -1,8 +1,15 @@
 import { expect, test, type ConsoleMessage, type Page } from '@playwright/test'
 
+import { openAssistant, switchLanguage } from './support/assistantRail'
+import { mockHomeEndpoints } from './support/v2MerchantMock'
+
 /**
- * 商家运营助手（`/`，两页合并评审 2026-09-26 评审、2026-09-27 用户裁定「选项 C」
+ * 商家运营助手（两页合并评审 2026-09-26 评审、2026-09-27 用户裁定「选项 C」
  * 后取代 v1 分析助手 `AssistantView`——PRD §15 N2）。
+ *
+ * W Task 6 起助手是常驻外壳、默认收起的助手栏，入口改为 `openAssistant()`
+ * （`/?assistant=open`）；原助手页头部的工作台导航与语言切换器随外壳迁到侧栏与
+ * 偏好设置，对应断言改指向侧栏「主导航」与偏好设置入口（映射见 W Task 6 报告）。
  *
  * v2 商家会话/聊天走裸 `fetch`（`/api/v2/merchant/*`），不像 v1 `submitChat`
  * 那样经过 `resolveTransport()` 的 Mock 传输层，因此常规 Mock E2E 套件
@@ -28,6 +35,8 @@ async function mockV2Endpoints(page: Page) {
   await page.route('**/api/v2/merchant/conversations*', async (route) => {
     await route.fulfill({ json: { items: [], next_cursor: null, has_more: false } })
   })
+  // W Task 8：`/` 是首页，空闲后会取简报、主指标等只读数据，一并打桩。
+  await mockHomeEndpoints(page)
 }
 
 function collectConsoleErrors(messages: string[]) {
@@ -44,16 +53,18 @@ test('运营助手入口展示商家切换、语言切换与工作台导航，�
   page.on('pageerror', (error) => errors.push(error.message))
   await mockV2Endpoints(page)
 
-  await page.goto('/')
+  await openAssistant(page)
 
   await expect(page.getByRole('heading', { name: '运营助手' })).toBeVisible()
   await expect(page.getByTestId('merchant-switcher')).toContainText('Borough商家100')
-  await expect(page.getByTestId('language-switcher')).toBeVisible()
+  // 语言切换在偏好设置里（设计说明 §2.1），入口是左下角账号区。
+  await expect(page.getByTestId('preferences-trigger')).toBeVisible()
   await expect(page.getByLabel('向运营助手提问')).toBeVisible()
 
-  const nav = page.getByRole('navigation', { name: '商家工作台' })
-  await expect(nav.getByRole('link', { name: '今日简报' })).toHaveAttribute('href', '/today')
-  await expect(nav.getByRole('link', { name: '库存告警' })).toHaveAttribute('href', '/inventory')
+  // 今日简报并入首页（`/today` → `/`），库存告警即侧栏「库存」。
+  const nav = page.getByRole('navigation', { name: '主导航' })
+  await expect(nav.getByRole('link', { name: '首页' })).toHaveAttribute('href', '/')
+  await expect(nav.getByRole('link', { name: '库存' })).toHaveAttribute('href', '/inventory')
   await expect(nav.getByRole('link', { name: '知识库' })).toHaveAttribute('href', '/knowledge-base')
 
   expect(errors).toEqual([])
@@ -76,6 +87,8 @@ test('未知路径回到助手入口，不存在登录页', async ({ page }) => 
   await page.goto('/login')
 
   await expect(page).toHaveURL('/')
+  // 助手栏默认收起：从侧栏入口打开后再核对。
+  await page.locator('[data-nav-group="assistant"] button').click()
   await expect(page.getByRole('heading', { name: '运营助手' })).toBeVisible()
 })
 
@@ -85,14 +98,40 @@ test('切到英语后，头部与导航文案无中文泄漏', async ({ page }) 
   page.on('pageerror', (error) => errors.push(error.message))
   await mockV2Endpoints(page)
 
-  await page.goto('/')
-  await page.getByTestId('language-switcher').click()
+  await openAssistant(page)
+  await switchLanguage(page, 'en-US')
 
   await expect(page.getByRole('heading', { name: 'Operations assistant' })).toBeVisible()
   await expect(page.getByLabel('Ask the operations assistant')).toBeVisible()
-  const nav = page.getByRole('navigation', { name: 'Merchant workspace' })
-  await expect(nav.getByRole('link', { name: "Today's brief" })).toBeVisible()
+  const nav = page.getByRole('navigation', { name: 'Main navigation' })
+  await expect(nav.getByRole('link', { name: 'Home' })).toBeVisible()
   await expect(nav.getByRole('link', { name: 'Knowledge base' })).toBeVisible()
 
   expect(errors).toEqual([])
+})
+
+test('Ctrl + J 打开与收起助手栏（输入框聚焦时同样生效，不打开下载页），Esc 收起', async ({
+  page,
+  context,
+}) => {
+  await mockV2Endpoints(page)
+  await page.goto('/')
+  const rail = page.locator('#assistant-rail')
+  await expect(rail).toBeHidden()
+
+  await page.keyboard.press('Control+j')
+  const input = page.getByLabel('向运营助手提问')
+  await expect(input).toBeVisible()
+  await expect(input).toBeFocused()
+
+  await page.keyboard.press('Control+j')
+  await expect(rail).toBeHidden()
+  // Chrome 的 Ctrl + J 默认打开下载页；preventDefault 后不应多出新页面。
+  expect(context.pages()).toHaveLength(1)
+
+  await page.locator('[data-nav-group="assistant"] button').click()
+  await expect(input).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(rail).toBeHidden()
+  await expect(page.locator('[data-nav-group="assistant"] button')).toBeFocused()
 })

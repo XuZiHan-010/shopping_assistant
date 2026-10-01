@@ -1,6 +1,220 @@
 # 项目进度快照
 
-> **2026-09-27 当前状态：N3 阶段 C 开发与 S2/S5/S6/S7 双层场景已收口，等待 N3-4 独立复审及真实模型人工质量验收。**
+> **2026-09-30：N4-A 压缩策略真实对比完成（用户授权，R3），确认维持 `TOOL_RESULT_PRUNING`。** `deepseek-flash` 90 次调用全部成功，**383,755 token**（可丢弃测试库保险丝经用户同意本次临时提到 100 万；实际未超过默认 50 万）。人工复核后两策略回答各 28/30 合格，身份与安全均 30/30；摘要策略总 token 约为清理的 1.87 倍（249,965 vs 133,790）。发现并修复两处：① 截至时间锚点补 `[工具#call_id]`，否则模型无法把数值与定义版本对应；② 正文出现 DeepSeek 内部工具调用标记（`<｜｜DSML｜｜ …>`）时按上游异常可见降级——循环的质量重写不给工具，此前可能把这段标记当回答展示。另记：模型曾把围栏随机 ID 当草稿编号（由确定性校验兜底，未改）。评测集商家问题按依赖轮次重写。报告 `docs/history/eval/n4-e5-compaction-real.md`；修复后未重跑真实对比。**验证（2026-10-01）**：后端全量 `REQUIRE_INTEGRATION_DB=1`（本地 compose PostgreSQL、空 `LLM_API_KEY`）**4254 passed / 13 skipped / 0 failed**，`ruff check .`、`mypy app`（292 文件）通过；首次全量因 Docker Desktop 中途停止在约 17% 中断，重启后重跑。未执行 Git 操作。
+
+> **2026-09-30：N4-B E5 记忆抽取真实评测完成（用户授权，R3），N4-B 计划全部勾选。** `deepseek-flash` 40 次调用全部成功，共 **8,731 token**（申请上限 16 万）；错误写入率 **5%**（2 条，均出自更正类用例 MEM-016），应拒绝的 20 条（敏感诱导、助手推测等）零误写，精确率 0.905、漏记 0；选定 `deepseek-flash`，写入 §6.13，报告 `docs/history/eval/n4-e5-memory-real.md`。运行库为本地可丢弃库 `borough_e5_real_test`；`memory_e5` 入口补 Windows 事件循环设置（首次运行连库失败、零调用）。**注意**：`backend/.env` 的 `LLM_MODEL` 仍是已退役别名 `deepseek-v4-flash`，本次用环境变量覆盖，未改文件。未执行 Git 操作。
+
+> **2026-09-30：N4-B（双端记忆）完成（Task 7 步骤 4 见上条）。** 计划 `plans/2026-09-21-n4-memory-pipeline.md`。
+> - **核实**：Task 2–6、9 的实现与测试此前已写入但未勾选，本轮逐项对照计划核实后勾选（证据写在计划各 Task 末尾）：抽取按发言者过滤、outbox 幂等 / SKIP LOCKED / 租约 / 重试上限、访客不入队且绑定后不补抽、顾客 180 天仅确认续期、关闭即清空、商家事实 / 总结两层与陈旧不注入、`memory-personalization` Skill（补齐 PRD C2 第 5 个顾客 Skill）、商家记忆面板。v1 `merchant_memories` 未迁入、v2 不读写它（PRD §14）。
+> - **修复缺陷**：两端把记忆拼进 `LoopRequest.system_prompt`，而循环把系统提示词整体算作数字来源——商家记忆「上月净成交额大约 50 万」能让回答里的「50 万」通过确定性校验，违反 M11。新增 `LoopRequest.memory_context`（拼在稳定前缀与围栏策略之后，A9），不进数字来源；顾客记忆同样处理。两端集成用例修复前失败、修复后通过；§6.13 已补规则与必测。另补 `BackgroundTasks` 静态守卫，并把顾客记忆响应的身份断言加强为检查原值。
+> - **E5 记忆评测**：Fake 管线早已通过；真实选型评测审批请求已提交——`deepseek-flash` 40 次、每次 ≤4000 token、合计 ≤16 万（低于每日预算），入口 `uv run python -m app.eval.memory_e5 --real`，**未执行**。
+> - **验证**：后端全量 `REQUIRE_INTEGRATION_DB=1`（本地 compose PostgreSQL、空 `LLM_API_KEY`）**4246 passed / 13 skipped / 0 failed**；`ruff check .`、`mypy app` 通过。本轮未改前端（Task 9 面板沿用 W 收尾时 746 passed 的验证）。
+> - **N4 剩余**：C 混合检索（Railway Postgres 能否启用 `vector` 待确认）；A、B 各有一个 R3 真实评测待授权；v2 界面不渲染 `step` / `thinking_steps`。未调用真实 LLM，未执行 Git 操作。
+
+> **2026-09-30：N4-A（上下文与压缩）完成；生产策略暂按保守默认 `TOOL_RESULT_PRUNING`，未经真实模型对比。** 计划 `plans/2026-09-21-n4-context-compaction.md` 全部勾选。
+> - **实现**：Task 2 工具结果清理、Task 3 摘要压缩的实现与单测由先前会话写入但未勾选、未登记，本轮以变异检查代替追溯红灯后勾选。Task 4 接入循环：`CompactionPolicy` 经 `LoopLimits.from_settings` 进入 `runner.py`，每次工具轮决策前按字符估算，超过 `COMPACTION_TRIGGER_TOKENS`（新增，默认 8000）按 `COMPACTION_STRATEGY`（新增，默认 `TOOL_RESULT_PRUNING`）压缩；摘要调用走回合同一份预算，`COMPACTION_MAX_CALLS` 用尽回退清理；压缩生效时推 SSE `step`（`node="compact_context"`，「正在整理较早的对话」），最终响应 `thinking_steps` 记同一步（契约既有字段，OpenAPI 无变化）。后端计划 §6.10 登记两个配置，§6.12 写明选型。
+> - **E5 压缩评测（Task 5）**：30 条长对话（`app/eval/datasets/compaction/`），评估器 `app/eval/compaction_e5.py`。Fake LLM 下两策略身份、来源（含截至时间与定义版本）、草稿版本、安全约束四项保持率均 100%；诊断项「历史用户原话仍可见」清理 100%、摘要 0%（Fake 最坏摘要）。报告 `docs/history/eval/n4-e5-compaction-fake.md`。**真实模型对比（90 次 `deepseek-flash` 调用、约 84 万 token、超过每日预算）已提交审批请求，未执行**（R3）。
+> - **验证**：后端全量 `REQUIRE_INTEGRATION_DB=1`（本地 compose PostgreSQL 55432、空 `LLM_API_KEY`）**4241 passed / 13 skipped / 0 failed**（跳过项同上条：原有 4 项 + WS 图片 9 项）；`ruff check .`、`mypy app`（291 文件）通过；新增测试：循环级 8 例、配置 4 例、两端 Chat 集成 3 例、E5 评测 6 例。
+> - **未完成**：两端前端都不渲染 v2 `step` / `thinking_steps`，压缩提示目前只到 API 层，界面上看不到；真实模型选型待 R3 授权。
+> - **同日 W §五审查整改补登记**：草稿隔离、助手输入隔离、语言刷新、订单 SQL 分页四项已实现未勾选，本轮核实后勾选——前端全量 746 passed，`typecheck`、`lint`、`codegen:check`、`build` 通过；后端订单分页与索引迁移集成 14 passed。
+> - 未调用真实 LLM，未执行 Git 操作。
+
+> **2026-09-30（WS 收口）：除 Task 12 商品图片外，WS 完成定义其余各项已满足。**
+> - **类目（Task 11）**：契约 §8.8.1 `ProductSummary` 增加 `category: string[1..64]`（源类目，不翻译），PRD §11.2.2 同步；Schema、服务、OpenAPI（`docs/api.json` / `api.md`）、两端 `generated.ts`、顾客端 Adapter／类型已同步。顾客端 `i18n/categories.ts` 固定词表（英文与后端确定性词典一致，未登记原样显示），商品浮层与完整商品页显示类目；`shop-tokens.css` 补齐计划 Task 7 漏掉的五个类目占位色（浅色与两份深色），图片加载前按类目上底色，缺图仍为条纹占位。§8.0.1 五项：契约、OpenAPI 重导、两端生成类型、Adapter 与测试、OpenAPI 会话契约哨兵均已齐备。
+> - **计划复选框**：Task 0–11 已对照代码与测试逐项核实后勾选，复核说明（红灯步骤无法追溯、等价偏差、有理由的偏差）写在计划「二、任务」开头。复核补齐的测试：`rawRequest` 语言请求头；外壳视图入口与 `aria-current`、待付款角标只计 `PENDING`、访客不请求订单、身份菜单文案、`?panel=memory` 直开记忆页签；视图切换保留对话；下单成功跳转订单并关闭购物车、下单被拒不跳转；三条旧路由重定向。删除已迁空的 `assistant/conversations/` 空目录。
+> - **验证（本轮，全部 Fake LLM，未调用真实 LLM）**：后端全量（一次性库，`REQUIRE_INTEGRATION_DB=1`）**4219 passed / 1 failed / 13 skipped**，唯一失败是商品列表公开字段集合断言未含新增的 `category`，按契约补字段后相关 496 项复跑通过；全仓 `ruff check .` 与 `mypy app`（290 文件）通过。`shop/` 单测 **137 passed**，`typecheck`、`lint`、`build`、`codegen:check`、`tokens:check` 通过；Playwright 主套件 **10/10**、S4 **1/1**。`frontend/` `codegen:check`、`typecheck`、`lint` 通过，单测 744/746，失败的 2 例是已知的 `HomeMetricPanel` 负载超时（与后端全量并行时出现），单独复跑 22/22。
+> - **剩余**：Task 12 的 23 张商品原图待交付（交付后转换、校验、写 `IMAGE-CREDITS.md`、1440px/375px 目视验收）。未执行 Git 操作。
+
+> **2026-09-30（WS 审查整改）**：按对照计划的代码审查修复以下问题。
+> - **演示种子**：`seed_demo_scenarios.py` 不再预置「待付款」单。原单按营业日前一天 15:00 写入、写入即超过 30 分钟支付窗口，且没有库存占用，超时关单会把 `stock_reserved` 减成负数（违反 `ck_products_stock_reserved_nonneg`）或吃掉别人的占用；改为一笔超时关闭订单（`ORDER_PLACED` + `ORDER_CLOSED`，`close_reason=TIMEOUT`），演示「待付款／去支付」改为现场下单。WS 计划 Task 0 步骤 2 同步校正。已部署或本地库若已有旧种子待付款单，需人工核对其占用后再跑关单任务。
+> - **后端**：`order_leads` 订单行与商品关联补 `merchant_id` 过滤，并与 `last_event_times` 一样拒绝跨商家批量调用。下架商品首件图片保持契约 §8.10.1 行为（仍取当前图片），WS 计划中与契约冲突的「下架即 null」描述已按契约校正。
+> - **顾客端**：首页问候与日期改为客户端挂载后按本机时间渲染（`useSyncExternalStore`，服务端为空），消除 UTC 服务端与 UTC+8 顾客之间的水合不一致；首页服务端取优惠券、购物车取优惠券都带页面语言；订单页幂等键改为「操作 + 订单」，对未展开订单的快捷操作不再清空已展开详情；英文概况句改用英文标点与单复数；首页、订单页、商品浮层／详情、购物车的内联双语文案收进 `messages.ts`，并加英文字典全键类型约束；履约事件标签去掉后端没有的「到达转运中心」「快递员已出发」；商品详情不再把内部 UUID 当商品编号展示；去掉 9 个文件的 UTF-8 BOM。
+> - **验证**：`shop/` 单测 **124 passed**（新增 7 项，覆盖服务端渲染不含问候、英文单复数、优惠券语言、按订单区分幂等键、快捷操作不替换展开详情、事件标签与复数键），`typecheck`、`lint`、`build`、`codegen:check`、`tokens:check` 通过；顾客端 Playwright **10/10**（一次性库、空 `LLM_API_KEY`、脚本化 Fake LLM）。后端相关用例在一次性库 **103 passed**（确定性种子、顾客／商家订单、目录、订单工具、首页指标、定时任务）；首轮与 Playwright 并行时 `test_rolling_seed_catches_up_missing_days_and_is_idempotent` 失败 1 次，单独与整组复跑均通过，未复现。`ruff`（改动文件）、`mypy app` 通过。未跑后端全量与商家端检查（本轮未改 `frontend/`）。
+> - **仍未处理**：商品浮层「显示类目」需要 `ProductSummary` 契约增加类目字段，属契约变更，未做；`TopBar` / `IdentityMenu` / `Composer` 仍内联在 `ShopShell`；计划 Task 0–11 的复选框未逐项复核；Task 12 图片仍待交付。未调用真实 LLM，未执行 Git 操作。
+
+> **2026-09-30：WS（顾客端店面重设计）Task 0–11 与 Task 13 的实现已接通。** PRD／契约、热门排序、商品缺失属性、订单摘要、只读 `get_my_order`、演示目录、OpenAPI 与两端生成类型已同步；顾客端已迁入共享色板、自托管字体、双语与偏好、智能助手首页／对话、常驻或抽屉购物车、订单视图、商品浮层、动态抽屉和售后页样式。旧 `/assistant`、`/cart`、`/memories` 路由保留重定向；旧组件逻辑迁移后删除。WS 新增的 `sort` 已补入 OpenAPI 会话契约测试。W、N4 的并行改动保留。
+>
+> **验证**：后端全量 pytest **4204 passed / 4 skipped / 0 failed**（Windows 无符号链接权限的 3 项与独占时序测试 1 项按原约定跳过）；全局 Ruff、`mypy app`（290 文件）通过。`shop/` 115 项组件测试、`typecheck`、`lint`、`codegen:check`、`tokens:check`、`build` 通过；`frontend/` `codegen:check` 通过；顾客端主 Playwright 10/10、S4 1/1 通过。N3 S2 已修复为等待顾客会话与水合完成，N3 浏览器整组 4/4 通过。所有聊天验收使用脚本化 Fake LLM，未调用真实 LLM。
+>
+> **本轮 WS 收尾（2026-09-30）**：Task 12 步骤 1–2 的图片转换与校验脚本及测试已实现，按编号读取原图、居中裁切、800×800 WebP 与 ≤200KB 校验，拒绝重复编号、06 号图和覆盖已有资源；目标目录有多余图片时在写入前拒绝（测试先失败、修复后通过）。合成图片仅在测试临时目录使用，工具测试 **9 passed**，覆盖缺图、损坏原图、重复编号、禁止编号、已有目标、尺寸、格式和大小；正式资源测试因原图未交付 **1 skipped**，CLI `check` 已确认以非零状态报告缺少全部 23 张图片。脚本及测试 Ruff 通过。顾客端 token 副本已重新同步，`tokens:check`、`typecheck`、`lint` 通过，顾客端组件回归 **117 passed**。
+>
+> **剩余**：Task 12 的 23 张演示商品原图尚未交付，需提供原图目录及生成工具、日期，随后转换入库、填写 `IMAGE-CREDITS.md` 并完成 1440px / 375px 图片目视验收。页面暂显示“暂无图片”占位；不得将工具测试通过视为图片交付完成。既往深色、字号与大字号窄屏断言已随顾客端 Playwright 全套复跑通过，本轮尚未重跑图片浏览器验收。早期 Task 0–11 的细粒度复选框未逐项复核，本轮未批量补勾；交付情况见上述快照。未调用真实 LLM，未执行 Git 发布。
+
+> **2026-09-30：业务日时区修复（原 W 已知红项 ④）。** 商家助手 `attribute_change` 此前按 UTC 取「今天」，上海 00:00–08:00 会比首页与演示数据 Cron（UTC 16:10 = 上海 00:10，按业务日补数）少一天、周一凌晨还停在上一周。现 `AttributionService.attribute_change` 改为只收 `now` + `business_timezone`、内部用 `business_today` 换算（无时区时刻直接拒绝），工具与首页总览都走它。同类问题一并修复：售后工单、退款、退货的 `business_date` 与顾客信号的 `signal_date` 原为 UTC 日期（凌晨退款会记到前一天、影响净成交额），统一改走 `services/v2/orders.business_date_of`（结账也改用它）。新增 5 条跨日用例（冻结在 UTC 前一日 20:00 = 上海次日 04:00；单元 1 条 + 集成 4 条），把实现改回 UTC 后集成 4 条全部变红，恢复后通过；另加无时区时刻拒绝用例。**验证**：`ruff check .`、`mypy app`（290 文件）通过；后端全量 `REQUIRE_INTEGRATION_DB=1`（本地 compose PostgreSQL 55432、空 `LLM_API_KEY`）**4214 passed / 13 skipped / 0 failed**，跳过项为原有 4 项 + WS Task 12 图片测试 9 项（本机缺 PIL、原图未交付）。首轮全量曾有 39 failed / 5 errors，逐文件复跑及第二轮全量均未复现，推断为同时段另一会话共用测试库所致。未改 OpenAPI。遗留：`app/eval/primitives.py` 评测种子仍按 UTC 取 `business_date`（评测夹具，不影响线上），未改。未调用 LLM，未执行 Git 操作。
+
+> **2026-09-30（收尾）：W 计划全部步骤勾选完毕。** WS 已把 `shop/src` 的旧 token 引用清零，Task 10 步骤 3 随之完成：`frontend/src/assets/tokens.css` 删除旧 `--color-*` / `--shadow-card` / `--shadow-control` 兼容映射，并 `tokens:sync` 到 `shop/`；商家端 `tokens.legacy.spec.ts` 取消对 `tokens.css` 的豁免，顾客端新增同款 `shop/src/styles/tokens.legacy.test.ts`（注入旧名探针确认能失败）。**验证**：商家端 `test` 738 passed（与 `shop/` 并行首轮 `HomeMetricPanel` 2 例 5 s 超时，同下方已知负载现象；单独 22/22、全量单独复跑 738/738）、`typecheck`、`lint`、`codegen:check`、`build`、`firstpaint:check` 通过；`shop/` `test` 117 passed、`typecheck`、`lint`、`tokens:check`、`codegen:check`、`build` 通过。未跑 Playwright（删除的变量已无任何引用，不影响渲染）。下方 W 记录的红项 ①（N3 S2）已由 WS 修复、② 已关闭；③ 删除会话确认弹窗待用户决定、④ `attribute_change` 业务日偏差仍为 W 之后的独立修复项。未调用 LLM，未执行 Git 操作。
+
+> **2026-09-30：W（商家工作台界面重设计）Task 0–11 完成，N4 的前端任务（B Task 9 商家记忆面板收尾、C Task 6 知识后台索引状态页面部分）已解锁。** 计划 `plans/2026-09-28-merchant-workbench-redesign.md`；唯一未勾选的是 Task 10 步骤 3 的“删除兼容映射”（裁定 N，见下）——已于同日收尾完成，见上条。
+>
+> - **后端**：三条新路径 `GET /v2/merchant/metrics/overview`（`services/v2/metrics_overview.py`，与 `query_metrics` / `attribute_change` 同周期、同数字，分项失败整体降级、失败项为空值，不调用 LLM）、`GET /v2/merchant/orders` 与 `/orders/{order_id}`（`services/v2/merchant_orders.py`，只列本店 v2 订单，三项筛选、绑定筛选的游标，他店与历史订单同一 `RESOURCE_FORBIDDEN` 并写审计，只出 `buyer_alias`）；Schema、OpenAPI、两端生成类型、Adapter 与哨兵齐备，安全用例 `w_merchant_*.yaml`。订单摘要 `lead_item` / `last_event_at` 与 WS 共用。演示种子为每个默认商家补齐 v2 订单（首页订单量含历史导入订单，订单页只列平台交易订单，页面写明口径差异）。
+> - **前端**：外壳 `layouts/MerchantShell.vue`（侧栏工作区 / 运营 / 运营助手 / 管理四组，偏好设置含主题、字号、语言）；「市集大厅」token（`assets/tokens.css`，两份深色定义）；默认收起的助手栏 `components/shell/AssistantRail.vue`（`Ctrl/⌘ + J`、「问助手」只预填不发送、历史面板、1100px 以下抽屉）；`AdminGate` 管理员令牌关卡（未持令牌不发 `/api/admin/*`）；首页（简报卡为确定性规则汇总、主指标只取 overview、需要你处理分源隔离、最近订单）；只读订单页与商品页；库存、审批、售后、顾客信号、商家记忆、知识库迁入外壳换样式、行为不变。`TodayView`、`OpsAssistantView` 已删除。`/today`、`/ops-assistant` 重定向到首页（后者打开助手栏）。
+> - **验收（2026-09-30，Task 11）**：前端 `test` 738 passed（首轮 2 个 `HomeMetricPanel` 用例在机器负载下 5 s 超时，单独 22/22、全量复跑 738/738）、`typecheck`、`lint`、`codegen:check`、`build`、`firstpaint:check`、`secrets:check` 通过；常规 Mock E2E 36/36，首屏门禁 1/1；S3 2/2、S4 1/1、N3 3/4（S5、S6、S7 通过，S2 见下）。横向溢出检查改为同时核对 `main#main`（须存在）与展开的助手栏（原先只比 `documentElement`，在 `body` `overflow-x: clip` 下恒通过），已用注入宽元素证明新检查能失败；收紧后未发现真实溢出。「商家切换后清空会话与目录」的 Mock 改为按演示 Token 发会话、目录按会话归属，`--repeat-each=5` 30/30。1440 / 1100 / 820 / 375 × 浅深色 × 中英文共 16 组截图（208 张）零溢出、零控制台错误，与定稿原型的差异清单见 `.superpowers/sdd/2026-09-28-merchant-workbench-redesign/task-11-report.md`（无需在 W 内修的缺陷）。后端 `REQUIRE_INTEGRATION_DB=1` 全量 **4203 passed / 1 failed / 4 skipped**：唯一失败是 WS 商品 `sort` 参数的 OpenAPI 会话契约哨兵，运行期间 WS 已更新该测试，复跑 111 passed；`tests/eval` 156 passed（安全集零失败）；`mypy app` 通过；`ruff check .` 34 处错误均不在 W 文件（N4 压缩模块 2 处、WS 演示目录相关 32 处）。浏览器与后端运行均强制空 `LLM_API_KEY`、不可达 `LLM_BASE_URL`，使用一次性库 `borough_w_final_test`、`borough_w_s3_e2e_test`、`borough_w_s4_e2e_test`。
+> - **已知红项与未完成**：① N3 S2 在顾客端「发送」按钮一步超时（按钮保持禁用），属 WS 顾客端改造（裁定 L），W 未改顾客端步骤；② `tokens.css` 旧变量兼容映射只为 `shop/` 保留（仍有约 80 处引用），删除移交 WS（裁定 N），`frontend/src` 内引用已清零并有防回归测试；③ 助手栏删除会话不加确认弹窗，与原型不一致，保持旧行为（裁定 J），待用户决定；④ `attribute_change` 工具按 UTC 取“今天”，与首页业务日（Asia/Shanghai）在 00:00–08:00 可能差一天，属原有缺陷，列为 W 之后的独立修复项。
+> - 未调用真实 LLM，未执行任何 Git 发布或改变 Git 状态的操作。
+
+> **2026-09-28：N4-B 对新版 N4/W/WS 路线图的衔接复核。** 记忆后端的 outbox、双重过滤、
+> 双端存储与 5 条路由已实现并导出；顾客端记忆页用独立 `MemoriesClient` 承载逻辑，供 WS Task 10
+> 迁移进动态抽屉，并把旧路径改为 `?panel=memory` 重定向。商家端 `MerchantMemoryView.vue` 及旧路由/入口
+> 目前只是未提交草稿；依 W Task 0 裁定，由 W Task 5 原样挂入新外壳「运营」分组，W Task 10 再换样式，
+> **N4-B Task 9 尚未完成**。W/WS/N4 的 `docs/api.json` 导出必须串行；顾客工具注册需与 WS Task 4
+> 合并保留。40 条合成 E5 数据的 Fake LLM 评测通过，真实模型选型仍待 R3 费用授权，不能以 Fake 结果
+> 宣称模型质量。后端全量回归 4027 passed / 4 skipped / 2 failed，两个失败为新增路由的精确路径清单与安全集登记；
+> 登记后相关回归 179 passed。`shop` 全量单测 98 passed，之后补了空态测试，相关定向复跑 6 passed；记忆页 375px 浏览器验收 1 passed；
+> 商家端单测 508 passed，前后端 lint/typecheck、两端 codegen 检查与构建通过。未调用真实 LLM，未执行 Git 发布。
+
+> **2026-09-28：N1–N3 验收记录收尾（部分）。**
+>
+> 补勾两处此前遗漏的复选框（此前已有实际交付，只是勾选状态落后）：
+> - `n2-tool-loop-and-registry` Task 2（四类闸门）、Task 3（循环上限与预算公式）、Task 4（主循环）
+>   共 7 个步骤，依据 2026-09-24 Astra 独立复审 N2-1（通过）、N2-2（有条件通过 → 阻塞项已修复并复跑全绿）；
+> - `n1-eval-harness` Task 7 步骤 3（与冻结基线对照）：实际由 `n2-tool-loop-and-registry` Task 5 于
+>   2026-09-22 完成并交付 `tests/eval/baseline_comparison.py` + `docs/history/eval/n2-baseline-comparison.md`，
+>   2026-09-24 Astra 独立复审通过；本条只是补勾并注明出处，不是新工作。
+>
+> **未完成**：N1 收尾要求的本地全量回归
+> （`REQUIRE_INTEGRATION_DB=1 REQUIRE_SECURITY_TIMING=1 uv run pytest -q`，独占本地 PostgreSQL）
+> 因命令执行工具暂时不可用（服务端权限分类器无响应）未能重跑。上一次记录的结果是 2026-09-23
+> 的 **2195 passed / 6 failed / 0 skipped**（见 §二「2026-09-23 N1 完整审核」），此后 9/28 的多轮全量回归
+> 均为**全绿**（如 N3 收尾 **3953 passed / 4 skipped / 0 failed**），但都不是专门为 N1 收尾要求
+> （独占库 + 强制时序哨兵）跑的那条命令。**`n1-review-remediation.md` 的收口复选框仍保持未勾选**，
+> 待工具恢复后按该命令重跑一次并据结果收尾。全程本地、零费用、不调用真实 LLM，未执行 Git 操作。
+
+> **2026-09-28：N4 开工，A Task 0（多轮历史回放，D-N4-1）完成（Opus）。**
+> 两端 v2 Chat 现在把同一会话最近 `CHAT_HISTORY_MAX_TURNS`（默认 6，0–20，0 关闭）轮的用户与助手文字交给工具循环；
+> 只回放文字，不回放工具结果；顾客历史照常围栏；历史只由服务端从已落库消息读取，请求体提交历史返回 422。
+> **顺带修复既有漏洞**：循环原本把全部历史消息（含助手回答）算作数字来源，回放上线后模型复述自己编的数字即可过校验；
+> 现只认历史中的用户消息（修复前该测试失败）。新增 8 例测试；相关回归（循环、v2 服务、v2 集成与 API、S1–S7 场景、安全门禁）
+> **1947 passed / 0 failed**，`ruff`、`mypy app` 通过。改动文件：`app/core/config.py`、`agent/loop/runner.py`、`checks.py`（注释）、
+> `services/v2/conversations.py`、`shop_chat.py`、`merchant_chat.py` 及两条路由。**Chat 装配文件已释放**，N4-B 的记忆注入
+> （Task 4）可以接手；装配顺序为「系统提示（含 Skill 索引）→ 历史 → 本轮」。未调用 LLM，未执行 Git 操作。
+
+> **2026-09-28：N3 C 追加整改与本轮自动化复核完成；N3 既有验收结论继续成立。**
+> 满减券现在与折扣券共用 20% 优惠上限，起草时拦截、批准时按当前护栏复检；真实 PostgreSQL 定向集成 17 passed。
+> S5 后端用例及浏览器种子改为覆盖本周与等长对照周的同一星期几，修复周一图表缺失；S2/S5/S6/S7 浏览器 4 passed。
+> 修复测试夹具清表超时后，后端全量 `REQUIRE_INTEGRATION_DB=1` **3953 passed / 4 skipped / 0 failed**；
+> 4 项跳过同下方 N3 验收记录（独占时序哨兵 1 项、Windows 符号链接权限 3 项），此前已另行补跑。
+> 本轮 `ruff check .`、`mypy app`（267 文件）、单一 Alembic head 通过；新库迁移到 head 后 `net_gmv` 正式口径资产存在。
+> 商家端组件测试 506 passed，`typecheck`、`lint`、`codegen:check`、`build` 通过。测试期间仅一次性测试库设置
+> `synchronous_commit=off` 以避开 Docker WAL 同步写入等待，验证后已恢复默认，不改变产品数据库配置；未调用真实 LLM，未执行 Git 发布操作。
+> **N4 阶段 0 复核**：顾客端 375px 会话目录及商家端「新建对话」补测、Mock E2E 24 passed 和缺译回退标记，
+> 见下方既有记录。下一步按 N4 计划推进；三个可选真实模型质量/生成验收仍须按 R3 另行取得费用授权。
+
+> **2026-09-28：N3 整体验收通过（附条件：三个可选费用点待 R3 人工验收）；入口-N4 有条件通过。**
+> 按用户指示由 Opus 完成 N3 收口。审查：F1–F4 整改后复审通过；N3-2、N3-3、N3-5 复审通过（实现者非本会话）；
+> N3-4 通过，其中新补的导出下载审计为本会话自审。复审记录见 `plans/2026-09-26-n3-independent-review.md`「整改后复审」，
+> 清单已勾选（`plans/2026-09-22-astra-checklist.md`）。
+> 复审中补做一处阶段 C 遗漏：Task 7 步骤 3 从未执行，已在 `search-discovery`、`purchase-research` 两个顾客 Skill
+> 正文补「问到具体属性时调用 `get_product_attribute`」并升版本至 2。
+> **路线图 §五 八条逐条证据：**
+> ① A 20/20、B 41/41、C 34/34 步已勾，N3-1～N3-5 通过；
+> ② S2、S4、S5、S6、S7 后端端到端在全量回归中通过；浏览器层 S2/S5/S6/S7 4 passed、S4 商家端 1 passed + 顾客端 1 passed；
+> ③ 11 个 Skill、44 条用例与 27 组同角色组合在工具循环中执行通过（含 C Task 0 跨阶段冲突用例）；
+> ④ v2 路径清单哨兵与安全集在全量回归中零失败；`CURRENT_MILESTONE` 已切到 `"N3"`，`tests/eval` 140 passed；
+> ⑤ 后端全量 `REQUIRE_INTEGRATION_DB=1` **3949 passed / 4 skipped / 0 failed**；4 项跳过另行补跑——时序哨兵独占库 1 passed，
+>    3 项符号链接用例在 Linux 容器 `tests/unit/skills` 181 passed；`ruff check .`、`mypy app`（267 文件）通过；
+>    商家端 `npm run test` 506 passed、`typecheck`/`build`/`codegen:check` 通过，Mock E2E 23 passed；
+>    `shop` 单测 93 passed，`typecheck`/`lint`/`build`/`codegen:check`/`tokens:check` 通过；
+> ⑥ v1 路由与 `graph.py` 冻结基线在全量回归中完好；「v1 分析助手页仍可用」已由 2026-09-27 用户裁定的两页合并
+>    （PRD §15 N2）取代，不再适用；S1 浏览器 5 passed、S3 浏览器 2 passed，零回归；
+> ⑦ 三个可选费用点——简报真实生成、售后随单摘要真实质量、Skill 意图选择真实模型质量——均**待人工验收**（R3）；
+> ⑧ 本文件与 `docs/project-navigation.md` 已更新。
+> **附带修正**：`shop/playwright.config.ts` 未排除 `e2e/s4`、未固定 `zh-CN` 浏览器语言（S1 中文断言在英文页面失败），已修。
+> **已知非阻塞项**：CSV 公式转义未覆盖 `\t`/`\r` 开头；`sale_detail` 以 `assert` 判断工单；售后工具语言写死中文；
+> 顾客端英文模式下页头导航与「绑定演示顾客」仍为中文（全站双语不在 C9 范围）；F2/F3 各有一类边界场景未单独成测。
+> **入口-N4**：压缩、记忆两份计划入口条件满足；检索计划**阻塞于 pgvector**——本地镜像 `postgres:16-alpine` 不含（计划
+> Task 2 步骤 0 处理），**Railway Postgres 是否能启用 `vector` 需用户确认**。计划中 `load_domain`、`search_rules` 两处行号已改正。
+> 未调用真实 LLM，未执行 Git 发布操作，未修改只读参考目录。
+
+> **2026-09-28：N4 / N5 六项裁定落入计划（纯文档，未改代码）。** 用户采纳推荐方案：
+> D-N4-1 回放同会话最近 6 轮文字、不回放工具结果、**历史回答中的数字视为无来源**；D-N4-2 访客回合不抽取记忆、绑定后不补抽；
+> D-N4-3 商家记忆面板做最小版并列为 N4 第一个可砍项；D-N5-1 新建只读 `OpsStatusView.vue`（先改 PRD §14）；
+> D-N5-2 会话目录与双语 E2E 已重建，`real-api/analytics.spec.ts` 不在浏览器层重建，剩余复核提前到 N4 阶段 0；
+> D-N5-3 MCP 默认不提前，有时间节点时启用「Opus 完成 N4-A 后接做 N5-A」。
+> 已改：`n4-context-compaction` Task 0、`n4-memory-pipeline` Task 3 / 9、`n4-hybrid-retrieval` S7 基准、
+> `n5-budget-ops-and-railway` Task 3 步骤 3、`n5-final-eval-and-closeout` Task 1 / 9，以及 N4、N5 总览与分工文件。
+> N4 计划 74 步（已勾 3），N5 计划 68 步。**PRD 与契约已同步**：PRD A5、C7、M11、§14、§15 N4 / N5；
+> 后端计划 §6.10、§6.12、§6.13、§8.8.3、§8.9.3；前端计划第 14、15 条。三处契约先行步骤已勾选，无对外字段变化，
+> OpenAPI 无需重新导出。
+> 下方 2026-09-27「N4、N5 阶段划分」一条中的「待用户裁定」与 N3 残项清单已被本条及其后的 N3 收尾记录取代：
+> N3 两条只读路径、S5–S7 两层场景均已完成，N3 仍待独立验收（F1–F4 复审、N3-2 / N3-3、N3-4 独立复审）。
+> 未调用 LLM，未执行 Git 操作。
+
+> **2026-09-28：N3-4 审核完成（Opus；已按用户指示勾选，见上条 N3 验收），发现的阻塞项已修复。**
+> 四个审查点（导出范围与行数上限、口径 SQL 不回流执行、售后决定走草稿且无金额、商家只见别名）在代码层成立。
+> 阻塞项：PRD §408 / SEC10 要求的**导出下载审计从未实现**（此前台账误记为已覆盖）。已在
+> `app/api/routes/exports.py` 签名校验通过、内容生成成功后写 `EXPORT_DOWNLOADED`，失败下载不写；
+> 新增 2 条集成测试（先红后绿）；导出/OpenAPI/安全门禁相关测试 268 passed，`ruff`、`mypy app` 通过，
+> OpenAPI 无变化。后端全量回归 3949 passed / 4 skipped / 0 failed（跳过项已另行补跑，见上条 N3 验收）。次要项（CSV 转义未覆盖 `\t`/`\r` 开头、`sale_detail` 用 `assert`
+> 判断工单、售后工具语言写死中文）已记入 `plans/2026-09-22-astra-checklist.md` N3-4，未修。
+
+> **2026-09-27（续）：N3 阶段 C 遗留任务收尾——Task 8 确认全量完成、后端安全门禁缺口修复、
+> 后端全量回归转绿、E2E 缺口部分补齐。仍待 N3-4 独立复审及真实模型人工质量验收。**
+>
+> **Task 8 状态更正**：核对代码后确认此前记录为"受阻"的两个子块（商品与库存区完整版、
+> 经营图表区）实际已随 2026-09-27 当天更早的图表可视化与两页合并工作一并交付，此前的
+> `project-progress.md` 快照未同步——`GET /api/v2/merchant/products/content`、
+> `GET /api/v2/merchant/coupons` 两个只读端点已存在并接入 `InventoryView.vue`（内容缺口、
+> 库存告警、券状态均已渲染，`test_content.py`/`InventoryView.spec.ts` 覆盖）；经营图表区由
+> `OpsAssistantView.vue` 内嵌的 `MetricChartPanel`（`query_metrics`/`attribute_change` 产出的
+> `visualization`）覆盖，替代原 v1 独立看板页的定位。**Task 8 四个子块全部完成**，无新增代码。
+>
+> **后端安全门禁真实缺口修复**：跑全量后端回归时，`test_every_v2_route_has_an_endpoint_security_case`
+> 报出上述两个只读端点从未进入安全用例库（`tests/eval/datasets/security/`）——是遗漏，不是环境问题。
+> 新增 `app/eval/datasets/security/n3_merchant_catalog_ops.yaml`（SEC-N3C-001/002：顾客会话冒用
+> 两个商家端点一律 403 + `SESSION_ROLE_MISMATCH` 审计，与既有 `n3_after_sales_signals.yaml` 的
+> SEC-N3B-007 同一模式；两个端点按 `merchant_id` 过滤、无路径参数，无法构造跨店 ID，故不需要额外的
+> `resource_scope.seed_foreign_*` 用例）。`tests/eval/test_security_gate.py` 69 passed。
+> 顺手修复一处无关的既有 lint 遗留（`app/tools/merchant/definitions.py` 导入顺序，`ruff check --fix`）。
+>
+> **后端全量回归**：`REQUIRE_INTEGRATION_DB=1 uv run pytest -q` 干净跑通
+> **3947 passed / 4 skipped / 0 failed**（19 分 16 秒）。此前一轮跑出的 3 个
+> `TRUNCATE ... statement timeout` 错误已确认是本机 Docker/磁盘 fsync 环境抖动
+> （单独重跑 3 passed），不是回归；修复安全门禁缺口后的干净复跑无任何失败。
+>
+> **v2 层 fetch Mock 基础设施与 E2E 缺口**（两页合并时登记的验证缺口，本次部分补齐）：
+> 新增 `e2e/support/v2MerchantMock.ts`——一层薄的 `page.route` 打桩封装（会话创建、会话目录
+> 增删查、v2 Chat 的 SSE `turn_complete`、反馈回执），供 v2 页面的 Mock E2E 复用，替代此前
+> "v2 从未接入过 fixture 拦截层"的状态。基于它重建两条场景（不是逐条照抄旧断言——v1 三栏 DOM、
+> `quick-question` fixture 索引等机制在 v2 不存在，重建的是同一组产品行为）：
+> - `e2e/ops-assistant-conversation.spec.ts`（5 例）：一问一答、打开历史对话恢复内容、
+>   删除会话从目录移除、采纳与赞踩持久化展示、切换商家清空会话与目录；
+> - `e2e/ops-assistant-localization.spec.ts`（2 例）：切换语言后头部/导航文案切换且无残留、
+>   新提问按新语言请求（v2 `opsChat` store 没有 v1 `reloadForLocale()` 那种历史消息重放重译
+>   机制，只有 `auth`/`knowledge` 两个 store 有——本次测的是 v2 实际行为，不是假装补一个
+>   v2 没有的机制）。
+> Mock E2E 套件合计 **23 passed**（16 既有 + 7 新增）。
+> **`real-api/analytics.spec.ts`（原验证 v1 后端指标/明细/导出/隔离，经已下线的 v1 UI 驱动）
+> 未重建**：v1 后端本身的这些能力已有独立的后端集成测试覆盖（`test_merchant_chat_export.py`
+> 等），v2 层的等价能力若要用 E2E 验证，需要真实后端（Mock 无法证明后端隔离是否生效，这也是
+> `isolation.spec.ts` 注释里说明的同一道理），应归入 `e2e/s3/*` 真实后端家族而不是 Mock 套件，
+> 留待后续与 S3 家族一并扩展，本次不强行造一个假阳性的 Mock 测试。
+>
+> **S3/N3 真实后端浏览器套件本次已实测验证**（此前记录为"本地端口 55451 未起服务无法验证"，
+> 本次临时起了一个一次性 Docker Postgres 容器跑通后已清理，不留驻留服务）：
+> - `playwright.s3.config.ts` 2 passed；过程中发现并修复一处两页合并遗留的真实测试缺陷——
+>   `e2e/s3/ops-assistant-responsive.spec.ts` 仍断言旧路由行为（点击简报条目后 URL 变为
+>   `/ops-assistant`），但两页合并后 `/ops-assistant` 已改为对 `/` 的纯重定向，运营助手就在
+>   `/` 本身；同一测试还断言了合并时已替换掉的旧 `scopeNotice` 文案。两处均已按当前实际路由
+>   与文案更正，非放宽断言；
+> - `playwright.n3.config.ts`（S2/S5/S6/S7 双端浏览器场景）4 passed，复用已有的
+>   `borough_n3_browser_s3_e2e_test` 库，验证与此前记录一致，本次是真实复核而非新实现。
+>
+> **前端**：`npm run test` 506 passed（无变化）；`npm run typecheck`/`build`/`codegen:check` 通过；
+> Mock E2E 23 passed；S3/N3 真实后端 E2E 6 passed。**后端**：`ruff check .`、`mypy app`（267 文件）
+> 全绿；全量 3947 passed / 4 skipped / 0 failed；安全门禁 69 passed。全程 Fake LLM，零真实调用（R3）；
+> 未执行 Git 发布操作（R2）；未修改只读参考目录（R8）。
+>
+> **仍未完成（不是本次遗漏，需要独立资源或裁定）**：
+> 1. **N3-4 独立复审尚未做**——本次是自查自验，不能替代 Astra 角色的独立复审；
+> 2. `real-api/analytics.spec.ts` 等价场景——需要先决定是否扩展 `e2e/s3/*` 真实后端家族覆盖
+>    v2 导出/隔离，还是认为后端集成测试已充分覆盖、无需浏览器层重复验证；
+> 3. `api/chat.ts` 内部剩余函数级死代码（`submitChat`/`submitFeedback`/`listConversations`，
+>    仍有测试覆盖 v1 `/api/chat` 契约）——是否连带下线 v1 `/api/chat` 前端调用路径本身是产品
+>    范围决策，不是清理任务，按此前用户裁定继续搁置；
+> 4. 简报真实生成与真实模型意图/措辞质量验收——按 R3 需另行取得费用授权，本次未做。
+
+> **2026-09-27 当前状态（此前记录，已被本文件顶部续记录取代）：N3 阶段 C 开发与
+> S2/S5/S6/S7 双层场景已收口，等待 N3-4 独立复审及真实模型人工质量验收。**
 > 商家只读商品内容/优惠券游标接口已按 PRD → §8 契约 → OpenAPI/双端生成类型接入；`/inventory` 展示
 > 内容缺口、库存告警和券状态/优惠幅度。净成交额类目归因已修正为后端按类目查询毛成交额与退款额再相减，
 > 退款与商品类目的关联路径加了租户条件。正式指标口径工具返回资产更新时间作为定义版本。

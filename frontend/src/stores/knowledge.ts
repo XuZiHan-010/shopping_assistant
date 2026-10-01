@@ -13,6 +13,7 @@ import {
   type UpdateKnowledgeDocumentOptions,
 } from '@/api/knowledge'
 import type { KnowledgeDocument, KnowledgeTreeNode } from '@/api/adapters/knowledge'
+import { resolveViewerToken } from '@/api/client'
 import { AppError } from '@/api/errors'
 import { findNode, isBusinessDomain } from '@/utils/knowledgeTree'
 
@@ -44,6 +45,15 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
   const localeEpoch = ref(0)
 
   const selectedNode = computed(() => findNode(roots.value, selectedPath.value))
+
+  /**
+   * 当前令牌是不是只读（VIEWER_TOKEN 的构建期镜像）。后端才是权威（写请求一律 403），
+   * 这里只是让界面不再摆出注定失败的写按钮；令牌值只在内存里比较，不落盘、不进日志。
+   */
+  const isReadOnlyToken = computed(() => {
+    const viewer = resolveViewerToken()
+    return Boolean(viewer) && adminToken.value !== '' && adminToken.value === viewer
+  })
 
   function setAdminToken(token: string): void {
     adminToken.value = token.trim()
@@ -207,6 +217,7 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
 
   return {
     adminToken,
+    isReadOnlyToken,
     roots,
     selectedDocument,
     selectedPath,

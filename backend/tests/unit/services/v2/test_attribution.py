@@ -29,6 +29,8 @@ from app.services.v2.attribution import (
 
 MERCHANT_ID = UUID("00000000-0000-4000-8000-000000000101")
 WEDNESDAY = datetime(2026, 9, 23, 10, 0, tzinfo=UTC)  # 本周三；本周已过 3 天
+# UTC 周日 20:00 = 上海周一 04:00：UTC 日期比业务日期早一天，且跨周。
+CROSS_DAY = datetime(2026, 9, 27, 20, 0, tzinfo=UTC)
 
 
 @dataclass
@@ -130,7 +132,7 @@ async def test_incomplete_week_uses_equal_length_comparison() -> None:
     )
     service = AttributionService(fake)
     result = await service.attribute_change(
-        _context(), metric="gross_gmv", dimension="category", today=WEDNESDAY
+        _context(), metric="gross_gmv", dimension="category", now=WEDNESDAY, business_timezone="UTC"
     )
     assert result.stopped is False
     assert result.comparison_label == ("本周前 3 天", "上周前 3 天")
@@ -141,6 +143,46 @@ async def test_incomplete_week_uses_equal_length_comparison() -> None:
     assert (current_range.end - current_range.start) == (baseline_range.end - baseline_range.start)
     assert (current_range.start, current_range.end) == (date(2026, 9, 21), date(2026, 9, 23))
     assert (baseline_range.start, baseline_range.end) == (date(2026, 9, 14), date(2026, 9, 16))
+
+
+@pytest.mark.asyncio
+async def test_today_is_taken_in_business_timezone_across_utc_midnight() -> None:
+    """上海 00:00–08:00 时 UTC 仍是前一天；「今天」必须按业务时区取，与首页同一周期。"""
+
+    fake = FakeSafeQueryService(
+        [
+            _segmented_result("gross_gmv", [("女装", Decimal("500"))]),
+            _segmented_result("gross_gmv", [("女装", Decimal("400"))]),
+        ]
+    )
+    result = await AttributionService(fake).attribute_change(
+        _context(),
+        metric="gross_gmv",
+        dimension="category",
+        now=CROSS_DAY,
+        business_timezone="Asia/Shanghai",
+    )
+    current_range = fake.calls[0].date_range
+    baseline_range = fake.calls[1].date_range
+    assert current_range is not None and baseline_range is not None
+    assert (current_range.start, current_range.end) == (date(2026, 9, 28), date(2026, 9, 28))
+    assert (baseline_range.start, baseline_range.end) == (date(2026, 9, 21), date(2026, 9, 21))
+    assert result.comparison_label == ("本周前 1 天", "上周前 1 天")
+    assert result.data_cutoff == date(2026, 9, 28)
+
+
+@pytest.mark.asyncio
+async def test_naive_now_is_rejected() -> None:
+    """无时区的时刻无法换算业务日（会被当成服务器本地时间），直接拒绝。"""
+
+    with pytest.raises(ValueError):
+        await AttributionService(FakeSafeQueryService([])).attribute_change(
+            _context(),
+            metric="gross_gmv",
+            dimension="category",
+            now=datetime(2026, 9, 27, 20, 0),
+            business_timezone="Asia/Shanghai",
+        )
 
 
 @pytest.mark.asyncio
@@ -155,7 +197,7 @@ async def test_data_gap_stops_attribution_and_says_where() -> None:
     )
     service = AttributionService(fake)
     result = await service.attribute_change(
-        _context(), metric="gross_gmv", dimension="category", today=WEDNESDAY
+        _context(), metric="gross_gmv", dimension="category", now=WEDNESDAY, business_timezone="UTC"
     )
     assert result.stopped is True
     assert result.stopped_reason is not None and "基期" in result.stopped_reason
@@ -177,7 +219,7 @@ async def test_near_zero_change_reports_absolute_contribution() -> None:
     )
     service = AttributionService(fake)
     result = await service.attribute_change(
-        _context(), metric="gross_gmv", dimension="category", today=WEDNESDAY
+        _context(), metric="gross_gmv", dimension="category", now=WEDNESDAY, business_timezone="UTC"
     )
     assert result.mode == "ABSOLUTE_CONTRIBUTION"
     assert all(segment.share is None for segment in result.segments)
@@ -196,7 +238,7 @@ async def test_clear_swing_reports_share_not_just_absolute() -> None:
     )
     service = AttributionService(fake)
     result = await service.attribute_change(
-        _context(), metric="gross_gmv", dimension="category", today=WEDNESDAY
+        _context(), metric="gross_gmv", dimension="category", now=WEDNESDAY, business_timezone="UTC"
     )
     assert result.mode == "SHARE"
     women = next(segment for segment in result.segments if segment.name == "女装")
@@ -214,7 +256,7 @@ async def test_net_gmv_attribution_subtracts_refunds_per_category_in_backend() -
         ]
     )
     result = await AttributionService(fake).attribute_change(
-        _context(), metric="net_gmv", dimension="category", today=WEDNESDAY
+        _context(), metric="net_gmv", dimension="category", now=WEDNESDAY, business_timezone="UTC"
     )
     assert result.stopped is False
     women = next(segment for segment in result.segments if segment.name == "女装")
@@ -240,7 +282,11 @@ async def test_attribution_rejects_truncated_category_results() -> None:
     service = AttributionService(FakeSafeQueryService([partial]))
     with pytest.raises(ChartPointLimitExceeded, match="缩小"):
         await service.attribute_change(
-            _context(), metric="gross_gmv", dimension="category", today=WEDNESDAY
+            _context(),
+            metric="gross_gmv",
+            dimension="category",
+            now=WEDNESDAY,
+            business_timezone="UTC",
         )
 
 

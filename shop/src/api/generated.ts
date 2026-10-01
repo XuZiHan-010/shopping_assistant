@@ -414,6 +414,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/shop/memories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Shop Memories */
+        get: operations["list_shop_memories_api_v2_shop_memories_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/shop/memories/{memory_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Shop Memory */
+        delete: operations["delete_shop_memory_api_v2_shop_memories__memory_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/shop/memory-preference": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set Shop Memory Preference */
+        put: operations["set_shop_memory_preference_api_v2_shop_memory_preference_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v2/merchant/inventory/alerts": {
         parameters: {
             query?: never;
@@ -426,6 +477,40 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/merchant/memories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Merchant Memories */
+        get: operations["list_merchant_memories_api_v2_merchant_memories_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/merchant/memories/{memory_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Merchant Memory */
+        delete: operations["delete_merchant_memory_api_v2_merchant_memories__memory_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -635,6 +720,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/merchant/metrics/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Metrics Overview */
+        get: operations["get_metrics_overview_api_v2_merchant_metrics_overview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/merchant/orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Orders
+         * @description 仅本店具备 v2 交易投影的订单；三项筛选均可选，游标绑定筛选（§8.7.4）。
+         */
+        get: operations["list_orders_api_v2_merchant_orders_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/merchant/orders/{order_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Order
+         * @description 不存在、他店订单与历史（非 v2）订单统一 403 RESOURCE_FORBIDDEN；不写查看审计。
+         */
+        get: operations["get_order_api_v2_merchant_orders__order_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v2/merchant/chat": {
         parameters: {
             query?: never;
@@ -678,7 +820,7 @@ export interface paths {
         };
         /**
          * List Products
-         * @description 只返回在售商品；排序 `created_at DESC, id DESC`。
+         * @description 只返回在售商品；按上新或近 30 个业务日已支付件数排序。
          */
         get: operations["list_products_api_v2_shop_stores__shop_slug__products_get"];
         put?: never;
@@ -1792,6 +1934,15 @@ export interface components {
             /** Has More */
             has_more: boolean;
         };
+        /** CursorPage[CustomerMemoryItem] */
+        CursorPage_CustomerMemoryItem_: {
+            /** Items */
+            items: components["schemas"]["CustomerMemoryItem"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+            /** Has More */
+            has_more: boolean;
+        };
         /** CursorPage[CustomerSignal] */
         CursorPage_CustomerSignal_: {
             /** Items */
@@ -1850,6 +2001,24 @@ export interface components {
         CursorPage_MerchantCoupon_: {
             /** Items */
             items: components["schemas"]["MerchantCoupon"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+            /** Has More */
+            has_more: boolean;
+        };
+        /** CursorPage[MerchantMemoryItem] */
+        CursorPage_MerchantMemoryItem_: {
+            /** Items */
+            items: components["schemas"]["MerchantMemoryItem"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+            /** Has More */
+            has_more: boolean;
+        };
+        /** CursorPage[MerchantOrderSummary] */
+        CursorPage_MerchantOrderSummary_: {
+            /** Items */
+            items: components["schemas"]["MerchantOrderSummary"][];
             /** Next Cursor */
             next_cursor: string | null;
             /** Has More */
@@ -1935,6 +2104,38 @@ export interface components {
             replies: components["schemas"]["AfterSaleReply"][];
             /** Conversation Summary Shared */
             conversation_summary_shared: boolean;
+        };
+        /** CustomerMemoriesResponse */
+        CustomerMemoriesResponse: {
+            /** Memory Enabled */
+            memory_enabled: boolean;
+            memories: components["schemas"]["CursorPage_CustomerMemoryItem_"];
+        };
+        /**
+         * CustomerMemoryItem
+         * @description 按顾客 + 店铺隔离；不含服务端解析的顾客与商家内部标识。
+         */
+        CustomerMemoryItem: {
+            /** Id */
+            id: string;
+            /** Shop Slug */
+            shop_slug: string;
+            /** Category */
+            category: string;
+            /** Key */
+            key: string;
+            /** Value */
+            value: string;
+            /**
+             * Last Confirmed At
+             * Format: date-time
+             */
+            last_confirmed_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
         };
         /**
          * CustomerSignal
@@ -2533,6 +2734,35 @@ export interface components {
             degraded_reason: string | null;
         };
         /**
+         * MemoryLayer
+         * @enum {string}
+         */
+        MemoryLayer: "FACT" | "SUMMARY";
+        /**
+         * MemoryPreferenceRequest
+         * @description 关闭记忆须显式确认：条件必填，不是无条件必填。设置绝对状态，天然幂等。
+         */
+        MemoryPreferenceRequest: {
+            /** Enabled */
+            enabled: boolean;
+            /** Purge Confirmation */
+            purge_confirmation?: "yes" | null;
+        };
+        /** MemoryPreferenceResponse */
+        MemoryPreferenceResponse: {
+            /** Memory Enabled */
+            memory_enabled: boolean;
+            /** Purged Count */
+            purged_count: number;
+        };
+        /** MemorySourceRef */
+        MemorySourceRef: {
+            /** Conversation Id */
+            conversation_id: string;
+            /** Message Id */
+            message_id: string;
+        };
+        /**
          * MerchantAfterSaleDetailResponse
          * @description 商家侧：顾客只以店铺级脱敏别名出现；查看审计是服务端副作用，不进入响应。
          */
@@ -2736,6 +2966,155 @@ export interface components {
             /** Currently Active */
             currently_active: boolean;
         };
+        /** MerchantMemoriesResponse */
+        MerchantMemoriesResponse: {
+            facts: components["schemas"]["CursorPage_MerchantMemoryItem_"];
+            /** Summaries */
+            summaries: components["schemas"]["MerchantMemoryItem"][];
+        };
+        /** MerchantMemoryDeleteResponse */
+        MerchantMemoryDeleteResponse: {
+            /** Deleted Id */
+            deleted_id: string;
+            /** Summary Rebuild Scheduled */
+            summary_rebuild_scheduled: boolean;
+        };
+        /** MerchantMemoryItem */
+        MerchantMemoryItem: {
+            /** Id */
+            id: string;
+            layer: components["schemas"]["MemoryLayer"];
+            /** Category */
+            category: string;
+            /** Content */
+            content: string;
+            source_ref: components["schemas"]["MemorySourceRef"] | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** MerchantMetricsOverviewResponse */
+        MerchantMetricsOverviewResponse: {
+            /** Analysis Sources */
+            analysis_sources: components["schemas"]["AnalysisSourceEntry"][];
+            /** Thinking Steps */
+            thinking_steps?: components["schemas"]["ThinkingStep"][];
+            quality_status: components["schemas"]["QualityStatus"];
+            /** Quality Attempts */
+            quality_attempts: number;
+            /** Quality Notes */
+            quality_notes?: string[];
+            /** Degraded */
+            degraded: boolean;
+            /** Degraded Reason */
+            degraded_reason: string | null;
+            /** Business Timezone */
+            business_timezone: string;
+            /**
+             * Data As Of
+             * Format: date-time
+             */
+            data_as_of: string;
+            source: components["schemas"]["MerchantMetricsOverviewSource"];
+            /** Definition Version */
+            definition_version: string;
+            current_period: components["schemas"]["OverviewPeriod"];
+            baseline_period: components["schemas"]["OverviewPeriod"];
+            headline: components["schemas"]["OverviewHeadline"];
+            attribution: components["schemas"]["OverviewAttribution"];
+            /** Secondary */
+            secondary: components["schemas"]["OverviewSecondaryMetric"][];
+        };
+        /**
+         * MerchantMetricsOverviewSource
+         * @enum {string}
+         */
+        MerchantMetricsOverviewSource: "REALTIME" | "DAILY_ROLLUP" | "MIXED";
+        /** MerchantOrderDetailResponse */
+        MerchantOrderDetailResponse: {
+            /** Id */
+            id: string;
+            payment_status: components["schemas"]["PaymentStatus"];
+            fulfillment_status: components["schemas"]["FulfillmentStatus"];
+            after_sale_status: components["schemas"]["OrderAfterSaleProjection"];
+            /** Total Cents */
+            total_cents: number;
+            /** Item Count */
+            item_count: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Pay By
+             * Format: date-time
+             */
+            pay_by: string;
+            lead_item: components["schemas"]["OrderLeadItem"];
+            /**
+             * Last Event At
+             * Format: date-time
+             */
+            last_event_at: string;
+            /** Items */
+            items: components["schemas"]["OrderItemPriceSnapshot"][];
+            /** Subtotal Cents */
+            subtotal_cents: number;
+            /** Discount Cents */
+            discount_cents: number;
+            /** Coupon Id */
+            coupon_id: string | null;
+            /** Paid At */
+            paid_at: string | null;
+            /** Closed At */
+            closed_at: string | null;
+            close_reason: components["schemas"]["CloseReason"] | null;
+            /**
+             * Is Demo
+             * @constant
+             */
+            is_demo: true;
+            /** Buyer Alias */
+            buyer_alias: string;
+        };
+        /**
+         * MerchantOrderSummary
+         * @description 商家侧订单摘要：顾客以店铺级脱敏别名出现，不含 buyer_key（§8.12.4）。
+         */
+        MerchantOrderSummary: {
+            /** Id */
+            id: string;
+            payment_status: components["schemas"]["PaymentStatus"];
+            fulfillment_status: components["schemas"]["FulfillmentStatus"];
+            after_sale_status: components["schemas"]["OrderAfterSaleProjection"];
+            /** Total Cents */
+            total_cents: number;
+            /** Item Count */
+            item_count: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Pay By
+             * Format: date-time
+             */
+            pay_by: string;
+            lead_item: components["schemas"]["OrderLeadItem"];
+            /**
+             * Last Event At
+             * Format: date-time
+             */
+            last_event_at: string;
+            /** Buyer Alias */
+            buyer_alias: string;
+            /** Line Count */
+            line_count: number;
+        };
         /** MerchantProductContent */
         MerchantProductContent: {
             /** Id */
@@ -2890,6 +3269,12 @@ export interface components {
              * Format: date-time
              */
             pay_by: string;
+            lead_item: components["schemas"]["OrderLeadItem"];
+            /**
+             * Last Event At
+             * Format: date-time
+             */
+            last_event_at: string;
             /** Items */
             items: components["schemas"]["OrderItemPriceSnapshot"][];
             /** Subtotal Cents */
@@ -2926,6 +3311,18 @@ export interface components {
             /** Line Total Cents */
             line_total_cents: number;
         };
+        /**
+         * OrderLeadItem
+         * @description 订单摘要用的首件商品展示信息，取订单首行价格快照名称与商品当前图片。
+         */
+        OrderLeadItem: {
+            /** Product Id */
+            product_id: string;
+            /** Name */
+            name: string;
+            /** Image Url */
+            image_url: string | null;
+        };
         /** OrderPayRequest */
         OrderPayRequest: {
             /** Client Request Id */
@@ -2952,7 +3349,111 @@ export interface components {
              * Format: date-time
              */
             pay_by: string;
+            lead_item: components["schemas"]["OrderLeadItem"];
+            /**
+             * Last Event At
+             * Format: date-time
+             */
+            last_event_at: string;
         };
+        /** OverviewAttribution */
+        OverviewAttribution: {
+            /**
+             * Dimension
+             * @default category
+             * @constant
+             */
+            dimension: "category";
+            mode: components["schemas"]["OverviewAttributionMode"];
+            /** Segments */
+            segments: components["schemas"]["OverviewAttributionSegment"][];
+            /** Remaining Count */
+            remaining_count: number;
+            /** Remaining Contribution Cents */
+            remaining_contribution_cents: number;
+            /** Stopped Reason */
+            stopped_reason: string | null;
+        };
+        /**
+         * OverviewAttributionMode
+         * @enum {string}
+         */
+        OverviewAttributionMode: "SHARE" | "ABSOLUTE_CONTRIBUTION" | "STOPPED";
+        /** OverviewAttributionSegment */
+        OverviewAttributionSegment: {
+            /** Name */
+            name: string;
+            /** Current Cents */
+            current_cents: number;
+            /** Baseline Cents */
+            baseline_cents: number;
+            /** Contribution Cents */
+            contribution_cents: number;
+            /** Share Bp */
+            share_bp: number | null;
+        };
+        /** OverviewHeadline */
+        OverviewHeadline: {
+            /**
+             * Metric Code
+             * @default net_gmv
+             * @constant
+             */
+            metric_code: "net_gmv";
+            /** Current Cents */
+            current_cents: number;
+            /** Baseline Cents */
+            baseline_cents: number | null;
+            /** Change Ratio Bp */
+            change_ratio_bp: number | null;
+            /** Current Series */
+            current_series: components["schemas"]["OverviewMetricPoint"][];
+            /** Baseline Series */
+            baseline_series: components["schemas"]["OverviewMetricPoint"][];
+        };
+        /** OverviewMetricPoint */
+        OverviewMetricPoint: {
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Value Cents */
+            value_cents: number;
+        };
+        /** OverviewPeriod */
+        OverviewPeriod: {
+            /**
+             * Start
+             * Format: date
+             */
+            start: string;
+            /**
+             * End
+             * Format: date
+             */
+            end: string;
+            /** Label */
+            label: string;
+        };
+        /** OverviewSecondaryMetric */
+        OverviewSecondaryMetric: {
+            /**
+             * Metric Code
+             * @enum {string}
+             */
+            metric_code: "order_count" | "refund_amount" | "return_rate";
+            unit: components["schemas"]["OverviewSecondaryUnit"];
+            /** Current Value */
+            current_value: number | null;
+            /** Baseline Value */
+            baseline_value: number | null;
+        };
+        /**
+         * OverviewSecondaryUnit
+         * @enum {string}
+         */
+        OverviewSecondaryUnit: "COUNT" | "CENTS" | "RATIO_BP";
         /**
          * PaymentStatus
          * @enum {string}
@@ -3020,6 +3521,8 @@ export interface components {
              * @enum {string}
              */
             short_description_translation_status: "SOURCE" | "MACHINE" | "FALLBACK";
+            /** Category */
+            category: string;
             /** Description */
             description: string;
             /** Attributes */
@@ -3029,6 +3532,8 @@ export interface components {
              * @enum {string}
              */
             description_translation_status: "SOURCE" | "MACHINE" | "FALLBACK";
+            /** Missing Attributes */
+            missing_attributes: string[];
         };
         /** ProductSummary */
         ProductSummary: {
@@ -3065,6 +3570,8 @@ export interface components {
              * @enum {string}
              */
             short_description_translation_status: "SOURCE" | "MACHINE" | "FALLBACK";
+            /** Category */
+            category: string;
         };
         /**
          * QualityStatus
@@ -4646,6 +5153,187 @@ export interface operations {
             };
         };
     };
+    list_shop_memories_api_v2_shop_memories_get: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: {
+                "X-Session-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerMemoriesResponse"];
+                };
+            };
+            /** @description 缺少或提供了无效的商家凭证 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权访问该资源或管理端点 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 依赖服务暂时不可用 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_shop_memory_api_v2_shop_memories__memory_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Session-Id"?: string | null;
+            };
+            path: {
+                memory_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 缺少或提供了无效的商家凭证 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权访问该资源或管理端点 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 依赖服务暂时不可用 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    set_shop_memory_preference_api_v2_shop_memory_preference_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Session-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemoryPreferenceRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryPreferenceResponse"];
+                };
+            };
+            /** @description 缺少或提供了无效的商家凭证 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权访问该资源或管理端点 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 依赖服务暂时不可用 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     list_inventory_alerts_api_v2_merchant_inventory_alerts_get: {
         parameters: {
             query?: {
@@ -4668,6 +5356,127 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CursorPage_InventoryAlert_"];
+                };
+            };
+            /** @description 缺少或提供了无效的商家凭证 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权访问该资源或管理端点 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 依赖服务暂时不可用 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_merchant_memories_api_v2_merchant_memories_get: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: {
+                "X-Session-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantMemoriesResponse"];
+                };
+            };
+            /** @description 缺少或提供了无效的商家凭证 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权访问该资源或管理端点 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 依赖服务暂时不可用 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_merchant_memory_api_v2_merchant_memories__memory_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Session-Id"?: string | null;
+            };
+            path: {
+                memory_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantMemoryDeleteResponse"];
                 };
             };
             /** @description 缺少或提供了无效的商家凭证 */
@@ -5489,6 +6298,188 @@ export interface operations {
             };
         };
     };
+    get_metrics_overview_api_v2_merchant_metrics_overview_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Session-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantMetricsOverviewResponse"];
+                };
+            };
+            /** @description 缺少或提供了无效的商家凭证 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权访问该资源或管理端点 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 依赖服务暂时不可用 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_orders_api_v2_merchant_orders_get: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+                payment_status?: components["schemas"]["PaymentStatus"] | null;
+                fulfillment_status?: components["schemas"]["FulfillmentStatus"] | null;
+                after_sale_status?: components["schemas"]["OrderAfterSaleProjection"] | null;
+            };
+            header?: {
+                "X-Session-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CursorPage_MerchantOrderSummary_"];
+                };
+            };
+            /** @description 缺少或提供了无效的商家凭证 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权访问该资源或管理端点 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 依赖服务暂时不可用 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_order_api_v2_merchant_orders__order_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Session-Id"?: string | null;
+            };
+            path: {
+                order_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantOrderDetailResponse"];
+                };
+            };
+            /** @description 缺少或提供了无效的商家凭证 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权访问该资源或管理端点 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 依赖服务暂时不可用 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     post_merchant_chat_api_v2_merchant_chat_post: {
         parameters: {
             query?: never;
@@ -5631,6 +6622,7 @@ export interface operations {
             query?: {
                 cursor?: string | null;
                 limit?: number;
+                sort?: "newest" | "popular";
             };
             header?: never;
             path: {

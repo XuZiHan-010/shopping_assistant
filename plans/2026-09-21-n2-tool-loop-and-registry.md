@@ -142,7 +142,7 @@ cd backend; uv run pytest tests/unit/tools/test_registry.py -v
 
 用两种异常而不是一个带 flag 的异常，是为了让"把致命错误当普通错误处理"在类型层面就写不出来。
 
-- [ ] **步骤 1：写失败测试**
+- [x] **步骤 1：写失败测试**（2026-09-24 Astra N2-1 独立复审通过，补勾）
 
 ```python
 async def test_provenance_gate_rejects_object_from_other_conversation(gates) -> None:
@@ -185,7 +185,7 @@ async def test_approval_gate_converts_write_to_draft(gates, db) -> None:
     assert await snapshot(db, "products") == before   # 目标对象未被修改
 ```
 
-- [ ] **步骤 2：确认失败 → 实现 → 确认通过**
+- [x] **步骤 2：确认失败 → 实现 → 确认通过**（2026-09-24 Astra N2-1 独立复审通过，补勾）
 
 ---
 
@@ -217,7 +217,7 @@ v1 不走循环，它的 10 是按"understand 最坏 3 次 + quality 2 次"精�
 若让 v2 公式去校验它，要么 v2 被迫压缩轮数，要么有人为了让校验通过去调大它，
 **两种结果都会在不知情时改变 v1 行为**。两条链路各用各的上限。
 
-- [ ] **步骤 1：写失败测试**
+- [x] **步骤 1：写失败测试**（2026-09-24 Astra N2-2 独立复审：有条件通过 → 阻塞项已修复并复跑全绿，补勾）
 
 ```python
 def test_loop_budget_rejected_when_too_small_for_worst_path() -> None:
@@ -239,8 +239,8 @@ def test_v1_budget_is_untouched_by_loop_formula() -> None:
     assert s.llm_max_calls_per_request == 10
 ```
 
-- [ ] **步骤 2：确认失败 → 实现 → 确认通过**
-- [ ] **步骤 3：v1 零回归**
+- [x] **步骤 2：确认失败 → 实现 → 确认通过**（2026-09-24 Astra N2-2 独立复审通过，补勾）
+- [x] **步骤 3：v1 零回归**（同上，随 N2-2 复审通过，补勾）
 
 ```powershell
 cd backend; uv run pytest tests/api/ tests/unit/agent/ -v
@@ -264,7 +264,7 @@ cd backend; uv run pytest tests/api/ tests/unit/agent/ -v
 6. 工具返回的第三方文本进提示词前经 `fencing.py` 围栏（A11）；
 7. 客户端断开时取消，停止后续 LLM 调用，已完成内容完整落库。
 
-- [ ] **步骤 1：写失败测试**（用 Task 4 前置的 `FakeLlmClient` 脚本）
+- [x] **步骤 1：写失败测试**（用 Task 4 前置的 `FakeLlmClient` 脚本；2026-09-24 Astra N2-2 独立复审通过，补勾）
 
 ```python
 async def test_stops_at_max_turns_and_discloses() -> None:
@@ -320,7 +320,7 @@ async def test_client_disconnect_stops_further_llm_calls() -> None:
     assert llm.calls == 1
 ```
 
-- [ ] **步骤 2：确认失败 → 实现 → 确认通过**
+- [x] **步骤 2：确认失败 → 实现 → 确认通过**（2026-09-24 Astra N2-2 独立复审通过，补勾）
 
 ```powershell
 cd backend; uv run pytest tests/unit/agent/loop/ -v

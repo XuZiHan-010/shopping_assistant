@@ -15,12 +15,22 @@ from app.schemas.v2.trade import (
     OrderCreateRequest,
     OrderDetailResponse,
     OrderItemPriceSnapshot,
+    OrderLeadItem,
     OrderPayRequest,
     OrderSummary,
     PaymentStatus,
 )
 
 NOW = "2026-09-21T00:00:00Z"
+
+
+def lead_item(**changes: object) -> dict[str, object]:
+    return {
+        "product_id": "p1",
+        "name": "商品",
+        "image_url": None,
+        **changes,
+    }
 
 
 def cart_item(**changes: object) -> dict[str, object]:
@@ -59,6 +69,8 @@ def order(**changes: object) -> dict[str, object]:
         "item_count": 2,
         "created_at": NOW,
         "pay_by": "2026-09-21T00:30:00Z",
+        "lead_item": lead_item(),
+        "last_event_at": NOW,
         "items": [order_item()],
         "subtotal_cents": 1000,
         "discount_cents": 100,
@@ -178,6 +190,7 @@ def test_order_detail_exposes_projections_but_events_use_separate_page() -> None
         {"closed_at": NOW, "close_reason": "USER_CANCELLED"},
         {"is_demo": False},
         {"pay_by": "2026-09-20T23:59:59Z"},
+        {"last_event_at": "2026-09-20T23:59:59Z"},
     ],
 )
 def test_order_detail_rejects_inconsistent_states(changes: dict[str, object]) -> None:
@@ -202,9 +215,58 @@ def test_unpaid_order_cannot_be_shipped() -> None:
         "item_count": 1,
         "created_at": NOW,
         "pay_by": NOW,
+        "lead_item": lead_item(),
+        "last_event_at": NOW,
     }
     with pytest.raises(ValidationError):
         OrderSummary.model_validate(summary)
+
+
+def test_order_summary_requires_lead_item_and_last_event_at() -> None:
+    base = {
+        "id": "o1",
+        "payment_status": "PENDING",
+        "fulfillment_status": "NOT_SHIPPED",
+        "after_sale_status": "NONE",
+        "total_cents": 1,
+        "item_count": 1,
+        "created_at": NOW,
+        "pay_by": NOW,
+        "lead_item": lead_item(),
+        "last_event_at": NOW,
+    }
+    assert OrderSummary.model_validate(base)
+    for missing in ("lead_item", "last_event_at"):
+        incomplete = {key: value for key, value in base.items() if key != missing}
+        with pytest.raises(ValidationError):
+            OrderSummary.model_validate(incomplete)
+
+
+def test_order_summary_last_event_at_not_before_created_at() -> None:
+    base = {
+        "id": "o1",
+        "payment_status": "PENDING",
+        "fulfillment_status": "NOT_SHIPPED",
+        "after_sale_status": "NONE",
+        "total_cents": 1,
+        "item_count": 1,
+        "created_at": NOW,
+        "pay_by": NOW,
+        "lead_item": lead_item(),
+        "last_event_at": "2026-09-20T23:59:59Z",
+    }
+    with pytest.raises(ValidationError):
+        OrderSummary.model_validate(base)
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["javascript:alert(1)", "http://images.example.com/p.png", "/demo/products/../secret"],
+)
+def test_order_lead_item_image_uses_public_product_url_rules(url: str) -> None:
+    with pytest.raises(ValidationError):
+        OrderLeadItem.model_validate(lead_item(image_url=url))
+    assert OrderLeadItem.model_validate(lead_item(image_url="/demo/products/01.webp"))
 
 
 def test_event_page_is_cursor_page_and_records_source_timezone() -> None:

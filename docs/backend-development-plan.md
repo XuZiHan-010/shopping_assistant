@@ -700,7 +700,10 @@ N3 阶段 C 落地补充（2026-09-27，图表可视化，§8.7.11）：
 ### 输入
 
 - `SessionContext`、用户消息、`conversation_id`；
-- 已加载的 Skill 集合（§6.11）与可见工具面（§6.9）。
+- 已加载的 Skill 集合（§6.11）与可见工具面（§6.9）；
+- **同一会话最近 N 轮历史**（`LoopRequest.history`，2026-09-28 用户裁定 D-N4-1）：只含用户与助手文字，
+  N 取 `CHAT_HISTORY_MAX_TURNS`（默认 6，范围 0–20；0 表示不回放）；不含工具结果与推理内容；
+  顾客历史消息按 A11 围栏。回放规则见 §8.8.3 / §8.9.3。
 
 ### 输出
 
@@ -785,6 +788,8 @@ AGENT_LOOP_WALL_CLOCK_SECONDS   默认 60
 AGENT_LOOP_MAX_LLM_CALLS        默认 12   # = 8 + 1(压缩预留) + (2 × 2 − 1)
 AGENT_LOOP_QUALITY_MAX_ATTEMPTS 默认 2    # v2 专用，不复用 v1 的 QUALITY_MAX_ATTEMPTS
 COMPACTION_MAX_CALLS            默认 1    # N4 摘要压缩预留，N2 循环不使用
+COMPACTION_STRATEGY             默认 TOOL_RESULT_PRUNING  # N4-A；未经真实模型对比前的保守默认（§6.12）
+COMPACTION_TRIGGER_TOKENS       默认 8000 # 按字符估算；单请求 token 预算按调用累计，阈值须远低于 MAX_LLM_TOKENS_PER_REQUEST
 ```
 
 **v2 循环用独立的 `AGENT_LOOP_MAX_LLM_CALLS`，不复用也不改动 v1 的
@@ -906,14 +911,27 @@ class CompactionStrategy(StrEnum):
   后续回答就无法满足 M3「必须返回数据截至时间与来源」和 D9「批准绑定草案版本」；
 - **旧对话摘要是模型生成内容，不得升级为事实来源**——它只能影响语气与上下文理解，
   不能充当数字、规则或状态的依据（与 D18① 同一条原则）；
+- **回放的助手历史回答同样是模型生成内容**（D-N4-1）：本轮回答中的数字若只能在历史回答里找到、
+  不能追溯到本轮工具结果或锚点，确定性校验判为无来源并降级；跨回合锚点只从 `messages.response_payload`
+  的持久化字段重建，不从助手文字中抽取数字；
 - **身份保存在服务端可信上下文，不反复塞进提示词**；
 - `SUMMARIZATION` 策略的 LLM 调用计入 `compaction_max_calls`，见 §6.10 的预算公式；
 - 两策略在同一评测集上的对比报告是 N4 交付物；选定后另一策略保留在 `eval/` 供回归。
+- **2026-09-30 选型（同日经真实模型对比确认）**：生产默认 `TOOL_RESULT_PRUNING`
+  （`COMPACTION_STRATEGY`），触发阈值 `COMPACTION_TRIGGER_TOKENS` 默认 8000（字符估算）。E5 Fake 评测两策略
+  四项保持率均为 100%，摘要策略吸收历史、多一次计费调用，证据见 `docs/history/eval/n4-e5-compaction-fake.md`。
+  `SUMMARIZATION` 仍可配置切换并由该评测回归。真实对比（`deepseek-flash` 90 次、383,755 token）人工复核后两策略各 28/30，
+  摘要策略总 token 约为清理的 1.87 倍，证据见 `docs/history/eval/n4-e5-compaction-real.md`；
+- 截至时间锚点带产出它的 `工具名#call_id`，与带数值的来源行同键（真实对比发现模型无法关联数值与定义版本）；
+- 模型正文出现上游内部工具调用标记（DeepSeek `DSML`）时按上游异常可见降级，不当回答展示、不当调用执行；
+- 压缩在每次工具轮决策前判断；生效时推送 SSE `step`（`node="compact_context"`）并写入最终响应 `thinking_steps`，
+  不静默发生；
 
 ### 必测
 
 - 压缩前后，工具来源 / 数据截至时间 / 草稿版本三项无损；
 - 摘要内容不会被下游当作事实来源引用（断言引用链只指向工具结果）；
+- 只复述历史回答中的数字、本轮未调用工具时，回答判为无来源并降级；
 - 提示词中不出现 `merchant_id` / `buyer_key` 原值；
 - `SUMMARIZATION` 触发时预算正确扣减且不突破总上限。
 
@@ -930,24 +948,37 @@ class CompactionStrategy(StrEnum):
   短批次、`FOR UPDATE SKIP LOCKED`、租约超时与重试上限处理；不得用进程内 `BackgroundTasks`
   冒充可靠异步交付，也不得让 Web 请求等待真实抽取完成；
 - 幂等任务 + 租户隔离 + 重试上限 + **单独预算**（不与主回合共享 `LlmBudget`，
-  参照既有 `localization_max_calls_per_request` 的独立预算做法）；
+  参照既有 `localization_max_calls_per_request` 的独立预算做法）；「单独预算」只是单次任务的调用上限，
+  抽取调用仍计入 PRD §10.2 的全局、角色、商家三级每日预算；
+- 抽取调用在 `llm_usage.purpose` 记为 `MEMORY`，与 `AGENT` / `LOCALIZATION` 分列审计；排空生产入口只构造带每日预算熔断的 LLM 客户端，Fake 测试注入走受测底层函数；
+- **抽取范围**（2026-09-28 用户裁定 D-N4-2）：只有回合落库时会话已绑定演示顾客（`buyer_key` 非空）且
+  「记住我的偏好」开启的顾客回合才追加 outbox 行；访客回合不追加，访客绑定后**不补抽**绑定前的回合；
+  商家回合按商家会话照常追加；
 - **写入前后双重过滤**：拒绝手机号、身份证、银行卡、地址、邮箱等标识信息，
   以及健康、宗教、政治等敏感推断；
 - 商家侧两层：`FACT`（带来源，可逐条删除）与 `SUMMARY`（可重建文档，删来源后重建）；
   顾客侧只做事实型，按**顾客 + 店铺**隔离，保留 180 天且**仅被读取不续期**；
 - **两层都不得回答规则、替代知识库或充当经营数字来源**；
+- 记忆经 `LoopRequest.memory_context` 注入：拼在系统消息的稳定前缀与围栏策略之后（A9），整体按外部文本围栏（A11），
+  且**不计入确定性校验的数字来源**——只凭记忆复述的数字判无来源并降级（2026-09-30 修复：此前记忆拼进 `system_prompt`，
+  会被当作来源）；
 - 团队知识与记忆是**单向边界**：记忆绝不升级写回团队知识库；
 - **不预设「更便宜的模型足够」**——抽取模型须经敏感信息误写率与事实准确率评测后选择（A6）；
   真实调用遵守 R3。
+- **2026-09-30 选型**：抽取模型 `deepseek-flash`。E5 真实评测 40 条（应写 20、不应写 20）错误写入率 5%（2 条，均出自 1 条更正类用例），
+  敏感信息与助手推测零误写，精确率 0.905、漏记 0；40 次调用共 8,731 token。证据 `docs/history/eval/n4-e5-memory-real.md`；
+  未对比 `deepseek-v4-pro`。
 
 ### 必测
 
 - 抽取任务失败不影响主回答已落库；
+- 访客回合不产生 outbox 行，绑定后也不补抽；
 - 同一回合重复触发只产生一条记忆（幂等）；
 - 双重过滤的每类敏感信息各一条反例；
 - 顾客记忆跨店铺不可见、跨顾客不可见；
 - 商家删除 `FACT` 来源后 `SUMMARY` 被标记重建；
 - 记忆预算耗尽不影响主回合预算。
+- 回答只复述记忆里的数字（商家经营数字、顾客记忆里的价格）时降级，两端各一条。
 
 ---
 
@@ -1500,6 +1531,13 @@ support_tickets
 五项缺一，该组不得标记完成。
 
 **契约冻结状态（2026-09-21）：** 七组字段契约已全部写入 §8.7–§8.14，PRD §11.2 的 47 条路径逐条覆盖；`backend/app/schemas/v2/` 的 Pydantic 模型与单测已落地。上述五项中的第 1 项（字段契约）对七组均已满足，第 2–5 项仍随各组路由实现的同一次变更完成——**契约冻结不等于 v2 功能已实现**，v2 路由、OpenAPI 导出、生成类型与 Adapter 尚未开始。
+
+**2026-09-28 追加**：PRD §11.2.3 按 M1 裁定新增三条商家只读路径：
+- `metrics/overview`；
+- `orders`；
+- `orders/{order_id}`。
+
+字段契约在 §8.12.4，路由由 `plans/2026-09-28-merchant-workbench-redesign.md` 实现。上文「47 条」是 N1 冻结时的历史计数；当前 PRD 路径总数以 §11.2 为准，由 v2 路径清单哨兵核对。
 
 ### 8.0.2 Chat BI 衡量层契约
 
@@ -2298,9 +2336,9 @@ class Visualization(BaseModel):
 | `DemoCustomerBindResponse` | `role: CUSTOMER`；`is_bound: true`；`expires_at: UTC datetime`；`cart_adjusted: bool`（严格布尔；合并时发生数量截顶、剔除不可售商品或超 50 行截断为 true，幂等重绑不再合并恒为 false；规则见 PRD C3，执行期裁定 E9）。原凭证保持有效，不再次返回凭证 |
 | `StoreProfileResponse` | `shop_slug: string`；`display_name: string[1..120]`；`rules_summary: string[0..10000]` |
 | `StockBand` | `IN_STOCK / LOW_STOCK / OUT_OF_STOCK` |
-| `ProductSummary` | `id: PublicId`；`name: string[1..200]`；`short_description: string[0..500]`；`price_cents: MoneyCents`；`stock_band: StockBand`；`image_url: string[1..2048]或null`；`source_locale: zh-CN / en-US / mixed / und`；`content_version: int≥1`；`requested_locale: zh-CN / en-US`；`name_translation_status / short_description_translation_status: SOURCE / MACHINE / FALLBACK` |
+| `ProductSummary` | `id: PublicId`；`name: string[1..200]`；`short_description: string[0..500]`；`price_cents: MoneyCents`；`stock_band: StockBand`；`image_url: string[1..2048]或null`；`source_locale: zh-CN / en-US / mixed / und`；`content_version: int≥1`；`requested_locale: zh-CN / en-US`；`name_translation_status / short_description_translation_status: SOURCE / MACHINE / FALLBACK`；`category: string[1..64]`（商品类目的**源值**，如“鞋靴”；不翻译，前端用固定词表显示，词表未登记的类目原样显示；WS 2026-09-30 为商品浮层与缺图占位加入） |
 | `ProductAttribute` | `name: string[1..100]`；`value: string[1..2000]`；`source: MERCHANT / DEMO`；`updated_at: UTC datetime`；`name_translation_status / value_translation_status: SOURCE / MACHINE / FALLBACK` |
-| `ProductDetailResponse` | ProductSummary 全部字段；`description: string[0..20000]`；`attributes: ProductAttribute[]`（0–100 项）；`description_translation_status: SOURCE / MACHINE / FALLBACK` |
+| `ProductDetailResponse` | ProductSummary 全部字段；`description: string[0..20000]`；`attributes: ProductAttribute[]`（0–100 项）；`description_translation_status: SOURCE / MACHINE / FALLBACK`；`missing_attributes: string[]`（0–20 项，该类目在 `REQUIRED_ATTRIBUTES_BY_CATEGORY` 中的必填属性里缺失或值为空的源属性名，按名称升序；类目未登记时为空数组，不翻译） |
 
 商品公开列表与详情按 `Accept-Language` 选择 `requested_locale`。`source_locale` 与 `content_version`
 来自当前商品源记录，译文逐字段按当前源文本哈希从**本商家**未过期的机器译文缓存读取；商品字段更新后，
@@ -2340,7 +2378,7 @@ DEMO` 仍表示**业务内容来源**，与翻译状态独立，不得把 `MACHI
 | `POST /api/v2/shop/sessions/demo-customer` | X-Session-Id 顾客；路径/查询无；体 DemoCustomerBindRequest | 200 DemoCustomerBindResponse，Cache-Control: no-store | 401；403角色错误；404 NOT_FOUND（演示模式关闭，统一公开不可用）；409 SESSION_ALREADY_BOUND；422 INVALID_REQUEST；503 DATA_SOURCE_UNAVAILABLE。同一身份原地绑定与购物车合并事务幂等，无client_request_id |
 | `DELETE /api/v2/shop/sessions/current` | X-Session-Id 顾客；路径/查询/体无 | 204，无体 | 401；403角色错误；503 DATA_SOURCE_UNAVAILABLE。注销当前会话；后续用该凭证返回401，无client_request_id |
 | `GET /api/v2/shop/stores/{shop_slug}` | 公开；路径shop_slug；查询/体无 | 200 StoreProfileResponse | 403 RESOURCE_FORBIDDEN；422 INVALID_REQUEST；503 DATA_SOURCE_UNAVAILABLE。只读，无幂等键 |
-| `GET /api/v2/shop/stores/{shop_slug}/products` | 公开；路径shop_slug；查询cursor/limit；体无 | 200 CursorPage[ProductSummary] | 403 RESOURCE_FORBIDDEN；422 INVALID_REQUEST / INVALID_CURSOR；503 DATA_SOURCE_UNAVAILABLE。只返回在售商品；只读 |
+| `GET /api/v2/shop/stores/{shop_slug}/products` | 公开；路径shop_slug；查询cursor/limit/sort；`sort: newest / popular`，默认 `newest`；体无 | 200 CursorPage[ProductSummary] | 403 RESOURCE_FORBIDDEN；422 INVALID_REQUEST / INVALID_CURSOR；503 DATA_SOURCE_UNAVAILABLE。只返回在售商品；只读 |
 | `GET /api/v2/shop/stores/{shop_slug}/products/{product_id}` | 公开；路径shop_slug、product_id:PublicId；查询/体无 | 200 ProductDetailResponse | 403 RESOURCE_FORBIDDEN（含非本店或不可售）；422 INVALID_REQUEST；503 DATA_SOURCE_UNAVAILABLE。只读 |
 | `GET /api/v2/shop/stores/{shop_slug}/coupons` | 公开；路径shop_slug；查询cursor/limit；体无 | 200 CursorPage[CouponSummary] | 403 RESOURCE_FORBIDDEN；422 INVALID_REQUEST / INVALID_CURSOR；503 DATA_SOURCE_UNAVAILABLE。仅当前已生效券（starts_at≤now<ends_at）；只读 |
 | `POST /api/v2/shop/chat` | X-Session-Id 顾客；路径/查询无；体ShopChatRequest | 200 SSE 或 ShopChatResponse | 401；403角色错误 / RESOURCE_FORBIDDEN；409 IDEMPOTENCY_KEY_REUSED / REQUEST_IN_PROGRESS；422 INVALID_REQUEST；429 RATE_LIMITED；503 LLM_BUDGET_EXCEEDED / DATA_SOURCE_UNAVAILABLE。幂等域、摘要与语言重放按 §8.7.3；默认SSE |
@@ -2349,8 +2387,8 @@ DEMO` 仍表示**业务内容来源**，与翻译状态独立，不得把 `MACHI
 | `DELETE /api/v2/shop/conversations/{conversation_id}` | X-Session-Id 顾客；路径conversation_id:PublicId；查询/体无 | 204，无体 | 401；403角色错误 / RESOURCE_FORBIDDEN；422 INVALID_REQUEST；503 DATA_SOURCE_UNAVAILABLE。删除后再次请求统一403；同事务删除来源状态，无client_request_id |
 
 所有受限对象查询强制当前主体 + 店铺范围；公开浏览按 slug 在服务端解析店铺，不让前端提供租户ID。
-列表排序：商品、优惠券、对话均 `created_at DESC, id DESC`；消息 `created_at ASC, id ASC`。
-签名游标绑定端点、公开店铺或会话主体+店铺、资源类型、语言与limit；消息还绑定conversation_id。
+列表排序：商品 `newest` 为 `created_at DESC, id DESC`；`popular` 为近 30 个业务日（Asia/Shanghai）已支付订单件数 DESC，并列 `created_at DESC, id DESC`；优惠券、对话均 `created_at DESC, id DESC`；消息 `created_at ASC, id ASC`。
+签名游标绑定端点、公开店铺或会话主体+店铺、资源类型、语言与limit；商品游标额外绑定 `sort`，换 `sort` 复用游标返回 422 `INVALID_CURSOR`；消息还绑定conversation_id。
 签名、24小时过期、锚点删除与从首页重取规则严格沿用 §8.7.4，不跨资源复用。
 
 #### 8.8.3 Chat 与 v1 迁移
@@ -2359,6 +2397,13 @@ SSE 逐事件使用 §8.7.5 的 `step / tool_call / tool_result / turn_complete 
 turn_complete 携带唯一完整 ShopChatResponse，和 JSON 响应逐字段相同，工具载荷只能用受控展示模型。
 开流前错误保留HTTP状态；开流后error为唯一终态，不再发送turn_complete；断流不得当成功。
 切换语言重放按 §8.6.4，不重复推理或产生副作用。请求拒绝 session_id、attachment_ids 和身份字段。
+
+**多轮历史回放**（2026-09-28 用户裁定 D-N4-1，PRD A5）：服务端按 `conversation_id` 读取同一会话最近
+`CHAT_HISTORY_MAX_TURNS` 轮（默认 6）的用户与助手文字作为模型上下文；顾客历史消息按 A11 围栏；
+不回放工具结果与推理内容；已删除会话不回放；**客户端不能提交历史**，请求体不新增字段，历史只由服务端从已落库消息读取。
+回放的助手文字不是事实来源（§6.12）。
+
+**顾客只读订单工具 `get_my_order`**：模型参数仅 `order_id: string[1..128]`，拒绝额外字段；结果包含 `payment_status`、`fulfillment_status`、`after_sale_status`、`pay_by`、`items[{name, quantity}]`、`recent_events[{event_type, occurred_at}]`（最多 5 条，按时间升序）。与 `check_after_sale_eligibility` 使用相同的 `merchant_id + buyer_key` 归属过滤，访客不可用；归属失败抛 `FatalToolError(gate="ownership")`。写策略为 `READ_ONLY`，可并行。`tool_call` / `tool_result` 展示摘要只含状态文字，不含 `buyer_key` 等内部字段。
 
 | v1 AnswerMode | 顾客端处理 |
 | --- | --- |
@@ -2415,7 +2460,8 @@ turn_complete 携带唯一完整 ShopChatResponse，和 JSON 响应逐字段相�
 #### 8.9.3 Chat 与 v1 迁移
 
 SSE 逐事件使用 §8.7.5；turn_complete 携带唯一完整 MerchantChatResponse，与 JSON 响应逐字段相同。
-请求拒绝 `session_id`、`attachment_ids` 与身份字段。v1 `AnswerMode` 一一映射：
+请求拒绝 `session_id`、`attachment_ids` 与身份字段。多轮历史回放规则与 §8.8.3 相同（D-N4-1），
+商家消息不围栏（商家是店铺经营者本人，其指令就是任务本身）。v1 `AnswerMode` 一一映射：
 
 | v1 AnswerMode | 商家端处理 |
 | --- | --- |
@@ -2440,8 +2486,9 @@ SSE 逐事件使用 §8.7.5；turn_complete 携带唯一完整 MerchantChatRespo
 | `CartItemSetRequest` | `quantity: int[0..99]`（严格整数，0 表示删除）；**不含 `client_request_id`**：设置绝对数量，天然幂等 |
 | `OrderCreateRequest` | `client_request_id` 按 §8.7.3，必填；`coupon_id: PublicId或null`（可省略，默认null）。订单行来自当前购物车，请求不接受商品、单价、金额或库存字段 |
 | `OrderItemPriceSnapshot` | `order_item_id: PublicId`；`product_id: PublicId`；`name: string[1..200]`；`quantity: int[1..99]`；`unit_price_cents`、`discount_cents`、`line_total_cents: MoneyCents`。约束：`discount_cents ≤ unit_price_cents × quantity`；`line_total_cents = unit_price_cents × quantity − discount_cents` |
-| `OrderSummary` | `id: PublicId`；`payment_status`；`fulfillment_status`；`after_sale_status: OrderAfterSaleProjection`；`total_cents: MoneyCents`；`item_count: int≥1`；`created_at: UTC datetime`；`pay_by: UTC datetime`（支付截止，创建后 30 分钟）。约束：`fulfillment_status ≠ NOT_SHIPPED` 时 `payment_status` 必须是 `PAID` |
-| `OrderDetailResponse` | OrderSummary 全部字段；`items: OrderItemPriceSnapshot[]`（1–50 项，`order_item_id` 不重复）；`subtotal_cents`、`discount_cents: MoneyCents`；`coupon_id: PublicId或null`；`paid_at: UTC datetime或null`；`closed_at: UTC datetime或null`；`close_reason: USER_CANCELLED / PAYMENT_TIMEOUT / null`；`is_demo: true`。约束见下 |
+| `OrderLeadItem` | `product_id: PublicId`；`name: string[1..200]`（取订单首行价格快照名称）；`image_url: ImageUrl或null`（取商品当前图片，经 `is_trusted_image_host` 判定，商品不存在或不可信时为 null） |
+| `OrderSummary` | `id: PublicId`；`payment_status`；`fulfillment_status`；`after_sale_status: OrderAfterSaleProjection`；`total_cents: MoneyCents`；`item_count: int≥1`；`created_at: UTC datetime`；`pay_by: UTC datetime`（支付截止，创建后 30 分钟）；`lead_item: OrderLeadItem`（按订单明细 `created_at, id` 升序的首行）；`last_event_at: UTC datetime`（该订单最新履约事件的 `occurred_at`；不早于 `created_at`）。约束：`fulfillment_status ≠ NOT_SHIPPED` 时 `payment_status` 必须是 `PAID` |
+| `OrderDetailResponse` | OrderSummary 全部字段（含 `lead_item`、`last_event_at`）；`items: OrderItemPriceSnapshot[]`（1–50 项，`order_item_id` 不重复）；`subtotal_cents`、`discount_cents: MoneyCents`；`coupon_id: PublicId或null`；`paid_at: UTC datetime或null`；`closed_at: UTC datetime或null`；`close_reason: USER_CANCELLED / PAYMENT_TIMEOUT / null`；`is_demo: true`。约束见下。下单、支付、取消的响应同样携带 `lead_item`、`last_event_at` |
 | `FulfillmentEventType` | `ORDER_PLACED / PAYMENT_CONFIRMED / SHIPPED / IN_TRANSIT / OUT_FOR_DELIVERY / DELIVERED / ORDER_CLOSED` |
 | `FulfillmentEvent` | `id: PublicId`；`event_type: FulfillmentEventType`；`occurred_at: UTC datetime`；`source_timezone: string[1..64]`（IANA 时区名，来源时区，不做隐式推断） |
 | `FulfillmentEventPage` | 即 `CursorPage[FulfillmentEvent]`（`items / next_cursor / has_more`，§8.7.4） |
@@ -2452,7 +2499,7 @@ SSE 逐事件使用 §8.7.5；turn_complete 携带唯一完整 MerchantChatRespo
 `OrderDetailResponse` 的一致性约束：`subtotal_cents = Σ unit_price × quantity`；`discount_cents = Σ 行 discount`；
 `total_cents = subtotal_cents − discount_cents = Σ line_total_cents`；`item_count = Σ quantity`；
 `paid_at` 非空当且仅当 `payment_status = PAID`；`closed_at` 与 `close_reason` 同时非空当且仅当 `payment_status = CLOSED`；
-`pay_by` 不早于 `created_at`。
+`pay_by` 不早于 `created_at`；`last_event_at` 不早于 `created_at`（`OrderSummary` 同一约束）。
 
 关闭原因在数据库保留 `CUSTOMER_CANCEL` / `TIMEOUT`，分别对应 API 的
 `USER_CANCELLED` / `PAYMENT_TIMEOUT`。响应装配与写入边界须调用
@@ -2678,6 +2725,80 @@ SSE 逐事件使用 §8.7.5；turn_complete 携带唯一完整 MerchantChatRespo
 
 排序：库存告警按严重度 `OUT_OF_STOCK → LOW_STOCK → SLOW_MOVING`，同级 `product_id ASC`（`id` 兜底）；商品内容与优惠券按 `created_at DESC, id DESC`；顾客信号 `signal_date DESC, id DESC`。
 签名游标绑定端点、商家主体摘要、资源类型、筛选条件、语言与 limit，规则严格沿用 §8.7.4。
+
+#### 8.12.4 首页经营主指标与订单只读面（2026-09-28 补入）
+
+**来源**：PRD M1（新增「订单」区域、首页经营主指标）、§11.2.3 新增三条路径、§15「W」。
+规划与迁移方案见 `plans/2026-09-28-merchant-workbench-redesign.md`。本节字段写完之前，不得创建这三条路由或前端请求封装（§8.0.1）。
+
+本节三条路径的约定：
+
+- 全部只读，不调用任何 LLM（零费用），`merchant_id` 只从商家会话解析；
+- 全部模型拒绝额外字段，金额按 §8.7.8 为整数分，时间归一化为 UTC；
+- 本节新增 `SignedMoneyCents`：`int`，strict，`−MAX_MONEY_CENTS ≤ x ≤ MAX_MONEY_CENTS`。净成交额与贡献值在退款大于成交时可为负，不能用非负的 `MoneyCents` 表示。
+
+**模型：**
+
+| 模型 | 字段、类型与范围 |
+| --- | --- |
+| `OverviewPeriod` | `start: date`；`end: date`（闭区间，按商家业务时区，`start ≤ end`，跨度 1–7 天）；`label: string[1..40]`（后端生成的本地化说明，如「本周前 3 天」，按 §8.6 语言协商） |
+| `OverviewMetricPoint` | `date: date`；`value_cents: SignedMoneyCents` |
+| `OverviewHeadline` | `metric_code: "net_gmv"`（字面值，本版只有这一项主指标）；`current_cents: SignedMoneyCents`；`baseline_cents: SignedMoneyCents或null`（基期无可比数据为 null）；`change_ratio_bp: int[−1000000..1000000]或null`（相对变化，万分比，`ROUND_HALF_UP`；`baseline_cents` 为 null 或 ≤ 0 时必须为 null，不产生伪精确比例）；`current_series: OverviewMetricPoint[]`（本期每天恰好一点，日期连续，无数据的日子补 0）；`baseline_series: OverviewMetricPoint[]`（与 `current_series` 等长，按星期几逐日对齐；基期无可比数据时为 []） |
+| `OverviewAttributionMode` | `SHARE / ABSOLUTE_CONTRIBUTION / STOPPED` |
+| `OverviewAttributionSegment` | `name: string[1..64]`（类目名）；`current_cents`、`baseline_cents`、`contribution_cents: SignedMoneyCents`（`contribution = current − baseline`）；`share_bp: int[−1000000..1000000]或null`（仅 `mode = SHARE` 时非空） |
+| `OverviewAttribution` | `dimension: "category"`（字面值）；`mode: OverviewAttributionMode`；`segments: OverviewAttributionSegment[]`（0–5 项，按 `abs(contribution_cents)` 降序，同值按 `name ASC`；`STOPPED` 时为 []）；`remaining_count: int≥0`；`remaining_contribution_cents: SignedMoneyCents`（其余类目的贡献合计。超过 5 个类目时**必须**用这两个字段说明其余部分，不得静默截断，M3）；`stopped_reason: string[1..200]或null`（仅 `STOPPED` 非空，安全可理解，不含 SQL 或内部异常） |
+| `OverviewSecondaryMetricCode` | `order_count / refund_amount / return_rate`。只允许已登记的受控指标（`app/analytics/contract.py`），不新造「客单价」「退款率」等口径 |
+| `OverviewSecondaryUnit` | `COUNT / CENTS / RATIO_BP` |
+| `OverviewSecondaryMetric` | `metric_code: OverviewSecondaryMetricCode`；`unit: OverviewSecondaryUnit`（`order_count→COUNT`、`refund_amount→CENTS`、`return_rate→RATIO_BP`，固定映射）；`current_value: int≥0或null`；`baseline_value: int≥0或null`（null 表示无数据，不得写成 0）。`RATIO_BP` 为万分比整数，由指标注册表声明的单位按 Decimal 换算并 `ROUND_HALF_UP`，禁止经过 float |
+| `MerchantMetricsOverviewResponse` | §8.7.6 `DegradationMixin` 全部字段；`business_timezone: string[1..64]`；`data_as_of: UTC datetime`；`source: REALTIME / DAILY_ROLLUP / MIXED`；`definition_version: string[1..64]`；`current_period`、`baseline_period: OverviewPeriod`；`headline: OverviewHeadline`；`attribution: OverviewAttribution`；`secondary: OverviewSecondaryMetric[]`（恰好 3 项，依次为 `order_count`、`refund_amount`、`return_rate`） |
+| `MerchantOrderSummary` | §8.10.1 `OrderSummary` 全部字段，含顾客端店面重设计（WS）加入的 `lead_item`、`last_event_at`，商家端直接继承、不另起字段；`buyer_alias: string[1..64]`（店铺级脱敏别名，与 §8.11.1 `MerchantAfterSaleSummary` 使用同一派生函数）；`line_count: int[1..50]`（订单行数） |
+| `MerchantOrderDetailResponse` | §8.10.1 `OrderDetailResponse` 全部字段；`buyer_alias`（同上） |
+
+**不变量：**
+
+1. **周期规则与归因工具相同**：
+   - 本期为本周一至今天（业务时区），基期为上周的等长区间，与 `attribute_change` 共用 `AttributionService` 的周期计算，不另写一套；
+   - `current_period.label`、`baseline_period.label` 与该服务的 `comparison_label` 语义一致；
+   - 本期包含今天，数据来源可能是 `MIXED`，必须如实返回（M3）。
+2. **所有数字都由后端确定性计算**（R4）：
+   - `headline`、`attribution`、`secondary` 复用 `AttributionService.query_metrics`、`query_metrics_series`、`attribute_change`，以及 `SafeQueryService` 的受控查询；
+   - 模型不参与，前端不得据序列自行重算比例或贡献。
+   - 一致性约束：
+     - `headline.current_cents = Σ current_series.value_cents`；
+     - 基期非空时，`headline.baseline_cents = Σ baseline_series.value_cents`；
+     - 归因 `mode ≠ STOPPED` 时，`Σ segments.contribution_cents + remaining_contribution_cents = current_cents − baseline_cents`。
+3. **降级披露**（R7）：
+   - 任一分项查询失败时整体 `degraded=true` 并给出原因。失败的分项取空值（`headline` 的 `baseline_cents` 为 null、归因为 `STOPPED`、辅助指标值为 null），**不回退到示意数字**。
+   - `analysis_sources` 只填实际来源（`DATABASE`），不得出现模型分析来源。
+   - `quality_status` 恒为 `NOT_RUN`，`quality_attempts = 0`：本端点没有 Reviewer。
+4. **订单只读、按商家隔离**（R5）：
+   - 列表与详情只返回本店、具备 v2 交易投影的订单。迁移前历史订单与他店订单一样返回 `403 RESOURCE_FORBIDDEN`，列表中不出现，与 §8.10.3 顾客端口径一致。
+   - 响应**不含** `buyer_key`、顾客会话或任何联系方式；订单详情不含对话内容，因此不写查看审计（与 §8.11 售后详情不同）。
+   - 本节没有订单写端点：发货、关闭、改价都不经本组。
+
+**逐路径契约：**
+
+列表参数同本节开头：`cursor: string[1..2048]或null`（默认null）、`limit: int[1..100]`（默认20）。401、403 角色错误与 `RESOURCE_FORBIDDEN` 的约定同 §8.12.3。
+
+| 方法与完整路径 | 鉴权、路径/查询/请求体 | 成功响应 | 错误、幂等与传输 |
+| --- | --- | --- | --- |
+| `GET /api/v2/merchant/metrics/overview` | X-Session-Id 商家；路径/查询/体无（周期由后端固定，不接受日期参数） | 200 MerchantMetricsOverviewResponse | 401；403角色错误；503 DATA_SOURCE_UNAVAILABLE（数据库整体不可用；分项失败走降级字段而不是 503）。只读，不调用 LLM |
+| `GET /api/v2/merchant/orders` | X-Session-Id 商家；路径无；查询 cursor/limit，以及筛选 `payment_status: PaymentStatus或null`、`fulfillment_status: FulfillmentStatus或null`、`after_sale_status: OrderAfterSaleProjection或null`（均默认null，不过滤）；体无 | 200 CursorPage[MerchantOrderSummary] | 401；403角色错误；422 INVALID_REQUEST / INVALID_CURSOR；503 DATA_SOURCE_UNAVAILABLE。仅本店；只读 |
+| `GET /api/v2/merchant/orders/{order_id}` | X-Session-Id 商家；路径order_id:PublicId；查询/体无 | 200 MerchantOrderDetailResponse | 401；403角色错误 / RESOURCE_FORBIDDEN；422 INVALID_REQUEST；503 DATA_SOURCE_UNAVAILABLE。只读；不存在、他店订单与历史订单同一错误结构 |
+
+**与 WS 的共用实现**：
+- `lead_item` / `last_event_at` 由 WS（`plans/2026-09-28-shop-storefront-redesign.md` Task 1 步骤 7）写入 §8.10.1。
+- 两端共用 `services/v2/orders.py` 的 `to_order_summary()`、`order_leads()`、`last_event_times()`。
+- W Task 3 与 WS Task 3 改同一文件，须串行；先做的一方实现，后做的一方复用。
+- W Task 3 先开工时，须先完成 WS Task 1 步骤 7 的契约，再按该契约实现这两个字段。
+
+**排序与游标**：订单按 `created_at DESC, id DESC`。签名游标绑定端点、商家主体摘要、资源类型、三项筛选、语言与 limit，规则沿用 §8.7.4。
+
+**安全集**：
+- 三条路径都随路由登记两类用例：未认证、顾客会话越权（`SESSION_ROLE_MISMATCH`）。
+- 订单详情另登记跨商家用例：返回 `RESOURCE_FORBIDDEN` 并写审计。
+- 订单列表另登记用例：伪造他店游标，返回 `INVALID_CURSOR`。
+- 全部用例都要通过路由覆盖守卫。
 
 ### 8.13 草稿审批与变更账本（组 6）
 

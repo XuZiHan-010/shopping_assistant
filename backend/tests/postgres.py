@@ -13,7 +13,9 @@ from pathlib import Path
 
 import pytest
 from alembic.config import Config
+from sqlalchemy import text
 from sqlalchemy.engine import make_url
+from sqlalchemy.ext.asyncio import AsyncSession
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 
@@ -30,6 +32,19 @@ TRUNCATE_ALL_TABLES = (
     "machine_translation_cache, resource_localizations, "
     "knowledge_documents, merchant_memories, merchants CASCADE"
 )
+
+
+async def truncate_all_tables(session: AsyncSession) -> None:
+    """清空测试库业务表；所有夹具都必须走这里，不要直接执行 `TRUNCATE_ALL_TABLES`。
+
+    TRUNCATE 需要对全部业务表取排他锁并同步 WAL，Docker Desktop 磁盘繁忙时可能超过
+    应用会话的 5 秒 `statement_timeout`，让无关用例在 setup 阶段随机报错。这里只在
+    当前事务内取消超时，调用方 commit 或 rollback 后 `SET LOCAL` 自动还原，业务会话
+    仍由集成测试验证 timeout 已启用。
+    """
+
+    await session.execute(text("SET LOCAL statement_timeout = 0"))
+    await session.execute(text(TRUNCATE_ALL_TABLES))
 
 
 def alembic_config(database_url: str) -> Config:

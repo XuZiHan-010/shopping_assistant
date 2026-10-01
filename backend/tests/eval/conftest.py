@@ -7,7 +7,6 @@ from collections.abc import AsyncIterator
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
-from sqlalchemy import text
 
 from app.core.config import AppEnvironment, Settings
 from app.db.session import Database
@@ -21,7 +20,7 @@ from tests.conftest import (
     MERCHANT_TWO_ID,
     MERCHANT_TWO_TOKEN,
 )
-from tests.postgres import TRUNCATE_ALL_TABLES
+from tests.postgres import truncate_all_tables
 
 MERCHANT_ONE_SLUG = "borough-api-100"
 MERCHANT_TWO_SLUG = "borough-api-101"
@@ -80,7 +79,7 @@ async def security_app(migrated_postgres: str) -> AsyncIterator[FastAPI]:
     )
     database = Database(settings)
     async with database.session() as session:
-        await session.execute(text(TRUNCATE_ALL_TABLES))
+        await truncate_all_tables(session)
         session.add_all(
             [
                 Merchant(

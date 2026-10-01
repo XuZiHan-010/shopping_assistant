@@ -1,6 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { KnowledgeTreeNode } from '@/api/adapters/knowledge'
 import { AppError } from '@/api/errors'
@@ -356,7 +356,7 @@ describe('KnowledgeBaseView en-US 下确定性文案为英文', () => {
     expect(wrapper.text()).toContain('This document was modified by another maintainer')
   })
 
-  it('非 Error 异常时展示英文兜底文案，不泄露非预期抛出值', async () => {
+  it('非 Error 且无状态码的异常按「可重试」展示英文文案，不泄露非预期抛出值', async () => {
     setChatTransport(async () => {
       throw 'boom'
     })
@@ -367,6 +367,80 @@ describe('KnowledgeBaseView en-US 下确定性文案为英文', () => {
     await wrapper.get('form').trigger('submit')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('Admin token verification failed.')
+    expect(wrapper.text()).toContain('Could not verify the token right now')
+    expect(wrapper.text()).not.toContain('boom')
+  })
+})
+
+describe('KnowledgeBaseView 只读令牌', () => {
+  afterEach(() => {
+    setChatTransport(undefined)
+    vi.unstubAllEnvs()
+  })
+
+  it('使用只读令牌时没有任何写操作按钮，文档只读', async () => {
+    vi.stubEnv('VITE_VIEWER_TOKEN', 'viewer-token')
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    useLocaleStore().setLocale('zh-CN')
+    useKnowledgeStore().setAdminToken('viewer-token')
+    setChatTransport(async (request) =>
+      request.path.includes('/documents/')
+        ? Response.json({
+            path: 'index/a.md',
+            content: '# a',
+            version: 'v1',
+            read_only: false,
+            content_locale: 'zh-CN',
+          })
+        : treeResponse([
+            {
+              ...DEFAULT_ROOTS[0]!,
+              children: [
+                {
+                  name: 'a.md',
+                  path: 'index/a.md',
+                  nodeType: 'document',
+                  readOnly: false,
+                  size: 3,
+                  version: 'v1',
+                  children: [],
+                },
+              ],
+            },
+          ]),
+    )
+    const wrapper = mount(KnowledgeBaseView, { global: { plugins: [pinia, i18n] } })
+    await flushPromises()
+    await wrapper.get('[data-path="index/a.md"]').trigger('click')
+    await flushPromises()
+
+    // 配对断言：同一份目录树与选中状态下，管理员令牌能看到这些控件，
+    // 下面「只读令牌下不存在」才不是空断言。
+    const adminPinia = createPinia()
+    setActivePinia(adminPinia)
+    useKnowledgeStore().setAdminToken('admin-token')
+    const adminWrapper = mount(KnowledgeBaseView, { global: { plugins: [adminPinia, i18n] } })
+    await flushPromises()
+    await adminWrapper.get('[data-path="index/a.md"]').trigger('click')
+    await flushPromises()
+    for (const id of ['create-domain', 'create-document', 'rename-domain', 'delete-node', 'save']) {
+      expect(adminWrapper.find(`[data-testid="${id}"]`).exists()).toBe(true)
+    }
+
+    for (const id of ['create-domain', 'create-document', 'rename-domain', 'delete-node', 'save']) {
+      expect(wrapper.find(`[data-testid="${id}"]`).exists()).toBe(false)
+    }
+    expect(wrapper.get('textarea').attributes('readonly')).toBeDefined()
+    expect(wrapper.find('[data-testid="readonly-notice"]').exists()).toBe(true)
+  })
+
+  it('使用管理员令牌（与只读令牌不同）时保留写操作按钮', async () => {
+    vi.stubEnv('VITE_VIEWER_TOKEN', 'viewer-token')
+    const { wrapper } = await mountAuthorized()
+
+    expect(wrapper.find('[data-testid="create-domain"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="create-document"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="readonly-notice"]').exists()).toBe(false)
   })
 })

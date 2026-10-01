@@ -73,20 +73,57 @@ function submit(): void {
   inset: 0;
   display: grid;
   place-items: center;
-  background: rgba(15, 23, 42, 0.4);
+  padding: 16px;
+  background: rgba(10, 16, 13, 0.4);
   z-index: 20;
 }
 
 .prompt-dialog {
-  width: min(90vw, 26rem);
+  width: min(100%, 26rem);
   padding: var(--space-5);
+  border: 1px solid var(--line);
   border-radius: var(--radius-column);
-  background: var(--color-surface);
-  box-shadow: var(--shadow-card);
+  background: var(--raised);
+  color: var(--ink);
+  box-shadow: var(--shadow-lg);
 }
 
 .prompt-dialog h2 {
   margin: 0 0 var(--space-4);
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 600;
+}
+
+footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+footer button {
+  min-height: 34px;
+  border-radius: 9px;
+  padding: 0 var(--space-4);
+  font: inherit;
+  font-size: 13px;
+  font-weight: var(--font-weight-control);
+}
+
+footer button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+footer button[data-testid='cancel'] {
+  border: 1px solid var(--line-strong);
+  background: var(--raised);
+  color: var(--ink);
+}
+
+footer button[data-testid='cancel']:hover {
+  background: var(--hover);
 }
 
 form {
@@ -94,42 +131,38 @@ form {
   gap: var(--space-2);
 }
 
+label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
 input {
   min-height: var(--control-height);
-  border: 1px solid var(--color-border-strong);
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius-control);
   padding: 0 var(--space-3);
+  background: var(--card);
+  color: var(--ink);
   font: inherit;
 }
 
 .prompt-dialog__error {
   margin: 0;
-  color: var(--color-danger-text);
+  color: var(--danger);
 }
 
 footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--space-2);
   margin-top: var(--space-2);
-}
-
-footer button {
-  min-height: var(--control-height);
-  border-radius: var(--radius-control);
-  padding: 0 var(--space-4);
-  font: inherit;
 }
 
 footer button[type='submit'] {
   border: 0;
-  color: white;
-  background: var(--color-primary);
-  font-weight: var(--font-weight-control);
+  color: var(--on-accent);
+  background: var(--accent);
 }
 
-footer button[type='button'] {
-  border: 1px solid var(--color-border);
-  background: white;
+footer button[type='submit']:hover:not(:disabled) {
+  background: var(--accent-strong);
 }
 </style>

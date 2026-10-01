@@ -70,6 +70,17 @@ MERCHANT_AFTER_SALES = "/api/v2/merchant/after-sales"
 MERCHANT_AFTER_SALE = "/api/v2/merchant/after-sales/{after_sale_id}"
 MERCHANT_SIGNALS = "/api/v2/merchant/customer-signals"
 MERCHANT_SIGNAL_IGNORE = "/api/v2/merchant/customer-signals/{signal_id}/ignore"
+# N4 B：双端记忆 5 条。内部身份从会话解析，不在请求字段暴露。
+SHOP_MEMORIES = "/api/v2/shop/memories"
+SHOP_MEMORY = "/api/v2/shop/memories/{memory_id}"
+SHOP_MEMORY_PREFERENCE = "/api/v2/shop/memory-preference"
+MERCHANT_MEMORIES = "/api/v2/merchant/memories"
+MERCHANT_MEMORY = "/api/v2/merchant/memories/{memory_id}"
+#: W 阶段 Task 2：首页经营主指标（§8.12.4）。周期由后端固定，不接受任何查询参数。
+MERCHANT_METRICS_OVERVIEW = "/api/v2/merchant/metrics/overview"
+#: W 阶段 Task 3：商家订单只读面（§8.12.4）。仅本店具备 v2 交易投影的订单。
+MERCHANT_ORDERS = "/api/v2/merchant/orders"
+MERCHANT_ORDER = "/api/v2/merchant/orders/{order_id}"
 
 # (方法, 路径) → (鉴权类别, 成功状态码, 请求模型, 响应模型, 声明的错误码)
 # 鉴权类别对应 AGENTS.md §8.3：public / bearer / session。
@@ -315,6 +326,38 @@ EXPECTED: dict[tuple[str, str], tuple[str, str, str | None, str | None, set[str]
         "session", "200", "SignalIgnoreRequest", "CustomerSignal",
         {"401", "403", "409", "422", "503"},
     ),
+    ("get", SHOP_MEMORIES): (
+        "session", "200", None, "CustomerMemoriesResponse",
+        {"401", "403", "422", "503"},
+    ),
+    ("delete", SHOP_MEMORY): (
+        "session", "204", None, None, {"401", "403", "422", "503"},
+    ),
+    ("put", SHOP_MEMORY_PREFERENCE): (
+        "session", "200", "MemoryPreferenceRequest", "MemoryPreferenceResponse",
+        {"401", "403", "422", "503"},
+    ),
+    ("get", MERCHANT_MEMORIES): (
+        "session", "200", None, "MerchantMemoriesResponse",
+        {"401", "403", "422", "503"},
+    ),
+    ("delete", MERCHANT_MEMORY): (
+        "session", "200", None, "MerchantMemoryDeleteResponse",
+        {"401", "403", "422", "503"},
+    ),
+    ("get", MERCHANT_METRICS_OVERVIEW): (
+        "session", "200", None, "MerchantMetricsOverviewResponse",
+        # 422 同当日简报：覆盖 FastAPI 默认注入的校验错误响应结构。
+        {"401", "403", "422", "503"},
+    ),
+    ("get", MERCHANT_ORDERS): (
+        "session", "200", None, "CursorPage_MerchantOrderSummary_",
+        {"401", "403", "422", "503"},
+    ),
+    ("get", MERCHANT_ORDER): (
+        "session", "200", None, "MerchantOrderDetailResponse",
+        {"401", "403", "422", "503"},
+    ),
 }
 
 # 两阶段创建的第二个成功分支，状态码和模型都单独固定。
@@ -329,7 +372,7 @@ QUERY_PARAMS: dict[tuple[str, str], set[str]] = {
     ("get", MERCHANT_PRODUCTS_CONTENT): {"cursor", "limit"},
     ("get", MERCHANT_COUPONS): {"cursor", "limit"},
     ("get", MERCHANT_DRAFTS): {"cursor", "limit", "state", "kind", "batch_id"},
-    ("get", SHOP_PRODUCTS): {"cursor", "limit"},
+    ("get", SHOP_PRODUCTS): {"cursor", "limit", "sort"},
     ("get", SHOP_COUPONS): {"cursor", "limit"},
     ("get", SHOP_ORDERS): {"cursor", "limit"},
     ("get", SHOP_ORDER_EVENTS): {"cursor", "limit"},
@@ -340,6 +383,11 @@ QUERY_PARAMS: dict[tuple[str, str], set[str]] = {
     ("get", SHOP_AFTER_SALES): {"cursor", "limit"},
     ("get", MERCHANT_AFTER_SALES): {"cursor", "limit", "state"},
     ("get", MERCHANT_SIGNALS): {"cursor", "limit", "include_ignored"},
+    ("get", SHOP_MEMORIES): {"cursor", "limit"},
+    ("get", MERCHANT_MEMORIES): {"cursor", "limit"},
+    ("get", MERCHANT_ORDERS): {
+        "cursor", "limit", "payment_status", "fulfillment_status", "after_sale_status",
+    },
 }
 
 #: 任何路由都不得以查询参数接受这些名字。

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ChevronDown } from '@lucide/vue'
+import { ChevronDown, ChevronsUpDown } from '@lucide/vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
 import { i18n } from '@/i18n'
@@ -9,10 +9,20 @@ import { i18n } from '@/i18n'
 const triggerAria = computed(() => i18n.global.t('merchantSwitcher.triggerAria'))
 const listAria = computed(() => i18n.global.t('merchantSwitcher.listAria'))
 
-const props = defineProps<{
-  modelValue: string
-  merchants: readonly string[]
-}>()
+const props = withDefaults(
+  defineProps<{
+    modelValue: string
+    merchants: readonly string[]
+    /**
+     * `side`：商家工作台侧栏品牌区的样式（W Task 5），深底浅字、菜单向下展开；
+     * 行为与默认样式完全相同。
+     */
+    variant?: 'default' | 'side'
+    /** 仅 `side` 样式显示的第二行说明，例如「演示商家」。 */
+    caption?: string
+  }>(),
+  { variant: 'default', caption: '' },
+)
 
 const emit = defineEmits<{
   'update:modelValue': [merchant: string]
@@ -72,7 +82,11 @@ defineExpose({ openAndFocus })
 </script>
 
 <template>
-  <div ref="rootElement" class="merchant-switcher">
+  <div
+    ref="rootElement"
+    class="merchant-switcher"
+    :class="{ 'merchant-switcher--side': props.variant === 'side' }"
+  >
     <button
       ref="triggerElement"
       class="merchant-switcher__trigger"
@@ -83,9 +97,18 @@ defineExpose({ openAndFocus })
       aria-controls="merchant-switcher-options"
       @click="isOpen = !isOpen"
     >
-      <span class="merchant-switcher__status" aria-hidden="true"></span>
-      <span class="merchant-switcher__name">{{ modelValue }}</span>
-      <ChevronDown aria-hidden="true" :size="15" />
+      <template v-if="props.variant === 'side'">
+        <span class="merchant-switcher__text">
+          <strong class="merchant-switcher__name" translate="no">{{ modelValue }}</strong>
+          <span v-if="props.caption" class="merchant-switcher__caption">{{ props.caption }}</span>
+        </span>
+        <ChevronsUpDown aria-hidden="true" :size="16" class="merchant-switcher__chev" />
+      </template>
+      <template v-else>
+        <span class="merchant-switcher__status" aria-hidden="true"></span>
+        <span class="merchant-switcher__name">{{ modelValue }}</span>
+        <ChevronDown aria-hidden="true" :size="15" />
+      </template>
     </button>
 
     <!-- listbox / option：触发按钮已经声明了 aria-expanded 与 aria-controls，
@@ -130,18 +153,18 @@ defineExpose({ openAndFocus })
   align-items: center;
   gap: var(--space-2);
   padding: 0 var(--space-2-5);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--line);
   border-radius: var(--radius-control);
-  color: var(--color-text-secondary);
-  background: var(--color-surface);
-  box-shadow: var(--shadow-control);
+  color: var(--ink-2);
+  background: var(--card);
+  box-shadow: var(--shadow-sm);
   transition: var(--transition-interactive);
 }
 
 .merchant-switcher__trigger:hover {
-  border-color: #cdd7fd;
-  color: var(--color-primary);
-  background: var(--color-primary-soft);
+  border-color: var(--line-strong);
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .merchant-switcher__status {
@@ -149,8 +172,8 @@ defineExpose({ openAndFocus })
   height: 7px;
   flex: none;
   border-radius: 50%;
-  background: var(--color-teal);
-  box-shadow: 0 0 0 3px rgba(24, 169, 153, 0.13);
+  background: var(--ok);
+  box-shadow: 0 0 0 3px var(--ok-soft);
 }
 
 .merchant-switcher__name {
@@ -176,10 +199,10 @@ defineExpose({ openAndFocus })
   gap: var(--space-1);
   margin: 0;
   padding: var(--space-1);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--line);
   border-radius: var(--radius-control);
-  background: #fff;
-  box-shadow: 0 14px 32px rgba(37, 52, 82, 0.16);
+  background: var(--raised);
+  box-shadow: var(--shadow-lg);
   list-style: none;
 }
 
@@ -194,7 +217,7 @@ defineExpose({ openAndFocus })
   gap: var(--space-2);
   padding: var(--space-2) var(--space-2-5);
   border-radius: 8px;
-  color: var(--color-text-secondary);
+  color: var(--ink-2);
   background: transparent;
   font-size: var(--font-size-body);
   text-align: left;
@@ -202,7 +225,79 @@ defineExpose({ openAndFocus })
 
 .merchant-switcher__option:hover,
 .merchant-switcher__option[aria-current='true'] {
-  color: var(--color-primary-strong);
-  background: var(--color-primary-soft);
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+
+/* ---------- 侧栏品牌区样式（定稿原型 `.brand`） ---------- */
+.merchant-switcher--side .merchant-switcher__trigger {
+  height: auto;
+  gap: 11px;
+  padding: 6px 8px;
+  border: 1px solid var(--side-line);
+  border-radius: 12px;
+  color: var(--side-ink);
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: none;
+}
+
+.merchant-switcher--side .merchant-switcher__trigger:hover {
+  border-color: rgba(239, 233, 220, 0.24);
+  color: var(--side-ink);
+  background: var(--side-hover);
+}
+
+.merchant-switcher__text {
+  min-width: 0;
+  flex: 1;
+  text-align: left;
+}
+
+.merchant-switcher--side .merchant-switcher__name {
+  display: block;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.merchant-switcher__caption {
+  display: block;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--side-soft);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.merchant-switcher__chev {
+  flex: none;
+  color: var(--side-faint);
+}
+
+.merchant-switcher--side .merchant-switcher__menu {
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  width: auto;
+  max-width: none;
+  padding: 6px;
+  border-radius: 12px;
+  background: var(--raised);
+  box-shadow: var(--shadow-lg);
+}
+
+.merchant-switcher--side .merchant-switcher__option {
+  padding: 7px 8px;
+  color: var(--ink);
+  font-size: 13.5px;
+}
+
+.merchant-switcher--side .merchant-switcher__option:hover {
+  color: var(--ink);
+  background: var(--hover);
+}
+
+.merchant-switcher--side .merchant-switcher__option[aria-current='true'] {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
 }
 </style>

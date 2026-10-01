@@ -18,7 +18,7 @@ from sqlalchemy import select
 from app.db.session import Database
 from app.models.analytics import Product
 from app.models.promotion import Coupon
-from app.schemas.v2.drafts import DraftKind, GuardrailCheckResult
+from app.schemas.v2.drafts import DraftKind
 from app.services.v2.coupons import CouponRow, to_coupon_summary
 from app.services.v2.guardrails import check_coupon, check_price_change, load_limits
 from app.tools.errors import FatalToolError, GuardrailRejection
@@ -148,11 +148,14 @@ def build_pricing_tools(database: Database) -> tuple[ToolSpec, ...]:
         )
 
     async def coupon_guardrail(ctx: ToolContext, args: DraftCouponArgs) -> None:
-        if args.kind != "DISCOUNT" or args.discount_rate is None:
-            return
         async with database.session() as session:
             limits = await load_limits(session, ctx.session.merchant_id)
-        checks = check_coupon(discount_rate=args.discount_rate, limits=limits)
+        checks = check_coupon(
+            discount_rate=args.discount_rate if args.kind == "DISCOUNT" else None,
+            threshold_amount=args.threshold_amount if args.kind == "FULL_REDUCTION" else None,
+            discount_amount=args.discount_amount if args.kind == "FULL_REDUCTION" else None,
+            limits=limits,
+        )
         for check in checks:
             if not check.passed:
                 assert check.current_limit is not None and check.remediation is not None
@@ -163,11 +166,14 @@ def build_pricing_tools(database: Database) -> tuple[ToolSpec, ...]:
                 )
 
     async def draft_coupon(ctx: ToolContext, args: DraftCouponArgs) -> DraftProposal:
-        checks: list[GuardrailCheckResult] = []
-        if args.kind == "DISCOUNT" and args.discount_rate is not None:
-            async with database.session() as session:
-                limits = await load_limits(session, ctx.session.merchant_id)
-            checks = check_coupon(discount_rate=args.discount_rate, limits=limits)
+        async with database.session() as session:
+            limits = await load_limits(session, ctx.session.merchant_id)
+        checks = check_coupon(
+            discount_rate=args.discount_rate if args.kind == "DISCOUNT" else None,
+            threshold_amount=args.threshold_amount if args.kind == "FULL_REDUCTION" else None,
+            discount_amount=args.discount_amount if args.kind == "FULL_REDUCTION" else None,
+            limits=limits,
+        )
         return DraftProposal(
             # 券是新建对象，此刻还没有真实 id；用占位符，真正的 id 由
             # `DatabaseDraftSink._stage_coupon()` 预先分配（草稿暂存层的职责，见 D9）。

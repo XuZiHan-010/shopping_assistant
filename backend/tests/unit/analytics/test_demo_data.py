@@ -149,3 +149,68 @@ def test_paid_orders_have_a_paid_at_and_cancelled_ones_do_not() -> None:
         if order["order_status"] == "CANCELLED":
             assert order["paid_at"] is None
             assert order["paid_amount"] == Decimal("0.00")
+
+
+def test_storefront_catalog_matches_approved_products_and_gaps() -> None:
+    from app.analytics.demo_data import build_demo_catalog
+    from app.services.v2.content_completeness import required_attributes_for
+
+    products = build_demo_catalog(merchant_id=MERCHANT, seed=DEMO_ANALYTICS_SEED_BASE)
+    expected = [
+        ("真丝印花半裙", 569),
+        ("牛津纺长袖衬衫", 239),
+        ("手工缝线切尔西靴", 699),
+        ("粗陶手作咖啡杯（两只装）", 128),
+        ("燕麦舒缓保湿面霜", 159),
+        ("亚麻宽松开衫", 329),
+        ("水洗帆布工装夹克", 459),
+        ("复古德训运动鞋", 389),
+        ("橡木砧板", 199),
+        ("玫瑰果油修护精华", 219),
+        ("羊毛混纺高领毛衣", 399),
+        ("美利奴羊毛针织开衫", 529),
+        ("软底乐福鞋", 459),
+        ("亚麻格纹桌布", 169),
+        ("苦橙花淡香水", 399),
+        ("高腰直筒牛仔裤", 299),
+        ("格纹羊绒围巾", 489),
+        ("防泼水徒步短靴", 629),
+        ("无花果雪松香氛蜡烛", 149),
+        ("氨基酸温和洁面乳", 89),
+        ("法式碎花连衣裙", 459),
+        ("修身斜纹休闲裤", 279),
+        ("羊皮芭蕾平底鞋", 399),
+        ("羊毛混纺沙发毯", 359),
+    ]
+    assert len(products) == 24
+    assert [(p["title"], p["price"]) for p in products] == [
+        (name, Decimal(price)) for name, price in expected
+    ]
+    for index, product in enumerate(products):
+        attributes = product["attributes"]
+        missing = {
+            key
+            for key in required_attributes_for(product["category"])
+            if key not in attributes or not attributes[key]["value"]
+        }
+        assert missing == ({"产地"} if index == 2 else set())
+        assert product["image_url"] == (
+            None if index == 5 else f"/demo/products/{index + 1:02d}.webp"
+        )
+        assert product["stock_on_hand"] == (3 if index == 3 else 100)
+        assert product["status"] == ("AUDITING" if index % 8 == 0 else "ONLINE")
+    assert products[4]["detail_description"] == "简短说明。"
+
+
+def test_storefront_catalog_preserves_original_ids_and_listing_dates() -> None:
+    from app.analytics.demo_data import build_demo_catalog
+
+    expected = {
+        0: ("bb683d33-a395-4677-ae18-b56f3ba0f297", "2026-04-26T02:00:00+00:00"),
+        12: ("ca7e9c69-680e-40df-bafb-aeb554821c4c", "2026-03-23T02:00:00+00:00"),
+        23: ("14a3e0cc-c851-4a42-a8a0-bb8566bd1186", "2026-03-11T02:00:00+00:00"),
+    }
+    for _ in range(2):
+        products = build_demo_catalog(merchant_id=MERCHANT, seed=DEMO_ANALYTICS_SEED_BASE)
+        for index, pair in expected.items():
+            assert (str(products[index]["id"]), products[index]["listed_at"].isoformat()) == pair

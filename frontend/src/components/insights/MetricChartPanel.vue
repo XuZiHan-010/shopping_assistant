@@ -121,22 +121,22 @@ useEChart(
   flex-direction: column;
   gap: var(--space-3);
   padding: var(--space-3);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--line);
   border-radius: var(--radius-card);
-  background: var(--color-surface);
-  box-shadow: var(--shadow-control);
+  background: var(--card);
+  box-shadow: var(--shadow-sm);
 }
 
 .chart-panel__header {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  color: var(--color-text-secondary);
+  color: var(--ink-2);
 }
 
 .chart-panel__header h2 {
   margin: 0;
-  color: var(--color-text);
+  color: var(--ink);
   font-size: var(--font-size-section-title);
   font-weight: var(--font-weight-emphasis);
 }
@@ -146,14 +146,14 @@ useEChart(
   flex-direction: column;
   gap: var(--space-1-5);
   padding: var(--space-3);
-  border: 1px dashed var(--color-border-strong);
+  border: 1px dashed var(--line-strong);
   border-radius: var(--radius-control);
-  background: var(--color-surface-muted);
+  background: var(--well);
 }
 
 .chart-panel__notice {
   margin: 0;
-  color: var(--color-text-secondary);
+  color: var(--ink-2);
   font-size: var(--font-size-caption);
   line-height: var(--line-height-body);
 }
@@ -165,14 +165,14 @@ useEChart(
 
 .chart-panel__title {
   margin: 0;
-  color: var(--color-text);
+  color: var(--ink);
   font-size: var(--font-size-control);
   font-weight: var(--font-weight-control);
 }
 
 .chart-panel__count {
   margin: 0;
-  color: var(--color-text-secondary);
+  color: var(--ink-2);
   font-size: var(--font-size-caption);
 }
 
@@ -182,12 +182,12 @@ useEChart(
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-4) var(--space-2);
-  color: var(--color-text-secondary);
+  color: var(--ink-2);
   text-align: center;
 }
 
 .chart-panel__empty span {
-  color: var(--color-text-secondary);
+  color: var(--ink-2);
   font-size: var(--font-size-control);
   font-weight: var(--font-weight-emphasis);
 }

@@ -14,6 +14,7 @@ vi.mock('@/session/ShopContext', () => ({
 const product = (stockBand: Product['stockBand']): Product => ({
   id: 'p1',
   name: '羊绒围巾',
+  category: '女装',
   shortDescription: '柔软保暖',
   priceCents: 25900,
   stockBand,
