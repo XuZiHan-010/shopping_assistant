@@ -4,6 +4,10 @@
 
 # Borough — a two-sided commerce agent platform
 
+> An independent implementation based on Anthropic's
+> [Claude Commerce Agents reference blueprint](https://github.com/anthropics/commerce-agents).
+> See [Origin and licensing](#origin-and-licensing) for the adapted scope and copyright terms.
+
 > One backend, two agents. The **shopper agent** helps customers find products, fill a cart and handle returns inside a store.
 > The **merchant agent** answers business questions, runs inventory and content, and drafts changes for approval.
 > Both share one set of identity, order, inventory and audit facts. The model interprets and picks tools;
@@ -31,6 +35,7 @@ an MCP entry point, and an **evaluation suite that is layered and reports its fa
 ## Contents
 
 - [At a glance](#at-a-glance)
+- [Origin and licensing](#origin-and-licensing)
 - [Screens](#screens)
 - [Capabilities](#capabilities)
 - [Architecture](#architecture)
@@ -64,6 +69,23 @@ an MCP entry point, and an **evaluation suite that is layered and reports its fa
 | Regression | All automated tests use a scripted model and cost nothing | 4,700+ backend, 793 merchant app, 141 shopper app |
 
 The failing numbers are in the table too. Full results, denominators and review notes are under [Evaluation](#evaluation).
+
+## Origin and licensing
+
+Borough builds on Anthropic's [Claude Commerce Agents](https://github.com/anthropics/commerce-agents) reference blueprint,
+using commit [`fd4d592`](https://github.com/anthropics/commerce-agents/tree/fd4d59224ab96b43c6dc6888207c67b3bd5a24cf)
+as its reference. The two-agent structure, on-demand skills, bounded tool loop and approval of merchant writes draw on that blueprint.
+Four shopper skills and four merchant skills are adapted from upstream; each adapted `SKILL.md` records its source.
+Borough implements its own commerce domain model, trusted identity and tenant isolation, backend tools and state machines,
+frontends, API contracts and evaluation. It uses DeepSeek through its own `LlmClient`; support for an Anthropic-compatible
+protocol does not mean that it calls Claude or uses an Anthropic-hosted service.
+
+**Copyright and license:** Upstream `commerce-agents` is Copyright © 2026 Anthropic PBC and is released under the
+[Apache License 2.0](https://github.com/anthropics/commerce-agents/blob/fd4d59224ab96b43c6dc6888207c67b3bd5a24cf/LICENSE).
+Its copyright and license notices apply to upstream material included or adapted here. Copyright in Borough's original
+contributions belongs to their respective contributors. This repository currently has no root `LICENSE`; the upstream
+Apache-2.0 license does **not** by itself license the entire Borough repository under Apache-2.0.
+Borough is an independent personal engineering project, unaffiliated with and not endorsed by Anthropic.
 
 ## Screens
 
@@ -269,10 +291,6 @@ structlog · pytest · Ruff · mypy
 
 **Model** — DeepSeek `deepseek-flash`, through an in-house `LlmClient` with adapters for both the OpenAI-compatible and the
 Anthropic-compatible protocol
-
-The overall approach to skills and the tool loop draws on Anthropic's
-[commerce-agents](https://github.com/anthropics/commerce-agents) blueprint (Apache-2.0). The domain model, contracts, security
-boundaries and evaluation are designed and implemented in this project.
 
 ## Quick start
 
