@@ -28,6 +28,9 @@ from app.models.merchant import Merchant
 from app.services.seed_service import default_merchants
 
 ADVISORY_LOCK_ID = 2026081801
+_ANALYZE_PRUNED_TABLES = "ANALYZE " + ", ".join(
+    model.__tablename__ for model in (Order, OrderItem, Refund, ReturnRecord, SupportTicket)
+)
 DEFAULT_WINDOW_DAYS = 180
 
 
@@ -184,6 +187,10 @@ async def roll_forward(
                     if rows:
                         await session.execute(insert(model).values(rows))
                         written += len(rows)
+            # 清理前由本事务自己刷新统计信息。autovacuum 看不到未提交的行：它若在本事务写入途中
+            # 分析这些表，会把刚灌进上万行的表记成空表，下面的清理语句随即按空表规划成嵌套全表扫描，
+            # 触发语句超时（首次补齐 180 天时最容易撞上）。事务内的 ANALYZE 能看到自己写入的行。
+            await session.execute(text(_ANALYZE_PRUNED_TABLES))
             cutoff = business_day - timedelta(days=window_days - 1)
             legacy_orders = select(Order.id).where(
                 Order.merchant_id == merchant.id, Order.lifecycle_origin == "LEGACY_V1"

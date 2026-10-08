@@ -396,3 +396,4 @@ async def test_catalog_refresh_initialises_stock_for_rows_that_predate_inventory
     assert sold_out["id"] not in events
     assert await _catalog(db_session, merchant.id, DEMO_ANALYTICS_SEED_BASE) == catalog
     assert await initial_stock_events() == events
+

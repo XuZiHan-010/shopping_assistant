@@ -35,7 +35,8 @@ const base = { popular, store, coupons: [], locale: 'zh-CN' as const }
 
 beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true })
-  vi.setSystemTime(new Date('2026-09-29T20:00:00+08:00'))
+  // 问候语按运行环境的本地时间取：用本地时间构造，测试才不依赖机器所在时区（CI 是 UTC）。
+  vi.setSystemTime(new Date(2026, 8, 29, 20, 0, 0))
   mocks.session = { isBound: true, sessionId: 's1' }; mocks.messages = []
   mocks.listOrders.mockResolvedValue([
     order('delivery', 'OUT_FOR_DELIVERY'), order('pending', 'NOT_SHIPPED', 'PENDING'),
