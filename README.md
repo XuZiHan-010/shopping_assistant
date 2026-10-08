@@ -2,406 +2,438 @@
   <b>简体中文</b> · <a href="README.en.md">English</a>
 </p>
 
-# Borough 商家 AI 助手
+# Borough 双端 Agent 电商平台
 
-> 面向电商商家的对话式 Data Agent：用自然语言问经营数据，拿到**带口径、带图表、带行动建议、且被独立 Reviewer 复核过**的回答。
+> 一套后端、两个 Agent：**顾客端**在店铺里导购、加购和办售后，**商家端**查经营数据、管库存和内容、审批草稿。
+> 两端共用同一份身份、订单、库存与审计事实；模型负责理解和选择工具，**金额、库存、SQL 与每一次写入都由后端确定性代码决定**。
 
 <p>
 <img alt="Python" src="https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white">
 <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-0.116-009688?logo=fastapi&logoColor=white">
-<img alt="LangGraph" src="https://img.shields.io/badge/LangGraph-orchestration-1C3C3C">
+<img alt="Next.js" src="https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white">
 <img alt="Vue" src="https://img.shields.io/badge/Vue-3.5-4FC08D?logo=vuedotjs&logoColor=white">
 <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white">
-<img alt="PostgreSQL" src="https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white">
+<img alt="PostgreSQL" src="https://img.shields.io/badge/PostgreSQL-16%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white">
+<img alt="MCP" src="https://img.shields.io/badge/MCP-read--only%20server-6E56CF">
 <img alt="Railway" src="https://img.shields.io/badge/Deploy-Railway-0B0D0E?logo=railway&logoColor=white">
 </p>
 
-商家在对话框里问「最近 7 天退货量趋势怎么样」，系统会识别商家身份 → 判定问题是否在业务范围内 → 结构化理解意图 →
-用**后端模板 SQL**（模型永远碰不到 SQL）查询 PostgreSQL → 生成结论、图表和至少两条有数据依据的建议 →
-交给独立 Reviewer 复核 → 落库并异步沉淀商家记忆。任何一环不可用都会**显式降级并在界面上说明原因**，
-而不是编造一个像样的答案。
+这是一个个人工程实践项目，目标是把 Agent 应用里常被一笔带过的部分做实：
+有上限的工具循环、按需加载的 Skill、上下文压缩、双端记忆、混合检索、MCP 接入，
+以及一套**分层的、敢写出失败数字的评测**。
+
+`Borough` 是虚构的电商平台 IP，三家演示商家与全部经营数据均由程序生成。
 
 ---
 
 ## 目录
 
-- [项目简介](#项目简介)
-- [核心能力](#核心能力)
+- [一分钟看懂](#一分钟看懂)
+- [界面](#界面)
+- [能力一览](#能力一览)
 - [系统架构](#系统架构)
-- [Agent 问答流水线](#agent-问答流水线)
-- [安全与成本设计](#安全与成本设计)
+- [一个回合是怎么跑的](#一个回合是怎么跑的)
+- [评测](#评测)
+- [安全与成本](#安全与成本)
 - [技术栈](#技术栈)
 - [快速开始](#快速开始)
 - [测试与质量门禁](#测试与质量门禁)
 - [API 一览](#api-一览)
 - [部署](#部署)
 - [目录结构](#目录结构)
+- [当前状态与已知限制](#当前状态与已知限制)
 - [文档索引](#文档索引)
 
 ---
 
-## 项目简介
+## 一分钟看懂
 
-Borough 商家 AI 助手是一个面向电商商家的对话式 Data Agent。商家用自然语言提问，
-系统负责把问题变成受控的数据查询，并给出带口径、带图表、带行动建议的回答。
+| 主题 | 做法 | 证据 |
+| --- | --- | --- |
+| Agent 循环 | 自研工具循环，回合数、工具调用、模型调用、token 四项都有硬上限，触顶即可见降级 | 单回合最多 8 轮决策 / 16 次工具调用 / 12 次模型调用 |
+| 工具与 Skill | 26 个工具按角色划分工具面；12 个 Skill（顾客 5、商家 7）按需加载，不常驻提示词 | 首次 Skill 选择 46/48（真实模型） |
+| 写操作 | 商家端所有写入先成**草稿**，由人在审批界面批准，应用时按当前状态复检；聊天里说「批准」不生效 | 并发批准只有一个赢家、重复批准无二次副作用（确定性测试） |
+| 检索 | 关键词 + 向量（pgvector、`bge-small-zh-v1.5` 本地推理）RRF 融合；索引分版本、原子切换、质量不达标不切换 | Recall@5 0.759 → **0.907**，引用正确率 85.19% → **90.74%** |
+| 记忆 | 回合结束后经 outbox 异步抽取；顾客与商家记忆隔离，记忆**不能**作为回答里数字的来源 | 错误写入率 5%（2/40），10 条敏感信息诱导零泄露 |
+| 上下文压缩 | 工具结果清理与摘要两种策略，身份、来源、草稿版本、安全约束作为锚点保留 | 结构保持率 100%（脚本化模型）；真实模型下来源保留仅 13/24，**未达标** |
+| MCP | 只读 MCP 服务端，短期、可撤销、限定店铺与工具范围的独立凭证 | 标准 MCP 客户端集成测试 |
+| 安全 | 79 条安全用例作为硬门禁：跨租户、身份伪造、SQL 注入、提示词注入、模型自批 | 79/79，`skip` 不计入通过 |
+| 成本 | 全局 / 角色 / 店铺三级每日预算，先查后发；价格分版本，写入时计成本 | 耗尽时上游请求数为 0 |
+| 回归 | 自动化测试全部使用脚本化模型，不产生费用 | 后端 4700+、商家端 793、顾客端 141 |
 
-它针对的是商家日常经营分析里几个具体的问题：
-
-- 经营数据分散在订单、退款、商品、优惠券、工单等多张表里，跨业务分析成本高；
-- 商家不知道指标是怎么算出来的，也不应该接触数据库细节，更不该去写 SQL；
-- 指标回答常常只有一个数字，缺少口径、趋势解释和「接下来该做什么」；
-- 平台规则和指标口径散落在文档与个人经验里，问一次要找很久；
-- 把 LLM 直接接上数据库，会带来误解问题、编造字段、算错数和越权查询的风险。
-
-技术选型上刻意保持很小的组件面：Python + TypeScript，单一 PostgreSQL 承担全部存储职责，
-不额外引入分析型数据库或数据管道；Redis、异步 Worker 和对象存储都按真实需求逐步接入，
-而不是一开始就摆上。组件少，理解、开发、测试和部署的门槛都会低很多。
-
-`Borough` 是本项目虚构的电商平台 IP；演示商家与全部经营数据均为**程序生成的虚构数据**，
-不含任何真实商家信息。演示身份用 Token 白名单直接映射到三个虚构商家（顶栏可切换，
-用于验证数据隔离），不需要注册登录。
+失败的数字同样写在这张表里。完整结果、分母与复核记录见[评测](#评测)。
 
 ## 界面
 
-<img src="docs/images/zh/01-assistant.png" alt="Borough 商家 AI 助手主界面">
+<img src="docs/images/zh/01-merchant-home.png" alt="商家工作台首页">
 
-<p align="center"><i>助手主界面：左栏每日经营日报与指标口径，中栏对话与 12 步质量轨迹，右栏行动建议与「猜你想问」</i></p>
+<p align="center"><i>商家工作台：今日简报、待处理事项与核心指标；右侧是运营助手</i></p>
 
-| Chat BI 运营看板 | 知识库维护后台 |
+| 顾客端店铺 | 草稿审批 |
 | :---: | :---: |
-| <img src="docs/images/zh/04-ops-dashboard.png" alt="Chat BI 运营看板"> | <img src="docs/images/zh/03-knowledge-base.png" alt="知识库维护后台"> |
-| 六项北极星指标、日趋势与分类下钻；样本不足时显示「样本不足」而不是伪造 0% | 固定三根目录树、业务域四板块、文档编辑与只读记忆 |
+| <img src="docs/images/zh/02-shop-home.png" alt="顾客端店铺首页"> | <img src="docs/images/zh/03-merchant-drafts.png" alt="商家端草稿审批"> |
+| 智能助手首页：快捷提问、进行中的订单、热门商品与常驻购物车 | 模型只能起草；改动前后对照，由人批准后才生效 |
 
-<table>
-<tr>
-<td width="26%"><img src="docs/images/zh/02-chart.png" alt="指标图表面板"></td>
-<td>
+| 商品与库存 | 运维看板 |
+| :---: | :---: |
+| <img src="docs/images/zh/04-merchant-catalog.png" alt="商家端商品管理"> | <img src="docs/images/zh/05-ops-status.png" alt="运维看板"> |
+| 商品内容完整度由后端按类目规范核对，缺口可让助手起草补充 | 三级预算余量、当日成本、限流与降级计数、工具错误率 |
 
-**指标图表**
+<p align="center"><i>截图取自本地 Docker Compose 全栈与演示数据，未配置模型 Key。</i></p>
 
-字段只能取自后端已登记的维度与指标列，模型无法指定任意列；可切换的图表类型由后端
-`allowed_types` 决定。摘要与明细表共用同一套数字格式，不会把浮点求和的误差尾数写给用户。
+## 能力一览
 
-</td>
-</tr>
-<tr>
-<td width="26%"><img src="docs/images/zh/05-mobile.png" alt="移动端布局"></td>
-<td>
+### 顾客端（Next.js）
 
-**移动端**
+- **导购与成单**：按需求检索本店商品、对比、加入购物车；提交订单时占用库存，演示支付与 30 分钟超时关单；
+- **售后**：退货资格由后端按时效判定，顾客确认后才建单；寄回、收货、退款全程有事件记录；
+- **缺失就是缺失**：商家没填的属性，助手说明没有并生成「内容缺口」信号，不替商家编造；
+- **记忆**：偏好经顾客确认才保存，180 天未确认自动过期，可随时查看与删除；
+- **访客与绑定**：访客可浏览和加购，订单、售后、记忆需要绑定演示顾客身份。
 
-三栏在窄屏收敛为对话优先的单列布局，指标口径、图表与建议改为随对话展开，
-输入区固定在底部。
+### 商家端（Vue 3）
 
-</td>
-</tr>
-</table>
+- **经营分析**：指标查询、趋势与分类、五步归因；指标公式和 SQL 由后端模板生成；
+- **库存运营**：低库存告警进当日简报，补货走草稿审批，库存有事件账本可重算；
+- **内容与促销**：内容缺口 → 起草补充 → 批准生效；折扣券有最大优惠幅度护栏；
+- **客服与售后**：查看售后单、起草处理决定，顾客只以店铺级脱敏别名出现；
+- **口径问答**：检索指标口径与平台规则文档，带引用回答并声明定义版本；
+- **明细导出**：CSV 走 HMAC 签名 URL，15 分钟过期，做了公式注入防护。
 
-## 核心能力
+### 平台
 
-### 对话与分析
-
-- **六类回答模式**：`METRIC` 指标趋势 / `DETAIL` 业务明细 / `RULE` 平台规则 / `IDENTITY` 商家资料 /
-  `CHAT` 普通对话 / `INVALID` 范围外拒答，路由由结构化意图决定；
-- **指标查询**：GMV、订单量、退货量、退款金额、工单量等，支持趋势、分类维度、环比与同比；
-- **指标口径**：同时给出业务口径与 SQL 口径（13 字段），命中指标目录 / 知识库 / 模型生成三级检索，
-  来源与是否为生成口径均对用户可见；
-- **明细与导出**：订单、退款、商品、优惠券、工单五类明细；CSV 导出走 HMAC 签名 URL、15 分钟过期、
-  UTF-8 BOM，并做了公式注入防护；
-- **图表**：折线 / 柱状 / 饼图，字段只能取自已登记的维度与指标列，模型无法指定任意列；
-- **经营建议**：至少两条带数据依据的行动建议；
-- **质量轨迹**：界面显示 12 个真实处理阶段、质量状态（`PASSED` / `DEGRADED` / `FAILED` / `NOT_RUN`）、
-  复核轮次与降级原因；
-- **反馈闭环**：采纳 / 点赞 / 点踩，幂等写入，跨商家操作 403 并记审计。
-
-### 平台能力
-
-- **每日经营报告**：固定返回 `Asia/Shanghai` 昨日的六项指标与两条确定性建议，结果按
-  `daily-report:{date}` 幂等物化，全程不调用 LLM；
-- **商家记忆**：回答成功后异步沉淀同商家同分类的历史问答；团队知识优先、商家记忆仅作回退，
-  **绝不反向写回团队知识库**；
-- **「猜你想问」**：按同商家同分类的历史高频问题排序，聚合与排序全部下推 SQL；统计失败时用
-  savepoint 隔离并回落静态推荐，不污染主聊天事务；
-- **知识库维护后台**：管理员令牌进入，固定三根目录树、业务域四板块、文档 CRUD、`If-Match` 乐观锁
-  与 412 冲突保留输入；
-- **Chat BI 运营看板**：采纳率、准确率、平均思考时长、问题命中率、回答失效率等北极星指标，
-  按「日 × 商家 × 分类」幂等汇总，支持分类下钻与重刷 Job。
+- **MCP 只读入口**：外部 MCP 客户端用受限凭证拿到与工作台一致的数字；
+- **知识库后台**：文档维护、`If-Match` 乐观锁、索引状态可见；
+- **运维看板**：预算、成本、限流、降级、路由 p95 与 Chat BI 概览；
+- **中英双语**：界面、API 响应与回答语言跟随显示语言。
 
 ## 系统架构
 
 ```mermaid
 flowchart LR
-    U["商家浏览器<br/>Vue 3 + Pinia + ECharts"]
-    C["Caddy 静态托管"]
-    A["FastAPI<br/>鉴权 / 限流 / 费用守卫"]
-    G["LangGraph 问答图<br/>12 节点"]
-    L["DeepSeek<br/>OpenAI 兼容 API"]
-    Q["SafeQueryService<br/>白名单 + 模板 SQL"]
-    K["知识库 / 指标目录 / 商家记忆"]
-    P[("PostgreSQL")]
+    S["顾客端<br/>Next.js"]
+    M["商家端<br/>Vue 3"]
+    X["外部 MCP 客户端"]
 
-    U --> C
-    U -- "SSE / JSON" --> A
-    A --> G
-    G -- "结构化意图（非 SQL）" --> L
-    G --> K
-    G --> Q
-    Q --> P
-    K --> P
-    A --> P
+    subgraph API["FastAPI 后端"]
+        ID["会话身份<br/>角色工具面"]
+        GATE["零 LLM 闸门<br/>限流 / 三级预算"]
+        LOOP["工具循环<br/>轮数 / 工具 / LLM / token 上限"]
+        SK["Skill 按需加载"]
+        TOOLS["工具注册表<br/>确定性查询与写入复检"]
+        DRAFT["草稿与审批"]
+        MEM["记忆 outbox"]
+        RAG["混合检索<br/>关键词 + 向量 RRF"]
+    end
+
+    LLM["DeepSeek<br/>OpenAI / Anthropic 兼容协议"]
+    PG[("PostgreSQL 16<br/>+ pgvector")]
+    CRON["Cron 分发器"]
+
+    S -- "X-Session-Id · SSE" --> ID
+    M -- "X-Session-Id · SSE" --> ID
+    X -- "MCP 凭证" --> TOOLS
+    ID --> GATE --> LOOP
+    LOOP <--> LLM
+    LOOP --> SK
+    LOOP --> TOOLS
+    TOOLS --> RAG
+    TOOLS --> DRAFT
+    LOOP --> MEM
+    TOOLS --> PG
+    RAG --> PG
+    DRAFT --> PG
+    MEM --> PG
+    CRON --> PG
 ```
 
 要点：
 
-- **前端不代理 API**。Caddy 只托管静态产物，浏览器直连后端公网地址，因此 CORS 只允许精确 Origin，
-  且漏配 `VITE_API_BASE_URL` 会**响亮失败**，而不是把请求打到静态服务器上静默拿 404；
-- **类型单向流动**：`OpenAPI → api/generated.ts → api/adapters/*.ts → types/*.ts → Store → 组件`。
-  组件不得直接消费生成类型，Adapter 是唯一转换点且每个都配契约测试——后端字段一变，契约测试立刻爆红；
-- **ORM 与 API Schema 分离**，ORM 对象永不直接作为外部协议。
+- **身份只从服务端会话解析**。`merchant_id` 与 `buyer_key` 不采信前端或模型传入；顾客会话与商家会话角色不可互换，
+  跨角色、跨商家、跨顾客一律 403 并写审计，「不存在」与「不属于你」返回相同的错误结构；
+- **模型的工具面按角色裁剪**。顾客端的模型只能调整购物车数量，下单、支付、取消是界面动作，不在工具面里；
+- **前端不代理 API**。两个前端都直连后端公网地址，CORS 只放行两个精确 Origin；漏配后端地址会响亮失败；
+- **类型单向流动**：`OpenAPI → generated.ts → Adapter → 领域类型 → Store → 组件`，生成文件禁止手改，由 `codegen:check` 守住。
 
-## Agent 问答流水线
+## 一个回合是怎么跑的
 
 ```text
-load_context → retrieve_knowledge_index → prefilter_question ─┬→ classify_intent → understand_intent
-                                                              │  → validate_intent → retrieve_knowledge_detail
-                                                              │  → query_data → compose_answer → quality_loop ─┐
-                                                              │                                                ↓
-                                                              └───────────（零 LLM 拒答）──────────→ suggest_questions → persist_answer
+可信会话身份与角色工具面
+  → 零 LLM 安全/权限闸门
+  → 按需加载受信 Skill 与检索上下文
+  → 有轮数、工具、LLM、时间和 token 上限的工具循环
+  → 后端确定性查询、计算与写操作复检
+  → 顾客界面确认 或 商家审批界面批准
+  → 回答、引用、降级与质量信息
+  → 异步记忆沉淀
 ```
 
-两个值得单独说的节点：
+几处值得展开的设计：
 
-**`prefilter_question` —— 零 LLM 的问题范围前置闸门。**
-在它出现之前，「CNN 和 RNN 的区别」这类明显无关的提问也会至少触发一次真实模型调用，没有任何路径能零成本拒绝。
-现在用零依赖 n-gram 切词，对问题与知识文档标题 / 路径、指标目录的 `display_name` / `metric_code`、
-商家历史记忆做加权打分，低于阈值时经条件边直接跳过全部会调用 LLM 的节点。
-**不用黑名单**（无关词汇无法穷举），而是白名单打分 fail-closed，并在三处 fail open：
-语料完全不可用（全新部署 / 知识库为空）、问候语、同会话已有历史轮次——最后一条是为了避免
-「那上个月呢？」这类不含业务词的合法追问被误拒。真实模型验收中，3 道范围外问题均为 **0 次 LLM 调用**。
+**工具结果是不可信输入。** 工具返回的文本用带随机标识的围栏包起来再交给模型，围栏内的「指令」不被当作指令；
+回答里的每个数字都要能在本回合的工具结果里找到来源，找不到就扣下重写或降级。记忆召回工具被明确标为
+「不能作为数字来源」——否则一句「上月净成交额大约 50 万」就能让模型的同款数字通过校验。
 
-**`quality_loop` —— 生成 → 本地确定性校验 → 独立 Reviewer → 回喂重试 → 兜底。**
-降级原因分 `UPSTREAM` / `VALIDATION` / `BUDGET` 三类，轮次由 `QUALITY_MAX_ATTEMPTS` 注入。
-受控降级只汇总来自本次查询的事实；明细被截断时**不提供不完整的总计**。
+**写操作分三段：起草、批准、应用。** 模型只产出草稿（改价、出券、补货、改内容、售后决定）。批准发生在界面上，
+绑定草稿版本；应用时按**当前**库存与状态复检，而不是起草时的快照。模型没有批准自己草稿的路径。
 
-## 安全与成本设计
+**压缩要保住什么。** 长回合里较早的工具结果会被清理或摘要。身份、数据来源与截至时间、指标定义版本、草稿版本、
+安全约束作为锚点原样保留；受信 Skill 不参与压缩。
 
-这部分是本项目着力最多的地方，也是把一个 LLM Demo 和一个敢对外开放的服务区分开的地方。
+**记忆走 outbox。** 回合成功后只写一条 outbox 记录，由定时任务抽取：幂等、`SKIP LOCKED`、租约与重试上限。
+抽取只看用户自己说的话，敏感信息（健康、住址、账号等）在写入前过滤；访客不入队，绑定后也不补抽。
+
+**索引切换是一行指针。** 知识索引分版本构建，验证通过后在单事务里改指针；新版本 Recall@5 低于上一版 95% 就不切换；
+构建失败保留旧版本并标陈旧；没有可用版本时检索降级为关键词，并在回答来源上如实标注。
+
+**降级必须看得见。** 数据库、知识库或模型不可用时可以降级，但来源、质量状态和降级原因都进 API 契约并渲染到界面，
+不把规则兜底包装成模型分析。
+
+> 仓库里还保留着一条 12 节点 LangGraph 流水线（`backend/app/agent/graph.py`）。它是上一代单端实现，
+> 自 2026-09-20 起冻结为**只读评测基线**，用于和新工具循环做对照，不再承接新能力。
+
+## 评测
+
+评测结论分三层，**不能互相替代**：
+
+| 层级 | 用什么跑 | 能证明什么 |
+| --- | --- | --- |
+| 确定性回归 | 脚本化模型，无费用，进 CI | 身份、闸门、工具路径、状态迁移与降级标注符合设计 |
+| 探索性真实运行 | 真实模型，但口径未冻结 | 发现问题，不作选型或验收依据 |
+| 真实评测 | 真实模型，样本与评分口径先冻结并记录哈希，调用有账本和上限 | 回答质量 |
+
+评测集：主评测集 104 条（安全 79、质量 25；顾客 49、商家 55；中文 74、英文 30），
+另有专项集——RAG 64 条、记忆抽取 40 条、压缩长对话 30 条。
+
+真实模型结果（DeepSeek `deepseek-flash`，2026 年 10 月）：
+
+| 项目 | 结果 | 说明 |
+| --- | --- | --- |
+| 混合检索 Recall@5 / MRR | 0.759 → **0.907** / 0.639 → **0.802** | 对比纯关键词基线；拒答率 0.90 不变。本地嵌入推理，无模型费用 |
+| RAG 引用正确率 | 85.19% → **90.74%** | 忠实度 98.15%，如实拒答 100%；9 个失败里 7 个是没检到但诚实拒答 |
+| 新循环 vs 冻结基线 | **6/6** vs 1/6 | 两代实现在共有的 6 项旧能力上对照 |
+| 首次 Skill 选择 | 46/48 | 2 例首轮先追问 |
+| 记忆抽取错误写入率 | 5%（2/40） | 都出自同一条多句更正用例；敏感诱导 10 条零泄露 |
+| v2 质量场景 | **16/19** | 人工逐条阅读 15/19，修复后定向复测为 16/19；自动裁判也给 16/19，但它判通过的用例里有 2 条实际答错 |
+| 压缩后来源保留 | 13/24 | **未达标**：两种策略压缩后都补不全来源、截至时间与定义版本 |
+
+几条从评测里学到的事：
+
+- **自动裁判判不了事实对错。** 它判通过的用例里有实际答错的，所以裁判结论不单独作为通过依据，语言一致性等能用代码判的改用代码判；
+- **脚本化模型会掩盖整类缺陷。** 它返回预写好的合法输出，「提示词有没有告诉模型该输出什么」在自动化测试里完全不可见，
+  所以提示词改动要配一条从 Schema 推导期望值的契约测试；
+- **真实模型暴露的问题是另一类。** 比如模型不知道今天几号、把英文时长「30 days」当成无来源数字、工具的自由字符串参数传错取值时悄悄返回 0 条。
+
+报告与原始记录在 [`docs/history/eval/`](docs/history/eval/)，汇总见
+[`n5-full-report.md`](docs/history/eval/n5-full-report.md)。
+
+## 安全与成本
 
 | 风险 | 设计 |
 | --- | --- |
-| 模型生成任意 SQL | 模型**只能**输出经 Pydantic 校验的结构化查询意图；SQL 由后端模板生成，表名列名走白名单、值全部绑定、日期范围与最大行数由后端强制 |
-| 跨商家越权 | `merchant_id` 只从 Bearer Token 解析，**永不采信前端传入**；所有经营查询强制注入商家范围，跨商家访问返回 403 并落 `audit_logs` |
-| 被刷爆 token | 三层闸门：单请求 LLM 调用次数上限（最坏路径 10 次，已与两套重试的乘加关系对齐）、单请求 token 上限、全局每日 token 预算熔断；再叠加上面的零 LLM 前置闸门 |
-| 提示词注入 / 越权读取 | 知识与记忆按商家隔离检索；日志脱敏，不记录隐私字段与完整查询结果 |
-| 管理接口与商家接口混淆 | **两套独立凭证**：商家走 `Authorization: Bearer`，管理端走 `X-Admin-Token`，后端对 `/api/admin/*` 只认后者；`ADMIN_TOKEN` 未配置时整个 admin 路由**不挂载**（返回 404 而非 401，避免暴露端点存在性） |
-| 只读演示需求 | 可选 `VIEWER_TOKEN` 与管理员令牌共用请求头，但后端只放行其中的 GET，写操作、记忆压缩、运维状态一律拒绝；两者取值相同时启动即拒绝 |
-| 降级被伪装成正常回答 | `analysis_sources` / `thinking_steps` / `quality_status` / `quality_notes` / `degraded` / `degraded_reason` 全部进入 API 契约并在界面渲染；**不得把规则兜底包装成模型分析** |
-| 导出链接泄露 | 签名 URL：HMAC + 15 分钟 TTL，是唯一不要求请求头的鉴权路径 |
-| 代理头伪造 | 只信任平台注入的转发头（`TRUSTED_PROXY_HOPS`），本地开发一律不信任客户端 `X-Forwarded-For` |
-| 密钥进代码 | 全部密钥只来自环境变量 / Railway Variables，`.env.example` 只放占位符；构建产物由 `secrets:check` 递归扫描 JS / CSS / HTML / JSON / sourcemap 拦截 |
+| 模型生成任意 SQL | 模型只输出经 Pydantic 校验的结构化意图；SQL 由后端模板生成，表名列名走白名单，值全部绑定，日期范围与行数由后端强制 |
+| 跨商家 / 跨顾客越权 | 身份只从已验证会话解析；所有查询强制注入商家范围，顾客数据再叠加 `buyer_key`；越权 403 并写审计 |
+| 对象存在性泄露 | 「不存在」与「无权访问」同一错误结构；订单详情两种情况各 500 次的响应时间差有时序测试守住 |
+| 提示词注入 | 工具结果与检索内容进围栏；模型不能决定金额、库存变化或批准 |
+| 模型自批 | 批准只发生在界面，绑定草稿版本；应用时按当前状态复检 |
+| 被刷爆 token | 会话级限流、单请求调用与 token 上限、三级每日预算熔断；检查在请求发出之前 |
+| 管理与商家凭证混淆 | 商家走 `X-Session-Id`，管理端只认 `X-Admin-Token`；未配置管理令牌时管理路由不挂载 |
+| 降级被伪装成正常回答 | 来源、质量状态、降级原因全部进契约并渲染 |
+| 密钥进代码 | 全部来自环境变量；构建产物由 `secrets:check` 扫描 |
 
 ## 技术栈
 
-**后端**　Python 3.12 · FastAPI · Pydantic v2 · SQLAlchemy 2（async）· Alembic · psycopg · LangGraph ·
-structlog · pytest · Ruff · mypy（strict）
+**后端**　Python 3.12 · FastAPI · Pydantic v2 · SQLAlchemy 2（async）· Alembic · psycopg · MCP SDK · fastembed（ONNX）·
+structlog · pytest · Ruff · mypy
 
-**前端**　Vue 3 · TypeScript · Vite · Pinia · Vue Router · ECharts · Zod · Vitest · Playwright · ESLint · Prettier
+**顾客端**　Next.js 16 · React 19 · TypeScript · Vitest · Playwright
 
-**数据与基础设施**　PostgreSQL 16 · Docker · Caddy · Railway（Frontend / Backend / Cron）
+**商家端**　Vue 3 · TypeScript · Vite · Pinia · Vue Router · vue-i18n · ECharts · Vitest · Playwright
 
-**模型**　DeepSeek（OpenAI 兼容 Chat Completions），默认 `deepseek-flash`
+**数据与基础设施**　PostgreSQL 16 + pgvector · Docker · Caddy · Railway
+
+**模型**　DeepSeek `deepseek-flash`，经自有 `LlmClient` 接 OpenAI 兼容与 Anthropic 兼容两种协议
+
+Skill 与工具循环的总体思路参考了 Anthropic 的 [commerce-agents](https://github.com/anthropics/commerce-agents) 蓝图（Apache-2.0）；
+领域模型、契约、安全边界与评测为本项目自行设计实现。
 
 ## 快速开始
 
-### 前置
+### 方式一：Docker Compose 起全栈
 
-Python 3.12、[uv](https://github.com/astral-sh/uv)、Node.js 20+、Docker。
+需要 Docker。首次构建会下载嵌入模型（约 95 MB）。
 
 ```powershell
 git clone https://github.com/XuZiHan-010/shopping_assistant.git
 cd shopping_assistant
+
+docker compose up -d postgres
+docker compose exec postgres createdb -U borough borough_compose_demo
+$env:COMPOSE_DB_NAME = "borough_compose_demo"
+docker compose up -d --build
 ```
 
-### 1. 启动 PostgreSQL
-
-```powershell
-docker-compose -p borough up -d postgres   # 监听 127.0.0.1:55432
-```
-
-### 2. 启动后端
+再灌演示数据（需要 Python 3.12 与 [uv](https://github.com/astral-sh/uv)）：
 
 ```powershell
 cd backend
 uv sync
-
-$env:DATABASE_URL = 'postgresql+psycopg://borough:borough_local@127.0.0.1:55432/borough_test'
-$env:FRONTEND_ORIGIN = 'http://localhost:5173'
-$env:DEMO_MERCHANT_TOKENS = '{"merchant-100-token":"00000000-0000-0000-0000-000000000001","merchant-101-token":"00000000-0000-0000-0000-000000000002","merchant-102-token":"00000000-0000-0000-0000-000000000003"}'
-
-uv run alembic upgrade head
-uv run python -m app.run                   # http://127.0.0.1:8000
+$env:DATABASE_URL = "postgresql+psycopg://borough:borough_local@127.0.0.1:55432/borough_compose_demo"
+uv run python ../scripts/seed_demo_data.py --seed                    # 三家演示商家
+uv run python -m scripts.seed_demo_analytics --force-full-rebuild    # 180 天经营数据
+uv run python -m scripts.seed_demo_scenarios --seed                  # 双端场景数据
 ```
 
-验证：`GET /api/health`（不查库、不调 LLM）、`GET /api/ready`（只执行 `SELECT 1`）。
+打开商家端 <http://localhost:5173>，从侧栏「顾客视角」进入顾客端（<http://localhost:3000>）。
+没有配置 `LLM_API_KEY` 时助手给出**可见的降级说明**，界面动作（加购、下单、支付、审批、售后、看板）都能演示。
 
-> **Windows 注意**：psycopg 的异步模式跑不了默认的 `ProactorEventLoop`。新增入口时必须显式选择事件循环
-> （见 `backend/app/core/runtime.py`），否则会表现为 `/api/ready` 返回 503。
-
-### 3. 灌入演示数据
+### 方式二：本地开发
 
 ```powershell
-# 仓库根目录
-uv run --project backend python scripts/seed_demo_data.py --seed      # 三个虚构商家
+docker compose up -d postgres                 # 127.0.0.1:55432
 
 cd backend
-# 180 天经营数据。日常由 app.jobs.seed_demo_rolling 增量滚动维护，
-# 全量重灌会抹掉历史，因此必须显式传 --force-full-rebuild
-uv run python -m scripts.seed_demo_analytics --force-full-rebuild
+uv sync
+$env:DATABASE_URL = "postgresql+psycopg://borough:borough_local@127.0.0.1:55432/borough_test"
+$env:FRONTEND_ORIGIN = "http://localhost:5173"
+$env:SHOP_ORIGIN = "http://localhost:3000"
+$env:DEMO_MERCHANT_TOKENS = '{"merchant-100-token":"00000000-0000-0000-0000-000000000001","merchant-101-token":"00000000-0000-0000-0000-000000000002","merchant-102-token":"00000000-0000-0000-0000-000000000003"}'
+uv run alembic upgrade head
+uv run python -m app.run                      # http://127.0.0.1:8000
 
-# 团队业务知识文档，指向一个存放 Markdown 的目录
-uv run python -m scripts.import_wiki --root <知识库目录>
+cd ../frontend ; npm ci ; npm run dev         # 商家端 http://localhost:5173
+cd ../shop     ; npm ci ; npm run dev         # 顾客端 http://localhost:3000
 ```
 
-> 全量 pytest 会清空 `knowledge_documents` 与经营数据表，跑完测试后需要重新执行后两条。
+环境变量见 [`.env.example`](.env.example)，每个阈值为什么取当前值都写在注释里。
 
-### 4. 启动前端
-
-```powershell
-cd frontend
-npm ci
-npm run dev                                # http://localhost:5173
-```
-
-前端通过 `VITE_API_BASE_URL` 指向后端地址；它没有同源 `/api` 回退，缺失时会直接报错。
-
-### 5.（可选）接入真实模型
-
-不配置 `LLM_API_KEY` 时系统走确定性 Fake Client，全流程可跑通且不产生任何费用。接入真实 DeepSeek：
+### 接入真实模型（可选，会产生费用）
 
 ```text
 LLM_API_KEY=<deepseek-api-key>
 LLM_BASE_URL=https://api.deepseek.com
 LLM_MODEL=deepseek-flash
-LLM_ENABLED=true
 ```
-
-完整环境变量清单见 [`.env.example`](.env.example)，其中逐条注释了每个阈值为什么取当前值——
-例如 `LLM_MAX_OUTPUT_TOKENS_PER_CALL` 取字段上限 8000，是因为推理模型会把偏低的配额耗尽在 reasoning 上、
-正文返回空串，进而让整条链路必然降级。
 
 ## 测试与质量门禁
 
-自动化测试**全部使用 Fake / 确定性 LLM，不产生任何模型费用**。
+自动化测试**全部使用脚本化模型，不产生模型费用**。
 
 ```powershell
 # 后端
 cd backend
-uv run ruff check . ; uv run ruff format --check . ; uv run mypy app
-uv run pytest                                     # 无真实测试库时集成用例自动跳过
-$env:REQUIRE_INTEGRATION_DB = '1'; uv run pytest  # CI 必须这样跑：库连不上直接硬失败
+uv run ruff check . ; uv run mypy app
+$env:REQUIRE_INTEGRATION_DB = "1"; uv run pytest      # 集成测试连真实 PostgreSQL，连不上直接失败
 
-# 前端
+# 商家端
 cd frontend
 npm run lint ; npm run typecheck ; npm run test
-npm run test:e2e            # Playwright（Mock API）
 npm run codegen:check       # generated.ts 是否与 OpenAPI 脱节
-npm run fixtures:check      # Adapter 契约 fixture 是否过期
-npm run firstpaint:check    # 阻止 ECharts 被带进首屏静态依赖链
-npm run secrets:check       # 扫描 dist/ 是否混入密钥形态字符串
-npm run mock:check          # 阻止 mock 载荷进入生产构建
+npm run test:e2e            # Playwright（Mock API）
+
+# 顾客端
+cd shop
+npm run lint ; npm run typecheck ; npm run test
+npm run codegen:check ; npm run tokens:check
 ```
 
-最近记录的结果：带真实 PostgreSQL 的后端全量回归 **1049 passed / 0 failed / 0 skipped**（2026-08-24）；
-最近一次改动后为后端 **941 passed**（未启动集成库时另有 212 skipped）、前端 Vitest **353 passed**、E2E **29 passed**。
+最近一次记录：后端全量 **4747 passed / 3 skipped / 0 failed**、商家端 **793 passed**、顾客端 **141 passed**
+（2026-10-08，后端连真实 PostgreSQL + pgvector；跳过的 3 项是 Windows 上无权创建符号链接的用例）。
 
-几条从踩坑里固化下来的测试约束：
+几条固化下来的约束：
 
-- **集成测试必须连真实 PostgreSQL，不用 SQLite**——商家隔离、迁移和 Seed 的验收全在这些用例里；
-- **`FakeLlmClient` 会掩盖整类缺陷**：它返回预写好的合法 JSON，于是「提示词到底有没有告诉模型该输出什么」
-  在自动化测试里完全不可见。因此新增或修改任何提示词，必须同时加一条**从 Pydantic 模型推导期望值**的
-  提示词契约测试；
-- **门禁全绿不等于行为正确**：曾有一处 `history=[]` 在 899 项全绿的前提下存活数周。凡是「本该传值、
-  实际传了空值」的形参，都要有断言输入内容的测试，而不只断言不抛异常。
+- 集成测试连真实 PostgreSQL，不用 SQLite——租户隔离、迁移、并发与时序的验收都在这里；
+- 安全用例是硬门禁：数据库连不上或用例被 skip，门禁直接失败，而不是悄悄少跑；
+- 门禁全绿不等于行为正确：凡是「本该传值、实际传了空值」的形参，都要有断言输入内容的测试。
 
 ## API 一览
 
-完整契约由 FastAPI 自动导出到 [`docs/api.md`](docs/api.md) 与 [`docs/api.json`](docs/api.json)。
+完整契约由 FastAPI 导出到 [`docs/api.md`](docs/api.md) 与 [`docs/api.json`](docs/api.json)。
 
-| 方法 | 路径 | 说明 |
+| 范围 | 路径 | 凭证 |
 | --- | --- | --- |
-| `POST` | `/api/chat` | 默认 SSE 流（`step` / `done` / `error`）；`Accept: application/json` 走同步路径，`done` 载荷与之完全一致 |
-| `GET` | `/api/conversations`、`/api/conversations/{id}` | 会话列表与详情 |
-| `DELETE` | `/api/conversations/{id}` | 删除会话 |
-| `POST` | `/api/answers/{id}/feedback` | 采纳 / 点赞 / 点踩（幂等） |
-| `GET` | `/api/exports/{id}` | 签名 CSV 下载（唯一免请求头的鉴权路径） |
-| `GET` | `/api/metrics/{code}` | 指标口径（路径参数是 `metric_code`，不是中文指标名） |
-| `GET` | `/api/reports/daily` | 每日经营报告 |
-| `GET` | `/api/demo/merchants` | 演示商家列表（生产环境默认关闭） |
-| `GET` | `/api/health`、`/api/ready` | 健康检查 / 就绪探针 |
-| `GET` `POST` `PUT` `DELETE` | `/api/admin/knowledge/*` | 知识库目录树、文档 CRUD、业务域维护、记忆压缩 |
-| `GET` `POST` | `/api/admin/analytics/chatbi/*` | Chat BI 总览、分类下钻、汇总重刷 |
-| `POST` | `/api/admin/reports/daily/recompute` | 重算指定商家日报 |
-| `GET` | `/api/admin/ops/status` | 预算余量、限流命中与降级计数（不返回 Token、Prompt 或经营数据） |
+| 顾客端 | `/api/v2/shop/*`：会话、Chat（SSE）、商品、购物车、订单、售后、记忆 | 公开浏览免凭证，其余 `X-Session-Id`（顾客会话） |
+| 商家端 | `/api/v2/merchant/*`：会话、Chat（SSE）、指标、商品、库存、订单、售后、草稿、信号、简报、记忆 | `X-Session-Id`（商家会话） |
+| MCP | `POST /api/v2/merchant/mcp` | 独立的短期只读凭证 |
+| 管理 | `/api/admin/*`：知识库、索引、运维状态、Chat BI | `X-Admin-Token` |
+| v1 兼容 | `/api/chat` 等上一代接口 | 演示 Token |
+| 探针 | `/api/health`、`/api/ready` | 无 |
+
+v2 共 53 条路径，与 PRD 逐条对账（`backend/scripts/audit_routes.py`）。
 
 ## 部署
 
-Railway 上运行四类服务：`frontend`（Node 多阶段构建 → `caddy:2-alpine`）、`backend`、PostgreSQL，
-以及两个独立 Cron（演示数据滚动 Seed、Chat BI 日汇总）。配置即代码在 `frontend/railway.json`、
-`backend/railway.json`、`backend/railway.cron.json`、`backend/railway.chatbi-cron.json`，
-运维手册见 [`docs/deployment.md`](docs/deployment.md)。
+目标拓扑是 Railway 上的四个服务加外部 PostgreSQL：
 
-几个已定的约束：
+| 服务 | 目录 | 说明 |
+| --- | --- | --- |
+| `merchant` | `/frontend` | Vue 静态产物，Caddy 托管，不代理 `/api` |
+| `backend` | `/backend` | FastAPI；数据库迁移在发布阶段执行一次 |
+| `shop` | `/shop` | Next.js standalone |
+| `cron` | `/backend` | 每 5 分钟运行统一分发器：关单、草稿过期、记忆抽取、索引重建、演示数据滚动 |
 
-- 镜像构建期**不跑 codegen**——Railway 的前端构建上下文里没有仓库根的 `docs/`，因此
-  `src/api/generated.ts` 是提交进仓库的生成产物，由 `codegen:check` 保证它不过期；
-- `VITE_API_BASE_URL` 在构建期注入静态产物，必须由 Railway Variables 提供；
-- 数据库迁移在发布阶段执行，不由每个 Worker 并发执行；
-- 附件不依赖容器临时磁盘。
+配置即代码在各目录的 `railway.json` 与 `backend/railway.cron.json`，步骤与环境变量见
+[`docs/deployment.md`](docs/deployment.md)。公开部署真实模型 Key 之前，限流、单请求上限与每日预算熔断三项要先在公网域名上验收。
+
+只部署 `merchant` 与 `backend` 两个服务也能运行：商家工作台完整可用，侧栏不显示「顾客视角」入口，定时任务不自动执行。
 
 ## 目录结构
 
 ```text
-merchant_assistant/
 ├── backend/                    # FastAPI 后端
 │   ├── app/
-│   │   ├── agent/              # LangGraph 问答图、状态、前置闸门与各节点
-│   │   ├── api/routes/         # chat / conversations / metrics / exports / reports / admin ...
-│   │   ├── services/           # safe_query · answer · review · quality_loop · memory · chatbi ...
-│   │   ├── intent/             # 结构化意图模型与白名单校验
-│   │   ├── repositories/       # 数据访问（商家隔离在此强制）
-│   │   ├── analytics/          # 指标公式与演示数据生成
-│   │   ├── llm/                # DeepSeek Client 与费用守卫
-│   │   ├── jobs/               # 滚动 Seed、Chat BI 汇总 CLI
-│   │   └── knowledge/ prompts/ models/ schemas/ core/ db/
+│   │   ├── agent/loop/         # 工具循环：runner、上限、围栏、数字校验、压缩
+│   │   ├── agent/graph.py      # 上一代 12 节点 LangGraph，冻结为评测基线
+│   │   ├── tools/              # 工具注册表、闸门与顾客 / 商家工具
+│   │   ├── skills/             # Skill 规格、加载器与 12 个 SKILL.md
+│   │   ├── memory/             # 双端记忆：抽取、过滤、存储、outbox 管线
+│   │   ├── knowledge/          # 混合检索、嵌入、RRF 融合、索引版本
+│   │   ├── mcp/                # MCP 只读服务端与凭证
+│   │   ├── llm/                # LlmClient、双协议适配器、预算守卫、价格版本
+│   │   ├── eval/               # 评测集、评分器、裁判与真实评测入口
+│   │   ├── api/routes/v2/      # 顾客端与商家端路由
+│   │   ├── jobs/               # Cron 分发器与各定时任务
+│   │   └── services/ repositories/ models/ schemas/ ...
 │   ├── migrations/             # Alembic
-│   └── tests/                  # unit / integration / api / agent
-├── frontend/                   # Vue 3 前端
-│   ├── src/
-│   │   ├── views/              # AssistantView · KnowledgeBaseView · OpsDashboardView
-│   │   ├── components/         # chat / insights / knowledge / analytics / layout
-│   │   ├── api/                # client · sse · generated.ts（禁止手改）· adapters/
-│   │   └── stores/ types/ composables/
-│   └── e2e/                    # Playwright
-├── docs/                       # PRD、前后端计划、API 导出、部署手册
-├── scripts/                    # 演示 Seed、OpenAPI 导出、fixture 导出
-└── plans/                      # 实施与整改计划
+│   └── tests/                  # unit / integration / api / eval / e2e
+├── frontend/                   # 商家端（Vue 3）
+├── shop/                       # 顾客端（Next.js）
+├── docs/                       # PRD、契约、API 导出、部署手册、评测报告
+├── plans/                      # 实施计划
+└── scripts/                    # 演示数据、OpenAPI 导出
 ```
+
+## 当前状态与已知限制
+
+项目按 N1–N5 五个里程碑推进。N1–N4 的验收检查已完成（带遗留缺陷），N5 的本地实现已完成、整体验收尚未收口。
+下面这些是已知且尚未解决的：
+
+- **售后场景在真实模型下还没有端到端走通**：默认压缩策略会清掉同一回合后面还要用的工具结果；
+- 触到工具调用上限时回答可能为空；
+- 顾客端商品搜索不跨语言，英文关键词搜不到中文商品；
+- 记忆抽取在「多句更正」这一种说法上会误抽历史片段；
+- 平台规则库里的售后文档内容还很薄，规则问答的依据有限；
+- 预算熔断按保守估算预留，上游实际用量高于预留时，单次调用仍可能略微超出当日上限；
+- 性能基准、随机攻击集的置信区间、裁判与人工一致性校准尚未执行。
+
+演示边界：演示商家与演示顾客不是真实登录；支付与退款是模拟的；附件、OCR、真实用户体系、多规格商品与 MCP 写工具不在本版范围。
+
+进度快照见 [`docs/project-progress.md`](docs/project-progress.md)。
 
 ## 文档索引
 
 | 文档 | 内容 |
 | --- | --- |
-| [`AGENTS.md`](AGENTS.md) | 开发规则、目录索引与开发顺序（协作 agent 的入口） |
-| [`docs/PRD.md`](docs/PRD.md) | 产品范围、用户故事、架构决策与验收标准 |
-| [`docs/project-progress.md`](docs/project-progress.md) | 当前进度快照：阶段、验证结果、下一步与风险 |
-| [`docs/backend-development-plan.md`](docs/backend-development-plan.md) | 后端阶段划分与 `ChatRequest` / `ChatResponse` / SSE 精确契约 |
-| [`docs/frontend-development-plan.md`](docs/frontend-development-plan.md) | 前端阶段划分与 Definition of Done |
-| [`docs/api.md`](docs/api.md) | OpenAPI 导出（接口字段的最终来源） |
+| [`docs/PRD.md`](docs/PRD.md) | 产品范围、用户故事、状态机与验收标准 |
+| [`docs/backend-development-plan.md`](docs/backend-development-plan.md) | 后端架构边界与接口字段契约 |
+| [`docs/api.md`](docs/api.md) | OpenAPI 导出 |
+| [`docs/demo-script.md`](docs/demo-script.md) | S1–S8 演示脚本：每一步体现哪条工程规则 |
+| [`docs/history/eval/`](docs/history/eval/) | 评测报告、人工复核与原始记录 |
 | [`docs/deployment.md`](docs/deployment.md) | Railway 部署与运维手册 |
+| [`docs/project-progress.md`](docs/project-progress.md) | 进度快照、验证结果与风险 |
+| [`AGENTS.md`](AGENTS.md) | 开发规则与入口索引 |
 
 ---
-
-## 说明
 
 - 演示商家、经营数据与知识文档均为虚构，仅用于功能演示；
 - 本项目为个人工程实践，与任何真实电商平台无关。
