@@ -12,14 +12,13 @@ import { formatEventTime, formatPrice } from '@/lib/format'
 import { useShop } from '@/session/ShopContext'
 import type { Coupon, OrderSummaryView, Product, ProductLocale, StoreProfile } from '@/types/shop'
 import { ProductArt } from './ProductArt'
+import { QUICK_PROMPTS } from './quickPrompts'
 import { ThreadView } from './ThreadView'
 import styles from './HomeView.module.css'
 
 const rank: Record<OrderSummaryView['fulfillmentStatus'] | 'PENDING', number> = {
   OUT_FOR_DELIVERY: 0, PENDING: 1, IN_TRANSIT: 2, SHIPPED: 3, NOT_SHIPPED: 4, DELIVERED: 5,
 }
-
-const quickKeys = ['home.quick1', 'home.quick2', 'home.quick3', 'home.quick4'] as const
 
 const noSubscription = () => () => undefined
 /** 以「小时 + 日期」作快照：同一小时内取值稳定，满足 useSyncExternalStore 的缓存要求。 */
@@ -115,11 +114,11 @@ export function HomeView({ popular, store, coupons, locale, thread }: {
         ) : bound ? <p className={styles.summary} role="status">{orderError === session?.sessionId ? t('home.summaryUnavailable') : t('home.loadingSummary')}</p> : <p className={styles.summary}>{t('guestSummary')}</p>}
       </header>
 
-      <div className={styles.quick} aria-label={t('home.quickLabel')}>
-        {quickKeys.map((key, index) => (
-          <button key={key} type="button" className={styles.quickCard} onClick={() => void send(t(key))}>
-            <span className={styles.quickIcon} aria-hidden="true">{['⌕', '◇', '◌', '✎'][index]}</span>
-            <span>{t(key)}</span><span className={styles.arrow} aria-hidden="true">↗</span>
+      <div className={styles.quick} role="group" aria-label={t('home.quickLabel')}>
+        {QUICK_PROMPTS.map(prompt => (
+          <button key={prompt.key} type="button" className={styles.quickCard} onClick={() => void send(t(prompt.key))}>
+            <span className={styles.quickIcon} aria-hidden="true">{prompt.icon}</span>
+            <span>{t(prompt.key)}</span><span className={styles.arrow} aria-hidden="true">↗</span>
           </button>
         ))}
       </div>

@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import (
     ConfirmationRequiredError,
+    DatabaseUnavailableError,
     GuardrailRejectedError,
     IllegalStateTransitionError,
     InvalidRequestError,
@@ -647,7 +648,9 @@ async def sale_detail(
             SupportTicket.after_sale_id == record.id,
         )
     )
-    assert ticket is not None
+    if ticket is None:
+        # 关联业务事实缺失时明确失败；不能在 python -O 下返回字符串 "None"。
+        raise DatabaseUnavailableError()
     snapshot = ConversationSnapshot(
         status=record.conversation_summary_status,
         text=record.conversation_summary_text,

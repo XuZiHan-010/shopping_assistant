@@ -17,10 +17,10 @@ spec.loader.exec_module(images)
 
 def test_expected_files_match_catalog() -> None:
     catalog = build_demo_catalog(merchant_id=UUID(int=1), seed=1)
-    assert {
-        Path(str(row["image_url"])).name for row in catalog if row["image_url"]
-    } == images.EXPECTED
-    assert "06.webp" not in images.EXPECTED
+    # 24 件全部有图（2026-10-04 用户裁定补上 06 号）。
+    assert all(row["image_url"] for row in catalog)
+    assert {Path(str(row["image_url"])).name for row in catalog} == images.EXPECTED
+    assert len(images.EXPECTED) == 24
 
 
 def test_missing_assets_fail_check(tmp_path: Path) -> None:
@@ -33,7 +33,7 @@ def test_delivered_catalog_assets() -> None:
     # 全套未交付时明确挂起；一旦开始交付，缺图、多图、超限均失败。
     directory = images.DESTINATION
     if not directory.exists():
-        pytest.skip("WS Task 12：用户尚未交付 23 张原图；CLI check 仍严格失败")
+        pytest.skip("WS Task 12：用户尚未交付 24 张原图；CLI check 仍严格失败")
     actual = {path.name for path in directory.glob("*.webp")}
     assert actual == images.EXPECTED
     for name in actual:
@@ -50,7 +50,7 @@ def test_conversion_and_validation(tmp_path: Path) -> None:
         image.new("RGB", (100, 150), "red").save(source / f"{Path(name).stem}-product.png")
     images.convert(source, output)
     images.check(output)
-    assert len(list(output.glob("*.webp"))) == 23
+    assert len(list(output.glob("*.webp"))) == 24
     with pytest.raises(ValueError, match="拒绝覆盖"):
         images.convert(source, output)
     image.new("RGB", (10, 10)).save(output / "01.webp")
@@ -60,10 +60,10 @@ def test_conversion_and_validation(tmp_path: Path) -> None:
 
 def test_duplicate_and_forbidden_numbers_rejected(tmp_path: Path) -> None:
     image = pytest.importorskip("PIL.Image")
-    image.new("RGB", (10, 10)).save(tmp_path / "06.png")
-    with pytest.raises(ValueError, match="06 刻意无图"):
+    image.new("RGB", (10, 10)).save(tmp_path / "25.png")
+    with pytest.raises(ValueError, match="不在 01–24 的商品清单内"):
         images.convert(tmp_path, tmp_path / "out")
-    (tmp_path / "06.png").unlink()
+    (tmp_path / "25.png").unlink()
     for name in ("01-a.png", "01-b.png"):
         image.new("RGB", (10, 10)).save(tmp_path / name)
     with pytest.raises(ValueError, match="多张原图"):
@@ -89,7 +89,7 @@ def test_invalid_batch_leaves_destination_untouched(tmp_path: Path, problem: str
     if problem == "corrupt":
         (source / "24.png").write_bytes(b"broken image")
     else:
-        (output / "06.webp").write_bytes(b"existing")
+        (output / "25.webp").write_bytes(b"existing")
     before = {path.name: path.read_bytes() for path in output.iterdir()}
     with pytest.raises((ValueError, OSError)):
         images.convert(source, output)

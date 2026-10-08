@@ -194,9 +194,7 @@ def test_storefront_catalog_matches_approved_products_and_gaps() -> None:
             if key not in attributes or not attributes[key]["value"]
         }
         assert missing == ({"产地"} if index == 2 else set())
-        assert product["image_url"] == (
-            None if index == 5 else f"/demo/products/{index + 1:02d}.webp"
-        )
+        assert product["image_url"] == f"/demo/products/{index + 1:02d}.webp"
         assert product["stock_on_hand"] == (3 if index == 3 else 100)
         assert product["status"] == ("AUDITING" if index % 8 == 0 else "ONLINE")
     assert products[4]["detail_description"] == "简短说明。"
@@ -214,3 +212,77 @@ def test_storefront_catalog_preserves_original_ids_and_listing_dates() -> None:
         products = build_demo_catalog(merchant_id=MERCHANT, seed=DEMO_ANALYTICS_SEED_BASE)
         for index, pair in expected.items():
             assert (str(products[index]["id"]), products[index]["listed_at"].isoformat()) == pair
+
+
+# ---- 基准规模（PRD §10.1；N5 D Task 3 步骤 1）----------------------------------------------
+
+
+def test_default_scale_leaves_the_demo_dataset_unchanged() -> None:
+    # 倍数是给性能基准用的；演示数据（倍数 1）必须与加参数之前逐行相同。
+    assert _dataset() == build_demo_dataset(
+        merchant_id=MERCHANT,
+        end_date=END,
+        days=180,
+        seed=DEMO_ANALYTICS_SEED_BASE,
+        daily_order_scale=1,
+    )
+
+
+def test_benchmark_scale_multiplies_orders_and_stays_deterministic() -> None:
+    def scaled(scale: int) -> DemoDataset:
+        return build_demo_dataset(
+            merchant_id=MERCHANT,
+            end_date=END,
+            days=30,
+            seed=DEMO_ANALYTICS_SEED_BASE,
+            daily_order_scale=scale,
+        )
+
+    base, big = scaled(1), scaled(10)
+
+    assert len(big.orders) == 10 * len(base.orders)
+    assert big == scaled(10)  # 同种子可复现
+    order_ids = [row["id"] for row in big.orders]
+    assert len(set(order_ids)) == len(order_ids)
+    assert {row["order_id"] for row in big.order_items} <= set(order_ids)
+    assert len({row["order_no"] for row in big.orders}) == len(order_ids)
+    # 目录不随倍数变：还是同一批商品。
+    assert big.products == base.products
+
+
+def test_benchmark_scale_reaches_the_prd_volume_for_three_merchants() -> None:
+    """PRD §10.1：3 个商家、180 天、约 5 万订单 / 12 万订单项 / 各 5 千退款退货 / 3 千工单。"""
+
+    from app.analytics.demo_data import BENCHMARK_DAILY_ORDER_SCALE
+    from app.services.seed_service import default_merchants
+
+    totals = {"orders": 0, "order_items": 0, "refunds": 0, "returns": 0, "tickets": 0}
+    for index, merchant in enumerate(default_merchants()):
+        dataset = build_demo_dataset(
+            merchant_id=merchant.id,
+            end_date=END,
+            days=180,
+            seed=DEMO_ANALYTICS_SEED_BASE + index,
+            daily_order_scale=BENCHMARK_DAILY_ORDER_SCALE,
+        )
+        for name in totals:
+            totals[name] += len(getattr(dataset, name))
+
+    assert 45_000 <= totals["orders"] <= 65_000, totals
+    assert 100_000 <= totals["order_items"] <= 140_000, totals
+    assert totals["refunds"] >= 3_500 and totals["returns"] >= 3_000, totals
+    assert totals["tickets"] >= 2_500, totals
+
+
+def test_scale_must_be_a_positive_integer() -> None:
+    import pytest
+
+    for bad in (0, -1):
+        with pytest.raises(ValueError, match="daily_order_scale"):
+            build_demo_dataset(
+                merchant_id=MERCHANT,
+                end_date=END,
+                days=1,
+                seed=DEMO_ANALYTICS_SEED_BASE,
+                daily_order_scale=bad,
+            )

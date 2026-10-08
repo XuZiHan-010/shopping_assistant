@@ -17,9 +17,15 @@ const resolvedTitle = computed(() => props.title ?? t('adminTokenDialog.title'))
 const resolvedEyebrow = computed(() => props.eyebrow ?? t('adminTokenDialog.eyebrow'))
 
 const emit = defineEmits<{ submit: [token: string] }>()
-const token = ref('')
-const useViewerToken = ref(false)
 const viewerToken = resolveViewerToken()
+// 配置了只读令牌就默认勾选：访客不用输入任何东西即可只读浏览；要编辑的人取消勾选
+// 再输入管理员令牌。只读令牌本身可公开（R6），所以允许预填并明文显示。
+const useViewerToken = ref(Boolean(viewerToken))
+const token = ref(viewerToken ?? '')
+
+const instructions = computed(() =>
+  viewerToken ? t('adminTokenDialog.instructionsWithViewer') : t('adminTokenDialog.instructions'),
+)
 
 function toggleViewerToken(checked: boolean): void {
   useViewerToken.value = checked
@@ -29,8 +35,8 @@ function toggleViewerToken(checked: boolean): void {
 function submit(): void {
   if (!token.value.trim()) return
   emit('submit', token.value.trim())
-  token.value = ''
-  useViewerToken.value = false
+  // 回到初始状态，手输的管理员令牌不留在输入框里。
+  toggleViewerToken(Boolean(viewerToken))
 }
 </script>
 
@@ -38,7 +44,7 @@ function submit(): void {
   <section class="admin-token-dialog" role="dialog" aria-labelledby="admin-token-title">
     <p class="admin-token-dialog__eyebrow">{{ resolvedEyebrow }}</p>
     <h1 id="admin-token-title">{{ resolvedTitle }}</h1>
-    <p>{{ t('adminTokenDialog.instructions') }}</p>
+    <p>{{ instructions }}</p>
     <form @submit.prevent="submit">
       <label for="admin-token">{{ t('adminTokenDialog.tokenLabel') }}</label>
       <input

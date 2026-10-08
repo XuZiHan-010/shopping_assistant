@@ -55,7 +55,7 @@ def test_different_merchants_get_different_data() -> None:
     assert _dataset() != _dataset(MERCHANT_TWO, DEMO_ANALYTICS_SEED_BASE + 1)
 
 
-def test_catalog_contains_all_four_completeness_samples() -> None:
+def test_catalog_contains_all_three_completeness_samples() -> None:
     catalog = build_demo_catalog(merchant_id=MERCHANT_ONE, seed=DEMO_ANALYTICS_SEED_BASE)
     assert any(
         "产地" in product["attributes"]
@@ -65,7 +65,8 @@ def test_catalog_contains_all_four_completeness_samples() -> None:
     )
     assert any("产地" not in product["attributes"] for product in catalog)
     assert any(len(product["detail_description"] or "") < 30 for product in catalog)
-    assert any(product["image_url"] is None for product in catalog)
+    # 无图样本已于 2026-10-04 按用户裁定取消（PRD §8.3）：演示目录全部有图。
+    assert all(product["image_url"] for product in catalog)
 
 
 def test_catalog_stock_matches_initial_stock_ledger() -> None:
@@ -153,6 +154,31 @@ def test_all_generated_business_rows_have_reproducible_audit_times() -> None:
     assert all(order["updated_at"] == order["created_at"] for order in dataset.orders)
 
 
+def test_seeded_daily_brief_payload_is_a_valid_brief_response() -> None:
+    """当日简报接口把库里的 payload 直接按响应模型读回（`get_current_brief`）。
+
+    种子写入的 payload 少字段时，灌完演示数据的当天商家首页的简报请求就是 500。
+    """
+
+    from app.schemas.v2.merchant_ops import DailyBriefResponse
+
+    catalog = build_demo_catalog(merchant_id=MERCHANT_ONE, seed=DEMO_ANALYTICS_SEED_BASE)
+    rows = _scenario_module.build_scenario_rows(
+        merchant_id=MERCHANT_ONE, business_day=END_DATE, catalog=catalog
+    )
+
+    assert len(rows.daily_briefs) == 1
+    row = rows.daily_briefs[0]
+    # 与真实写入路径一样先过一遍 JSON：库里存的是 JSONB。
+    brief = DailyBriefResponse.model_validate(json.loads(json.dumps(row["payload"])))
+    assert brief.brief_version == row["brief_version"]
+    assert brief.business_date == row["business_date"] == END_DATE
+    assert brief.generated_at == row["generated_at"]
+    # 确定性规则汇总，不是模型分析：来源标数据库，质量循环未运行（R7）。
+    assert [entry.source for entry in brief.analysis_sources] == ["DATABASE"]
+    assert brief.quality_status == "NOT_RUN" and brief.degraded is False
+
+
 def test_scenarios_are_stable_and_cover_s1_to_s4() -> None:
     catalog = build_demo_catalog(merchant_id=MERCHANT_ONE, seed=DEMO_ANALYTICS_SEED_BASE)
     first = _scenario_module.build_scenario_rows(
@@ -186,6 +212,13 @@ def test_scenarios_are_stable_and_cover_s1_to_s4() -> None:
     assert restock["state"] == "STAGED"
     assert low_stock["stock_on_hand"] - low_stock["stock_reserved"] == 3
     assert restock["target_version"] == 3
+    # 种子草稿要能被审批页与应用处理器读懂：载荷形状与 Agent 起草的补货草稿一致。
+    from app.models.drafts import Draft
+    from app.services.v2.drafts import to_diff
+
+    entry = to_diff(Draft(**restock)).entries[0]
+    assert (entry.before, entry.after) == (3, 23)
+    assert restock["payload"]["product_title"] == low_stock["title"]
     history = _dataset()
     sold_last_30d = sum(
         item["quantity"] for item in history.order_items if item["product_id"] == low_stock["id"]
@@ -200,6 +233,8 @@ def test_scenarios_are_stable_and_cover_s1_to_s4() -> None:
     assert order["business_date"] >= END_DATE - timedelta(days=7)
     assert item["line_total"] == item["unit_price"] * item["quantity"] - item["discount_amount"]
     assert order["total_amount"] == item["line_total"]
+    # 订单行要带商品名快照，否则两端的订单列表只能显示占位符。
+    assert item["title_snapshot"] == available[item["product_id"]]["title"]
     paid_at = events["PAYMENT_CONFIRMED"]["occurred_at"]
     assert events["SHIPPED"]["occurred_at"] - paid_at == timedelta(hours=6)
     assert events["DELIVERED"]["occurred_at"] - paid_at == timedelta(days=3)
@@ -267,6 +302,8 @@ def test_orders_page_scenario_covers_five_statuses() -> None:
     assert first.after_sales[0]["order_id"] == active_orders[0]["id"]
     assert len(first.after_sale_lines) == 1
     assert first.after_sale_lines[0]["after_sale_id"] == first.after_sales[0]["id"]
+    assert len(first.after_sale_tickets) == 1
+    assert first.after_sale_tickets[0]["after_sale_id"] == first.after_sales[0]["id"]
 
     # 订单行、履约事件与订单一一对应，不遗漏。
     order_ids = {order["id"] for order in first.orders_page_orders}
@@ -286,9 +323,11 @@ def test_orders_page_scenario_covers_five_statuses() -> None:
 @pytest.mark.asyncio
 async def test_three_merchant_seed_is_repeatable_in_postgres(db_session: AsyncSession) -> None:
     from app.jobs.rebuild_projections import rebuild_projections
+    from app.models.after_sales import AfterSale
     from app.models.analytics import Order, Product
     from app.models.events import FulfillmentEvent, InventoryEvent
     from app.services.seed_service import default_merchants, seed_demo_merchants
+    from app.services.v2.after_sales import sale_detail
 
     async def snapshot_digest() -> str:
         # 逐行规范化，覆盖经营事实、事件、库存与 S1–S4 场景。
@@ -318,6 +357,18 @@ async def test_three_merchant_seed_is_repeatable_in_postgres(db_session: AsyncSe
     await seed_demo_merchants(db_session, default_merchants())
     first_written = await _analytics_module.seed_analytics(db_session, days=7, end_date=END_DATE)
     first_scenarios = await _scenario_module.seed_scenarios(db_session, business_day=END_DATE)
+    seeded_sale = await db_session.scalar(
+        select(AfterSale).where(AfterSale.merchant_id == MERCHANT_ONE)
+    )
+    assert seeded_sale is not None
+    merchant_detail = await sale_detail(
+        db_session,
+        seeded_sale,
+        customer=False,
+        alias_secret=b"stable-test-secret-for-aliases",
+        locale="zh-CN",
+    )
+    assert merchant_detail.ticket_id
     counts = tuple(
         [
             await db_session.scalar(select(func.count()).select_from(model))

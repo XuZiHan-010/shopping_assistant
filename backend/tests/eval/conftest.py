@@ -3,24 +3,15 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING
 
 import pytest
 import pytest_asyncio
-from fastapi import FastAPI
 
-from app.core.config import AppEnvironment, Settings
-from app.db.session import Database
-from app.eval.security_harness import MerchantFixture, SecurityHarness
-from app.main import create_app
-from app.models.merchant import Merchant
-from tests.conftest import (
-    ADMIN_TOKEN,
-    MERCHANT_ONE_ID,
-    MERCHANT_ONE_TOKEN,
-    MERCHANT_TWO_ID,
-    MERCHANT_TWO_TOKEN,
-)
-from tests.postgres import truncate_all_tables
+if TYPE_CHECKING:
+    from fastapi import FastAPI
+
+    from app.eval.security_harness import SecurityHarness
 
 MERCHANT_ONE_SLUG = "borough-api-100"
 MERCHANT_TWO_SLUG = "borough-api-101"
@@ -60,6 +51,20 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
 @pytest_asyncio.fixture
 async def security_app(migrated_postgres: str) -> AsyncIterator[FastAPI]:
     """带演示顾客绑定能力的真实 PostgreSQL 应用；仅供安全门禁使用。"""
+
+    # 零 skip 钩子的隔离子进程不使用这些夹具，勿在收集阶段加载整个应用及模型依赖。
+    from app.core.config import AppEnvironment, Settings
+    from app.db.session import Database
+    from app.main import create_app
+    from app.models.merchant import Merchant
+    from tests.conftest import (
+        ADMIN_TOKEN,
+        MERCHANT_ONE_ID,
+        MERCHANT_ONE_TOKEN,
+        MERCHANT_TWO_ID,
+        MERCHANT_TWO_TOKEN,
+    )
+    from tests.postgres import truncate_all_tables
 
     settings = Settings(
         app_env=AppEnvironment.TEST,
@@ -103,6 +108,15 @@ async def security_app(migrated_postgres: str) -> AsyncIterator[FastAPI]:
 
 @pytest.fixture
 def security_harness(security_app: FastAPI) -> SecurityHarness:
+    from app.db.session import Database
+    from app.eval.security_harness import MerchantFixture, SecurityHarness
+    from tests.conftest import (
+        MERCHANT_ONE_ID,
+        MERCHANT_ONE_TOKEN,
+        MERCHANT_TWO_ID,
+        MERCHANT_TWO_TOKEN,
+    )
+
     database: Database = security_app.state.database
     return SecurityHarness(
         security_app,

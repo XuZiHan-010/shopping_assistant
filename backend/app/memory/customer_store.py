@@ -1,4 +1,8 @@
-"""按店铺与已绑定顾客隔离的事实记忆和偏好开关。"""
+"""按店铺与已绑定顾客隔离的事实记忆和偏好开关。
+
+主体在构造时绑定（`CustomerMemoryOwner`），方法不接收 `merchant_id` / `buyer_key`：调用方无从
+传入别人的主体，所有查询都由本类按绑定主体过滤（N4-1①）。
+"""
 
 from __future__ import annotations
 
@@ -11,18 +15,21 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.memory.filters import filter_candidate, filter_persisted
+from app.memory.owners import CustomerMemoryOwner
 from app.models.memory_v2 import CustomerMemory, CustomerMemoryPreference
 
 RETENTION = timedelta(days=180)
 
 
 class CustomerMemoryStore:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, owner: CustomerMemoryOwner) -> None:
+        if not isinstance(owner, CustomerMemoryOwner):
+            raise TypeError("CustomerMemoryStore 需要 CustomerMemoryOwner")
         self._session = session
+        self._owner = owner
 
-    async def _locked_preference(
-        self, merchant_id: UUID, buyer_key: str
-    ) -> CustomerMemoryPreference:
+    async def _locked_preference(self) -> CustomerMemoryPreference:
+        merchant_id, buyer_key = self._owner.merchant_id, self._owner.buyer_key
         await self._session.execute(
             pg_insert(CustomerMemoryPreference)
             .values(merchant_id=merchant_id, buyer_key=buyer_key, memory_enabled=True)
@@ -39,23 +46,22 @@ class CustomerMemoryStore:
         assert row is not None
         return row
 
-    async def memory_enabled(self, *, merchant_id: UUID, buyer_key: str) -> bool:
+    async def memory_enabled(self) -> bool:
         result = await self._session.scalar(
             select(CustomerMemoryPreference.memory_enabled).where(
-                CustomerMemoryPreference.merchant_id == merchant_id,
-                CustomerMemoryPreference.buyer_key == buyer_key,
+                CustomerMemoryPreference.merchant_id == self._owner.merchant_id,
+                CustomerMemoryPreference.buyer_key == self._owner.buyer_key,
             )
         )
         return result is not False
 
     async def write(
-        self, *, merchant_id: UUID, buyer_key: str, category: str, key: str,
-        value: str, at: datetime,
+        self, *, category: str, key: str, value: str, at: datetime,
     ) -> CustomerMemory | None:
         fact = SimpleNamespace(category=category, key=key, value=value)
         if not category or not key or not value or filter_candidate(fact).rejected:
             return None
-        preference = await self._locked_preference(merchant_id, buyer_key)
+        preference = await self._locked_preference()
         if not preference.memory_enabled:
             return None
         if filter_persisted(fact).rejected:
@@ -63,12 +69,14 @@ class CustomerMemoryStore:
         row_id = await self._session.scalar(
             pg_insert(CustomerMemory)
             .values(
-                id=uuid4(), merchant_id=merchant_id, buyer_key=buyer_key,
-                category=category, key=key, value=value, last_confirmed_at=at,
+                id=uuid4(), merchant_id=self._owner.merchant_id,
+                buyer_key=self._owner.buyer_key, category=category, key=key, value=value,
+                last_confirmed_at=at,
             )
             .on_conflict_do_update(
                 constraint="uq_customer_memories_owner_key",
-                set_={"category": category, "value": value, "last_confirmed_at": at},
+                # 唯一键含 category（迁移 20261001_0046）：同类同 key 才视为同一事实并更新。
+                set_={"value": value, "last_confirmed_at": at},
             )
             .returning(CustomerMemory.id)
         )
@@ -79,14 +87,13 @@ class CustomerMemoryStore:
         return row
 
     async def recall(
-        self, *, merchant_id: UUID, buyer_key: str, at: datetime, limit: int = 20,
-        category: str | None = None,
+        self, *, at: datetime, limit: int = 20, category: str | None = None,
     ) -> list[CustomerMemory]:
-        if not await self.memory_enabled(merchant_id=merchant_id, buyer_key=buyer_key):
+        if not await self.memory_enabled():
             return []
         statement = select(CustomerMemory).where(
-                CustomerMemory.merchant_id == merchant_id,
-                CustomerMemory.buyer_key == buyer_key,
+                CustomerMemory.merchant_id == self._owner.merchant_id,
+                CustomerMemory.buyer_key == self._owner.buyer_key,
                 CustomerMemory.last_confirmed_at > at - RETENTION,
             )
         if category is not None:
@@ -97,27 +104,25 @@ class CustomerMemoryStore:
         )
         return list(rows.all())
 
-    async def delete(self, *, merchant_id: UUID, buyer_key: str, memory_id: UUID) -> bool:
+    async def delete(self, *, memory_id: UUID) -> bool:
         result = await self._session.execute(
             delete(CustomerMemory).where(
                 CustomerMemory.id == memory_id,
-                CustomerMemory.merchant_id == merchant_id,
-                CustomerMemory.buyer_key == buyer_key,
+                CustomerMemory.merchant_id == self._owner.merchant_id,
+                CustomerMemory.buyer_key == self._owner.buyer_key,
             ).returning(CustomerMemory.id)
         )
         return result.scalar_one_or_none() is not None
 
-    async def set_preference(
-        self, *, merchant_id: UUID, buyer_key: str, enabled: bool,
-    ) -> int:
-        preference = await self._locked_preference(merchant_id, buyer_key)
+    async def set_preference(self, *, enabled: bool) -> int:
+        preference = await self._locked_preference()
         preference.memory_enabled = enabled
         purged = 0
         if not enabled:
             result = await self._session.execute(
                 delete(CustomerMemory).where(
-                    CustomerMemory.merchant_id == merchant_id,
-                    CustomerMemory.buyer_key == buyer_key,
+                    CustomerMemory.merchant_id == self._owner.merchant_id,
+                    CustomerMemory.buyer_key == self._owner.buyer_key,
                 ).returning(CustomerMemory.id)
             )
             purged = len(result.scalars().all())

@@ -66,11 +66,17 @@ export const routes: RouteRecordRaw[] = [
         name: 'merchant-memory',
         component: () => import('@/views/MerchantMemoryView.vue'),
       },
-      // —— 管理（进入须管理员令牌，页面内用 `AdminGate` 包裹：无令牌只显示令牌入口、不发 /api/admin/* 请求；N5 的 `OpsStatusView` 同组追加） ——
+      // —— 管理（进入须管理员令牌，页面内用 `AdminGate` 包裹：无令牌只显示令牌入口、不发 /api/admin/* 请求） ——
       {
         path: 'knowledge-base',
         name: 'knowledge-base',
         component: () => import('@/views/KnowledgeBaseView.vue'),
+      },
+      {
+        // N5 B Task 3（D-N5-1）：只读运维看板。
+        path: 'ops-status',
+        name: 'ops-status',
+        component: () => import('@/views/OpsStatusView.vue'),
       },
     ],
   },

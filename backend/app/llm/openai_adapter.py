@@ -299,7 +299,7 @@ class OpenAiConverseAdapter:
             "model": self._settings.llm_model,
             "messages": serialized,
             "stream": stream,
-            "max_tokens": reserve_call(self._settings, budget),
+            "max_tokens": reserve_call(self._settings, budget, options),
             # 每次都显式发送：官方默认开启思考模式，不发就会随提供方默认值漂移。
             "thinking": {"type": effective_thinking(self._settings, options)},
         }

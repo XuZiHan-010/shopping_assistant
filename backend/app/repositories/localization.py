@@ -170,6 +170,7 @@ class LocalizationRepository:
             MachineTranslationCache.source_hash.in_(list(source_hashes)),
             MachineTranslationCache.target_locale == str(target_locale),
             MachineTranslationCache.prompt_version == prompt_version,
+            MachineTranslationCache.expires_at > func.now(),
         ]
         if scope_kind == "MERCHANT":
             conditions.append(MachineTranslationCache.merchant_id == merchant_id)

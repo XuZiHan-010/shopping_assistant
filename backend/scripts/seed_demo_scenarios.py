@@ -22,7 +22,7 @@ from app.core.runtime import configure_event_loop_policy
 from app.db.session import Database
 from app.jobs.seed_demo_rolling import _require_demo_merchants
 from app.models.after_sales import AfterSale, AfterSaleLine
-from app.models.analytics import Order, OrderItem, Product
+from app.models.analytics import Order, OrderItem, Product, SupportTicket
 from app.models.drafts import Draft
 from app.models.events import AfterSaleEvent, FulfillmentEvent, InventoryEvent
 from app.models.memory_v2 import CustomerSignal, DailyBrief
@@ -50,6 +50,7 @@ class ScenarioRows(NamedTuple):
     orders_page_fulfillment_events: list[dict[str, object]]
     after_sales: list[dict[str, object]]
     after_sale_lines: list[dict[str, object]]
+    after_sale_tickets: list[dict[str, object]]
     #: `rebuild_projections` 只信任事件账本：只有 `payload["order_id"]` 与
     #: `payload["after_sale_status"]` 都存在时才会把某单的 `after_sale_status`
     #: 判定为非 NONE（详见 `app/jobs/rebuild_projections.py`）。缺这一条，
@@ -119,6 +120,7 @@ def build_scenario_rows(
         "business_date": order_day,
         "order_id": order_id,
         "product_id": guide["id"],
+        "title_snapshot": guide["title"],
         "quantity": 1,
         "unit_price": unit_price,
         "discount_amount": Decimal("0.00"),
@@ -196,7 +198,13 @@ def build_scenario_rows(
         "target_version": low_stock["stock_on_hand"],
         "draft_version": 1,
         "state": "STAGED",
-        "payload": {"quantity": 20, "stock_on_hand_before": low_stock["stock_on_hand"]},
+        # 载荷形状必须与 Agent 起草的补货草稿一致（`app/services/v2/drafts.py`）：
+        # 审批页的改动对照与应用处理器都按 `delta` / `base_on_hand` 读取。
+        "payload": {
+            "delta": 20,
+            "base_on_hand": low_stock["stock_on_hand"],
+            "product_title": low_stock["title"],
+        },
         "guardrail_snapshot": {"stock_available": 3, "low_stock_threshold": 5},
         "created_by": "DEMO_SEED",
         "created_at": created_at,
@@ -208,9 +216,24 @@ def build_scenario_rows(
         "merchant_id": merchant_id,
         "business_date": business_day,
         "brief_version": 1,
+        # 接口把这份 payload 原样按 `DailyBriefResponse` 读回，所以必须是完整的响应结构，
+        # 字段与 `services/v2/daily_brief.py::build_full_brief` 的确定性汇总一致；
+        # 它不是模型分析（R7）。
         "payload": {
+            "analysis_sources": [
+                {"source": "DATABASE", "degraded": False, "degraded_reason": None}
+            ],
+            "thinking_steps": [],
+            "quality_status": "NOT_RUN",
+            "quality_attempts": 0,
+            "quality_notes": [],
+            "degraded": False,
+            "degraded_reason": None,
+            "brief_version": 1,
+            "business_date": business_day.isoformat(),
             "business_timezone": "Asia/Shanghai",
             "data_as_of": created_at.isoformat(),
+            "generated_at": created_at.isoformat(),
             "trigger": "SCHEDULED",
             "collapsed_count": 0,
             "items": [
@@ -262,6 +285,22 @@ def build_scenario_rows(
         orders_page_events,
         after_sales,
         after_sale_lines,
+        [
+            {
+                "id": _id(merchant_id, "orders-page-after-sale-ticket", business_day),
+                "merchant_id": merchant_id,
+                "business_date": business_day,
+                "ticket_no": f"SCN-AF-{str(sale['id'])[:12]}",
+                "order_id": sale["order_id"],
+                "after_sale_id": sale["id"],
+                "ticket_status": "OPEN",
+                "ticket_reason": "售后申请待商家处理",
+                "opened_at": sale["created_at"],
+                "created_at": sale["created_at"],
+                "updated_at": sale["updated_at"],
+            }
+            for sale in after_sales
+        ],
         after_sale_events,
     )
 
@@ -345,6 +384,7 @@ def _orders_page_scenarios(
                 "business_date": order_day,
                 "order_id": order_id,
                 "product_id": guide["id"],
+                "title_snapshot": guide["title"],
                 "quantity": 1,
                 "unit_price": unit_price,
                 "discount_amount": Decimal("0.00"),
@@ -680,6 +720,14 @@ async def seed_scenarios(
                 if kept_lines:
                     await session.execute(insert(AfterSaleLine).values(kept_lines))
                     written += len(kept_lines)
+                kept_tickets = [
+                    row
+                    for row in rows.after_sale_tickets
+                    if row["after_sale_id"] in inserted_after_sale_ids
+                ]
+                if kept_tickets:
+                    await session.execute(insert(SupportTicket).values(kept_tickets))
+                    written += len(kept_tickets)
                 kept_after_sale_events = [
                     row
                     for row in rows.after_sale_events

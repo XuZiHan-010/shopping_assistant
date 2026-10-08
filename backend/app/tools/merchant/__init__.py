@@ -13,6 +13,7 @@ Agent 连证据都拿不到。
 from __future__ import annotations
 
 from app.db.session import Database
+from app.knowledge.index_versions import VectorIndexSearch
 from app.repositories.audit import AuditRepository
 from app.services.v2.inventory_alerts import AlertRules
 from app.tools.merchant.after_sale import build_after_sale_tools
@@ -35,6 +36,7 @@ def build_merchant_tools(
     alias_secret: bytes = b"development-buyer-alias-secret",
     export_signing_secret: str | None = None,
     export_url_ttl_minutes: int = 15,
+    knowledge_vector: VectorIndexSearch | None = None,
 ) -> tuple[ToolSpec, ...]:
     """商家工具面的装配点；`build_tool_registry()` 在进程启动时调用它。"""
 
@@ -50,7 +52,7 @@ def build_merchant_tools(
             signing_secret=export_signing_secret,
             export_url_ttl_minutes=export_url_ttl_minutes,
         )
-        + build_definitions_tools(database)
+        + build_definitions_tools(database, vector=knowledge_vector)
         + build_content_tools(database)
         + build_memory_tools(database)
     )

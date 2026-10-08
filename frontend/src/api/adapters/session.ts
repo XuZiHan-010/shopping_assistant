@@ -19,6 +19,8 @@ export interface MerchantSession {
   role: 'MERCHANT'
   expiresAt: string
   merchantDisplayName: string
+  /** 本店顾客端店铺标识（D-N5-4）：后端从已验证会话解析，只用来拼「顾客视角」链接。 */
+  shopSlug: string
 }
 
 function toMerchantSession(raw: RawMerchantSessionCreateResponse): MerchantSession {
@@ -27,6 +29,7 @@ function toMerchantSession(raw: RawMerchantSessionCreateResponse): MerchantSessi
     role: raw.role,
     expiresAt: raw.expires_at,
     merchantDisplayName: raw.merchant_display_name,
+    shopSlug: raw.shop_slug,
   }
 }
 

@@ -2540,6 +2540,87 @@
         }
       }
     },
+    "/api/v2/merchant/mcp": {
+      "post": {
+        "tags": [
+          "v2-merchant-mcp"
+        ],
+        "summary": "MCP 只读服务入口",
+        "description": "协议固定 `2026-07-28`，无协议会话的 Streamable HTTP：不实现旧版 `initialize`，不接收也不签发 `Mcp-Session-Id`。只支持 `server/discover`、`tools/list`、`tools/call`；工具面为只读白名单与凭证 scope 的交集。凭证缺失或无效时在解析正文之前返回 401。其余错误一律为 JSON-RPC error，不使用 v2 `ErrorResponse`。",
+        "operationId": "post_merchant_mcp_api_v2_merchant_mcp_post",
+        "responses": {
+          "200": {
+            "description": "JSON-RPC result 或 JSON-RPC error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "JSON-RPC 2.0 单请求；MCP 协议版本 2026-07-28（官方 SDK 协议类型）"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "通知已接收（无正文）"
+          },
+          "400": {
+            "description": "解析失败、请求头与正文不一致或协议版本不受支持（JSON-RPC error）"
+          },
+          "401": {
+            "description": "MCP 凭证缺失、无效、过期或已撤销；带 `WWW-Authenticate: Bearer`"
+          },
+          "413": {
+            "description": "请求正文过大（JSON-RPC error）"
+          },
+          "429": {
+            "description": "请求过于频繁"
+          },
+          "503": {
+            "description": "凭证库不可用、无法鉴权（`id: null` 的 JSON-RPC error，不解析请求正文）"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "JSON-RPC 2.0 单请求；MCP 协议版本 2026-07-28（官方 SDK 协议类型）"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "MCP-Protocol-Version",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "2026-07-28"
+              ]
+            }
+          },
+          {
+            "name": "Mcp-Method",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Mcp-Name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
     "/api/v2/merchant/products/content": {
       "get": {
         "tags": [
@@ -7868,6 +7949,48 @@
         ],
         "title": "BriefRegenerateRequest"
       },
+      "BudgetLevelStatus": {
+        "properties": {
+          "level": {
+            "type": "string",
+            "enum": [
+              "GLOBAL",
+              "ROLE",
+              "SHOP"
+            ],
+            "title": "Level"
+          },
+          "scope": {
+            "type": "string",
+            "title": "Scope"
+          },
+          "budget_tokens": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Budget Tokens"
+          },
+          "used_tokens": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Used Tokens"
+          },
+          "remaining_tokens": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Remaining Tokens"
+          }
+        },
+        "type": "object",
+        "required": [
+          "level",
+          "scope",
+          "budget_tokens",
+          "used_tokens",
+          "remaining_tokens"
+        ],
+        "title": "BudgetLevelStatus",
+        "description": "一级预算的当日用量（N5 B Task 3）。店铺级只给脱敏标识，不给商家 ID 或名称。"
+      },
       "BusinessDomainRenameRequest": {
         "properties": {
           "new_name": {
@@ -9216,6 +9339,24 @@
           "updated_at"
         ],
         "title": "ConversationSummary"
+      },
+      "CostByCurrency": {
+        "properties": {
+          "currency": {
+            "type": "string",
+            "title": "Currency"
+          },
+          "amount": {
+            "type": "string",
+            "title": "Amount"
+          }
+        },
+        "type": "object",
+        "required": [
+          "currency",
+          "amount"
+        ],
+        "title": "CostByCurrency"
       },
       "CouponSummary": {
         "properties": {
@@ -11513,6 +11654,107 @@
         "title": "KnowledgeDocumentUpdateRequest",
         "description": "`is_source_version=true`（默认）更新源标题/正文本身；`false` 改为保存\n一份人工译文，此时必须显式提供 `content_locale`——源语言可以是\n`mixed`/`und`，不能靠\"等于源语言之外的那个\"推断目标语言（Task 8 Step 4）。"
       },
+      "KnowledgeIndexStatus": {
+        "properties": {
+          "retrieval_mode": {
+            "type": "string",
+            "enum": [
+              "HYBRID",
+              "KEYWORD_ONLY"
+            ],
+            "title": "Retrieval Mode"
+          },
+          "active_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Version"
+          },
+          "embedding_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Embedding Model"
+          },
+          "configured_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Configured Model"
+          },
+          "stale": {
+            "type": "boolean",
+            "title": "Stale"
+          },
+          "stale_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "BUILD_FAILED",
+                  "CORPUS_CHANGED"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stale Reason"
+          },
+          "building": {
+            "type": "boolean",
+            "title": "Building"
+          },
+          "last_failure_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "EMBEDDING_UNAVAILABLE",
+                  "EMBEDDING_FAILED",
+                  "QUALITY_REGRESSION",
+                  "EMPTY_CORPUS",
+                  "BUILD_TIMEOUT",
+                  "BUILD_ABORTED",
+                  "STORAGE_FAILED"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Failure Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "retrieval_mode",
+          "active_version",
+          "embedding_model",
+          "configured_model",
+          "stale",
+          "stale_reason",
+          "building",
+          "last_failure_reason"
+        ],
+        "title": "KnowledgeIndexStatus",
+        "description": "知识索引状态（N4-C，契约 §8.6.7）；不含分块正文、向量或异常原文。"
+      },
       "KnowledgeTreeNode": {
         "properties": {
           "name": {
@@ -11572,11 +11814,15 @@
             },
             "type": "array",
             "title": "Roots"
+          },
+          "index_status": {
+            "$ref": "#/components/schemas/KnowledgeIndexStatus"
           }
         },
         "type": "object",
         "required": [
-          "roots"
+          "roots",
+          "index_status"
         ],
         "title": "KnowledgeTreeResponse"
       },
@@ -12839,6 +13085,19 @@
             "minLength": 1,
             "title": "Status"
           },
+          "image_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2048,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Url"
+          },
           "content_version": {
             "type": "integer",
             "minimum": 1.0,
@@ -12885,6 +13144,7 @@
           "title",
           "category",
           "status",
+          "image_url",
           "content_version",
           "missing_required_attributes",
           "missing_content_fields",
@@ -12926,6 +13186,13 @@
             "maxLength": 120,
             "minLength": 1,
             "title": "Merchant Display Name"
+          },
+          "shop_slug": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "title": "Shop Slug"
           }
         },
         "additionalProperties": false,
@@ -12934,7 +13201,8 @@
           "session_id",
           "role",
           "expires_at",
-          "merchant_display_name"
+          "merchant_display_name",
+          "shop_slug"
         ],
         "title": "MerchantSessionCreateResponse"
       },
@@ -13088,6 +13356,106 @@
           "demo_deployment_mode": {
             "type": "boolean",
             "title": "Demo Deployment Mode"
+          },
+          "budget_levels": {
+            "items": {
+              "$ref": "#/components/schemas/BudgetLevelStatus"
+            },
+            "type": "array",
+            "title": "Budget Levels"
+          },
+          "llm_cost_today": {
+            "items": {
+              "$ref": "#/components/schemas/CostByCurrency"
+            },
+            "type": "array",
+            "title": "Llm Cost Today"
+          },
+          "unpriced_calls_today": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Unpriced Calls Today"
+          },
+          "cache_hit_tokens_today": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Cache Hit Tokens Today"
+          },
+          "cache_hit_rate_today": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Hit Rate Today"
+          },
+          "tool_calls_total": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Tool Calls Total"
+          },
+          "tool_errors_total": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Tool Errors Total"
+          },
+          "route_p95_ms": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Route P95 Ms"
+          },
+          "turns_today": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Turns Today"
+          },
+          "avg_tokens_per_turn_today": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Tokens Per Turn Today"
+          },
+          "avg_cost_per_turn_today": {
+            "items": {
+              "$ref": "#/components/schemas/CostByCurrency"
+            },
+            "type": "array",
+            "title": "Avg Cost Per Turn Today"
+          },
+          "avg_turn_elapsed_ms_today": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Turn Elapsed Ms Today"
+          },
+          "degraded_reason_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Degraded Reason Counts"
+          },
+          "source_degraded_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Source Degraded Counts"
           }
         },
         "type": "object",
@@ -13099,7 +13467,21 @@
           "degraded_count",
           "error_code_counts",
           "agent_node_average_ms",
-          "demo_deployment_mode"
+          "demo_deployment_mode",
+          "budget_levels",
+          "llm_cost_today",
+          "unpriced_calls_today",
+          "cache_hit_tokens_today",
+          "cache_hit_rate_today",
+          "tool_calls_total",
+          "tool_errors_total",
+          "route_p95_ms",
+          "turns_today",
+          "avg_tokens_per_turn_today",
+          "avg_cost_per_turn_today",
+          "avg_turn_elapsed_ms_today",
+          "degraded_reason_counts",
+          "source_degraded_counts"
         ],
         "title": "OpsStatusResponse",
         "description": "系统级聚合快照，不含商家标识、Token 明文或 Prompt 内容。"

@@ -85,6 +85,7 @@ def build_gates(request: Request, database: Database, principal_secret: bytes) -
         principal_secret=principal_secret,
         audit=AuditRepositorySecurityAudit(AuditRepository(database)),
         drafts=DatabaseDraftSink(database),
+        metrics=request.app.state.metrics,
     )
 
 

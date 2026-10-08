@@ -10,6 +10,7 @@
  * 条目上不显示计数徽标：本 Task 没有接数据，不写示意数字（R7）。
  */
 import {
+  Activity,
   BookOpen,
   Brain,
   House,
@@ -31,6 +32,7 @@ import { useAuthStore } from '@/stores/auth'
 import { isApplePlatform } from '@/utils/platform'
 
 import BrandMark from './BrandMark.vue'
+import CustomerViewLink from './CustomerViewLink.vue'
 import PreferencesPanel from './PreferencesPanel.vue'
 
 type NavKey =
@@ -43,6 +45,7 @@ type NavKey =
   | 'signals'
   | 'memory'
   | 'knowledge-base'
+  | 'ops-status'
 
 interface NavItem {
   key: NavKey
@@ -136,8 +139,7 @@ const OPERATIONS: NavGroup = {
   ],
 }
 
-// N5 的运维看板 `OpsStatusView` 预留在本组：届时在 items 追加一条并给路由包 `AdminGate`；
-// 页面尚不存在，这里不放死链接。
+// 管理分组：知识库与只读运维看板（N5 B Task 3，D-N5-1），两页都在页面层包 `AdminGate`。
 const ADMIN: NavGroup = {
   key: 'admin',
   labelKey: 'shell.groups.admin',
@@ -148,6 +150,13 @@ const ADMIN: NavGroup = {
       icon: BookOpen,
       to: { name: 'knowledge-base' },
       activeFor: ['knowledge-base'],
+    },
+    {
+      key: 'ops-status',
+      labelKey: 'shell.nav.opsStatus',
+      icon: Activity,
+      to: { name: 'ops-status' },
+      activeFor: ['ops-status'],
     },
   ],
 }
@@ -278,6 +287,8 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', onDocumentPoin
     </nav>
 
     <div ref="operatorElement" class="side-nav__operator">
+      <!-- 「顾客视角」（D-N5-4）：只是新标签链接；未配置顾客端地址或没有会话时不渲染。 -->
+      <CustomerViewLink class="side-nav__customer-view" />
       <button
         ref="prefsTrigger"
         type="button"
@@ -454,6 +465,10 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', onDocumentPoin
   margin-top: auto;
   padding-top: 10px;
   border-top: 1px solid var(--side-line);
+}
+
+.side-nav__customer-view {
+  margin-bottom: 8px;
 }
 
 .side-nav__operator-button {

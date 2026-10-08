@@ -184,3 +184,12 @@ async def test_search_rules_finds_and_can_cite_document(
     body = resp.json()
     assert body["degraded"] is False
     assert any(c["tool_name"] == "search_rules" for c in body["tool_calls"])
+    # 测试应用未配置嵌入模型：关键词照常命中，但 KNOWLEDGE 来源如实标注向量索引不可用（§7.6、R7），
+    # 整轮不因此降级。
+    assert body["analysis_sources"] == [
+        {
+            "source": "KNOWLEDGE",
+            "degraded": True,
+            "degraded_reason": "INDEX_UNAVAILABLE_KEYWORD_FALLBACK",
+        }
+    ]

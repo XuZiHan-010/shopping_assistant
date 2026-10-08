@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agent.loop.limits import LoopLimits
 from app.api.dependencies import (
     build_guarded_llm,
+    enforce_keyed_rate_limit,
     get_app_settings,
     get_database,
     get_db_session,
@@ -37,6 +38,7 @@ from app.api.routes.v2.merchant_conversations import Directory
 from app.api.session_deps import require_merchant_session
 from app.core.config import Settings
 from app.core.errors import error_responses
+from app.core.metrics import OperationalMetrics
 from app.core.session import SessionContext
 from app.db.session import Database
 from app.llm.client import ConversationalLlmClient
@@ -64,6 +66,7 @@ def _service(
     locale: SupportedLocale,
     principal_secret: bytes,
     skills: SkillRegistry | None = None,
+    metrics: OperationalMetrics | None = None,
 ) -> MerchantChatService:
     return MerchantChatService(
         session,
@@ -71,10 +74,12 @@ def _service(
         gates=gates,
         limits=LoopLimits.from_settings(settings),
         ctx=ctx,
+        business_timezone=settings.business_timezone,
         locale=locale,
         principal_secret=principal_secret,
         skills=skills,
         history_turns=settings.chat_history_max_turns,
+        metrics=metrics,
     )
 
 
@@ -116,11 +121,14 @@ async def post_merchant_chat(
     principal_secret: Annotated[bytes, Depends(get_principal_secret)],
     locale: Annotated[SupportedLocale, Depends(get_request_locale)],
 ) -> JSONResponse | StreamingResponse:
+    enforce_keyed_rate_limit(request, settings, key=f"v2-chat:{ctx.role}:{ctx.session_record_id}")
     if payload.conversation_id is not None:
         await directory.require(payload.conversation_id)
     request_id = str(getattr(request.state, "request_id", "unknown"))
     cancel = asyncio.Event()
-    llm = build_guarded_llm(settings, database, request_id=request_id, merchant_id=ctx.merchant_id)
+    llm = build_guarded_llm(
+        settings, database, request_id=request_id, merchant_id=ctx.merchant_id, role=ctx.role
+    )
     gates = build_gates(request, database, principal_secret)
     service = _service(
         session,
@@ -131,6 +139,7 @@ async def post_merchant_chat(
         ctx=ctx,
         locale=locale,
         principal_secret=principal_secret,
+        metrics=request.app.state.metrics,
     )
 
     async def execute(on_event: Any = None) -> dict[str, Any]:

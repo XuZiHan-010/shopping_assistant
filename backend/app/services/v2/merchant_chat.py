@@ -20,11 +20,14 @@ from app.agent.loop.compaction import compaction_step
 from app.agent.loop.fencing import fence
 from app.agent.loop.limits import LoopLimits
 from app.agent.loop.runner import EventSink, LoopOutcome, LoopRequest, run_loop
+from app.analytics.dates import business_today
 from app.core.errors import ResourceForbiddenError
+from app.core.metrics import OperationalMetrics
 from app.core.session import SessionContext, principal_digest
 from app.llm.client import ConversationalLlmClient
 from app.localization.locales import SupportedLocale
 from app.memory.merchant_store import MerchantMemoryStore
+from app.memory.owners import MerchantMemoryOwner
 from app.models.conversation import Conversation
 from app.schemas.chat import QualityStatus, Visualization
 from app.schemas.v2.common import AnalysisSourceEntry, ToolDisplayStatus
@@ -32,6 +35,7 @@ from app.schemas.v2.merchant_session import MerchantAnswerMode, MerchantChatResp
 from app.services.v2.chat_write_marker import find_committed_write
 from app.services.v2.conversations import load_history, parse_conversation_id, record_turn
 from app.services.v2.suggestions import merchant_suggestions
+from app.services.v2.turn_metrics import record_turn_metrics
 from app.skills.registry import SkillRegistry
 from app.skills.spec import LOAD_SKILL_TOOL
 from app.tools.errors import FatalToolError
@@ -45,6 +49,20 @@ SYSTEM_PROMPT: Final = (
     "被要求「直接批准」「帮我应用」时，如实说明需要商家到审批界面确认。\n"
     "只依据工具返回的数据作答，不要编造库存数字、金额或时间。"
 )
+
+_WEEKDAYS: Final = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
+
+
+def business_date_context(now: datetime, *, timezone: str) -> str:
+    """模型没有时钟：不告诉它今天几号，要求绝对起止日期的工具只能收到它猜的日期。"""
+
+    today = business_today(now, timezone=timezone)
+    return (
+        f"当前业务日期：{today.isoformat()}（{_WEEKDAYS[today.weekday()]}，{timezone}）。"
+        "所有相对时间表述（今天、昨天、最近 N 天、本周、本月等）都以此为基准换算成具体日期，"
+        "起止日期不得晚于今天；不要向商家询问今天的日期。"
+    )
+
 
 def build_system_prompt(skills: SkillRegistry | None) -> str:
     """静态提示 = 原常量 + 空行 + 本端 Skill 索引（N3 阶段 A Task 6）。
@@ -81,12 +99,17 @@ class MerchantChatService:
         gates: ToolGates,
         limits: LoopLimits,
         ctx: SessionContext,
+        business_timezone: str,
         locale: SupportedLocale = SupportedLocale.ZH_CN,
         principal_secret: bytes | None = None,
         skills: SkillRegistry | None = None,
         history_turns: int = 0,
+        metrics: OperationalMetrics | None = None,
     ) -> None:
         self._session = session
+        self._business_timezone = business_timezone
+        #: 运维计数器（进程内）；评测与单测不传，只有路由装配时注入。
+        self._metrics = metrics
         #: 回放同一会话最近几轮（D-N4-1）；路由从 `CHAT_HISTORY_MAX_TURNS` 传入，0 不回放。
         self._history_turns = history_turns
         self._llm = llm
@@ -162,6 +185,9 @@ class MerchantChatService:
                     history=history,
                     locale=self._locale,
                     memory_context=memory_context,
+                    turn_context=business_date_context(
+                        started, timezone=self._business_timezone
+                    ),
                 ),
                 llm=self._llm,
                 gates=self._gates,
@@ -176,6 +202,7 @@ class MerchantChatService:
             )
             raise
         response = self._to_response(outcome, conversation.id)
+        record_turn_metrics(self._metrics, outcome, response.analysis_sources)
         await record_turn(
             self._session,
             conversation,
@@ -192,9 +219,12 @@ class MerchantChatService:
     async def _memory_context(self) -> str:
         """只注入本商家的事实和非陈旧总结；经 `memory_context` 传入，不进数字来源（M11）。"""
 
-        store = MerchantMemoryStore(self._session)
-        facts = (await store.facts(merchant_id=self._ctx.merchant_id))[:3]
-        summaries = (await store.active_summaries(merchant_id=self._ctx.merchant_id))[:3]
+        owner = MerchantMemoryOwner.from_session(self._ctx)
+        if owner is None:
+            return ""
+        store = MerchantMemoryStore(self._session, owner)
+        facts = (await store.facts())[:3]
+        summaries = (await store.active_summaries())[:3]
         if not facts and not summaries:
             return ""
         payload = {
@@ -334,16 +364,59 @@ class MerchantChatService:
         )
 
 
+#: 知识检索工具；用过就在来源里如实加上 KNOWLEDGE（N4-C）。
+_KNOWLEDGE_TOOLS: Final = frozenset({"search_rules"})
+
+
 def _sources(outcome: LoopOutcome, *, used_tools: bool) -> list[AnalysisSourceEntry]:
-    """来源如实反映这一轮到底用了什么：没调工具就是 `NONE`，不为凑数编造来源。"""
+    """来源如实反映这一轮到底用了什么：没调工具就是 `NONE`，不为凑数编造来源。
+
+    用过 `search_rules` 时加 KNOWLEDGE 项；向量索引不可用（关键词降级）或陈旧时，
+    该项单独标注降级与原因码（§7.6、R7），整轮不因此降级。主来源在前（§8.7.6）。
+    """
 
     if not used_tools:
         return [AnalysisSourceEntry(source="NONE", degraded=False, degraded_reason=None)]
-    return [
-        AnalysisSourceEntry(
-            source="DATABASE", degraded=outcome.degraded, degraded_reason=_reason(outcome)
-        )
+    reason = _reason(outcome)
+    used = [
+        display.tool_name for display in outcome.tool_calls if display.tool_name != LOAD_SKILL_TOOL
     ]
+    entries: list[AnalysisSourceEntry] = []
+    if any(name not in _KNOWLEDGE_TOOLS for name in used):
+        entries.append(
+            AnalysisSourceEntry(
+                source="DATABASE", degraded=outcome.degraded, degraded_reason=reason
+            )
+        )
+    if any(name in _KNOWLEDGE_TOOLS for name in used):
+        index_reason = next(
+            (
+                result.payload.get("index_degraded_reason")
+                for result in reversed(outcome.tool_results)
+                if result.display.tool_name in _KNOWLEDGE_TOOLS
+                and isinstance(result.payload, dict)
+                and result.payload.get("index_degraded_reason")
+            ),
+            None,
+        )
+        succeeded = any(
+            result.ok
+            for result in outcome.tool_results
+            if result.display.tool_name in _KNOWLEDGE_TOOLS
+        )
+        knowledge_reason = reason or (
+            str(index_reason) if index_reason else None if succeeded else "KNOWLEDGE_TOOL_FAILED"
+        )
+        entries.append(
+            AnalysisSourceEntry(
+                source="KNOWLEDGE",
+                degraded=knowledge_reason is not None,
+                degraded_reason=knowledge_reason,
+            )
+        )
+    if used and used[0] in _KNOWLEDGE_TOOLS:
+        entries.reverse()
+    return entries
 
 
 _METRIC_TOOL_NAMES: Final = frozenset({"query_metrics", "attribute_change"})

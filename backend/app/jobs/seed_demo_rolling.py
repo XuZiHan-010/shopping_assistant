@@ -8,7 +8,7 @@ from contextlib import nullcontext
 from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import delete, exists, func, select, text
+from sqlalchemy import case, delete, exists, func, select, text, tuple_, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -60,6 +60,51 @@ async def _catalog(session: AsyncSession, merchant_id: UUID, seed: int) -> list[
             where=(Product.content_version == 1) & Product.title.like("演示商品%"),
         )
     await session.execute(statement)
+    # 种子后来才补上的图片（06 号，2026-10-04）：上面的刷新只认旧版「演示商品 NN」行，
+    # 已是现行目录的库里这一行图片仍为空。只补「标题仍是种子标题且尚无图片」的行，
+    # 不覆盖商家已有的图片或改过名的商品；补完即不再命中，重复执行无副作用。
+    seed_images = {str(row["product_code"]): row["image_url"] for row in generated}
+    await session.execute(
+        update(Product)
+        .where(
+            Product.merchant_id == merchant_id,
+            Product.image_url.is_(None),
+            tuple_(Product.product_code, Product.title).in_(
+                [(row["product_code"], row["title"]) for row in generated]
+            ),
+        )
+        .values(
+            image_url=case(seed_images, value=Product.product_code),
+            content_version=Product.content_version + 1,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    # 从 v1 库升级上来的行：库存列是迁移补的默认值（在库 0、阈值为空），也没有任何库存事件，
+    # 不补的话线上整店显示售罄。只认「从未有过库存」的种子行——卖到 0 的行阈值是设过的、
+    # 也有事件，不会命中；补完即不再命中。INITIAL_STOCK 事件由下面的既有逻辑按补后的在库量写入。
+    seed_stock = {str(row["product_code"]): row["stock_on_hand"] for row in generated}
+    seed_threshold = {str(row["product_code"]): row["low_stock_threshold"] for row in generated}
+    await session.execute(
+        update(Product)
+        .where(
+            Product.merchant_id == merchant_id,
+            Product.stock_on_hand == 0,
+            Product.stock_reserved == 0,
+            Product.low_stock_threshold.is_(None),
+            tuple_(Product.product_code, Product.title).in_(
+                [(row["product_code"], row["title"]) for row in generated]
+            ),
+            ~exists().where(
+                InventoryEvent.merchant_id == merchant_id,
+                InventoryEvent.subject_id == Product.id,
+            ),
+        )
+        .values(
+            stock_on_hand=case(seed_stock, value=Product.product_code),
+            low_stock_threshold=case(seed_threshold, value=Product.product_code),
+        )
+        .execution_options(synchronize_session=False)
+    )
     persisted = list(
         (await session.execute(select(Product.__table__).where(Product.merchant_id == merchant_id)))
         .mappings()

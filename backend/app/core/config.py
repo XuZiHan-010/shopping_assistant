@@ -37,6 +37,15 @@ def agent_loop_llm_call_floor(
     return max_turns + compaction_max_calls + 2 * quality_max_attempts - 1
 
 
+#: 按 E5 RAG 评测标定的向量召回阈值（N4-C Task 3，`docs/history/eval/rag-hybrid.md`）：
+#: 在拒答率不低于关键词基线（0.90）的前提下 Recall@5 最高的取值，再往保守一侧留余量。
+#: 评测集只有 10 条「应找不到」，阈值对拒答率很敏感——换语料后应重新评测。
+CALIBRATED_MIN_SIMILARITY: dict[str, float] = {
+    "google/embeddinggemma-300m": 0.40,
+    "BAAI/bge-small-zh-v1.5": 0.575,
+}
+
+
 class Settings(BaseSettings):
     """Borough 后端配置。
 
@@ -101,17 +110,30 @@ class Settings(BaseSettings):
         le=20,
         validation_alias=AliasChoices("MAX_LLM_CALLS_PER_REQUEST", "llm_max_calls_per_request"),
     )
+    # 调用前检查拿输入的 UTF-8 字节数当 token 上界（`llm/guard.py`），2026-10-07 实测稳定在
+    # 真实 token 的 3.5 倍左右。所以这个值要按「已用 token + 下一次输入的字节数」来配，
+    # 而不是按回合的真实用量：25_000 时「加载 Skill → 查数据 → 作答」的第三次调用必被拒；
+    # 60_000 时售后回合（列表 → 详情 → 查三次规则）在第 5 次调用被拒（已用 23_917 + 输入约
+    # 37_300 字节）。120_000 容得下这类工具结果很长的回合走到第 9 次调用左右。
     llm_max_tokens_per_request: int = Field(
-        default=25_000,
+        default=120_000,
         ge=100,
         le=200_000,
         validation_alias=AliasChoices("MAX_LLM_TOKENS_PER_REQUEST", "llm_max_tokens_per_request"),
     )
-    # 全局每日预算（`llm_daily_budget` 只按 usage_date 聚合，不分商家、不分访客，
-    # 公开演示时所有人共用同一个池子）。500_000 = 单请求上限 25_000 × 20 个问题，
-    # 即最坏情况也保证 20 个完整问题。2026-08-17 真实 `deepseek-v4-flash` 实测每个
-    # 完整问题约 6_000 token，因此实际可支撑约 80 个。
-    llm_daily_budget_tokens: int = Field(default=500_000, ge=1_000, le=100_000_000)
+    # 三级每日预算按「每个商家每天能问 25 个左右」配出（用户 2026-10-07 裁定）。
+    # 2026-10-07 真实 `deepseek-flash` 实测：v2 商家回合约 8_700 token，用到 Skill 的三步回合
+    # 约 14_600；每次调用前还要按字节上界预留约 23_000–28_000（用完按实际对账），所以额度里
+    # 最后这一截用不上。25 个三步回合至少要约 387_000，店铺级取 450_000 留余量；
+    # 商家角色级 = 店铺级 × 3 个演示商家；全局 = 商家角色级 + 顾客角色级，再取整。
+    # 全局是总量闸门：公开演示时所有人共用同一个池子，一天最多花掉这么多。
+    llm_daily_budget_tokens: int = Field(default=1_600_000, ge=1_000, le=100_000_000)
+    # N5 B 三级预算（PRD §10.2、Q37）：全局之下再分角色与店铺两级，任一耗尽即熔断。
+    # 角色级把公开的顾客流量与商家工作台隔开；店铺级按「角色 + 店铺」计，一家店耗尽不影响
+    # 另一家，同一家店的顾客流量也拖不垮它自己的工作台。非对话调用（记忆抽取、压缩摘要）同样计入。
+    llm_customer_daily_budget_tokens: int = Field(default=200_000, ge=1_000, le=100_000_000)
+    llm_merchant_daily_budget_tokens: int = Field(default=1_350_000, ge=1_000, le=100_000_000)
+    llm_shop_daily_budget_tokens: int = Field(default=450_000, ge=1_000, le=100_000_000)
     # v2 工具循环的五项上限（§6.10，PRD A2）。与上面 v1 的 `llm_max_calls_per_request`
     # 互不共享、互不校验：v1 的 10 按它自己的最坏路径精确配出，让 v2 公式去校验它，
     # 要么 v2 被迫压缩轮数，要么有人为了让校验通过去调大它，都会在不知情时改变 v1 行为。
@@ -216,6 +238,16 @@ class Settings(BaseSettings):
     # 仍然绝不进代码或构建产物。
     viewer_token: str | None = None
     knowledge_max_document_bytes: int = Field(default=262_144, ge=1, le=2_097_152)
+    # N4-C 混合检索（PRD A7，§6.14）。本地嵌入在 backend 进程内推理，不是 LLM 调用（R3 不适用）。
+    # 为空表示关闭向量召回：`search_rules` 只用关键词，并在来源上如实标注降级（R7）。
+    # 模型文件由镜像构建期下载到 `embedding_cache_dir`，运行时不访问外网。
+    embedding_model: str | None = None
+    embedding_cache_dir: str | None = None
+    embedding_threads: int = Field(default=1, ge=1, le=8)
+    # 向量召回的最低余弦相似度；与模型绑定。留空时取 `CALIBRATED_MIN_SIMILARITY` 里按 E5 评测
+    # 标定的值（docs/history/eval/rag-hybrid.md）；未标定的模型必须显式给出，否则启动失败——
+    # 沿用别的模型的阈值会让召回或拒答悄悄失准。
+    embedding_min_similarity: float | None = Field(default=None, ge=-1.0, le=1.0)
     export_signing_secret: str | None = None
     export_url_ttl_minutes: int = Field(default=15, ge=1, le=60)
 
@@ -236,6 +268,12 @@ class Settings(BaseSettings):
         if self.shop_origin is not None:
             origins.append(str(self.shop_origin).rstrip("/"))
         return origins
+
+    @field_validator("shop_origin", mode="before")
+    @classmethod
+    def blank_shop_origin_is_unset(cls, value: Any) -> Any:
+        # 只部署商家端时这个变量可能留空；空串等同未设置，CORS 只放行商家端。
+        return None if isinstance(value, str) and not value.strip() else value
 
     @field_validator("frontend_origin", "shop_origin", mode="before")
     @classmethod
@@ -279,6 +317,31 @@ class Settings(BaseSettings):
                 f"{floor} = AGENT_LOOP_MAX_TURNS {self.agent_loop_max_turns} "
                 f"+ COMPACTION_MAX_CALLS {self.compaction_max_calls} "
                 f"+ 2 × AGENT_LOOP_QUALITY_MAX_ATTEMPTS {self.agent_loop_quality_max_attempts} − 1"
+            )
+        return self
+
+    @field_validator(
+        "embedding_model", "embedding_cache_dir", "embedding_min_similarity", mode="before"
+    )
+    @classmethod
+    def blank_embedding_value_is_unset(cls, value: object) -> object:
+        # Railway / .env 里留空的变量是空串；对这几项来说空串就是「未设置」。
+        return None if isinstance(value, str) and not value.strip() else value
+
+    @property
+    def resolved_embedding_min_similarity(self) -> float:
+        if self.embedding_min_similarity is not None:
+            return self.embedding_min_similarity
+        return CALIBRATED_MIN_SIMILARITY.get((self.embedding_model or "").strip(), 1.0)
+
+    @model_validator(mode="after")
+    def enforce_calibrated_embedding_threshold(self) -> Settings:
+        model = (self.embedding_model or "").strip()
+        uncalibrated = model not in CALIBRATED_MIN_SIMILARITY
+        if model and self.embedding_min_similarity is None and uncalibrated:
+            raise ValueError(
+                f"EMBEDDING_MODEL={model} 没有标定过的相似度阈值，"
+                "须同时设置 EMBEDDING_MIN_SIMILARITY"
             )
         return self
 

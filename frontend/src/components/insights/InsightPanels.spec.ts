@@ -84,5 +84,35 @@ describe('MetricChartPanel', () => {
     // 图表标题（`chart.title`）是后端已本地化字段，原样透传，不由前端重译。
     expect(withChart.text()).toContain('类目成交 GMV')
   })
+
+  it('类型切换只提供后端声明且前端支持的图表类型，点击后摘要按新类型重算（PRD §12.3）', async () => {
+    const wrapper = mountWithI18n(MetricChartPanel, {
+      chart: { ...chartAnswer.chart, allowedTypes: ['BAR', 'PIE', 'RADAR'] },
+    })
+    const buttons = wrapper.get('[data-testid="chart-type-switcher"]').findAll('button')
+
+    // 后端声明了三种，前端不认识 RADAR：不提供它，也不自行加上后端没声明的折线图。
+    expect(buttons.map((button) => button.text())).toEqual(['柱状图', '饼图'])
+    // 默认取后端声明的第一种（柱状图）：摘要讲最高值，不讲占比。
+    expect(wrapper.get('[data-testid="chart-summary"]').text()).not.toContain('占比')
+
+    await buttons[1]!.trigger('click')
+
+    // 数据点没变（仍是查询结果里的两行），只是换了呈现与摘要口径。
+    expect(wrapper.get('[data-testid="chart-summary"]').text()).toContain('食品 占比 60.0%')
+    expect(wrapper.findAll('tbody tr')).toHaveLength(2)
+
+    await buttons[0]!.trigger('click')
+    expect(wrapper.get('[data-testid="chart-summary"]').text()).not.toContain('占比')
+  })
+
+  it('后端只声明一种类型时不显示类型切换（时间趋势固定为折线图）', () => {
+    const wrapper = mountWithI18n(MetricChartPanel, {
+      chart: { ...chartAnswer.chart, type: 'LINE', allowedTypes: ['LINE'] },
+    })
+
+    expect(wrapper.find('[data-testid="chart-type-switcher"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="chart-summary"]').text().length).toBeGreaterThan(0)
+  })
 })
 

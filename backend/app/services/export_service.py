@@ -320,7 +320,7 @@ def _localized_cell(value: str, locale: SupportedLocale) -> str:
 
 
 def _csv_value(value: object, locale: SupportedLocale) -> object:
-    if isinstance(value, str) and value[:1] in {"=", "+", "-", "@"}:
+    if isinstance(value, str) and value[:1] in {"=", "+", "-", "@", "\t", "\r", "\n"}:
         return "'" + value
     if value is None:
         return ""

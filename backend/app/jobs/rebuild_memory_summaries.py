@@ -8,6 +8,7 @@ from sqlalchemy import select
 
 from app.db.session import Database
 from app.memory.merchant_store import MerchantMemoryStore
+from app.memory.owners import MerchantMemoryOwner
 from app.models.memory_v2 import MerchantMemorySummary
 from app.models.merchant import Merchant
 
@@ -31,7 +32,9 @@ async def rebuild_once(database: Database, *, now: datetime, limit: int = 20) ->
             )
             if owner is None:
                 continue
-            await MerchantMemoryStore(session).rebuild_summaries(merchant_id=merchant_id, at=now)
+            await MerchantMemoryStore(
+                session, MerchantMemoryOwner.from_maintenance_row(merchant_id)
+            ).rebuild_summaries(at=now)
             rebuilt += 1
         await session.commit()
         return rebuilt

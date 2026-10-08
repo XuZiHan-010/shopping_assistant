@@ -26,12 +26,246 @@ pytestmark = pytest.mark.integration
 PATH = "/api/v2/shop/after-sales"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("locale", ["zh-CN", "en-US"])
+async def test_after_sale_tools_follow_display_language(postgres_app, postgres_client, locale):
+    import re
+
+    from app.localization.locales import SupportedLocale
+    from app.tools.customer.after_sale import (
+        CheckAfterSaleArgs,
+        PrepareAfterSaleArgs,
+    )
+    from app.tools.customer.after_sale import (
+        build_after_sale_tools as customer_tools,
+    )
+    from app.tools.merchant.after_sale import DraftAfterSaleDecisionArgs, ListAfterSalesArgs
+
+    headers, order_id = await setup_order(postgres_app, postgres_client)
+    database = database_of(postgres_app)
+    ctx = ToolContext(
+        session=SessionContext(
+            session_record_id=uuid4(),
+            role=SessionRole.CUSTOMER,
+            merchant_id=MERCHANT_ONE_ID,
+            buyer_key="demo-buyer-1",
+            shop_slug=SHOP,
+        ),
+        conversation_id=str(uuid4()),
+        request_id="localized-tools",
+        locale=SupportedLocale(locale),
+    )
+    tools = {tool.name: tool for tool in customer_tools(database)}
+    check = await tools["check_after_sale_eligibility"].executor(
+        ctx, CheckAfterSaleArgs(order_id=str(order_id))
+    )
+    preview = await tools["prepare_after_sale"].executor(
+        ctx, PrepareAfterSaleArgs(order_id=str(order_id), after_sale_type="REFUND_ONLY")
+    )
+    texts = [
+        check.summary,
+        check.payload["rule_ref"],
+        preview.summary,
+        preview.payload["rule_ref"],
+        preview.payload["next_step"],
+    ]
+    challenge = await postgres_client.post(PATH, headers=headers, json=request(order_id))
+    created = await postgres_client.post(
+        PATH,
+        headers=headers,
+        json=request(order_id, token=challenge.json()["confirmation_token"]),
+    )
+    assert created.status_code == 201
+    sale_id = created.json()["id"]
+    merchant_ctx = ToolContext(
+        session=SessionContext(
+            session_record_id=uuid4(),
+            role=SessionRole.MERCHANT,
+            merchant_id=MERCHANT_ONE_ID,
+            buyer_key=None,
+            shop_slug=None,
+        ),
+        conversation_id=str(uuid4()),
+        request_id="localized-merchant-tools",
+        locale=SupportedLocale(locale),
+    )
+    merchant_tools = {
+        tool.name: tool
+        for tool in build_after_sale_tools(database, alias_secret=b"test-alias-secret")
+    }
+    listed = await merchant_tools["list_after_sales"].executor(merchant_ctx, ListAfterSalesArgs())
+    detail = await merchant_tools["get_after_sale"].executor(
+        merchant_ctx, GetAfterSaleArgs(after_sale_id=sale_id)
+    )
+    draft = await merchant_tools["draft_after_sale_decision"].executor(
+        merchant_ctx, DraftAfterSaleDecisionArgs(after_sale_id=sale_id, decision="APPROVE")
+    )
+    texts.extend(
+        [
+            listed.summary,
+            detail.summary,
+            draft.summary,
+            listed.payload["items"][0]["buyer_alias"],
+            detail.payload["buyer_alias"],
+        ]
+    )
+    for text in texts:
+        assert bool(re.search(r"[\u4e00-\u9fff]", text)) == (locale == "zh-CN"), text
+    assert preview.payload["estimated_refund_cents"] == 10000
+
+
+@pytest.mark.asyncio
+async def test_missing_linked_ticket_returns_service_error(postgres_app, postgres_client):
+    from sqlalchemy import delete
+
+    _, sale_id = await confirmed_sale(postgres_app, postgres_client)
+    async with database_of(postgres_app).session() as session:
+        await session.execute(
+            delete(SupportTicket).where(SupportTicket.after_sale_id == UUID(sale_id))
+        )
+        await session.commit()
+    headers = await merchant_session_headers(postgres_client, MERCHANT_ONE_AUTH)
+    response = await postgres_client.get(f"/api/v2/merchant/after-sales/{sale_id}", headers=headers)
+    assert response.status_code == 503
+    assert response.json()["code"] == "DATA_SOURCE_UNAVAILABLE"
+    assert "ticket_id" not in response.json()
+
+
 async def setup_order(app: FastAPI, client: AsyncClient) -> tuple[dict[str, str], UUID]:
     database = database_of(app)
     product_id = await seed_product(database, MERCHANT_ONE_ID)
     order_id = await seed_paid_order(database, MERCHANT_ONE_ID, product_id, quantity=1)
     headers = await bound_customer(client, app, buyer_key="demo-buyer-1", shop_slug=SHOP)
     return headers, order_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("select_refunded_only", [True, False])
+async def test_refund_preview_handles_fully_refunded_line_and_mixed_lines(
+    postgres_app, postgres_client, select_refunded_only
+):
+    from decimal import Decimal
+
+    from app.models.analytics import Order, OrderItem, Refund
+    from app.tools.customer.after_sale import PrepareAfterSaleArgs
+    from app.tools.customer.after_sale import build_after_sale_tools as customer_tools
+    from app.tools.errors import GuardrailRejection
+
+    headers, order_id = await setup_order(postgres_app, postgres_client)
+    database = database_of(postgres_app)
+    now = datetime.now(UTC)
+    async with database.session() as session:
+        first = await session.scalar(select(OrderItem).where(OrderItem.order_id == order_id))
+        order = await session.get(Order, order_id)
+        second = OrderItem(
+            merchant_id=MERCHANT_ONE_ID,
+            business_date=now.date(),
+            order_id=order_id,
+            product_id=first.product_id,
+            quantity=1,
+            item_amount=Decimal("100"),
+            unit_price=Decimal("100"),
+            discount_amount=Decimal("0"),
+            line_total=Decimal("100"),
+        )
+        session.add(second)
+        order.paid_amount = order.total_amount = Decimal("200")
+        await session.flush()
+        first_id = str(first.id)
+        for item, amount in [(first, "100"), (second, "30")]:
+            session.add(
+                Refund(
+                    merchant_id=MERCHANT_ONE_ID,
+                    business_date=now.date(),
+                    order_item_id=item.id,
+                    refund_amount=Decimal(amount),
+                    refund_reason="PREVIOUS",
+                    refund_status="REFUNDED",
+                    refunded_at=now,
+                )
+            )
+        await session.commit()
+    selected = [first_id] if select_refunded_only else []
+    ctx = ToolContext(
+        session=SessionContext(
+            session_record_id=uuid4(),
+            role=SessionRole.CUSTOMER,
+            merchant_id=MERCHANT_ONE_ID,
+            buyer_key="demo-buyer-1",
+            shop_slug=SHOP,
+        ),
+        conversation_id=str(uuid4()),
+        request_id="refund-boundary",
+    )
+    tool = next(t for t in customer_tools(database) if t.name == "prepare_after_sale")
+    args = PrepareAfterSaleArgs(
+        order_id=str(order_id), after_sale_type="REFUND_ONLY", order_item_ids=selected
+    )
+    payload = {**request(order_id), "order_item_ids": selected}
+    if select_refunded_only:
+        with pytest.raises(GuardrailRejection) as rejected:
+            await tool.executor(ctx, args)
+        assert rejected.value.check.code == "ALREADY_REFUNDED"
+        response = await postgres_client.post(PATH, headers=headers, json=payload)
+        assert response.status_code == 422
+        assert response.json()["details"][0]["reason"] == "ALREADY_REFUNDED"
+    else:
+        preview = await tool.executor(ctx, args)
+        response = await postgres_client.post(PATH, headers=headers, json=payload)
+        assert response.status_code == 200
+        assert preview.payload["estimated_refund_cents"] == 7000
+        assert response.json()["summary"]["estimated_refund_cents"] == 7000
+    async with database.session() as session:
+        assert await session.scalar(select(func.count()).select_from(AfterSale)) == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid_kind", ["expired", "tampered"])
+@pytest.mark.parametrize("state_changed", [False, True])
+async def test_invalid_confirmation_is_neutral_even_after_state_change(
+    postgres_app, postgres_client, monkeypatch, invalid_kind, state_changed
+):
+    headers, order_id = await setup_order(postgres_app, postgres_client)
+    challenge = await postgres_client.post(PATH, headers=headers, json=request(order_id))
+    assert challenge.status_code == 200
+    token = challenge.json()["confirmation_token"]
+    if state_changed:
+        other = await postgres_client.post(
+            PATH, headers=headers, json=request(order_id, key="other")
+        )
+        created = await postgres_client.post(
+            PATH,
+            headers=headers,
+            json=request(order_id, key="other", token=other.json()["confirmation_token"]),
+        )
+        assert created.status_code == 201
+    if invalid_kind == "expired":
+        later = datetime.fromisoformat(challenge.json()["expires_at"]) + timedelta(seconds=1)
+
+        class Frozen(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return later if tz is None else later.astimezone(tz)
+
+        monkeypatch.setattr(shop_after_sales_route, "datetime", Frozen)
+    else:
+        body, signature = token.split(".")
+        token = body + "." + ("A" if signature[0] != "A" else "B") + signature[1:]
+    rejected = await postgres_client.post(
+        PATH, headers=headers, json=request(order_id, token=token)
+    )
+    assert rejected.status_code == 422
+    assert rejected.json()["code"] == "CONFIRMATION_REQUIRED"
+    async with database_of(postgres_app).session() as session:
+        assert await session.scalar(select(func.count()).select_from(AfterSale)) == int(
+            state_changed
+        )
+        consumed = await session.scalar(
+            select(func.count())
+            .select_from(OperationEvidenceNonce)
+            .where(OperationEvidenceNonce.consumed_at.is_not(None))
+        )
+        assert consumed == int(state_changed)
 
 
 def request(order_id: UUID, *, key: str = "sale-1", token: str | None = None) -> dict[str, object]:

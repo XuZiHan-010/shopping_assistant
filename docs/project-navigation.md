@@ -141,6 +141,8 @@ N1–N5 默认不创建通用 `worker/` 或对象存储；只有出现可量化�
 | 路径 | 阶段 | 职责 |
 | --- | --- | --- |
 | `frontend/src/views/KnowledgeBaseView.vue` | 现有 | 知识库维护后台；令牌仅内存持有，通过 `X-Admin-Token` 进入 |
+| `frontend/src/views/OpsStatusView.vue`、`components/ops/OpsStatusPanel.vue` | N5 已实现 | `/ops-status` 只读运维看板（D-N5-1）：三级预算、成本、限流与降级、工具错误率、路由 p95 与 Chat BI 概览。内容区挂在 `AdminGate` 插槽内，未持令牌不发 `/api/admin/*`；数据经 `api/adapters/adminOps.ts` → `types/opsStatus.ts` |
+| `frontend/src/components/shell/CustomerViewLink.vue` | N5 已实现 | 侧栏账号区上方的「顾客视角」入口（D-N5-4）：`VITE_SHOP_BASE_URL` + 会话响应里的 `shop_slug`，新标签打开，不带任何凭证；变量缺失或无会话时不渲染 |
 | `frontend/src/views/ApprovalView.vue` | N2 已实现 | `/approvals/:draftId` 草稿审批——商家端所有写操作的唯一出口；审批证据只存组件内存 |
 | `frontend/src/views/ApprovalListView.vue` | N3 阶段 C 已实现 | `/approvals` 草稿列表，按 `batch_id` 分组 + 勾选批准；批准整批时对每个勾选的子草稿依次签发新证据再应用，证据同样只存组件内存 |
 | `frontend/src/views/InventoryView.vue`、`stores/catalogOps.ts` | N3 阶段 C 扩展 | `/inventory` 库存告警、商品内容完整度及优惠券状态/优惠幅度；列表从 `api/adapters/merchantOps.ts` 接入 v2 游标接口 |
@@ -242,6 +244,8 @@ OpenAPI → api/generated.ts → api/adapters/*.ts → types/*.ts → Store → 
 | `frontend/scripts/check-no-mock-payload.mjs` | 阻止 mock 数据进入生产产物 |
 | `frontend/scripts/check-fixtures.mjs`、`sync-fixtures.mjs` | 前后端共享 fixture 的一致性 |
 | `frontend/scripts/mock-e2e-server.mjs`、`e2e-process.mjs` | e2e 的 mock 后端与进程管理 |
+| `frontend/src/build/dockerfile-args.spec.ts` | `env.d.ts` 里每个 `VITE_*` 变量都须在 `frontend/Dockerfile` 有 `ARG` 与 `ENV`（Railway 会静默丢弃未声明的构建参数） |
+| `frontend/playwright.compose.config.ts`、`e2e/compose/` | 本地 compose 全栈冒烟（真实镜像）：商家首页 → 「顾客视角」→ 顾客端快捷提问；不随默认 E2E 运行 |
 | `frontend/scripts/s3-e2e-server.mjs`、`playwright.s3.config.ts` | S3 浏览器验收：迁移 + 播种一次性库 → 脚本化模型后端（8012）→ Vite（5275）；`npm run test:e2e:s3` |
 | `backend/tests/support/e2e_s3_app.py`、`backend/scripts/seed_s3_e2e.py` | S3 验收的确定性后端入口（只替换模型，其余全真实）与种子；库名须 `*_s3_e2e_test` |
 | `backend/tests/support/e2e_n3_app.py`、`backend/scripts/seed_n3_e2e.py`、`frontend/e2e/n3/` | N3 S2/S5/S6/S7 双端浏览器验收：真实 API/PostgreSQL + 脚本化 Fake LLM；`frontend/playwright.n3.config.ts` 只接受一次性 `*_s3_e2e_test` 库 |
@@ -257,7 +261,7 @@ OpenAPI → api/generated.ts → api/adapters/*.ts → types/*.ts → Store → 
 | `shop/package.json`、`next.config.ts`、`tsconfig.json`、`eslint.config.mjs`、`vitest.config.ts` | 工程骨架（`output: 'standalone'`） |
 | `shop/Dockerfile`、`railway.json`、`.dockerignore` | 独立镜像，监听 `PORT`，健康检查 `/health`；构建期不读 `../docs` 与 `../frontend` |
 | `shop/scripts/check-generated.mjs`、`check-tokens.mjs`、`sync-tokens.mjs` | 类型 / token / logo 副本漂移检查与同步 |
-| `scripts/demo_product_images.py`、`backend/tests/unit/analytics/test_demo_product_images.py` | WS 商品图片转换与校验：23 张 800×800 WebP、每张 ≤200KB、06 刻意无图；Pillow 通过 `uv run --with pillow` 临时加载；原图未交付时 CLI 校验失败，资源测试明确挂起 |
+| `scripts/demo_product_images.py`、`backend/tests/unit/analytics/test_demo_product_images.py` | WS 商品图片转换与校验：24 张 800×800 WebP、每张 ≤200KB（2026-10-04 补上 06 号）；Pillow 通过 `uv run --with pillow` 临时加载；原图未交付时 CLI 校验失败，资源测试明确挂起 |
 | `shop/scripts/e2e-process.mjs` | E2E 子进程管理（参照商家端，不用 Playwright 自带 webServer） |
 | `shop/src/api/generated.ts` | codegen 产物，禁止手改 |
 | `shop/src/api/client.ts`、`errors.ts` | base URL 漏配响亮失败（不回退同源）、`ApiError` / `NetworkError` / `ApiConfigError` |
@@ -364,7 +368,7 @@ load_context → retrieve_knowledge_index → prefilter_question
 | `backend/app/skills/` | **已创建（N3 阶段 A–C）**：`spec.py`、`loader.py`、`registry.py`、`tool.py` 负责安全加载与受信通道；`app/eval/skill_cases.py` 校验用例。`customer/` 有 4 个导购/售后 Skill，`merchant/` 有经营 Skill 和 `customer-service-replies`；记忆 Skill 归 N4 | §6.11 | N3 |
 | `backend/app/memory/` | 双端记忆抽取、双重过滤、事实层 / 总结层 | §6.13 | N4 |
 | `backend/app/eval/` | 评测集、三层评分与关键安全集硬门禁 | §6.15 | N1 起 |
-| `backend/app/knowledge/`（扩展） | 混合召回 + pgvector + 索引原子切换 | §6.14 | N4 |
+| `backend/app/knowledge/`（扩展） | **已创建（N4-C）**：`embedding.py`（本地嵌入协议与 fastembed 懒加载实现）、`index_versions.py`（§7.6 索引版本状态机、单条 SQL 向量查询、验证探针 Recall 闸门）、`fusion.py`（RRF）、`probes/n4_e5_rag.yaml`（E5 评测集兼切换验证探针）；`retrieval.py` 的 `search_documents` 接受向量排名做融合；构建任务 `app/jobs/build_index.py` | §6.14 | N4 |
 
 截至 2026-09-24，`app/eval/`（N1 模块 E）、`app/tools/` 与 `app/agent/loop/`（N2 模块 A）、`app/skills/`（N3 阶段 A）已创建；
 `app/memory/` 仍是计划路径，目录不存在。知识库里被排除的目录名 `"指标或调用指标平台mcp的skill"` 与 `app/skills/` 无关，**不是实现**。
@@ -391,7 +395,7 @@ N4-A（2026-09-30）已落地：`app/agent/loop/compaction/`（`__init__.py` 策
 | `backend/app/intent/` | 结构化意图的模型、提示词、服务与白名单（`models.py` / `prompts.py` / `service.py` / `whitelist.py`） |
 | `backend/app/services/safe_query.py` | 白名单校验、查询路由和 SQL 模板 |
 | `backend/app/metrics/` | 指标目录、字段注释、报表 URL 与 seed |
-| `backend/app/knowledge/` | 业务域、路径策略、检索、版本与 wiki 导入 |
+| `backend/app/knowledge/` | 业务域、路径策略、检索（关键词 + 向量 RRF 混合）、索引版本、嵌入与 wiki 导入 |
 | `backend/app/services/answer_service.py` | 回答组织和不同模式分发 |
 | `backend/app/services/review_service.py`、`quality_loop.py`、`quality_types.py` | 独立质量审核与有限重试 |
 | `backend/app/services/visualization_service.py` | 确定安全的图表字段和类型 |
@@ -416,7 +420,18 @@ N4-A（2026-09-30）已落地：`app/agent/loop/compaction/`（`__init__.py` 策
 | `backend/scripts/llm_smoke.py` | 双协议**真实冒烟**脚本，**会产生费用（R3）**；默认只展示计划，`--yes` 才发请求；不属于默认测试套件，不得被 `app/` 或 `tests/` 导入 |
 | `backend/app/jobs/seed_demo_rolling.py` | 专用演示数据库的增量滚动 Seed；需显式写权限与商家集合精确匹配 |
 | `backend/app/jobs/chatbi_rollup.py` | Chat BI 日粒度汇总的幂等重刷 CLI |
-| `backend/app/jobs/purge_guest_provenance.py` | 清理过期且未绑定的访客会话留下的对话来源状态；Railway 配置 `backend/railway.provenance-cron.json`（Service 尚未创建） |
+| `backend/app/jobs/purge_guest_provenance.py` | 清理过期且未绑定的访客会话留下的对话来源状态；由 Cron 分发器每个业务日调用 |
+| `backend/app/jobs/run_scheduled.py` | **N5 Cron 统一分发器**：每 5 分钟运行一次，按 `scheduled_job_runs` 判断到期，事务级 advisory lock 防重叠，失败隔离、漏跑追赶；任务表与行为见 `docs/deployment.md`「cron 服务：统一分发器」。Railway 配置 `backend/railway.cron.json`（Service 尚未创建） |
+| `backend/app/jobs/purge_operation_evidence.py` | N5：清理过期的操作证据 nonce 及其售后确认摘要快照 |
+| `backend/app/mcp/` | **N5 MCP 只读入口**：`credentials.py`（凭证签发 / 校验 / 撤销，库里只存指纹）、`server.py`（协议头阶梯与分发，鉴权先于读正文）、`tools.py`（只读工具面投影与输出剥离）；路由 `api/routes/v2/merchant_mcp.py` |
+| `backend/scripts/mcp_credentials.py` | MCP 凭证命令行（issue / list / revoke）；不在 backend 镜像里，须在仓库检出中运行 |
+| `backend/app/llm/guard.py`、`budget_scope.py`、`pricing.py` | N5 三级预算（全局 / 角色 / 店铺，先查后发）与按价格版本计成本；价格行在 `model_price_versions`，只追加 |
+| `backend/app/eval/feedback_harvest.py` | N5 E6 线上反馈回流：把点踩与降级的回合脱敏、去重、归因后写成候选清单供人审阅；不写评测集，调优集与最终测试集按指纹互斥 |
+| `backend/app/services/v2/turn_metrics.py` | v2 两端对话回合的运维计数入口：整轮降级按原因码、单来源降级另计；路由装配时注入 `OperationalMetrics` |
+| `docs/specs/2026-10-04-n5-acceptance-matrix.md` | PRD §12 逐条验收矩阵（证据、状态、最近运行），附 E2E 缺口与裁定复核 |
+| `docs/history/eval/n5-full-report.md` | N5 全量评测报告：Fake / 探索性 / 真实三层分开陈述 |
+| `docs/demo-script.md`、`docs/specs/2026-10-04-v1-retirement-readiness.md` | S1–S8 演示脚本；v1 退役就绪清单与弃用公告草稿 |
+| `backend/scripts/audit_routes.py` | N5 路由覆盖对账：PRD §11.2 × 应用真实路由表（v2 缺 0 多 0、v1 全在、附件端点不存在）；`uv run python -m scripts.audit_routes` |
 | `backend/app/services/attachment_service.py` | **不存在/不规划**；附件解析已延期 |
 
 ### 5.5 数据库和 Repository
@@ -506,8 +521,14 @@ N1 需要为会话、角色、订单/售后事件、库存、草稿审批与索�
 [N1 计划] customer_memories / merchant_memory_facts / merchant_memory_summaries / customer_signals / daily_briefs   # M6
 [N1 计划] after_sales / after_sale_lines；refunds / returns / support_tickets 加 after_sale_id   # M7
 [N1 计划] idempotency_records                            # M8，v2 幂等五元组唯一域（契约 §8.7.3）
-[N4 计划] 索引版本与 pgvector 表
+[N4 已实现] knowledge_index_versions / knowledge_chunks / knowledge_index_state   # 迁移 0047，pgvector
+[N5 已实现] mcp_credentials                             # 迁移 0048；只存凭证指纹，按 merchant_id 隔离
+[N5 已实现] llm_daily_budget.scope_key                  # 迁移 0049；全局 / 角色 / 店铺三级
+[N5 已实现] model_price_versions；llm_usage 成本与价格版本列   # 迁移 0050；价格表只追加
+[N5 已实现] scheduled_job_runs                          # 迁移 0051；Cron 分发器任务状态，系统级
 ```
+
+N1–N5 各表的约束与用途见 `docs/database.md`；上面标「N1 计划」的表族均已随 N1–N4 落地，本清单只作导航。
 
 附件表与真实账号密码用户表均不在当前范围。N1 会话表只承载演示顾客/商家会话与不可变角色边界，
 不应被扩写成 SSO 用户体系。
@@ -531,6 +552,8 @@ backend/tests/integration/v2/test_draft_dispatch_db.py     # 分派经真实路�
 backend/tests/integration/tools/ # 闸门接真实来源状态与审计仓储
 backend/tests/eval/baseline_comparison.py # N2 新循环与冻结基线结构对照（Fake LLM），生成 docs/history/eval/n2-baseline-comparison.md
 backend/tests/eval/test_n4_compaction_e5_fake.py # N4-A：E5 压缩评测结构校验（两策略四项保持率，Fake LLM）
+backend/tests/eval/test_n4_compaction_e5_model.py # N4-A：压缩真实对比的 Fake 演练（调用次数、判分规则）
+backend/tests/eval/test_n4_rag_baseline.py # N4-C：E5 RAG 关键词基线（评测集结构、Recall/MRR/nDCG、诊断上限）
 backend/tests/integration/v2/test_chat_compaction.py # N4-A：压缩在两端 Chat 中可见（SSE step 与 thinking_steps）
 backend/tests/unit/schemas/v2/test_merchant_overview_orders.py  # W：§8.12.4 指标总览与商家订单 Schema 约束
 backend/tests/unit/services/v2/test_metrics_overview.py         # W：周期、归因合计、分项降级、不调用 LLM
@@ -594,13 +617,14 @@ Playwright glob 里 `?` 是单字符通配，查询串路由写 `conversations*`
 | `plans/2026-09-22-n2-module-roadmap.md` | **N2 总览**：模块 0 与 A–F（工具循环、交易闭环、草稿与库存、会话目录与反馈、商家端 Vue 迁移、顾客端 Next.js）的划分、依赖、难度、出口标准与已知缺口；不含实施步骤 |
 | `plans/2026-09-24-n3-module-roadmap.md` | **N3 总览**：阶段 0 与 A–C（A Skill 底座：加载器、`load_skill` 受信通道、草稿按种类分派；B 售后闭环与顾客 Skill，收口 S4；C 商家经营 Skill，收口 S2、S5、S6、S7）的划分、依赖、难度与出口标准；三份 N3 实施计划 `n3-skill-loader` / `n3-customer-skills-and-after-sales` / `n3-merchant-skills` 分别对应 A / B / C；不含实施步骤 |
 | `plans/2026-09-27-n4-module-roadmap.md` | **N4 总览**：阶段 0 与 A–C（A 上下文与压缩，含多轮历史回放；B 双端记忆，含 outbox 异步管线与两端记忆界面；C 混合检索，含 pgvector 与索引原子切换）的划分、依赖、难度、费用点与出口标准；三份 N4 实施计划 `n4-context-compaction` / `n4-memory-pipeline` / `n4-hybrid-retrieval` 分别对应 A / B / C；裁定记录 D-N4-1–D-N4-3（2026-09-28 采纳推荐方案）；不含实施步骤 |
-| `plans/2026-09-27-n5-module-roadmap.md` | **N5 总览**：阶段 0 与 A–D（A MCP 只读，收口 S8；B 预算、成本与可观测；C Cron 与 Railway 部署；D 全量评测与收口）的划分、依赖、费用与生产变更点、出口标准，及 N1–N5 路线完成定义；`n5-budget-ops-and-railway` 拆给 B（Task 1–3）与 C（Task 4–7）；裁定记录 D-N5-1–D-N5-3（2026-09-28 采纳推荐方案）；不含实施步骤 |
+| `plans/2026-09-27-n5-module-roadmap.md` | **N5 总览**：阶段 0 与 A–D（A MCP 只读，收口 S8；B 预算、成本与可观测；C Cron 与 Railway 部署；D 全量评测与收口）的划分、依赖、费用与生产变更点、出口标准，及 N1–N5 路线完成定义；`n5-budget-ops-and-railway` 拆给 B（Task 1–3）与 C（Task 4–7）；裁定记录 D-N5-1–D-N5-3（2026-09-28 采纳推荐方案）与 D-N5-4（2026-10-02 单入口演示，新增阶段 E）；2026-10-02 按 N4 收尾后的实际拓扑修订（外部 Neon、Railway 四服务、Opus 单会话执行），合计 80 步；不含实施步骤 |
+| `plans/2026-10-02-n5-single-entry.md` | **N5 阶段 E · 单入口演示**（D-N5-4）：商家会话响应补 `shop_slug`、商家端侧栏「顾客视角」新标签打开本店顾客端（只是链接，不传凭证）、顾客端快捷提问覆盖五个顾客 Skill 与规则问答；12 步 |
 | `plans/2026-09-28-merchant-workbench-redesign.md` | **W · 商家工作台界面重设计**实施计划（PRD §15「W」，2026-09-28 用户裁定，插在 N4 剩余前端任务之前）：<br>- 三条商家只读路径（`metrics/overview`、`orders`、`orders/{order_id}`，契约 §8.12.4）；<br>- 新外壳与助手栏、管理分组与管理员令牌入口、首页、订单页与商品页，其余页面迁入外壳；<br>- §三列出与 N4、N5 各任务的冲突规则。<br>设计说明 `docs/specs/2026-09-28-merchant-workbench-ui-design.md`；定稿原型 `frontend/prototypes/borough-merchant-redesign.html` |
 | `plans/2026-09-28-shop-storefront-redesign.md` | **WS · 顾客端店面重设计**实施计划（2026-09-28 用户定稿；PRD §15「WS」已同步）：智能助手首页、右侧常驻购物车、订单视图、动态抽屉、偏好设置；后端增量包括热门排序、商品缺失属性、订单摘要首件商品与最近更新时间、只读工具 `get_my_order`，演示商品换成真实名与图片。前端外壳依赖 W Task 5，现已解锁。规格见 `docs/specs/2026-09-28-shop-storefront-ui-design.md` |
 | `plans/2026-09-22-n2-assignment-and-review.md` | **N2 分工与 Astra 审查排期**（2026-09-22 已确认）：各模块实现模型（A、C Opus；B Sol；D、E Sonnet；F Codex Terra）、N2-1–N2-8 的证据要求与审查批次；不含实施步骤 |
 | `plans/2026-09-24-n3-assignment-and-review.md` | **N3 分工与 Astra 审查排期**（2026-09-24 建立，待排期）：各阶段实现模型（A、C Opus；B Sol；前端补全 Sonnet + Terra，沿用各自在 N2 建立的地基）、N3-1–N3-5 的证据要求与审查批次；不含实施步骤 |
 | `plans/2026-09-27-n4-assignment-and-review.md` | **N4 分工与 Astra 审查排期**（2026-09-27 拟定，待用户确认）：A Opus；B 后端 Sol、顾客记忆页 Terra、商家记忆面板 Sonnet；C Sonnet；N4-1–N4-4 的证据要求与审查批次；不含实施步骤 |
-| `plans/2026-09-27-n5-assignment-and-review.md` | **N5 分工与 Astra 审查排期**（2026-09-27 拟定，待用户确认）：A Opus；B Sonnet；C Sol（生产操作逐项经用户同意）；D Task 1–6 Sonnet、Task 7–9 Opus；N5-1–N5-5 的证据要求与审查批次；不含实施步骤 |
+| `plans/2026-09-27-n5-assignment-and-review.md` | **N5 分工与 Astra 审查排期**（2026-10-02 用户确认：Opus 单会话实现，各批次由独立子代理审查；原多模型分工表保留作参考）；N5-1–N5-5 的证据要求与审查批次；不含实施步骤 |
 | `plans/2026-09-20-n1-v2-contract-freeze.md` | N1 模块 A（v2 契约）实施计划，已完成 |
 | `plans/2026-09-21-n1-llm-client-and-adapters.md` | N1 模块 B（LLM 客户端与双协议适配）实施计划 |
 | `plans/2026-09-21-n1-data-migration-and-seeds.md` | N1 模块 C（数据迁移与确定性种子）实施计划 |
@@ -628,7 +652,7 @@ N1 审查整改记录：`plans/2026-09-22-n1-review-remediation.md`。自动验�
 安全评测语言传递与真实错误响应验证见 `backend/tests/eval/test_security_locale.py`；
 实际被测对象登记、阶段配额和端点分层的反向验证见 `backend/tests/eval/test_security_gate_guards.py`。
 
-`plans/` **不是空目录**，当前有 53 份计划，其中 N1–N5 新路线实施计划 20 份（不含总览），W（商家工作台界面重设计）与 WS（顾客端店面重设计）实施计划各 1 份，另有 N1 总览 `2026-09-21-n1-module-roadmap.md`、N2 总览 `2026-09-22-n2-module-roadmap.md`、N3 总览 `2026-09-24-n3-module-roadmap.md`、N4 总览 `2026-09-27-n4-module-roadmap.md`、N5 总览 `2026-09-27-n5-module-roadmap.md`、N2 分工与审查排期 `2026-09-22-n2-assignment-and-review.md`、N3 分工与审查排期 `2026-09-24-n3-assignment-and-review.md`、N4 分工与审查排期 `2026-09-27-n4-assignment-and-review.md`、N5 分工与审查排期 `2026-09-27-n5-assignment-and-review.md` 各 1 份、
+`plans/` **不是空目录**，当前有 54 份计划，其中 N1–N5 新路线实施计划 21 份（不含总览；含 2026-10-02 新增的 N5 阶段 E `2026-10-02-n5-single-entry.md`），W（商家工作台界面重设计）与 WS（顾客端店面重设计）实施计划各 1 份，另有 N1 总览 `2026-09-21-n1-module-roadmap.md`、N2 总览 `2026-09-22-n2-module-roadmap.md`、N3 总览 `2026-09-24-n3-module-roadmap.md`、N4 总览 `2026-09-27-n4-module-roadmap.md`、N5 总览 `2026-09-27-n5-module-roadmap.md`、N2 分工与审查排期 `2026-09-22-n2-assignment-and-review.md`、N3 分工与审查排期 `2026-09-24-n3-assignment-and-review.md`、N4 分工与审查排期 `2026-09-27-n4-assignment-and-review.md`、N5 分工与审查排期 `2026-09-27-n5-assignment-and-review.md` 各 1 份、
 跨阶段审查清单 `2026-09-22-astra-checklist.md` 1 份；执行顺序与依赖见该总览与 `docs/project-progress.md` §四。其余为已完成或已登记状态的历史计划。开工前先查是否已有覆盖同一范围的计划。
 
 ---
@@ -663,6 +687,18 @@ MVP 从 0 到 1 按以下顺序建成。**这是历史记录，不是待办清�
 ---
 
 ## 十、维护本文件
+
+当前阶段验收入口：
+
+| 文件 | 作用 |
+| --- | --- |
+| `docs/history/eval/n1-n4-acceptance-2026-10-03.md` | N1–N4 真实评测的冻结口径、费用范围与边界 |
+| `docs/history/eval/n1-n4-acceptance-2026-10-03.sha256.json` | 运行前须核对的样本、代码与口径哈希 |
+| `docs/history/eval/n1-n4-acceptance-results-2026-10-03.md` | 本轮实际结果、失败原因与未完成项 |
+| `docs/history/eval/n1-n4-acceptance-2026-10-04.md` | 执行防护整改、跨日批次预算、真实评测命令与待复核边界 |
+| `docs/history/eval/n1-n4-acceptance-2026-10-04.sha256.json` / `n1-n4-acceptance-source-2026-10-04.zip` | 新版候选冻结与源码快照；须完成末次补丁独立复核后才能用于真实评测 |
+| `backend/app/eval/n3_quality_acceptance.py` | Skill 首次选择与随单摘要人工质量验收，真实模式须 R3 授权 |
+| `backend/app/localization/after_sales.py` | 顾客/商家售后工具确定性双语文案 |
 
 出现以下情况更新本文件：创建或删除一级目录；移动关键入口文件；新增数据库或外部服务；
 修改 Agent 节点顺序；`[规划]` 路径正式落地。

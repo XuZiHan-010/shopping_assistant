@@ -23,7 +23,7 @@
 | `inventory_events`、`fulfillment_events`、`after_sale_events` | 按商家隔离的追加写事件账本；`dedupe_key` 唯一，数据库触发器拒绝 UPDATE / DELETE |
 | `drafts`、`change_ledger` | 按商家隔离的待批准草稿与已应用变更记录；批准不保存为草稿状态 |
 | `coupons`、`guardrail_configs` | 按商家隔离的促销券与定价护栏 |
-| `customer_memories` | `merchant_id + buyer_key` 双键隔离的顾客记忆 |
+| `customer_memories` | `merchant_id + buyer_key` 双键隔离的顾客记忆；唯一键 `(merchant_id, buyer_key, category, key)`（2026-10-01 迁移 `20261001_0046` 加入 `category`，同类同 key 更新、不同类不互相覆盖） |
 | `merchant_memory_facts`、`merchant_memory_summaries` | 按商家隔离的事实层与摘要层；事实必须有来源 |
 | `customer_signals` | 按商家隔离的顾客信号；`CONTENT_GAP` 表示商品内容缺口，不保存顾客提问原文 |
 | `daily_briefs` | 按商家和营业日唯一的当日简报 |
@@ -52,6 +52,36 @@ Chat BI 汇总及本地化表继续保留。`agent_sessions` 与来源状态表�
 迁移 `20260928_0043` 为商家事实增加可空 `deleted_at` 墓碑，以区分「重复删除本人事实」与「目标不存在/跨商家」；事实列表、总结重建和召回均排除墓碑。总结表增加 `(merchant_id, category)` 唯一约束，保证每类一份文档。
 
 outbox 领取使用 `FOR UPDATE SKIP LOCKED`；任务租约到期后允许重新领取，完成写入以消息 ID 幂等。180 天顾客记忆过期在读取路径判断，清理 Cron 迟跑不能延长可召回期限。
+
+## N4 C 知识索引版本
+
+迁移 `20261002_0047` 启用 `vector` 扩展（`CREATE EXTENSION IF NOT EXISTS vector`；外部 Neon 与本地
+`pgvector/pgvector:pg16` 均为 0.8.6），并新增三张表实现 PRD §7.6 的版本化原子切换。团队知识对所有商家一致，
+三张表都不含 `merchant_id`，也不含任何商家数据或记忆。
+
+| 表 / 列 | 约束与用途 |
+| --- | --- |
+| `knowledge_index_versions` | 每次构建一行，`id` 即版本号（自增）。`status` 只取 `BUILDING` / `VALIDATING` / `READY` / `FAILED`——「生效」不是状态而是指针；`failure_reason` 为稳定原因码，与 `FAILED` 成对（检查约束），不存异常原文。另存嵌入模型名、维度、语料指纹（按文档路径与内容哈希）、文档/分块数、本版本与上一生效版本的验证 Recall@5。部分唯一索引 `uq_knowledge_index_versions_single_build`（`WHERE status IN ('BUILDING','VALIDATING')`）保证同一时刻至多一个构建；崩溃遗留的构建行超过 30 分钟在下次构建前回收为 `BUILD_TIMEOUT` |
+| `knowledge_chunks` | 按版本写入的分块与向量；`version_id` 外键级联删除；`(version_id, source_path, chunk_index)` 唯一。`embedding` 为**不带维度**的 `vector`：语料只有几十块，查询精确扫描，不建 ANN 索引；换模型时新版本可直接写入不同维度。**从不 `UPDATE`**：切换后只 `DELETE` 更早版本的分块（保留生效版本与上一版），版本行保留作历史 |
+| `knowledge_index_state` | 单行指针（`id = 1` 检查约束）：`active_version_id`（外键 `RESTRICT`）、`stale` 与 `stale_reason`（`BUILD_FAILED` / `CORPUS_CHANGED`，与 `stale` 成对）。原子切换只在一个事务里改这一行；知识后台写文档时在同一事务把它标陈旧 |
+
+查询用一条 SQL 同时连接指针、版本与分块（并要求模型名与维度一致），READ COMMITTED 下单条语句只看到一个快照，
+所以一次检索不会混合新旧版本。分块正文只用于排序，返回给模型的正文始终取自当前 `knowledge_documents`。
+
+## N5 MCP 凭证、三级预算、价格版本与 Cron 状态
+
+四条迁移都是纯新增，接在 `20261002_0047` 之后，唯一 head 为 `20261004_0051`。
+
+| 迁移 | 表 / 列 | 约束与用途 |
+| --- | --- | --- |
+| `20261003_0048` | `mcp_credentials` | MCP 只读凭证（PRD A8）。只存凭证的 SHA-256 指纹（`token_fingerprint` 唯一），不存原值；`merchant_id` 外键级联删除；`scopes` 为非空 JSONB 数组；`expires_at > created_at`；`revoked_at` 非空即已撤销。签发、撤销只经 `backend/scripts/mcp_credentials.py`，没有 HTTP 路径 |
+| `20261003_0049` | `llm_daily_budget.scope_key` | 每日预算按级别分行：`GLOBAL`、`ROLE:CUSTOMER` / `ROLE:MERCHANT`、`SHOP:<角色>:<merchant_id>`；唯一约束由 `(usage_date)` 改为 `(usage_date, scope_key)`。历史行默认 `GLOBAL`。预留额度时三级在同一事务里全有或全无 |
+| `20261003_0050` | `model_price_versions` | 模型价格版本：高峰 / 非高峰 × 缓存命中 / 未命中 / 输出共六个单价（每百万 token）、`currency`、`effective_from`、`source_note`；`(model, effective_from)` 唯一。`BEFORE UPDATE OR DELETE` 触发器强制**只追加**——价格变动新增一行，不改旧行。初始两行为 2026-10-03 核实的 `deepseek-flash` 与 `deepseek-v4-pro` 官方价格 |
+| `20261003_0050` | `llm_usage` 新列 | `role`、`cache_hit_tokens`、`price_version_id`、计价时段与成本列。成本在**写入时**按当时生效的价格版本算好并存储，查询不重算；历史行这些列为 `NULL`（未定价），不按新价格回算 |
+| `20261004_0051` | `scheduled_job_runs` | Cron 分发器的任务状态，每个任务一行：`job_name` 主键、`last_slot`（最近一次成功的时间片起点，失败不推进）、`last_status`（`OK` / `FAILED`）、`last_error`（只存异常类别）、`last_run_at`、`run_count` |
+
+`mcp_credentials` 按 `merchant_id` 隔离。`llm_daily_budget`、`model_price_versions`、`scheduled_job_runs` 是系统级表，
+不含经营数据，没有 `merchant_id`；`llm_daily_budget` 的店铺级行只在 `scope_key` 里带商家 ID，运维接口对外只给它的脱敏摘要。
 
 ## N3 B 售后闭环
 

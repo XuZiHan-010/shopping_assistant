@@ -70,6 +70,20 @@ def test_random_set_is_reported_but_not_gating() -> None:
     assert rendered.gate_passed is True
 
 
+@pytest.mark.parametrize(
+    ("passed", "interval"),
+    [(True, "20.7%–100.0%"), (False, "0.0%–79.3%")],
+)
+def test_random_set_single_sample_interval_exposes_uncertainty(
+    passed: bool, interval: str
+) -> None:
+    report = DatasetReport(
+        security_results=[CaseReportEntry(case_id="SEC-001", passed=True)],
+        random_attack_results=[CaseReportEntry(case_id="RAND-001", passed=passed)],
+    )
+    assert interval in render_report(report).text
+
+
 def test_quality_metrics_render_only_when_present() -> None:
     report = DatasetReport(
         security_results=[CaseReportEntry(case_id="SEC-CROSS-001", passed=True)],
@@ -140,3 +154,32 @@ def test_json_redaction_preserves_public_diagnostics() -> None:
 
 def test_empty_security_results_cannot_pass_gate() -> None:
     assert render_report(DatasetReport(security_results=[])).gate_passed is False
+
+
+def test_report_entries_carry_the_request_id_for_tracing() -> None:
+    # PRD §10.4：追踪 ID 贯穿到评测报告条目，失败用例能据此查到 `llm_usage` 与审计行。
+    rendered = render_report(
+        DatasetReport(
+            security_results=[
+                CaseReportEntry(
+                    case_id="SEC-CROSS-001",
+                    passed=False,
+                    failure_detail="期望 403，实得 200",
+                    request_id="eval-SEC-CROSS-001-t0",
+                ),
+                CaseReportEntry(case_id="SEC-CROSS-002", passed=True, request_id="eval-ok-t0"),
+            ]
+        )
+    )
+
+    assert "- SEC-CROSS-001：失败（追踪 ID eval-SEC-CROSS-001-t0）" in rendered.text
+    assert "- SEC-CROSS-002：通过（追踪 ID eval-ok-t0）" in rendered.text
+
+
+def test_report_entry_without_request_id_renders_as_before() -> None:
+    rendered = render_report(
+        DatasetReport(security_results=[CaseReportEntry(case_id="SEC-CROSS-002", passed=True)])
+    )
+
+    assert "- SEC-CROSS-002：通过" in rendered.text
+    assert "追踪 ID" not in rendered.text

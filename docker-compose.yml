@@ -1,6 +1,8 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    # 带 pgvector 的 PostgreSQL 16（N4-C 混合检索，PRD A7）；主版本与原 postgres:16-alpine 一致。
+    # 新镜像基于 Debian（glibc），与 Alpine（musl）排序规则不同，故改用新数据卷，旧卷 borough_postgres_data 保留不删。
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_DB: borough_test
       POSTGRES_USER: borough
@@ -13,29 +15,52 @@ services:
       timeout: 3s
       retries: 20
     volumes:
-      - borough_postgres_data:/var/lib/postgresql/data
+      - borough_postgres_pgvector_data:/var/lib/postgresql/data
 
+  # backend、migrate、cron 默认连 borough_test。它同时是 pytest 的默认测试库，跑测试会清空它；
+  # 要保留一份本地演示数据时，先建一个库再用 COMPOSE_DB_NAME 指过去，例如：
+  #   docker compose exec postgres createdb -U borough borough_compose_demo
+  #   COMPOSE_DB_NAME=borough_compose_demo docker compose up -d
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      args:
+        # N4-C 选定的嵌入模型（2026-10-02 用户裁定，中文场景为主）；构建期下载进镜像。
+        EMBEDDING_MODEL: BAAI/bge-small-zh-v1.5
     environment:
+      # 与构建参数保持一致；阈值留空取标定值 0.575。本地推理，不是 LLM 调用。
+      EMBEDDING_MODEL: BAAI/bge-small-zh-v1.5
       APP_ENV: development
       APP_VERSION: 0.1.0
-      DATABASE_URL: postgresql+psycopg://borough:borough_local@postgres:5432/borough_test
+      DATABASE_URL: postgresql+psycopg://borough:borough_local@postgres:5432/${COMPOSE_DB_NAME:-borough_test}
       FRONTEND_ORIGIN: http://localhost:5173
+      # 顾客端的精确 Origin（PRD §10.7）；与下面 shop 服务映射的端口一致。
+      SHOP_ORIGIN: http://localhost:3000
       BUSINESS_TIMEZONE: Asia/Shanghai
       DEMO_MERCHANT_TOKENS: >-
         {"merchant-100-token":"00000000-0000-0000-0000-000000000001",
         "merchant-101-token":"00000000-0000-0000-0000-000000000002",
         "merchant-102-token":"00000000-0000-0000-0000-000000000003"}
       DEMO_MERCHANTS_ENDPOINT_ENABLED: "true"
+      # 顾客端「绑定演示顾客」需要这两项：部署开关，加上各店铺的演示 buyer_key。
+      # 取值与 scripts/seed_demo_scenarios.py 生成场景订单时用的 buyer_key 一致，绑定后才看得到订单与售后。
+      DEMO_DEPLOYMENT_MODE: "true"
+      DEMO_CUSTOMER_IDENTITIES: >-
+        {"borough-demo-100":"borough-demo-buyer-0001",
+        "borough-demo-101":"borough-demo-buyer-0002",
+        "borough-demo-102":"borough-demo-buyer-0003"}
       PORT: "8000"
     ports:
       - "8000:8000"
+      # 顾客端与 backend 共用网络命名空间（见 shop 服务的说明），它的 3000 端口要在这里发布。
+      - "3000:3000"
     depends_on:
       postgres:
         condition: service_healthy
+      # 迁移先跑完再起服务：对应 Railway 发布阶段的 preDeployCommand，backend 进程自己不迁移。
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       test:
         [
@@ -48,5 +73,74 @@ services:
       timeout: 3s
       retries: 5
 
+  # 发布阶段迁移（本地等价物）：一次性执行 `alembic upgrade head` 后退出。
+  # 不带嵌入模型构建参数，镜像不含模型层；迁移只需要连库。
+  migrate:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["python", "-m", "alembic", "upgrade", "head"]
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgresql+psycopg://borough:borough_local@postgres:5432/${COMPOSE_DB_NAME:-borough_test}
+      FRONTEND_ORIGIN: http://localhost:5173
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  # 统一 Cron 分发器（PRD §10.7）：与 Railway 的 cron 服务一样，跑一次就退出；
+  # `docker compose run --rm cron` 相当于平台触发一次调度。只给连库所需的变量：
+  # 不配 LLM_API_KEY（记忆抽取标 DISABLED）、不配 EMBEDDING_MODEL、不开演示数据写权限。
+  cron:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["python", "-m", "app.jobs.run_scheduled"]
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgresql+psycopg://borough:borough_local@postgres:5432/${COMPOSE_DB_NAME:-borough_test}
+      BUSINESS_TIMEZONE: Asia/Shanghai
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"
+    profiles: ["cron"]
+
+  # 顾客端（Next.js standalone）。NEXT_PUBLIC_* 在构建期内联，指向浏览器可达的 backend 地址。
+  shop:
+    build:
+      context: ./shop
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+        NEXT_PUBLIC_DEFAULT_SHOP_SLUG: borough-demo-100
+    # 顾客端有服务端取数（SSR），与浏览器用的是同一个构建期内联的 backend 地址。线上那是 backend 的
+    # 公网域名，两边都能访问；本地是 http://localhost:8000，容器里的 localhost 却是容器自己。
+    # 让 shop 共用 backend 的网络命名空间，容器内的 localhost:8000 就是 backend，不必为本地另造一个地址变量。
+    network_mode: "service:backend"
+    environment:
+      PORT: "3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  # 商家端（Vite 构建 → Caddy 静态托管）。VITE_SHOP_BASE_URL 让侧栏出现「顾客视角」入口（D-N5-4）。
+  merchant:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: http://localhost:8000
+        VITE_SHOP_BASE_URL: http://localhost:3000
+        VITE_USE_MOCK: "false"
+    environment:
+      PORT: "80"
+    ports:
+      - "5173:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
 volumes:
-  borough_postgres_data:
+  borough_postgres_pgvector_data:

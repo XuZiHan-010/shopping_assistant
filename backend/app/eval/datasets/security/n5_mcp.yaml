@@ -1,0 +1,93 @@
+# N5 A：MCP 只读入口（PRD A8、SEC12；契约 §8.14.3）。
+#
+# 端点级门禁：浏览器商家会话（X-Session-Id）不是 MCP 凭证，带着它调用 MCP 入口必须在解析正文前 401，
+# 且不留下任何凭证记录。凭证撤销后的即时失效（S8）由标准客户端集成测试
+# `tests/integration/mcp/test_standard_client.py` 端到端证明。
+
+- id: SEC-N5MCP-001
+  introduced_in: N5
+  role: MERCHANT
+  skill: mcp-readonly
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/merchant/mcp
+        json:
+          jsonrpc: "2.0"
+          id: 1
+          method: tools/list
+          params:
+            _meta:
+              io.modelcontextprotocol/protocolVersion: "2026-07-28"
+              io.modelcontextprotocol/clientCapabilities: {}
+  assertions:
+    - {type: http_status, expected: 401}
+    - {type: no_side_effect, table: mcp_credentials}
+
+# S8 撤销即时失效：先用原语写入一枚**已撤销**的凭证（原值只进用例 state），再以匿名身份带它调用 → 401。
+# 003 是对照组：同样方式写入未撤销的凭证，同一请求得到 200——证明 002 的 401 来自撤销而不是请求本身有误。
+- id: SEC-N5MCP-002
+  introduced_in: N5
+  role: MERCHANT
+  skill: mcp-readonly
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: merchant_a
+      primitive:
+        name: mcp.seed_credential
+        args: {revoked: true, state_key: mcp_token}
+    - actor: anonymous
+      request:
+        method: POST
+        path: /api/v2/merchant/mcp
+        headers:
+          Authorization: "Bearer {state:mcp_token}"
+          MCP-Protocol-Version: "2026-07-28"
+          Mcp-Method: tools/list
+        json:
+          jsonrpc: "2.0"
+          id: 1
+          method: tools/list
+          params:
+            _meta:
+              io.modelcontextprotocol/protocolVersion: "2026-07-28"
+              io.modelcontextprotocol/clientCapabilities: {}
+  assertions:
+    - {type: http_status, expected: 401}
+
+- id: SEC-N5MCP-003
+  introduced_in: N5
+  role: MERCHANT
+  skill: mcp-readonly
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: merchant_a
+      primitive:
+        name: mcp.seed_credential
+        args: {revoked: false, state_key: mcp_token}
+    - actor: anonymous
+      request:
+        method: POST
+        path: /api/v2/merchant/mcp
+        headers:
+          Authorization: "Bearer {state:mcp_token}"
+          MCP-Protocol-Version: "2026-07-28"
+          Mcp-Method: tools/list
+        json:
+          jsonrpc: "2.0"
+          id: 1
+          method: tools/list
+          params:
+            _meta:
+              io.modelcontextprotocol/protocolVersion: "2026-07-28"
+              io.modelcontextprotocol/clientCapabilities: {}
+  assertions:
+    - {type: http_status, expected: 200}

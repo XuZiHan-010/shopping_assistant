@@ -16,6 +16,25 @@ from app.services.export_service import ExportService
 from app.services.safe_query import ExportSpec
 
 
+@pytest.mark.parametrize("locale", list(SupportedLocale))
+@pytest.mark.parametrize("value", ["=1+1", "+1", "-1", "@SUM(A1)", "\t=1+1", "\r=1+1", "\n=1+1"])
+def test_csv_roundtrip_neutralizes_formula_and_control_prefixes(value, locale) -> None:
+    import csv
+    import io
+
+    from app.services.export_service import _to_csv
+
+    result = DetailResult(
+        columns=(ResultColumn("order_no", "订单号", "DIMENSION"),),
+        rows=[{"order_no": value}, {"order_no": "ORD-1"}, {"order_no": -12}],
+        total_rows=3,
+        truncated=False,
+        source_tables=("orders",),
+    )
+    rows = list(csv.reader(io.StringIO(_to_csv(result, locale).lstrip("\ufeff"))))
+    assert rows[1:] == [["'" + value], ["ORD-1"], ["-12"]]
+
+
 @dataclass
 class _Record:
     id: UUID

@@ -35,3 +35,23 @@ describe('rawRequest 的请求语言', () => {
     expect(headers[1]!['Accept-Language']).toBeUndefined()
   })
 })
+
+describe('rawRequest 的追踪 ID（N5 B Task 3）', () => {
+  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs() })
+
+  it('每次请求带唯一 X-Request-Id；调用方显式给了就不覆盖', async () => {
+    vi.stubEnv('NEXT_PUBLIC_API_BASE_URL', 'https://api.example.test')
+    const fetcher = vi.fn(async () => new Response('{}', { status: 200 }))
+    vi.stubGlobal('fetch', fetcher)
+
+    await rawRequest('/api/health')
+    await rawRequest('/api/health')
+    await rawRequest('/api/health', { headers: { 'x-request-id': 'trace-abc' } })
+
+    const headers = fetcher.mock.calls.map(call => (call as unknown as [string, RequestInit])[1].headers as Record<string, string>)
+    expect(headers[0]!['X-Request-Id']).toMatch(/^[A-Za-z0-9._:-]{1,128}$/)
+    expect(headers[0]!['X-Request-Id']).not.toBe(headers[1]!['X-Request-Id'])
+    expect(headers[2]!['x-request-id']).toBe('trace-abc')
+    expect(headers[2]!['X-Request-Id']).toBeUndefined()
+  })
+})

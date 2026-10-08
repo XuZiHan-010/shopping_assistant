@@ -275,6 +275,15 @@ async def test_request_carries_required_max_tokens_capped_by_remaining_budget(
     assert request_body(seen[0])["max_tokens"] == 600
 
 
+async def test_request_respects_guard_output_limit(settings: Settings) -> None:
+    transport, seen = recording_transport(_text_response())
+    await AnthropicConverseAdapter(settings, transport=transport).converse(
+        messages=hello(), tools=[], budget=budget(max_tokens=10_000),
+        options=LlmCallOptions(max_output_tokens=123),
+    )
+    assert request_body(seen[0])["max_tokens"] == 123
+
+
 async def test_successful_call_charges_the_summed_tokens(settings: Settings) -> None:
     transport, _ = recording_transport(_text_response())
     tracked = budget()

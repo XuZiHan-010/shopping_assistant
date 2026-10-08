@@ -23,6 +23,8 @@ class ExecutionOutcome:
     assertion_context: AssertionContext
     #: 已经脱去候选实现身份的纯对话文本，供裁判层使用；断言失败时不会被读取。
     transcript: str
+    #: 本次执行所发请求的追踪 ID（`X-Request-Id`）；只随结果带出，不进入裁判载荷。
+    request_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -37,6 +39,8 @@ class CaseRunResult:
     passed: bool
     failure_detail: str = ""
     judge: JudgeResult | None = None
+    #: 被断言的那次请求的追踪 ID；没有 HTTP 请求的执行器留空。
+    request_id: str = ""
 
 
 Executor = Callable[[EvalCase], Awaitable[ExecutionOutcome]]
@@ -64,10 +68,15 @@ class QualityRunner:
         outcome = await self._executor(case)
         assertion_result = evaluate_all(case.assertions, outcome.assertion_context)
         if not assertion_result.passed:
-            return CaseRunResult(case.id, passed=False, failure_detail=assertion_result.detail)
+            return CaseRunResult(
+                case.id,
+                passed=False,
+                failure_detail=assertion_result.detail,
+                request_id=outcome.request_id,
+            )
 
         if case.rubric_id is None:
-            return CaseRunResult(case.id, passed=True)
+            return CaseRunResult(case.id, passed=True, request_id=outcome.request_id)
 
         rubric = self._rubrics[case.rubric_id]
         judge = await grade_with_rubric(
@@ -77,4 +86,6 @@ class QualityRunner:
             rubric_prompt=rubric.prompt,
             transcript=outcome.transcript,
         )
-        return CaseRunResult(case.id, passed=judge.passed, judge=judge)
+        return CaseRunResult(
+            case.id, passed=judge.passed, judge=judge, request_id=outcome.request_id
+        )

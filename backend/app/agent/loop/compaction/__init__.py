@@ -22,6 +22,8 @@ from typing import Final
 from app.llm.client import LlmMessage
 from app.localization.locales import SupportedLocale
 from app.schemas.chat import ThinkingStep
+from app.skills.spec import SkillSpec
+from app.tools.types import ToolResult
 
 
 class CompactionStrategy(StrEnum):
@@ -88,6 +90,9 @@ def estimate_tokens(messages: Sequence[LlmMessage]) -> int:
     total = 0
     for message in messages:
         total += len(message.content)
+        # 思考模式下回放的 reasoning 同样随请求发出，必须计入（台账）。
+        if message.reasoning is not None:
+            total += len(message.reasoning.payload)
         for call in message.tool_calls or ():
             total += len(call.tool_name) + len(call.arguments_json)
     return total
@@ -112,6 +117,15 @@ def split_rounds(
         else:  # pragma: no cover - start 之后的第一条必然开启一轮
             prefix.append(message)
     return prefix, rounds
+
+
+def trusted_skill_calls(results: Sequence[ToolResult]) -> frozenset[str]:
+    """已加载受信 Skill 的调用 ID。Skill 是做法说明，不是可清理的工具数据：两种策略都原样保留
+    （审查 N4-3 I-2：被清理后模型看不到流程与约束，重新加载又占用单回合 `max_skill_loads`）。"""
+
+    return frozenset(
+        r.display.call_id for r in results if r.ok and isinstance(r.payload, SkillSpec)
+    )
 
 
 def flatten(

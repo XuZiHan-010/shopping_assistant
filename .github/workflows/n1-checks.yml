@@ -25,7 +25,7 @@ jobs:
       LLM_API_KEY: ""
     services:
       postgres:
-        image: postgres:16-alpine
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: borough
           POSTGRES_PASSWORD: borough_local
@@ -66,7 +66,7 @@ jobs:
     # 独立 runner / 服务容器，不能与迁移回归共享数据库。
     services:
       postgres:
-        image: postgres:16-alpine
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: borough
           POSTGRES_PASSWORD: borough_local

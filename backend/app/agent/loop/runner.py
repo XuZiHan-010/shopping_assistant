@@ -46,6 +46,7 @@ from app.agent.loop.compaction.pruning import prune_tool_results
 from app.agent.loop.compaction.summarization import summarize_early_context
 from app.agent.loop.fencing import FENCE_POLICY, fence
 from app.agent.loop.limits import LoopLimits
+from app.agent.loop.markup import TOOL_CALL_MARKUP
 from app.core.errors import ErrorCode
 from app.core.session import SessionRole
 from app.llm.client import (
@@ -150,6 +151,19 @@ _REVISE_PROMPT: Final[dict[SupportedLocale, str]] = {
     ),
 }
 
+#: 契约 §8.7.7：`answer` 是当前显示语言下的正文。模型不知道显示语言时会跟着提问语言走。
+_ANSWER_LANGUAGE: Final[dict[SupportedLocale, str]] = {
+    SupportedLocale.ZH_CN: (
+        "当前显示语言：简体中文（zh-CN）。无论用户用哪种语言提问，都用简体中文作答；"
+        "工具返回的商品名称、编号、指标代码和数字保持原样。"
+    ),
+    SupportedLocale.EN_US: (
+        "Display language: English (en-US). Always answer in English, whatever language "
+        "the user writes in; keep product names, IDs, metric codes and numbers exactly as "
+        "the tools return them."
+    ),
+}
+
 _SKILL_LIMIT_SUMMARY: Final = (
     "本回合加载的 Skill 已达上限 {limit} 个，这次没有加载；请依据已加载的 Skill 与工具结果继续。"
 )
@@ -159,9 +173,7 @@ _REVIEW_FALLBACK_NOTE: Final[dict[SupportedLocale, str]] = {
     SupportedLocale.EN_US: "The independent review did not pass",
 }
 
-#: DeepSeek 内部工具调用标记（半角或全角竖线，如 `<｜｜DSML｜｜ calls>`）。
-#: 2026-09-30 E5 真实对比中，不给工具时模型把这段语法直接写进了正文。
-_TOOL_CALL_MARKUP: Final = re.compile(r"<\s*/?\s*[|｜]+\s*DSML\s*[|｜]+")
+_TOOL_CALL_MARKUP: Final = TOOL_CALL_MARKUP
 
 
 # --- 输入输出 --------------------------------------------------------------------
@@ -177,6 +189,9 @@ class LoopRequest:
     #: 按用户变化的记忆段（调用方已围栏）。模型看得到，但**不是数字来源**（M11、A6）：
     #: 与 `system_prompt` 分开传，确定性校验只把后者算作来源；放在稳定前缀之后（A9）。
     memory_context: str = ""
+    #: 按回合变化、由后端给出的事实（如当前业务日期）。同样放在稳定前缀之后（A9），
+    #: 排在记忆段之前：它是后端事实，不是用户偏好。
+    turn_context: str = ""
 
 
 @dataclass
@@ -314,6 +329,8 @@ class _Run:
         ]
         self.displays: list[ToolDisplay] = []
         self.results: list[ToolResult] = []
+        #: 本回合已出现过的上游调用 ID：结果映射、清理占位与 SSE 都以它为键，重复即无法区分。
+        self.seen_call_ids: set[str] = set()
         self.tool_count = 0
         self.quality_attempts = 0
         self.quality_notes: list[str] = []
@@ -413,6 +430,10 @@ class _Run:
         # 上游 ID 会进入 SSE 与最终响应；整批先校验，避免先发事件或执行部分工具。
         if any(re.fullmatch(r"[A-Za-z0-9_-]{1,64}", c.call_id) is None for c in calls):
             raise _Stop("UPSTREAM")
+        ids = [c.call_id for c in calls]
+        if len(set(ids)) != len(ids) or self.seen_call_ids.intersection(ids):
+            raise _Stop("UPSTREAM")  # 同批或跨轮重复的调用 ID（台账）：不执行任何一个
+        self.seen_call_ids.update(ids)
         # 先让整批调用全部过闸门，再执行其中任何一个：致命闸门在任何副作用之前生效。
         for c in calls:
             await self.emit(ToolCallStarted(tool_name=c.tool_name, call_id=c.call_id))
@@ -682,7 +703,9 @@ def _parallel_safe(call: AdmittedCall) -> bool:
 
 def _initial_messages(request: LoopRequest) -> list[LlmMessage]:
     customer = request.context.session.role is SessionRole.CUSTOMER
-    system = f"{request.system_prompt}\n\n{FENCE_POLICY}"
+    system = f"{request.system_prompt}\n\n{FENCE_POLICY}\n\n{_ANSWER_LANGUAGE[request.locale]}"
+    if request.turn_context:
+        system = f"{system}\n\n{request.turn_context}"
     if request.memory_context:
         system = f"{system}\n\n{request.memory_context}"
     messages = [LlmMessage(role="system", content=system)]

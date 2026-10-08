@@ -78,6 +78,8 @@ async def test_case_locale_reaches_every_http_turn(
     try:
         result = await harness.run(locale_case(locale))
         assert result.passed, result.failure_detail
+        # 结果带上被断言的那次请求的追踪 ID，报告条目据此可回查审计与用量行（PRD §10.4）。
+        assert result.request_id.startswith("eval-") and result.request_id.endswith("-t1")
         assert seen == [locale, locale]
         expected = {
             "zh-CN": "当前会话无权执行此操作",

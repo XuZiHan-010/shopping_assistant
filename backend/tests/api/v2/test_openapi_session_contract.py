@@ -80,6 +80,9 @@ MERCHANT_MEMORY = "/api/v2/merchant/memories/{memory_id}"
 MERCHANT_METRICS_OVERVIEW = "/api/v2/merchant/metrics/overview"
 #: W 阶段 Task 3：商家订单只读面（§8.12.4）。仅本店具备 v2 交易投影的订单。
 MERCHANT_ORDERS = "/api/v2/merchant/orders"
+#: N5 A：MCP 只读入口（§8.14.3）。鉴权与正文都不按普通 v2 路由的形状：只认 MCP Bearer、
+#: 正文是 SDK 协议类型的 JSON-RPC，所以不进 `EXPECTED` 的逐条模型断言，由下方专用哨兵固定。
+MERCHANT_MCP = "/api/v2/merchant/mcp"
 MERCHANT_ORDER = "/api/v2/merchant/orders/{order_id}"
 
 # (方法, 路径) → (鉴权类别, 成功状态码, 请求模型, 响应模型, 声明的错误码)
@@ -413,8 +416,9 @@ def test_v2_exposes_exactly_the_registered_paths(schema: dict[str, Any]) -> None
 
     v2_paths = {path for path in schema["paths"] if path.startswith("/api/v2/")}
 
-    assert v2_paths == {path for _, path in EXPECTED}
-    for path in v2_paths:
+    assert v2_paths == {path for _, path in EXPECTED} | {MERCHANT_MCP}
+    assert set(schema["paths"][MERCHANT_MCP]) == {"post"}
+    for path in v2_paths - {MERCHANT_MCP}:
         expected_methods = {method for method, p in EXPECTED if p == path}
         assert set(schema["paths"][path]) == expected_methods, path
 
@@ -510,3 +514,30 @@ def test_public_catalog_models_expose_no_identity_or_stock_quantity(
         "stock_available",
         "low_stock_threshold",
     }
+
+
+def test_merchant_session_response_carries_shop_slug(schema: dict[str, Any]) -> None:
+    """D-N5-4（契约 §8.9.1）：响应必带 `shop_slug`，格式与顾客端会话请求的同名字段一致。"""
+
+    schemas = schema["components"]["schemas"]
+    response = schemas["MerchantSessionCreateResponse"]
+    assert "shop_slug" in response["required"]
+    assert response["properties"]["shop_slug"] == (
+        schemas["ShopSessionCreateRequest"]["properties"]["shop_slug"]
+    )
+    # 请求体仍为空对象：标识只从已验证会话解析，不接受传入。
+    assert not schemas["MerchantSessionCreateRequest"].get("properties")
+
+
+def test_mcp_route_contract_is_fixed(schema: dict[str, Any]) -> None:
+    """MCP 入口：只 POST；不收 `X-Session-Id` 与任何查询参数；协议头三项登记在案（§8.14.3）。"""
+
+    operation = schema["paths"][MERCHANT_MCP]["post"]
+    parameters = operation.get("parameters", [])
+    headers = {p["name"] for p in parameters if p["in"] == "header"}
+    query = {p["name"] for p in parameters if p["in"] == "query"}
+
+    assert headers == {"MCP-Protocol-Version", "Mcp-Method", "Mcp-Name"}
+    assert query == set()
+    assert set(operation["responses"]) == {"200", "202", "400", "401", "413", "429", "503"}
+    assert "security" not in operation  # 不复用商家登录 Token 的 HTTPBearer 方案

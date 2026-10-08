@@ -32,8 +32,8 @@
 - 降级必须可见（R7）：`degraded` / `degraded_reason` / 各 `analysis_sources[].degraded_reason` 都要显示。
 - 机器译文与缺译回退的标注（`TranslationNote`）在方块、浮层、购物车、订单行上都保留（C9）。
 - 热门排序：近 30 个业务日（Asia/Shanghai）已支付订单的件数降序，并列按 `created_at DESC, id DESC`；响应不返回销量数字。
-- 图片：`shop/public/demo/products/NN.webp`，800×800，单张 ≤200KB，共 23 张（#06 刻意无图）；`image_url` 为 `/demo/products/NN.webp`；`ALLOWED_IMAGE_HOSTS` 保持为空。
-- 三个刻意缺口必须保留：#03 无「产地」、#05 说明为“简短说明。”、#06 `image_url = null`。除此之外，每件商品的属性都要覆盖后端类目必填表（女装/男装/鞋靴：材质、产地、尺码；家居：材质、产地；美妆：产地、保质期），不得产生额外的内容缺口。
+- 图片：`shop/public/demo/products/NN.webp`，800×800，单张 ≤200KB，共 24 张（2026-10-04 用户裁定补上 #06，此前 23 张）；`image_url` 为 `/demo/products/NN.webp`；`ALLOWED_IMAGE_HOSTS` 保持为空。
+- 刻意缺口必须保留：#03 无「产地」、#05 说明为“简短说明。”（#06 `image_url = null` 已于 2026-10-04 按用户裁定取消，PRD §8.3 同步）。除此之外，每件商品的属性都要覆盖后端类目必填表（女装/男装/鞋靴：材质、产地、尺码；家居：材质、产地；美妆：产地、保质期），不得产生额外的内容缺口。
 - `shop/AGENTS.md`：这是新版 Next.js，写 Next 代码前先读 `shop/node_modules/next/dist/docs/` 里对应的指南（`redirect`、`cookies()`、`next/font`、布局）。
 - 不修改 `vendor/`、`yshopping-*` 目录（R8）；`shop/src/api/generated.ts` 与 `frontend/src/api/generated.ts` 禁止手改。
 
@@ -672,19 +672,17 @@
 - Create: `shop/public/demo/products/NN.webp`（23 张）、`shop/public/demo/products/IMAGE-CREDITS.md`
 - Test: `backend/tests/unit/analytics/test_demo_product_images.py`
 
-- [x] **步骤 1：写失败测试**（`test_demo_product_images.py`，不依赖 Pillow）：遍历 `build_demo_catalog()`，对每个非空 `image_url` 断言 `shop/public` 下存在对应文件、大小 ≤200KB；断言目录下没有多余的 `.webp`，也没有 `06.webp`。资源未交付时明确 skip；CLI 缺图失败已确认，工具异常目录测试先失败再修复通过，见进度快照。
+- [x] **步骤 1：写失败测试**（`test_demo_product_images.py`，不依赖 Pillow）：遍历 `build_demo_catalog()`，对每个非空 `image_url` 断言 `shop/public` 下存在对应文件、大小 ≤200KB；断言目录下没有多余的 `.webp`，也没有 `06.webp`。资源测试及异常目录测试通过，详见进度快照。
 - [x] **步骤 2：写转换与校验脚本** `scripts/demo_product_images.py`：
   - `convert <源目录>`：按文件名前缀 `NN` 匹配编号，居中裁成正方形，缩放到 800×800，以 WebP 质量 80 保存；超过 200KB 时按 75、70 递减重试；
   - `check`：校验 23 个文件的尺寸、格式、大小；
   - 运行方式：`cd backend; uv run --with pillow python ../scripts/demo_product_images.py convert <源目录>`，不改项目依赖。
-- [ ] **步骤 3**：用户把生成的原图放到仓库外的临时目录后，执行 `convert` 再执行 `check`；写 `IMAGE-CREDITS.md`（生成工具、生成日期，以及“为本项目生成的虚构商品图，不含真实品牌”）。
-- [ ] **步骤 4**：运行步骤 1 的测试 PASS；本地启动 `shop` 与后端（Fake LLM），在 1440px 与 375px 下目视确认首页热门、商品浮层、购物车、订单行的图片都正常显示。
-- [ ] 用户尚未交付时，本 Task 挂起，不阻塞其余 Task；占位图（“暂无图片”）照常工作。
+- [x] **步骤 3**：用户将 23 张原图放在 `shop/public/demo/products/`。转换后 WebP 写入同目录；PNG 原图归档到仓库外的 `D:\borough-product-originals`，并写入 `IMAGE-CREDITS.md`（GPT Image、2026-10-01，以及“为本项目生成的虚构商品图，不含真实品牌”）。
+- [x] **步骤 4**：图片工具测试通过；S1 店面 E2E 使用脚本化 Fake LLM，补充真实图片加载断言后 4/4 通过。1440px / 375px 页面截图已检查，图片解码为 800×800，375px 无横向溢出；23 个生产静态 URL 均返回 `200 image/webp`。
+- [x] 原图已交付，Task 12 不再挂起；06 号商品按规格无图，其他商品请求失败时保留“暂无图片”降级占位。
 
 验收入口：`cd backend; uv run --with pillow pytest tests/unit/analytics/test_demo_product_images.py -q`。
-工具用合成图片在临时目录验证；资源目录尚不存在时，交付资源测试明确 skip，不能据此认定图片交付完成。
-正式交付必须另跑 `uv run --with pillow python ../scripts/demo_product_images.py check`，缺图时该命令严格失败。
-转换拒绝覆盖已有图片；补交或替换时应先核对已有素材，避免误覆盖。来源记录须依据实际生成工具与日期填写。
+正式资源检查：`uv run --with pillow python ../scripts/demo_product_images.py check`。转换拒绝覆盖已有图片或目标目录中的多余图片；本轮原 PNG 已另存到仓库外，应用静态目录只保留最终 WebP 与来源说明。
 
 ### Task 13：端到端测试、验收与文档
 

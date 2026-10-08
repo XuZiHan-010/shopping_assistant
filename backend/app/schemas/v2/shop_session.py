@@ -19,12 +19,15 @@ from pydantic import (
 
 from app.core.session import SessionRole
 from app.schemas.chat import AnalysisSource
-from app.schemas.v2.common import CursorPage, IdempotentWriteRequest, MoneyCents, V2ChatResponseBase
+from app.schemas.v2.common import (
+    CursorPage,
+    IdempotentWriteRequest,
+    MoneyCents,
+    V2ChatResponseBase,
+)
+from app.schemas.v2.common import ShopSlug as ShopSlug
 
 PublicId = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)]
-ShopSlug = Annotated[
-    str, StringConstraints(min_length=1, max_length=64, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-]
 UtcDatetime = Annotated[AwareDatetime, AfterValidator(lambda value: value.astimezone(UTC))]
 SessionToken = Annotated[
     str, StringConstraints(min_length=43, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")

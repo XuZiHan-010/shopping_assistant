@@ -76,7 +76,8 @@ async def create_after_sale(
             session, ctx=ctx, payload=payload, audits=audits,
             request_id=request_id, now=now, evidence=evidence, secret=principal_secret,
             summary_llm=build_guarded_llm(
-                settings, database, request_id=request_id, merchant_id=ctx.merchant_id
+                settings, database, request_id=request_id, merchant_id=ctx.merchant_id,
+                role=ctx.role,
             ),
         )
         await session.commit()

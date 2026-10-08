@@ -61,6 +61,41 @@ async def merchant_b(db_session: AsyncSession) -> Merchant:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("scope", ["MERCHANT", "GLOBAL"])
+async def test_expired_machine_cache_is_not_read_when_cron_has_not_purged_it(
+    db_session: AsyncSession, merchant_a: Merchant, scope: str
+) -> None:
+    repo = LocalizationRepository(db_session)
+    merchant_id = merchant_a.id if scope == "MERCHANT" else None
+    stale = await repo.upsert_machine(
+        merchant_id=merchant_id,
+        source_hash="9" * 64,
+        source_language=SourceLanguage.ZH_CN,
+        target_locale=SupportedLocale.EN_US,
+        translated_text="expired translation",
+        model="fake",
+    )
+    await db_session.execute(
+        text("UPDATE machine_translation_cache SET expires_at = :expires_at WHERE id = :id"),
+        {"expires_at": datetime.now(UTC) - timedelta(seconds=1), "id": stale.id},
+    )
+    if scope == "MERCHANT":
+        hits = await repo.get_merchant_machine_many(
+            merchant_id=merchant_a.id,
+            source_hashes=["9" * 64],
+            target_locale=SupportedLocale.EN_US,
+            prompt_version="v1",
+        )
+    else:
+        hits = await repo.get_global_machine_many(
+            source_hashes=["9" * 64],
+            target_locale=SupportedLocale.EN_US,
+            prompt_version="v1",
+        )
+    assert hits == {}
+
+
+@pytest.mark.asyncio
 async def test_translation_cache_is_scoped_by_merchant(
     db_session: AsyncSession,
     merchant_a: Merchant,

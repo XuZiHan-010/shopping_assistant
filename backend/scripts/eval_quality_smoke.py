@@ -174,10 +174,12 @@ async def _execute_case(case: EvalCase, ctx: _RunContext) -> ExecutionOutcome:
     turn = case.turns[0]
     assert turn.request is not None
     message = (turn.request.json_body or {}).get("message", "")
+    request_id = f"eval-{case.id}"
     headers = {
         **turn.request.headers,
         "Authorization": f"Bearer {ctx.bearer_token}",
         "Accept": "application/json",
+        "X-Request-Id": request_id,
     }
     ctx.meter.before_call(f"{case.id}：Chat（{turn.request.headers.get('Accept-Language')}）")
     async with AsyncClient(
@@ -205,6 +207,7 @@ async def _execute_case(case: EvalCase, ctx: _RunContext) -> ExecutionOutcome:
             response_body=body,
         ),
         transcript=transcript,
+        request_id=request_id,
     )
 
 
@@ -239,7 +242,12 @@ async def run_quality_baseline(settings: Settings) -> DatasetReport:
                     f"（rubric={result.judge.rubric_id}@{result.judge.rubric_version}）"
                 )
             entries.append(
-                CaseReportEntry(case_id=case.id, passed=result.passed, failure_detail=detail)
+                CaseReportEntry(
+                    case_id=case.id,
+                    passed=result.passed,
+                    failure_detail=detail,
+                    request_id=result.request_id,
+                )
             )
             print(f"  = {'PASS' if result.passed else 'FAIL'}：{detail}", flush=True)
     finally:

@@ -23,7 +23,7 @@ pytestmark = pytest.mark.integration
 
 _DATASET_DIR = Path(__file__).resolve().parents[2] / "app" / "eval" / "datasets" / "security"
 
-CURRENT_MILESTONE = "N3"
+CURRENT_MILESTONE = "N5"
 CATEGORY_INTRODUCED_IN = {
     "CROSS": "N1",
     "SQLI": "N1",
@@ -35,6 +35,9 @@ CATEGORY_INTRODUCED_IN = {
     "CATALOG": "N2",
     "CART": "N2",
     "ORDER": "N2",
+    # N4 双端记忆越权（跨店铺/跨顾客/跨角色读写删）；N4 收尾时随里程碑切换启用最低数量门槛。
+    "N4M": "N4",
+    "N5MCP": "N5",
 }
 MILESTONES = ("N1", "N2", "N3", "N4", "N5")
 

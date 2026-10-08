@@ -14,11 +14,14 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analytics.contract import METRIC_SPECS
+from app.core.security import MerchantContext
 from app.domain.order_status_mapping import from_legacy_status
 from app.intent.models import GeneratedMetricPlan
 from app.models.analytics import Order, OrderItem, Product, Refund, ReturnRecord
 from app.repositories.analytics import AnalyticsRepository
 from app.schemas.chat import QuestionCategory
+from app.services.safe_query import SafeQueryService
+from app.services.v2.attribution import AttributionService
 
 DAY = date(2026, 8, 3)
 NEXT_DAY = date(2026, 8, 4)
@@ -121,6 +124,52 @@ async def test_aggregate_sums_gmv_over_the_range(
 
     assert result.rows == [{"gmv": Decimal("1000.00")}]
     assert result.source_tables == ("orders",)
+
+
+@pytest.mark.asyncio
+async def test_gross_refund_and_net_reconcile_with_daily_ledger(
+    db_session: AsyncSession, merchant_one_id: UUID
+) -> None:
+    """同一真实数据快照中，毛额、退款与净额须逐日对上固定报表口径。"""
+    await _fixture_rows(db_session, merchant_one_id)
+    repository = AnalyticsRepository(db_session)
+    values: dict[str, Decimal] = {}
+    for code in ("gross_gmv", "refund_amount"):
+        aggregate = await repository.aggregate(
+            merchant_id=merchant_one_id,
+            metric=METRIC_SPECS[code],
+            dimensions=(),
+            filters={},
+            start=DAY,
+            end=NEXT_DAY,
+            limit=200,
+        )
+        values[code] = aggregate.rows[0][code]
+    net = await AttributionService(
+        SafeQueryService(repository, business_timezone="UTC")
+    ).query_metrics(
+        MerchantContext(merchant_id=merchant_one_id),
+        metric="net_gmv",
+        start=DAY,
+        end=NEXT_DAY,
+        now=datetime(2026, 8, 5, tzinfo=UTC),
+    )
+    first_day = await repository.daily_report_metrics(merchant_id=merchant_one_id, report_date=DAY)
+    second_day = await repository.daily_report_metrics(
+        merchant_id=merchant_one_id, report_date=NEXT_DAY
+    )
+
+    assert values == {"gross_gmv": Decimal("1000.00"), "refund_amount": Decimal("200.00")}
+    assert net.value == Decimal("800.00")
+    assert (first_day["gmv"], first_day["refund_amount"]) == (
+        Decimal("400.00"), Decimal("0.00")
+    )
+    assert (second_day["gmv"], second_day["refund_amount"]) == (
+        Decimal("600.00"), Decimal("200.00")
+    )
+    assert net.value == sum(
+        day["gmv"] - day["refund_amount"] for day in (first_day, second_day)
+    )
 
 
 @pytest.mark.asyncio

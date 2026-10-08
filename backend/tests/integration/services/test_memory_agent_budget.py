@@ -78,7 +78,7 @@ async def test_daily_budget_exhausted_falls_back_without_bypassing_guard(
                 call_count=1,
             )
             .on_conflict_do_update(
-                constraint="uq_llm_daily_budget_usage_date",
+                constraint="uq_llm_daily_budget_scope",
                 set_={"consumed_tokens": settings.llm_daily_budget_tokens},
             )
         )
@@ -125,6 +125,84 @@ async def test_daily_budget_exhausted_falls_back_without_bypassing_guard(
         async with integration_database.session() as session:
             await session.execute(
                 delete(LlmDailyBudget).where(LlmDailyBudget.usage_date == usage_date)
+            )
+            await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_background_merchant_memory_respects_role_budget(
+    integration_database: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    merchant_id = uuid4()
+    settings = _settings().model_copy(
+        update={"llm_daily_budget_tokens": 50_000, "llm_merchant_daily_budget_tokens": 1_000}
+    )
+    usage_date = datetime.now(UTC).astimezone(ZoneInfo(settings.business_timezone)).date()
+
+    class NoNetworkClient:
+        def __init__(self, _: Settings) -> None:
+            pass
+
+        def is_configured(self) -> bool:
+            return True
+
+        async def complete(self, **kwargs: object) -> object:
+            raise RuntimeError("model must not be called after role budget is exhausted")
+
+    monkeypatch.setattr("app.llm.deepseek.DeepSeekLlmClient", NoNetworkClient)
+    async with integration_database.session() as session:
+        session.add(
+            Merchant(
+                id=merchant_id,
+                merchant_code=f"role-budget-{merchant_id}",
+                display_name="角色预算商家",
+            )
+        )
+        await session.execute(
+            insert(LlmDailyBudget).values(
+                usage_date=usage_date,
+                scope_key="ROLE:MERCHANT",
+                consumed_tokens=settings.llm_merchant_daily_budget_tokens,
+                call_count=1,
+            ).on_conflict_do_update(
+                constraint="uq_llm_daily_budget_scope",
+                set_={"consumed_tokens": settings.llm_merchant_daily_budget_tokens},
+            )
+        )
+        await session.commit()
+
+    try:
+        background = _RecordingBackground()
+        agent = MemoryAgent(
+            background=background,
+            database=integration_database,
+            settings=settings,
+            merchant_id=merchant_id,
+            merchant_display="角色预算商家",
+            request_id="role-budget-regression",
+        )
+        agent.submit(
+            category="TRADE",
+            question="上月成交额",
+            answer="上月成交额为 X",
+            source_tables=["orders"],
+            quality_notes=[],
+            suggestions=[],
+            export_id=None,
+        )
+        await background.run_all()
+        async with integration_database.session() as session:
+            rows = await _usage_rows(session, merchant_id)
+            assert len(rows) == 1
+            assert rows[0].status == "BUDGET_REJECTED"
+            assert await _memory_for(session, merchant_id) is not None
+    finally:
+        async with integration_database.session() as session:
+            await session.execute(
+                delete(LlmDailyBudget).where(
+                    LlmDailyBudget.usage_date == usage_date,
+                    LlmDailyBudget.scope_key == "ROLE:MERCHANT",
+                )
             )
             await session.commit()
 

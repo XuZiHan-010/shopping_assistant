@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { resetSessionForTest } from '@/api/credentials'
 import { apiErrorBody, json, stubBackend } from '@/test/fakeBackend'
 import { ShopShell } from './ShopShell'
+import { LocaleProvider } from '@/i18n/LocaleProvider'
 
 vi.mock('next/navigation', () => ({ usePathname: () => '/borough-100', useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }) }))
 
@@ -15,6 +16,17 @@ beforeEach(() => resetSessionForTest())
 afterEach(() => vi.unstubAllGlobals())
 
 describe('店铺外壳', () => {
+  it('英文模式的导航和演示身份入口使用英文', async () => {
+    stubBackend({ 'POST /api/v2/shop/sessions': guest, 'GET /api/v2/shop/cart': emptyCart })
+    render(<LocaleProvider initialLocale="en-US"><ShopShell shopSlug="borough-100"><p>Store</p></ShopShell></LocaleProvider>)
+    expect(await screen.findByTestId('identity')).toHaveTextContent('Guest')
+    const nav = screen.getByRole('navigation', { name: 'Store views' })
+    expect(within(nav).getByRole('link', { name: 'Assistant' })).toBeInTheDocument()
+    expect(within(nav).getByRole('link', { name: 'Orders' })).toBeInTheDocument()
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Guest' }))
+    expect(within(screen.getByRole('group', { name: 'Guest' })).getByRole('button', { name: 'Use demo shopper' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '绑定演示顾客' })).not.toBeInTheDocument()
+  })
   it('进入店铺时创建访客会话，顶栏显示访客身份', async () => {
     stubBackend({ 'POST /api/v2/shop/sessions': guest, 'GET /api/v2/shop/cart': emptyCart })
     render(

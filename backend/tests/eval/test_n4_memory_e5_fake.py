@@ -62,8 +62,13 @@ async def test_e5_aggregate_report_uses_all_cases_without_real_calls() -> None:
         responses[case["id"]] = FakeLlmClient(
             responses=[json.dumps({"facts": [proposal]}, ensure_ascii=False)]
         )
-    report = await evaluate(cases, llm_for_case=lambda case_id: responses[case_id])
+    evidence = []
+    report = await evaluate(cases, llm_for_case=lambda case_id: responses[case_id],
+                            on_case=evidence.append)
     assert report["cases"] == 40
     assert report["correct_writes"] == 20
     assert report["wrong_writes"] == 0
     assert report["missed"] == 0
+    assert len(evidence) == 40
+    assert sum(len(row["accepted"]) for row in evidence) == 20
+    assert all("candidates" in row and "filters" in row for row in evidence)

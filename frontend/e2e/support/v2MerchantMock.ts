@@ -62,6 +62,11 @@ export const MOCK_DEMO_TOKENS = {
   Borough商家101: 'demo-token-101',
 } as const
 
+/** Mock 会话响应里的店铺标识；「顾客视角」链接 = `MOCK_SHOP_BASE_URL` + `/` + 它（D-N5-4）。 */
+export const MOCK_SHOP_SLUG = 'borough-demo-100'
+/** 与 `scripts/mock-e2e-server.mjs` 注入的 `VITE_SHOP_BASE_URL` 一致。 */
+export const MOCK_SHOP_BASE_URL = 'https://shop.e2e.example'
+
 /**
  * `POST /api/v2/merchant/sessions`——返回一个不过期的会话，测试不关心真实 TTL。
  * 会话 ID 按 Bearer Token 区分（见 `mockSessionIdFor`）；没有 Bearer 时沿用固定默认值。
@@ -80,6 +85,7 @@ export async function mockMerchantSession(
         role: 'MERCHANT',
         expires_at: '2099-01-01T00:00:00Z',
         merchant_display_name: merchantDisplayName,
+        shop_slug: MOCK_SHOP_SLUG,
       },
     })
   })

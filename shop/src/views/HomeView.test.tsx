@@ -3,8 +3,10 @@ import userEvent from '@testing-library/user-event'
 import { renderToString } from 'react-dom/server'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { OrderSummaryView, Product, StoreProfile } from '@/types/shop'
+import { translate } from '@/i18n/LocaleProvider'
 import { HomeView } from './HomeView'
 import { ProductArt } from './ProductArt'
+import { QUICK_PROMPTS } from './quickPrompts'
 
 const mocks = vi.hoisted(() => ({
   send: vi.fn(), listOrders: vi.fn(), listProducts: vi.fn(), bind: vi.fn(), openPanel: vi.fn(), push: vi.fn(),
@@ -62,7 +64,7 @@ describe('智能助手首页', () => {
     const html = renderToString(<HomeView {...base} />)
     expect(html).not.toMatch(/早上好|下午好|晚上好/)
     expect(html).not.toContain('星期')
-    expect(html).toContain('通勤穿的皮鞋')
+    expect(html).toContain('通勤穿的鞋')
   })
 
   it('英文概况句使用英文标点并区分单复数', async () => {
@@ -84,10 +86,39 @@ describe('智能助手首页', () => {
     mocks.session = null
     render(<HomeView {...base} />)
     expect(mocks.listOrders).not.toHaveBeenCalled()
-    await userEvent.click(screen.getByRole('button', { name: /通勤穿的皮鞋/ }))
-    expect(mocks.send).toHaveBeenCalledWith('通勤穿的皮鞋，预算 800 以内，有推荐吗？')
-    expect(mocks.send.mock.calls[0]).toHaveLength(1)
-    expect(screen.getAllByRole('button', { name: /通勤穿的皮鞋|周末出门|敏感肌|记住：/ })).toHaveLength(4)
+    const quick = screen.getByRole('group', { name: '快捷提问' })
+    const cards = within(quick).getAllByRole('button')
+    expect(cards).toHaveLength(QUICK_PROMPTS.length)
+    for (const [index, prompt] of QUICK_PROMPTS.entries()) {
+      const text = translate('zh-CN', prompt.key)
+      await userEvent.click(cards[index]!)
+      // 点击只发送这一条文案本身，不附带任何预置内容。
+      expect(mocks.send.mock.calls[index]).toEqual([text])
+    }
+  })
+
+  it('快捷提问覆盖五个顾客 Skill 与一条规则问答（D-N5-4），中英一一对应', () => {
+    expect(QUICK_PROMPTS.length).toBeGreaterThanOrEqual(6)
+    expect(new Set(QUICK_PROMPTS.map(prompt => prompt.capability))).toEqual(new Set([
+      'search-discovery', 'purchase-research', 'planning-goals',
+      'after-sales-service', 'memory-personalization', 'platform-rules',
+    ]))
+    expect(new Set(QUICK_PROMPTS.map(prompt => prompt.key)).size).toBe(QUICK_PROMPTS.length)
+    for (const prompt of QUICK_PROMPTS) {
+      const zh = translate('zh-CN', prompt.key)
+      const en = translate('en-US', prompt.key)
+      expect(zh).toMatch(/[一-鿿]/)
+      expect(en, `${prompt.key} 缺英文`).not.toMatch(/[一-鿿]/)
+      expect(en.trim().length).toBeGreaterThan(10)
+    }
+  })
+
+  it('英文模式下快捷卡片显示并发送英文文案', async () => {
+    mocks.session = null
+    render(<HomeView {...base} locale="en-US" />)
+    const cards = within(screen.getByRole('group', { name: 'Suggested questions' })).getAllByRole('button')
+    await userEvent.click(cards[0]!)
+    expect(mocks.send).toHaveBeenCalledWith(translate('en-US', QUICK_PROMPTS[0]!.key))
   })
 
   it('进行中最多三单，按派送、待付款、运输顺序；按钮分流正确', async () => {

@@ -23,7 +23,7 @@ from app.agent.loop.runner import (
     run_loop,
 )
 from app.core.errors import ErrorCode
-from app.llm.client import LlmDailyBudgetExceededError, LlmMessage, LlmTurn
+from app.llm.client import LlmDailyBudgetExceededError, LlmMessage, LlmToolCall, LlmTurn
 from app.llm.fake import FakeLlmClient
 from app.localization.locales import SupportedLocale
 from app.schemas.chat import QualityStatus
@@ -175,6 +175,32 @@ async def test_tool_result_is_fed_back_with_matching_call_id() -> None:
     assistant, tool = second_round[-2], second_round[-1]
     assert assistant.role == "assistant" and assistant.tool_calls == [first]
     assert tool.role == "tool" and tool.tool_call_id == first.call_id
+
+
+async def test_duplicate_call_ids_in_one_batch_execute_nothing() -> None:
+    """台账：结果映射、清理占位与 SSE 都以调用 ID 为键；同批重复即无法区分，整批不执行。"""
+
+    first = call("slow_read", label="a")
+    twin = LlmToolCall(call_id=first.call_id, tool_name="slow_read", arguments_json='{"label":"b"}')
+    llm = FakeLlmClient(turns=[tool_use_turn(first, twin), end_turn()])
+
+    out = await _run(llm)
+
+    assert out.stop_reason == "UPSTREAM"
+    assert PROBE.started == []
+
+
+async def test_call_id_reused_in_a_later_round_is_rejected() -> None:
+    first = call("slow_read", label="a")
+    again = LlmToolCall(
+        call_id=first.call_id, tool_name="slow_read", arguments_json='{"label":"b"}'
+    )
+    llm = FakeLlmClient(turns=[tool_use_turn(first), tool_use_turn(again), end_turn()])
+
+    out = await _run(llm)
+
+    assert out.stop_reason == "UPSTREAM"
+    assert len(PROBE.started) == 1  # 第二轮的重复 ID 不执行
 
 
 # --- 上限 1：轮数 ------------------------------------------------------------------
@@ -499,6 +525,29 @@ def test_fabricated_numbers_are_caught_with_or_without_spaces(answer: str) -> No
 )
 def test_grounded_numbers_pass(answer: str, payload: object, sources: list[str]) -> None:
     assert ungrounded_numbers(answer, _evidence(payload), sources=sources) == []
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "Sold (last 30 days): 28",  # 2026-10-07 真实复测：这句让英文回答被扣下
+        "Sold last 30d: 28",
+        "A 30-day view shows 28 sold",
+        "28 sold over 12 weeks, 18 months and 24 hours",
+        "28 sold in the past 45 minutes",
+        "Sold in the Last 30 Days: 28",  # 表头式大写
+    ],
+)
+def test_english_durations_are_not_quantities_needing_a_source(answer: str) -> None:
+    assert ungrounded_numbers(answer, _evidence({"sales": 28}), sources=[]) == []
+
+
+def test_a_fabricated_quantity_next_to_an_english_duration_is_still_caught() -> None:
+    evidence = _evidence({"sales": 28})
+
+    assert ungrounded_numbers("We sold 45 units in the last 30 days", evidence, sources=[]) == [
+        "45"
+    ]
 
 
 def test_rounding_tolerance_follows_written_precision() -> None:
@@ -847,13 +896,78 @@ async def test_empty_memory_context_leaves_system_message_unchanged() -> None:
     await _run(llm, merchant_request())
 
     assert llm.converse_calls[0].messages[0].content == (
-        f"你是 Borough 商家经营助手。\n\n{FENCE_POLICY}"
+        f"你是 Borough 商家经营助手。\n\n{FENCE_POLICY}\n\n{_ZH_ANSWER_LANGUAGE}"
+    )
+
+
+async def test_turn_context_follows_the_stable_prefix_and_precedes_memory() -> None:
+    """按回合变化的事实（如当前业务日期）不进稳定前缀，否则每天都会让前缀缓存失效（A9）。"""
+
+    llm = FakeLlmClient(turns=[end_turn("你好")])
+    request = LoopRequest(
+        context=merchant_request().context,
+        system_prompt="你是 Borough 商家经营助手。",
+        user_message="今天销售额",
+        turn_context="当前业务日期：2026-10-07",
+        memory_context="商家偏好：回答简短",
+    )
+
+    await _run(llm, request)
+
+    assert llm.converse_calls[0].messages[0].content == (
+        f"你是 Borough 商家经营助手。\n\n{FENCE_POLICY}\n\n{_ZH_ANSWER_LANGUAGE}"
+        "\n\n当前业务日期：2026-10-07\n\n商家偏好：回答简短"
+    )
+
+
+# --- 回答语言跟随显示语言（契约 §8.7.7，2026-10-07 真实对照发现）------------------------
+
+_ZH_ANSWER_LANGUAGE = (
+    "当前显示语言：简体中文（zh-CN）。无论用户用哪种语言提问，都用简体中文作答；"
+    "工具返回的商品名称、编号、指标代码和数字保持原样。"
+)
+_EN_ANSWER_LANGUAGE = (
+    "Display language: English (en-US). Always answer in English, whatever language "
+    "the user writes in; keep product names, IDs, metric codes and numbers exactly as "
+    "the tools return them."
+)
+
+
+async def test_english_display_tells_the_model_to_answer_in_english_for_a_chinese_question() -> (
+    None
+):
+    """模型不知道显示语言时会跟着提问语言走：英文界面下中文提问得到中文回答。"""
+
+    llm = FakeLlmClient(turns=[end_turn("Let me check that for you.")])
+    request = LoopRequest(
+        context=merchant_request().context,
+        system_prompt="你是 Borough 商家经营助手。",
+        user_message="昨天总 GMV 是多少？",
+        locale=SupportedLocale.EN_US,
+    )
+
+    await _run(llm, request)
+
+    assert llm.converse_calls[0].messages[0].content == (
+        f"你是 Borough 商家经营助手。\n\n{FENCE_POLICY}\n\n{_EN_ANSWER_LANGUAGE}"
+    )
+
+
+async def test_chinese_display_tells_the_model_to_answer_in_chinese_for_an_english_question() -> (
+    None
+):
+    llm = FakeLlmClient(turns=[end_turn("你好")])
+
+    await _run(llm, merchant_request("hi"))
+
+    assert llm.converse_calls[0].messages[0].content == (
+        f"你是 Borough 商家经营助手。\n\n{FENCE_POLICY}\n\n{_ZH_ANSWER_LANGUAGE}"
     )
 
 
 # --- 上游把工具调用写进正文（2026-09-30 E5 真实对比发现）----------------------------
 
-_DSML = "<｜｜DSML｜｜ calls> <｜｜DSML｜｜ invoke name=\"query_metrics\"> </｜｜DSML｜｜ invoke>"
+_DSML = '<｜｜DSML｜｜ calls> <｜｜DSML｜｜ invoke name="query_metrics"> </｜｜DSML｜｜ invoke>'
 
 
 async def test_tool_call_markup_in_answer_is_upstream_degradation() -> None:
@@ -876,3 +990,31 @@ async def test_tool_call_markup_in_regenerated_answer_is_upstream_degradation() 
 
     assert out.stop_reason == "UPSTREAM" and out.degraded is True
     assert "DSML" not in out.answer
+
+
+# --- 不作数字证据的工具结果（审查 C1：记忆召回工具，M11）-------------------------------
+
+
+def test_tool_result_marked_not_grounding_cannot_source_numbers() -> None:
+    display = ToolDisplay(
+        "recall_merchant_preferences", "call_m", ToolDisplayStatus.SUCCEEDED, 1, 1
+    )
+    memory = ToolResult(
+        ok=True,
+        payload={"facts": [{"content": "上月净成交额大约 50 万"}]},
+        display=display,
+        reason_code=None,
+        grounds_numbers=False,
+    )
+
+    assert ungrounded_numbers("净成交额是 50 万", [memory], sources=[]) == ["50万"]
+
+
+def test_memory_recall_tools_never_ground_numbers() -> None:
+    from app.tools.customer.memory import build_memory_tools as customer_memory_tools
+    from app.tools.merchant.memory import build_memory_tools as merchant_memory_tools
+
+    specs = [*customer_memory_tools(None), *merchant_memory_tools(None)]  # type: ignore[arg-type]
+
+    assert {s.name for s in specs} == {"recall_preferences", "recall_merchant_preferences"}
+    assert all(spec.grounds_numbers is False for spec in specs)

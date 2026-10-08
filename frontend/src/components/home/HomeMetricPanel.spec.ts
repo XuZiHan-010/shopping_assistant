@@ -5,7 +5,7 @@
  * 若组件自己重算就会露馅（R4）。趋势图懒加载、空闲且进入视口后才挂载（首屏门禁）。
  */
 import { flushPromises, mount } from '@vue/test-utils'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { setLocaleProvider } from '@/api/credentials'
 import { i18n } from '@/i18n'
@@ -118,6 +118,14 @@ describe('HomeMetricPanel：主指标', () => {
 })
 
 describe('HomeMetricPanel：趋势图', () => {
+  // 首次动态 import 要现场转换图表模块；负载高时会吃掉用例自身 5 秒预算而偶发超时
+  //（2026-10-02 实测 5.14 s）。在钩子里预热，用例只测「空闲 + 进入视口才挂载」的门控本身。
+  // 钩子自己也给足时间：全量并行时这次转换实测会超过默认的 10 秒钩子超时（2026-10-04 两次），
+  // 钩子一超时，后面的用例就在模块还没转换完的情况下开跑并连带超时。只放宽预热，不放宽用例。
+  beforeAll(async () => {
+    await import('./HomeTrendChart.vue')
+  }, 60_000)
+
   it('空闲后且进入视口才挂载懒加载的趋势图', async () => {
     const { wrapper } = await mountPanel(json(overviewPayload()))
     expect(wrapper.find('[data-test=home-trend-chart]').exists()).toBe(false)

@@ -21,6 +21,7 @@ from app.agent.loop.limits import LoopLimits
 from app.agent.loop.runner import EventSink
 from app.api.dependencies import (
     build_guarded_llm,
+    enforce_keyed_rate_limit,
     get_app_settings,
     get_database,
     get_db_session,
@@ -90,11 +91,14 @@ async def post_shop_chat(
     principal_secret: Annotated[bytes, Depends(get_principal_secret)],
     locale: Annotated[SupportedLocale, Depends(get_request_locale)],
 ) -> JSONResponse | StreamingResponse:
+    enforce_keyed_rate_limit(request, settings, key=f"v2-chat:{ctx.role}:{ctx.session_record_id}")
     if payload.conversation_id is not None:
         await directory.require(payload.conversation_id)
     request_id = str(getattr(request.state, "request_id", "unknown"))
     cancel = asyncio.Event()
-    llm = build_guarded_llm(settings, database, request_id=request_id, merchant_id=ctx.merchant_id)
+    llm = build_guarded_llm(
+        settings, database, request_id=request_id, merchant_id=ctx.merchant_id, role=ctx.role
+    )
     service = ShopChatService(
         session,
         llm=llm,
@@ -105,6 +109,7 @@ async def post_shop_chat(
         principal_secret=principal_secret,
         skills=request.app.state.skill_registry,
         history_turns=settings.chat_history_max_turns,
+        metrics=request.app.state.metrics,
     )
 
     async def run(on_event: EventSink | None = None) -> dict[str, Any]:

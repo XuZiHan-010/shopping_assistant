@@ -22,6 +22,7 @@ from app.api.routes.v2.merchant_drafts import router as merchant_drafts_router
 from app.api.routes.v2.merchant_feedback import router as merchant_feedback_router
 from app.api.routes.v2.merchant_insights import router as merchant_insights_router
 from app.api.routes.v2.merchant_inventory import router as merchant_inventory_router
+from app.api.routes.v2.merchant_mcp import router as merchant_mcp_router
 from app.api.routes.v2.merchant_memory import router as merchant_memory_router
 from app.api.routes.v2.merchant_orders import router as merchant_orders_router
 from app.api.routes.v2.merchant_sessions import router as merchant_sessions_router
@@ -53,6 +54,7 @@ api_router.include_router(shop_conversations_router)
 api_router.include_router(shop_memory_router)
 api_router.include_router(merchant_inventory_router)
 api_router.include_router(merchant_memory_router)
+api_router.include_router(merchant_mcp_router)
 api_router.include_router(merchant_catalog_router)
 api_router.include_router(merchant_after_sales_router)
 api_router.include_router(merchant_signals_router)

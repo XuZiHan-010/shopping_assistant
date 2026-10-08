@@ -1140,6 +1140,10 @@ npm run test:e2e
 
     验收结果与已知红项见 `docs/project-progress.md`。实施计划见 `plans/2026-09-28-merchant-workbench-redesign.md`，设计说明见 `docs/specs/2026-09-28-merchant-workbench-ui-design.md`。
 17. **WS · 顾客端店面重设计**（PRD C1–C2、§15「WS」）：`shop/` 沿用 W 完成的共享 token，重建智能助手首页、订单视图、购物车侧栏、动态抽屉与偏好设置；商品热门排序、缺失属性、订单摘要及只读订单工具先由后端提供确定性事实。实施计划见 `plans/2026-09-28-shop-storefront-redesign.md`，设计说明见 `docs/specs/2026-09-28-shop-storefront-ui-design.md`。
+18. **N5 · 单入口演示**（PRD M1、C1、§10.7，D-N5-4，2026-10-02 用户裁定；2026-10-04 本地联调确认位置）：商家端侧栏「顾客视角」按钮在新标签页打开
+    `${VITE_SHOP_BASE_URL}/{shop_slug}`（`shop_slug` 来自商家会话响应，经 Adapter → Store；变量缺失时不显示按钮，
+    不传任何凭证）；顾客端首页快捷提问扩为覆盖五个顾客 Skill 与一条规则问答的双语固定文案。实施计划
+    `plans/2026-10-02-n5-single-entry.md`。
 
 Mock 字段与 OpenAPI 不一致时，以 OpenAPI 为准并修 Mock，不要反过来改契约。
 

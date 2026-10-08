@@ -53,8 +53,26 @@ describe('SideNav 侧栏', () => {
         .map((item) => item.text().trim())
     expect(labelsOf('workspace')).toEqual(['首页', '商品', '订单', '库存'])
     expect(labelsOf('operations')).toEqual(['待审批', '售后', '顾客信号', '记忆'])
-    expect(labelsOf('admin')).toEqual(['知识库'])
+    expect(labelsOf('admin')).toEqual(['知识库', '运维看板'])
     wrapper.unmount()
+  })
+
+  it('有会话且配置了顾客端地址时，账号区上方出现「顾客视角」入口（D-N5-4）', async () => {
+    vi.stubEnv('VITE_SHOP_BASE_URL', 'https://shop.example.com')
+    try {
+      const { wrapper, auth } = await mountNav()
+      expect(wrapper.find('[data-testid="customer-view-link"]').exists()).toBe(false)
+
+      auth.sessionId = 'sid'.padEnd(43, '0')
+      auth.shopSlug = 'borough-demo-100'
+      await flushPromises()
+
+      const entry = wrapper.get('.side-nav__operator [data-testid="customer-view-link"]')
+      expect(entry.attributes('href')).toBe('https://shop.example.com/borough-demo-100')
+      wrapper.unmount()
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 
   it('链接指向对应路由', async () => {
@@ -71,6 +89,7 @@ describe('SideNav 侧栏', () => {
       '/customer-signals',
       '/memories',
       '/knowledge-base',
+      '/ops-status',
     ])
     wrapper.unmount()
   })

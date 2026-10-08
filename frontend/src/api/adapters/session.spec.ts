@@ -38,6 +38,7 @@ describe('session adapter', () => {
           role: 'MERCHANT',
           expires_at: '2026-09-23T00:00:00Z',
           merchant_display_name: 'Borough商家100',
+          shop_slug: 'borough-demo-100',
         },
         201,
       ),
@@ -51,6 +52,7 @@ describe('session adapter', () => {
       role: 'MERCHANT',
       expiresAt: '2026-09-23T00:00:00Z',
       merchantDisplayName: 'Borough商家100',
+      shopSlug: 'borough-demo-100',
     })
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toBe(`${BASE_URL}/api/v2/merchant/sessions`)

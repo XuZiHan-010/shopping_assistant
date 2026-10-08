@@ -42,6 +42,7 @@ function shellRoutes() {
           ['customer-signals', 'customer-signals'],
           ['memories', 'merchant-memory'],
           ['knowledge-base', 'knowledge-base'],
+          ['ops-status', 'ops-status'],
         ].map(([path, name]) => ({ path: path!, name: name!, component: stub })),
       ],
     },

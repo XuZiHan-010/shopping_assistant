@@ -45,6 +45,12 @@ export const useAuthStore = defineStore('auth', () => {
    */
   const sessionId = ref<string | null>(null)
 
+  /**
+   * 当前会话所属商家的顾客端店铺标识（D-N5-4）。与会话 ID 同生命周期：只存内存，
+   * 会话丢弃时一并清空。它不是凭证，只用来拼「顾客视角」的新标签链接。
+   */
+  const shopSlug = ref<string | null>(null)
+
   const displayNames = computed(() => merchants.value.map((item) => item.displayName))
 
   /**
@@ -64,6 +70,7 @@ export const useAuthStore = defineStore('auth', () => {
     pendingSession = null
     const previous = sessionId.value
     sessionId.value = null
+    shopSlug.value = null
     for (const reset of sessionScopedResetHandlers) reset()
     // 注销失败不阻塞：旧会话本就按服务端 TTL 过期，为一次可能是网络抖动的
     // 注销失败卡住「切换商家」，代价比留一个反正很快过期的旧会话更大。
@@ -82,6 +89,7 @@ export const useAuthStore = defineStore('auth', () => {
       throw new AppError('AUTH_REQUIRED', '商家已切换，请重新操作。')
     }
     sessionId.value = session.sessionId
+    shopSlug.value = session.shopSlug
     selected.value = merchant
   }
 
@@ -261,6 +269,7 @@ export const useAuthStore = defineStore('auth', () => {
     invalidate,
     reloadForLocale,
     sessionId,
+    shopSlug,
     openSession,
     selectAndOpenSession,
     callWithSessionRetry,

@@ -31,6 +31,7 @@ from uuid import UUID
 from pydantic import BaseModel, ValidationError
 
 from app.core.errors import ErrorCode
+from app.core.metrics import OperationalMetrics
 from app.core.session import SessionContext, SessionRole, principal_digest
 from app.db.session import Database
 from app.repositories.audit import AuditRepository
@@ -186,6 +187,7 @@ class ToolGates:
         drafts: DraftSink | None = None,
         observer: Callable[[str], None] | None = None,
         clock: Callable[[], float] = time.perf_counter,
+        metrics: OperationalMetrics | None = None,
     ) -> None:
         if drafts is None and any(
             spec.write_policy is WritePolicy.MERCHANT_DRAFT for spec in registry.specs()
@@ -198,6 +200,7 @@ class ToolGates:
         self._drafts = drafts
         self._observe = observer or (lambda _stage: None)
         self._clock = clock
+        self._metrics = metrics
 
     @property
     def registry(self) -> ToolRegistry:
@@ -227,7 +230,33 @@ class ToolGates:
         *,
         call_id: str = DIRECT_CALL_ID,
     ) -> AdmittedCall | ToolResult:
-        """工具面 → 身份参数 → 参数校验 → 来源 → 选项 → 护栏。致命失败直接抛出。"""
+        """工具面 → 身份参数 → 参数校验 → 来源 → 选项 → 护栏。致命失败直接抛出。
+
+        准入阶段就失败（被拦截或被拒）的调用在这里计一次失败；放行的调用留给 `execute` 计数，
+        每次调用只计一次（运维看板的工具错误率，PRD §10.4）。
+        """
+
+        try:
+            admitted = await self._admit(ctx, tool_name, raw_args, call_id=call_id)
+        except FatalToolError:
+            self._count(ok=False)
+            raise
+        if isinstance(admitted, ToolResult):
+            self._count(ok=False)
+        return admitted
+
+    def _count(self, *, ok: bool) -> None:
+        if self._metrics is not None:
+            self._metrics.record_tool_call(ok=ok)
+
+    async def _admit(
+        self,
+        ctx: ToolContext,
+        tool_name: str,
+        raw_args: str | Mapping[str, Any],
+        *,
+        call_id: str,
+    ) -> AdmittedCall | ToolResult:
 
         started = self._clock()
         spec = self._registry.find(tool_name)
@@ -279,6 +308,16 @@ class ToolGates:
 
     async def execute(self, ctx: ToolContext, call: AdmittedCall) -> ToolResult:
         """审批闸门按写策略分派；草稿与界面确认在这里被「截住」，不会直接写目标对象。"""
+
+        try:
+            result = await self._execute(ctx, call)
+        except FatalToolError:
+            self._count(ok=False)
+            raise
+        self._count(ok=result.ok)
+        return result
+
+    async def _execute(self, ctx: ToolContext, call: AdmittedCall) -> ToolResult:
 
         spec, started = call.spec, self._clock()
         execution_ctx = replace(ctx, tool_call_id=call.call_id)
@@ -339,6 +378,7 @@ class ToolGates:
             outcome=ToolOutcome.SUCCEEDED,
             summary=output.summary,
             chart_data=output.chart_data,
+            grounds_numbers=spec.grounds_numbers,
         )
 
     # --- 闸门 --------------------------------------------------------------------

@@ -9,8 +9,8 @@ from httpx import AsyncClient
 from app.db.session import Database
 from app.llm.client import LlmTurn
 from app.llm.fake import FakeLlmClient
-from app.memory.customer_store import CustomerMemoryStore
 from tests.conftest import MERCHANT_ONE_ID
+from tests.support.memory_owners import CustomerStoreFor
 
 SHOP = "borough-api-100"
 NOW = datetime(2026, 9, 28, tzinfo=UTC)
@@ -47,7 +47,7 @@ async def test_bound_customer_can_list_and_delete_memory(
     headers = await _session(postgres_client, postgres_app, bind=True)
     database: Database = postgres_app.state.database
     async with database.session() as session:
-        memory = await CustomerMemoryStore(session).write(
+        memory = await CustomerStoreFor(session).write(
             merchant_id=MERCHANT_ONE_ID, buyer_key="memory-buyer",
             category="preference", key="color", value="blue", at=NOW,
         )
@@ -93,7 +93,7 @@ async def test_recent_memory_is_fenced_after_static_prompt(
     headers = await _session(postgres_client, postgres_app, bind=True)
     database: Database = postgres_app.state.database
     async with database.session() as session:
-        await CustomerMemoryStore(session).write(
+        await CustomerStoreFor(session).write(
             merchant_id=MERCHANT_ONE_ID, buyer_key="memory-buyer",
             category="preference", key="color", value="blue", at=NOW,
         )
@@ -122,7 +122,7 @@ async def test_memory_number_is_not_a_price_source(
     headers = await _session(postgres_client, postgres_app, bind=True)
     database: Database = postgres_app.state.database
     async with database.session() as session:
-        await CustomerMemoryStore(session).write(
+        await CustomerStoreFor(session).write(
             merchant_id=MERCHANT_ONE_ID, buyer_key="memory-buyer",
             category="preference", key="last_price", value="上次买的靴子 699 元", at=NOW,
         )
@@ -141,3 +141,37 @@ async def test_memory_number_is_not_a_price_source(
     assert response.status_code == 200, response.text
     assert "699" in fake.converse_calls[0].messages[0].content
     assert response.json()["degraded"] is True
+
+
+@pytest.mark.asyncio
+async def test_deleting_another_buyers_memory_is_forbidden_and_audited(
+    postgres_app: FastAPI, postgres_client: AsyncClient
+) -> None:
+    """审查 I5：同店另一位顾客的记忆 ID，删除返回 403 且写 RESOURCE_SCOPE_VIOLATION 审计（R5）。"""
+
+    from sqlalchemy import select
+
+    from app.models.operations import AuditLog
+
+    headers = await _session(postgres_client, postgres_app, bind=True)
+    database: Database = postgres_app.state.database
+    async with database.session() as session:
+        other = await CustomerStoreFor(session).write(
+            merchant_id=MERCHANT_ONE_ID, buyer_key="other-buyer",
+            category="preference", key="color", value="red", at=NOW,
+        )
+        assert other is not None
+        other_id = str(other.id)
+        await session.commit()
+
+    response = await postgres_client.delete(f"/api/v2/shop/memories/{other_id}", headers=headers)
+
+    assert response.status_code == 403 and response.json()["code"] == "RESOURCE_FORBIDDEN"
+    async with database.session() as session:
+        audited = (await session.scalars(
+            select(AuditLog.resource_id).where(
+                AuditLog.event_type == "RESOURCE_SCOPE_VIOLATION",
+                AuditLog.resource_type == "customer_memory",
+            )
+        )).all()
+    assert audited == [other_id]

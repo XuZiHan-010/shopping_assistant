@@ -26,6 +26,7 @@ import {
   productStatusTone,
 } from '@/components/catalog/productContent'
 import type { PillTone } from '@/components/layout/pillTone'
+import ProductThumb from '@/components/catalog/ProductThumb.vue'
 import StatusPill from '@/components/layout/StatusPill.vue'
 import WorkspacePage from '@/components/layout/WorkspacePage.vue'
 import { focusIfLost, useCursorList } from '@/composables/useCursorList'
@@ -171,8 +172,13 @@ function askDraft(product: MerchantProductContent): void {
           <tbody>
             <tr v-for="product in products" :key="product.id" data-test="product-row">
               <td class="cell-product">
-                <strong class="name">{{ product.title }}</strong>
-                <span class="ws-sub ws-mono" translate="no">{{ product.id }}</span>
+                <div class="product">
+                  <ProductThumb :image-url="product.imageUrl" />
+                  <div class="product__text">
+                    <strong class="name">{{ product.title }}</strong>
+                    <span class="ws-sub ws-mono" translate="no">{{ product.id }}</span>
+                  </div>
+                </div>
               </td>
               <td class="cell-category">{{ product.category }}</td>
               <td class="cell-stock r">
@@ -278,6 +284,17 @@ function askDraft(product: MerchantProductContent): void {
 .ask:hover {
   background: var(--accent);
   color: var(--on-accent);
+}
+
+.product {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.product__text {
+  min-width: 0;
 }
 
 .name {

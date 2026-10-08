@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 
 from app.db.session import Database
+from app.localization.after_sales import after_sale_text
 from app.models.after_sales import AfterSale
 from app.models.analytics import Order, OrderItem, Refund
 from app.models.events import FulfillmentEvent
@@ -110,10 +111,12 @@ def build_after_sale_tools(database: Database) -> tuple[ToolSpec, ...]:
             payload={
                 "allowed": result.allowed,
                 "allowed_types": sorted(kind.value for kind in result.allowed_types),
-                "rule_ref": result.rule_ref,
+                "rule_ref": after_sale_text(result.rule_ref, ctx.locale),
                 "reason_code": result.reason_code,
             },
-            summary="售后资格由后端订单事实判定；请如实解释结果，不承诺例外",
+            summary=after_sale_text(
+                "售后资格由后端订单事实判定；请如实解释结果，不承诺例外", ctx.locale
+            ),
             row_count=1,
         )
 
@@ -125,8 +128,8 @@ def build_after_sale_tools(database: Database) -> tuple[ToolSpec, ...]:
         if args.after_sale_type not in eligibility.allowed_types:
             raise GuardrailRejection(
                 code=eligibility.reason_code or "AFTER_SALE_INELIGIBLE",
-                current_limit=eligibility.rule_ref,
-                remediation="请向顾客说明当前规则允许的售后类型",
+                current_limit=after_sale_text(eligibility.rule_ref, ctx.locale),
+                remediation=after_sale_text("请向顾客说明当前规则允许的售后类型", ctx.locale),
             )
         async with database.session() as session:
             lines = list(
@@ -163,8 +166,8 @@ def build_after_sale_tools(database: Database) -> tuple[ToolSpec, ...]:
         if selected and selected != {str(line.id) for line in lines if str(line.id) in selected}:
             raise GuardrailRejection(
                 code="ORDER_LINE_INVALID",
-                current_limit="只能选择本订单的商品行",
-                remediation="请重新选择本订单中的商品",
+                current_limit=after_sale_text("只能选择本订单的商品行", ctx.locale),
+                remediation=after_sale_text("请重新选择本订单中的商品", ctx.locale),
             )
         chosen = [line for line in lines if not selected or str(line.id) in selected]
         refundable_cents = sum(
@@ -176,8 +179,8 @@ def build_after_sale_tools(database: Database) -> tuple[ToolSpec, ...]:
         if args.after_sale_type != AfterSaleType.TICKET and refundable_cents == 0:
             raise GuardrailRejection(
                 code="ALREADY_REFUNDED",
-                current_limit="平台演示售后规则：已退金额不可再次申请",
-                remediation="请核对订单行或联系客服",
+                current_limit=after_sale_text("平台演示售后规则：已退金额不可再次申请", ctx.locale),
+                remediation=after_sale_text("请核对订单行或联系客服", ctx.locale),
             )
         return ConfirmationPreview(
             payload={
@@ -188,10 +191,14 @@ def build_after_sale_tools(database: Database) -> tuple[ToolSpec, ...]:
                 "estimated_refund_cents": (
                     None if args.after_sale_type == AfterSaleType.TICKET else refundable_cents
                 ),
-                "rule_ref": eligibility.rule_ref,
-                "next_step": "请在售后页面核对并确认，聊天中的确认不生效",
+                "rule_ref": after_sale_text(eligibility.rule_ref, ctx.locale),
+                "next_step": after_sale_text(
+                    "请在售后页面核对并确认，聊天中的确认不生效", ctx.locale
+                ),
             },
-            summary="已准备售后预览；顾客须在页面上核对摘要和金额后亲自确认",
+            summary=after_sale_text(
+                "已准备售后预览；顾客须在页面上核对摘要和金额后亲自确认", ctx.locale
+            ),
         )
 
     return (

@@ -29,10 +29,12 @@ from app.agent.loop.compaction import (
     CompactionStrategy,
     flatten,
     split_rounds,
+    trusted_skill_calls,
 )
 from app.agent.loop.compaction.anchors import extract_anchors, render_anchors
 from app.agent.loop.compaction.pruning import prune_tool_results
 from app.agent.loop.fencing import fence
+from app.agent.loop.markup import TOOL_CALL_MARKUP
 from app.llm.client import (
     ConversationalLlmClient,
     LlmBudget,
@@ -86,7 +88,13 @@ async def summarize_early_context(
     prefix, rounds = split_rounds(messages)
     system, history, current = prefix[0], prefix[1:-1], prefix[-1]
     cutoff = max(len(rounds) - keep_recent_rounds, 0)
-    old_rounds, recent_rounds = rounds[:cutoff], rounds[cutoff:]
+    skills = trusted_skill_calls(results)
+    # 含受信 Skill 的较早轮整轮原样保留（不交给摘要模型转述，也不改变其受信身份）。
+    kept_rounds = [
+        r for r in rounds[:cutoff] if any(m.tool_call_id in skills for m in r if m.role == "tool")
+    ]
+    old_rounds = [r for r in rounds[:cutoff] if r not in kept_rounds]
+    recent_rounds = rounds[cutoff:]
     if not history and not old_rounds:
         return CompactionOutcome(
             messages=list(messages),
@@ -107,6 +115,7 @@ async def summarize_early_context(
         f"{_ROLE_LABEL.get(m.role, m.role.upper())}: {m.content}"
         for m in [*history, *(m for r in old_rounds for m in r)]
     )
+    calls_before = budget.calls
     try:
         turn = await llm.converse(
             messages=[
@@ -117,11 +126,19 @@ async def summarize_early_context(
             budget=budget,
         )
     except LlmBudgetError:
-        return fallback(0)  # 配额在扣减前就已不够，这次调用没有发生
+        # 调用次数先扣后发、token 事后记账：可能没发出请求，也可能已发出并付费。
+        # 按预算实际扣减的调用次数计，与 `compaction_max_calls` 的记账口径一致（台账）。
+        return fallback(budget.calls - calls_before)
     except LlmUnavailableError:
         return fallback(1)
     summary = (turn.text or "").strip()
-    if turn.degraded or turn.stop_reason != "END_TURN" or not summary:
+    if (
+        turn.degraded
+        or turn.stop_reason != "END_TURN"
+        or not summary
+        # 上游把内部工具调用标记写进正文时与主循环同样不采用（台账：摘要未检查 DSML）。
+        or TOOL_CALL_MARKUP.search(summary)
+    ):
         return fallback(1)
 
     absorbed = {m.tool_call_id for r in old_rounds for m in r if m.role == "tool"}
@@ -131,7 +148,9 @@ async def summarize_early_context(
     summary_block = f"{SUMMARY_NOTICE[locale]}\n{fence(summary, source='compaction:summary')}"
     content = "\n\n".join(part for part in (summary_block, anchors, current.content) if part)
     return CompactionOutcome(
-        messages=flatten([system, replace(current, content=content)], recent_rounds),
+        messages=flatten(
+            [system, replace(current, content=content)], [*kept_rounds, *recent_rounds]
+        ),
         strategy_used=CompactionStrategy.SUMMARIZATION,
         llm_calls=1,
         changed=True,

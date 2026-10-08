@@ -12,7 +12,11 @@ import {
   updateKnowledgeDocument,
   type UpdateKnowledgeDocumentOptions,
 } from '@/api/knowledge'
-import type { KnowledgeDocument, KnowledgeTreeNode } from '@/api/adapters/knowledge'
+import type {
+  KnowledgeDocument,
+  KnowledgeIndexStatus,
+  KnowledgeTreeNode,
+} from '@/api/adapters/knowledge'
 import { resolveViewerToken } from '@/api/client'
 import { AppError } from '@/api/errors'
 import { findNode, isBusinessDomain } from '@/utils/knowledgeTree'
@@ -26,6 +30,8 @@ function quoteVersion(version: string): string {
 export const useKnowledgeStore = defineStore('knowledge', () => {
   const adminToken = ref('')
   const roots = ref<KnowledgeTreeNode[]>([])
+  /** 索引状态随目录树一起返回（§8.6.7）；保存后重新加载目录树即可看到重建结果。 */
+  const indexStatus = ref<KnowledgeIndexStatus | undefined>(undefined)
   const selectedDocument = ref<KnowledgeDocument | undefined>(undefined)
   const selectedPath = ref('')
   const loading = ref(false)
@@ -70,7 +76,9 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
     loading.value = true
     errorMessage.value = ''
     try {
-      roots.value = await getKnowledgeTree(new AbortController().signal)
+      const snapshot = await getKnowledgeTree(new AbortController().signal)
+      roots.value = snapshot.roots
+      indexStatus.value = snapshot.indexStatus
     } catch (error) {
       errorMessage.value = error instanceof Error ? error.message : '知识库目录加载失败。'
       throw error
@@ -182,6 +190,7 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
   function signOut(): void {
     adminToken.value = ''
     roots.value = []
+    indexStatus.value = undefined
     selectedDocument.value = undefined
     selectedPath.value = ''
     errorMessage.value = ''
@@ -234,6 +243,7 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
     renameDomain,
     deleteSelected,
     saveDocument,
+    indexStatus,
     signOut,
     reloadForLocale,
   }

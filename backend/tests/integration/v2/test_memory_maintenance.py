@@ -10,10 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import Database
 from app.jobs.purge_expired_customer_memory import purge_once
 from app.jobs.rebuild_memory_summaries import rebuild_once
-from app.memory.customer_store import CustomerMemoryStore
-from app.memory.merchant_store import MerchantMemoryStore
 from app.models.memory_v2 import CustomerMemory, MerchantMemorySummary
 from tests.conftest import MERCHANT_ONE_ID
+from tests.support.memory_owners import CustomerStoreFor, MerchantStoreFor
 
 NOW = datetime(2026, 9, 28, tzinfo=UTC)
 
@@ -22,7 +21,7 @@ NOW = datetime(2026, 9, 28, tzinfo=UTC)
 async def test_purge_only_expired_customer_facts(
     db_session: AsyncSession, integration_database: Database, merchant_one_id: object
 ) -> None:
-    store = CustomerMemoryStore(db_session)
+    store = CustomerStoreFor(db_session)
     await store.write(
         merchant_id=MERCHANT_ONE_ID, buyer_key="buyer-a", category="preference",
         key="old", value="旧偏好", at=NOW - timedelta(days=181),
@@ -42,7 +41,7 @@ async def test_purge_only_expired_customer_facts(
 async def test_rebuild_removes_deleted_fact_from_summary(
     db_session: AsyncSession, integration_database: Database, merchant_one_id: object
 ) -> None:
-    store = MerchantMemoryStore(db_session)
+    store = MerchantStoreFor(db_session)
     fact = await store.add_fact(
         merchant_id=MERCHANT_ONE_ID, category="tone", content="回复语气偏正式",
         source_ref=f"{uuid4()}:{uuid4()}", at=NOW,

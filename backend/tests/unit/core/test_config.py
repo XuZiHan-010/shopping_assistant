@@ -272,3 +272,39 @@ def test_skill_limits_default_to_loader_constants() -> None:
 def test_skill_limits_are_bounded(field: str, value: int) -> None:
     with pytest.raises(ValidationError):
         make_settings(**{field: value})
+
+
+def test_embedding_is_off_by_default() -> None:
+    settings = make_settings()
+    assert settings.embedding_model is None
+
+
+def test_calibrated_model_gets_its_own_threshold() -> None:
+    assert make_settings(
+        embedding_model="google/embeddinggemma-300m"
+    ).resolved_embedding_min_similarity == pytest.approx(0.40)
+    assert make_settings(
+        embedding_model="BAAI/bge-small-zh-v1.5"
+    ).resolved_embedding_min_similarity == pytest.approx(0.575)
+
+
+def test_uncalibrated_model_requires_explicit_threshold() -> None:
+    """换了没评测过的模型却沿用别的阈值，召回或拒答会悄悄失准（N4-C）。"""
+
+    with pytest.raises(ValidationError, match="EMBEDDING_MIN_SIMILARITY"):
+        make_settings(embedding_model="some/other-model")
+    explicit = make_settings(embedding_model="some/other-model", embedding_min_similarity=0.5)
+    assert explicit.resolved_embedding_min_similarity == pytest.approx(0.5)
+
+
+def test_blank_embedding_variables_mean_unset() -> None:
+    settings = make_settings(embedding_model="", embedding_min_similarity="  ")
+    assert settings.embedding_model is None and settings.embedding_min_similarity is None
+
+
+def test_blank_shop_origin_means_unset() -> None:
+    # 只部署商家端时 Railway 上的 SHOP_ORIGIN 可能留空：
+    # 空串不应让启动失败，也不应放行任何顾客端 Origin。
+    settings = make_settings(shop_origin="  ")
+    assert settings.shop_origin is None
+    assert settings.cors_allowed_origins == [str(settings.frontend_origin).rstrip("/")]

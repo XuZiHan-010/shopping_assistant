@@ -16,9 +16,9 @@ NOW = datetime(2026, 9, 28, tzinfo=UTC)
 async def test_read_excludes_expired_without_renewing_retention(
     db_session: AsyncSession, merchant_one_id: object
 ) -> None:
-    from app.memory.customer_store import CustomerMemoryStore
+    from tests.support.memory_owners import CustomerStoreFor
 
-    store = CustomerMemoryStore(db_session)
+    store = CustomerStoreFor(db_session)
     await store.write(
         merchant_id=MERCHANT_ONE_ID, buyer_key="buyer-a", category="preference",
         key="color", value="blue", at=NOW - timedelta(days=179),
@@ -35,9 +35,9 @@ async def test_read_excludes_expired_without_renewing_retention(
 async def test_store_isolates_merchant_and_buyer(
     db_session: AsyncSession, merchant_one_id: object, merchant_two_id: object
 ) -> None:
-    from app.memory.customer_store import CustomerMemoryStore
+    from tests.support.memory_owners import CustomerStoreFor
 
-    store = CustomerMemoryStore(db_session)
+    store = CustomerStoreFor(db_session)
     await store.write(
         merchant_id=MERCHANT_ONE_ID, buyer_key="buyer-a", category="preference",
         key="color", value="blue", at=NOW,
@@ -50,9 +50,9 @@ async def test_store_isolates_merchant_and_buyer(
 async def test_disable_purges_and_blocks_future_writes(
     db_session: AsyncSession, merchant_one_id: object
 ) -> None:
-    from app.memory.customer_store import CustomerMemoryStore
+    from tests.support.memory_owners import CustomerStoreFor
 
-    store = CustomerMemoryStore(db_session)
+    store = CustomerStoreFor(db_session)
     await store.write(
         merchant_id=MERCHANT_ONE_ID, buyer_key="buyer-a", category="preference",
         key="color", value="blue", at=NOW,
@@ -72,9 +72,9 @@ async def test_disable_purges_and_blocks_future_writes(
 async def test_write_updates_same_fact_and_renews_from_confirmation_only(
     db_session: AsyncSession, merchant_one_id: object
 ) -> None:
-    from app.memory.customer_store import CustomerMemoryStore
+    from tests.support.memory_owners import CustomerStoreFor
 
-    store = CustomerMemoryStore(db_session)
+    store = CustomerStoreFor(db_session)
     first = await store.write(
         merchant_id=MERCHANT_ONE_ID, buyer_key="buyer-a", category="preference",
         key="color", value="blue", at=NOW - timedelta(days=3),
@@ -87,3 +87,26 @@ async def test_write_updates_same_fact_and_renews_from_confirmation_only(
     rows = await store.recall(merchant_id=MERCHANT_ONE_ID, buyer_key="buyer-a", at=NOW)
     assert len(rows) == 1 and rows[0].value == "green"
     assert rows[0].last_confirmed_at == NOW
+
+
+@pytest.mark.asyncio
+async def test_same_key_in_different_categories_does_not_overwrite(
+    db_session: AsyncSession, merchant_one_id: object
+) -> None:
+    """审查 I6：唯一键须含 category；否则「偏好/颜色」会被「偏好/尺码」静默覆盖。"""
+
+    from tests.support.memory_owners import CustomerStoreFor
+
+    store = CustomerStoreFor(db_session)
+    await store.write(
+        merchant_id=MERCHANT_ONE_ID, buyer_key="buyer-a", category="颜色",
+        key="偏好", value="素色", at=NOW,
+    )
+    await store.write(
+        merchant_id=MERCHANT_ONE_ID, buyer_key="buyer-a", category="尺码",
+        key="偏好", value="L 码", at=NOW,
+    )
+
+    rows = await store.recall(merchant_id=MERCHANT_ONE_ID, buyer_key="buyer-a", at=NOW)
+
+    assert sorted((row.category, row.value) for row in rows) == [("尺码", "L 码"), ("颜色", "素色")]

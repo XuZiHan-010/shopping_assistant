@@ -84,3 +84,26 @@ export function resolveViewerToken(
   const value = raw?.trim()
   return value ? value : undefined
 }
+
+/**
+ * 解析顾客端地址（「顾客视角」入口，D-N5-4）。
+ *
+ * 可选功能：未配置，或不是 http(s) 绝对地址时返回 `undefined`，调用方据此不显示入口——
+ * 不回退到同源，也不猜测地址。返回值去掉结尾斜杠，调用方直接拼 `/{shop_slug}`。
+ */
+export function resolveShopBaseUrl(
+  raw: string | undefined = import.meta.env.VITE_SHOP_BASE_URL,
+): string | undefined {
+  const value = raw?.trim().replace(/\/+$/, '')
+  if (!value) return undefined
+  let parsed: URL
+  try {
+    parsed = new URL(value)
+  } catch {
+    return undefined
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return undefined
+  // 只接受「源 + 可选路径」：带查询或片段的地址拼不出干净的店铺链接。
+  if (parsed.search || parsed.hash) return undefined
+  return value
+}

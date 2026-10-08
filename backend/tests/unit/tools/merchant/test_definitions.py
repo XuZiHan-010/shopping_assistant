@@ -164,3 +164,66 @@ def test_search_rules_rejects_empty_query() -> None:
 
     with pytest.raises(ValidationError):
         SearchRulesArgs(query="")
+
+
+# --- 检索范围：全部团队知识，而不只是平台规则域（N4-C，2026-10-01 基线发现）--------------
+
+
+@pytest.mark.asyncio
+async def test_search_rules_searches_all_business_documents() -> None:
+    """退货流程写在退货域文档里，正文不含「规则」二字；固定平台规则域时永远检不到。"""
+
+    docs = [
+        _FakeDocument(
+            "业务/退货/业务流程/退货业务流程图.md",
+            "退货业务流程图",
+            "买家发起退货或退款申请，商家审核，买家寄回，商家收货验收，平台打款退回。",
+        )
+    ]
+    retrieval = KnowledgeRetrieval(_FakeKnowledgeRepository(docs))
+
+    result = await resolve_rule_search("退货退款的流程是怎样的", retrieval=retrieval)
+
+    assert result.payload["matched"] is True
+    assert result.payload["hits"][0]["source_path"] == "业务/退货/业务流程/退货业务流程图.md"
+
+
+@pytest.mark.asyncio
+async def test_single_incidental_term_is_not_a_match() -> None:
+    """只碰巧命中一个词（如「规则」）不算找到：检索不到时要如实承认，而不是凑一篇。"""
+
+    docs = [
+        _FakeDocument("业务/平台规则/流程.md", "平台规则流程", "规则发布与公示，违规判定与处罚。")
+    ]
+    retrieval = KnowledgeRetrieval(_FakeKnowledgeRepository(docs))
+
+    result = await resolve_rule_search("广告投放的出价规则", retrieval=retrieval)
+
+    assert result.payload["matched"] is False
+    assert result.payload["hits"] == []
+
+
+@pytest.mark.asyncio
+async def test_search_rules_ranks_by_relevance() -> None:
+    docs = [
+        _FakeDocument("业务/交易/流程.md", "交易流程", "下单、支付、发货；售后可发起退款。"),
+        _FakeDocument("业务/退货/名词.md", "退款名词", "退款申请、退款状态与退款原因的解释。"),
+    ]
+    retrieval = KnowledgeRetrieval(_FakeKnowledgeRepository(docs))
+
+    result = await resolve_rule_search("退款状态有哪些", retrieval=retrieval)
+
+    assert result.payload["hits"][0]["source_path"] == "业务/退货/名词.md"
+
+
+@pytest.mark.asyncio
+async def test_single_short_keyword_query_can_match() -> None:
+    """审查 N4 I-3：「退款」只切出 1 个片段，阈值不能高于查询本身的片段数，否则永远检索不到。"""
+
+    docs = [_FakeDocument("业务/退货/名词.md", "退货名词", "常用别名：退款、售后、refund。")]
+    retrieval = KnowledgeRetrieval(_FakeKnowledgeRepository(docs))
+
+    result = await resolve_rule_search("退款", retrieval=retrieval)
+
+    assert result.payload["matched"] is True
+    assert result.payload["hits"][0]["source_path"] == "业务/退货/名词.md"

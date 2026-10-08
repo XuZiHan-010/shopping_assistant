@@ -24,10 +24,12 @@ from app.agent.loop.fencing import FENCE_POLICY, fence
 from app.agent.loop.limits import LoopLimits
 from app.agent.loop.runner import EventSink, LoopOutcome, LoopRequest, run_loop
 from app.core.errors import ResourceForbiddenError
+from app.core.metrics import OperationalMetrics
 from app.core.session import SessionContext, principal_digest
 from app.llm.client import ConversationalLlmClient
 from app.localization.locales import SupportedLocale
 from app.memory.customer_store import CustomerMemoryStore
+from app.memory.owners import CustomerMemoryOwner
 from app.models.conversation import Conversation
 from app.schemas.chat import QualityStatus
 from app.schemas.v2.common import AnalysisSourceEntry, ToolDisplayStatus
@@ -35,6 +37,7 @@ from app.schemas.v2.shop_session import ShopAnswerMode, ShopChatResponse
 from app.services.v2.chat_write_marker import find_committed_write
 from app.services.v2.conversations import load_history, parse_conversation_id, record_turn
 from app.services.v2.suggestions import shop_suggestions
+from app.services.v2.turn_metrics import record_turn_metrics
 from app.skills.registry import SkillRegistry
 from app.skills.spec import LOAD_SKILL_TOOL
 from app.tools.errors import FatalToolError
@@ -52,6 +55,19 @@ SYSTEM_PROMPT: Final = (
     "医疗、用药、法律和金融问题只说明商品信息，并建议咨询专业人士。\n"
     "售后工具只准备申请，顾客必须在界面确认；聊天中的确认不生效。\n" + FENCE_POLICY
 )
+
+#: 访客回合的身份说明（PRD C2：访客无订单、售后与记忆）。按会话变化，所以随 `memory_context`
+#: 接在稳定前缀之后，不进静态提示词（A9）。内容只来自服务端会话，不含任何顾客文字。
+#: 没有它，模型不知道当前是访客，遇到「我的订单到哪了」只能拿猜的订单号去调本人订单工具，
+#: 被归属闸门判为致命错误、整轮 403；有了它，这类提问得到「先选择演示身份」的正常引导。
+GUEST_SESSION_NOTE: Final = (
+    "【会话身份】当前顾客是访客，尚未在页面上绑定演示顾客身份：没有可查询的订单、售后记录与偏好记忆。\n"
+    "顾客问到本人订单、物流进度、售后申请，或要求记住偏好时，不要调用 get_my_order、"
+    "check_after_sale_eligibility、prepare_after_sale，也不要猜测订单号；"
+    "请说明需要先在页面上绑定演示顾客，绑定后即可继续。\n"
+    "商品、规则与购物车相关的问题照常服务；退换货等通用规则可以直接依据 get_shop_policy 说明。"
+)
+
 
 def build_system_prompt(skills: SkillRegistry | None) -> str:
     """静态提示 = 原常量 + 空行 + 本端 Skill 索引（N3 阶段 A Task 6）。
@@ -94,8 +110,11 @@ class ShopChatService:
         principal_secret: bytes | None = None,
         skills: SkillRegistry | None = None,
         history_turns: int = 0,
+        metrics: OperationalMetrics | None = None,
     ) -> None:
         self._session = session
+        #: 运维计数器（进程内）；评测与单测不传，只有路由装配时注入。
+        self._metrics = metrics
         #: 回放同一会话最近几轮（D-N4-1）；顾客原话的围栏由循环统一加。0 不回放。
         self._history_turns = history_turns
         self._llm = llm
@@ -183,6 +202,7 @@ class ShopChatService:
             )
             raise
         response = self._to_response(outcome, conversation.id)
+        record_turn_metrics(self._metrics, outcome, response.analysis_sources)
         await record_turn(
             self._session,
             conversation,
@@ -197,14 +217,18 @@ class ShopChatService:
         return ShopTurn(response=response, conversation_id=conversation.id)
 
     async def _memory_context(self) -> str:
-        """少量本店记忆，按外部文字围栏；经 `memory_context` 传入，不进数字来源（A6）。"""
+        """按会话变化的上下文：已绑定顾客是少量本店记忆（按外部文字围栏），访客是身份说明。
+
+        经 `memory_context` 传入，接在稳定前缀之后，不进数字来源（A6）。
+        """
 
         if self._ctx.buyer_key is None:
+            # 访客没有记忆可注入；同一位置改放身份说明，让模型引导绑定而不是去查订单。
+            return GUEST_SESSION_NOTE
+        owner = CustomerMemoryOwner.from_session(self._ctx)
+        if owner is None:
             return ""
-        rows = await CustomerMemoryStore(self._session).recall(
-            merchant_id=self._ctx.merchant_id, buyer_key=self._ctx.buyer_key,
-            at=datetime.now(UTC), limit=3,
-        )
+        rows = await CustomerMemoryStore(self._session, owner).recall(at=datetime.now(UTC), limit=3)
         if not rows:
             return ""
         payload = [

@@ -52,6 +52,8 @@ class CaseReportEntry:
     failure_detail: str = ""
     #: 供失败排查用的原始请求/响应片段；渲染前必须先经过 `_redact()`。
     raw_payload: str = ""
+    #: 该用例最终请求的追踪 ID（`X-Request-Id`，PRD §10.4）；据此可查到 `llm_usage` 与审计行。
+    request_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -131,9 +133,15 @@ def _confidence_interval(entries: Sequence[CaseReportEntry]) -> str:
     total = len(entries)
     passed = sum(1 for entry in entries if entry.passed)
     rate = passed / total
-    margin = 1.96 * ((rate * (1 - rate)) / total) ** 0.5
-    low = max(0.0, rate - margin)
-    high = min(1.0, rate + margin)
+    # Wilson score interval stays informative when a small set is all pass/all fail.
+    # The normal/Wald interval collapses to 100%–100% or 0%–0% in those cases.
+    z = 1.96
+    z_squared = z * z
+    denominator = 1 + z_squared / total
+    centre = rate + z_squared / (2 * total)
+    margin = z * ((rate * (1 - rate) + z_squared / (4 * total)) / total) ** 0.5
+    low = max(0.0, (centre - margin) / denominator)
+    high = min(1.0, (centre + margin) / denominator)
     return f"{rate:.1%}（95% 置信区间 {low:.1%}–{high:.1%}，n={total}）"
 
 
@@ -166,7 +174,8 @@ def render_report(
     if not report.security_results:
         lines.append("- 无安全评测样本，不能判定通过")
     for entry in report.security_results:
-        lines.append(f"- {_redact(entry.case_id)}：{'通过' if entry.passed else '失败'}")
+        trace = f"（追踪 ID {_redact(entry.request_id)}）" if entry.request_id else ""
+        lines.append(f"- {_redact(entry.case_id)}：{'通过' if entry.passed else '失败'}{trace}")
         if not entry.passed and entry.failure_detail:
             lines.append(f"  - {_redact(entry.failure_detail)}")
     lines.append(f"- 门禁结论：{'通过' if gate_passed else '不通过'}")

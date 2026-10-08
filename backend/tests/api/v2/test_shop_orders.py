@@ -7,6 +7,9 @@
 from __future__ import annotations
 
 import json
+import os
+import statistics
+import time
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -545,6 +548,42 @@ async def test_detail_of_foreign_missing_and_legacy_orders_is_one_403(
 
     assert all(body == bodies[0] for body in bodies)
     assert bodies[0]["details"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.security_timing
+@pytest.mark.skipif(
+    os.getenv("REQUIRE_SECURITY_TIMING") != "1",
+    reason="仅在独占 PostgreSQL 的 security-timing job 中运行",
+)
+async def test_order_detail_missing_and_foreign_timing(
+    postgres_app: FastAPI, postgres_client: AsyncClient
+) -> None:
+    """真实订单详情端点：不存在与越权订单各 500 次。"""
+    _, foreign_order, _ = await _placed(postgres_client, postgres_app, buyer_key="alice")
+    bob = await bound_customer(postgres_client, postgres_app, buyer_key="bob")
+    missing_url = f"{ORDERS}/{uuid4()}"
+    foreign_url = f"{ORDERS}/{foreign_order}"
+
+    async def elapsed(url: str) -> float:
+        started = time.perf_counter_ns()
+        response = await postgres_client.get(url, headers=bob)
+        assert response.status_code == 403
+        return (time.perf_counter_ns() - started) / 1_000_000
+
+    for _ in range(20):
+        await elapsed(missing_url)
+        await elapsed(foreign_url)
+    missing_ms, foreign_ms = [], []
+    for _ in range(500):
+        missing_ms.append(await elapsed(missing_url))
+        foreign_ms.append(await elapsed(foreign_url))
+
+    median_delta = abs(statistics.median(missing_ms) - statistics.median(foreign_ms))
+    missing_p95 = statistics.quantiles(missing_ms, n=100)[94]
+    foreign_p95 = statistics.quantiles(foreign_ms, n=100)[94]
+    assert median_delta <= 10.0
+    assert 0.8 <= missing_p95 / foreign_p95 <= 1.25
 
 
 @pytest.mark.asyncio

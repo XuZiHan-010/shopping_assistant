@@ -246,6 +246,34 @@ async def test_judge_payload_hides_candidate_identity() -> None:
         assert leak not in payload
 
 
+async def test_request_id_reaches_the_result_but_never_the_judge() -> None:
+    """追踪 ID 随结果带出供报告回查（PRD §10.4），但不进入裁判载荷。"""
+
+    async def traced_executor(case: EvalCase) -> ExecutionOutcome:
+        outcome = await _passing_executor(case)
+        return ExecutionOutcome(
+            assertion_context=outcome.assertion_context,
+            transcript=outcome.transcript,
+            request_id="eval-trace-0001",
+        )
+
+    fake_judge = _FakeJudgeClient()
+    runner = QualityRunner(
+        executor=traced_executor,
+        judge_client=fake_judge,
+        rubrics={"answer_quality": RubricSpec(version="v1", prompt="评估回答是否准确。")},
+    )
+
+    judged = await runner.run(case_with_rubric())
+    unjudged = await QualityRunner(
+        executor=traced_executor, judge_client=fake_judge, rubrics={}
+    ).run(_quality_case(id="EVAL-QUALITY-NO-RUBRIC"))
+
+    assert judged.request_id == "eval-trace-0001"
+    assert unjudged.request_id == "eval-trace-0001"
+    assert "eval-trace-0001" not in fake_judge.last_payload
+
+
 def test_response_field_assertion_requires_path_and_expected() -> None:
     from app.eval.cases import Assertion
 

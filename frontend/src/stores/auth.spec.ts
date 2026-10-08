@@ -111,12 +111,17 @@ describe('useAuthStore', () => {
 describe('v2 商家会话（n2-merchant-vue-v2-migration Task 2）', () => {
   const BASE_URL = 'http://127.0.0.1:8000'
 
-  function sessionResponse(sessionId: string, displayName: string): Response {
+  function sessionResponse(
+    sessionId: string,
+    displayName: string,
+    shopSlug = 'borough-demo-100',
+  ): Response {
     return Response.json({
       session_id: sessionId,
       role: 'MERCHANT',
       expires_at: '2026-09-24T00:00:00Z',
       merchant_display_name: displayName,
+      shop_slug: shopSlug,
     })
   }
 
@@ -142,6 +147,35 @@ describe('v2 商家会话（n2-merchant-vue-v2-migration Task 2）', () => {
     expect(store.sessionId).toBe('sid-a'.padEnd(43, '0'))
     const dump = JSON.stringify({ ...localStorage }) + JSON.stringify({ ...sessionStorage })
     expect(dump).not.toContain(store.sessionId)
+  })
+
+  it('shopSlug 随会话保存在内存、不落持久化存储；切换商家时随会话一起替换（D-N5-4）', async () => {
+    const store = useAuthStore()
+    await store.loadMerchants()
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    expect(store.shopSlug).toBeNull()
+
+    fetchMock.mockResolvedValueOnce(
+      sessionResponse('sid-a'.padEnd(43, '0'), 'Borough商家100', 'borough-demo-100'),
+    )
+    await store.openSession(store.merchants[0]!)
+    expect(store.shopSlug).toBe('borough-demo-100')
+    const dump = JSON.stringify({ ...localStorage }) + JSON.stringify({ ...sessionStorage })
+    expect(dump).not.toContain('borough-demo-100')
+
+    // 切换：旧会话一丢弃，旧店铺标识同步清空；新会话到手后才是新店铺。
+    let resolveNext: (response: Response) => void = () => undefined
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }))
+    fetchMock.mockImplementationOnce(
+      () => new Promise<Response>((resolve) => { resolveNext = resolve }),
+    )
+    const switching = store.selectAndOpenSession(store.merchants[1]!)
+    expect(store.shopSlug).toBeNull()
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
+    resolveNext(sessionResponse('sid-b'.padEnd(43, '0'), 'Borough商家101', 'borough-demo-101'))
+    await switching
+    expect(store.shopSlug).toBe('borough-demo-101')
   })
 
   it('切换商家：先注销旧会话、清空已注册的会话态 Store，再换取新会话，绝不复用旧 X-Session-Id', async () => {

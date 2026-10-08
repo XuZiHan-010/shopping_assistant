@@ -10,8 +10,13 @@ dependencies = [
     # 客户端断开时的清理能跑完，所以显式声明。
     "anyio>=4.9,<5",
     "fastapi>=0.116,<1",
+    "fastembed>=0.8,<0.9",
     "httpx>=0.28,<1",
     "langgraph>=0.2,<1",
+    # MCP 官方 SDK（N5 A，PRD A8；契约 §8.14.3）：只用它的 2026-07-28 协议类型与入站校验阶梯
+    # （`mcp.shared.inbound`），鉴权与分发由 `app/mcp/server.py` 自己做；测试用它的标准客户端。
+    # 精确钉版本：协议仍在快速演进，升级须重跑 `tests/integration/mcp/`。
+    "mcp==2.2.0",
     "psycopg[binary,pool]>=3.2,<4",
     "pydantic-settings>=2.10,<3",
     "pyyaml>=6.0,<7",

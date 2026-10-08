@@ -105,7 +105,13 @@ class DeepSeekLlmClient:
                         {"role": "user", "content": user},
                     ],
                     "stream": False,
-                    "max_tokens": min(remaining, self._settings.llm_max_output_tokens_per_call),
+                    "max_tokens": min(
+                        remaining,
+                        self._settings.llm_max_output_tokens_per_call,
+                        options.max_output_tokens
+                        if options.max_output_tokens is not None
+                        else remaining,
+                    ),
                 }
                 if (
                     options.thinking == "disabled"

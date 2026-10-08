@@ -21,6 +21,20 @@ function mountGate(pinia = createPinia()) {
   return mount(AdminGate, { global: { plugins: [pinia, i18n] }, slots: { default: SLOT } })
 }
 
+const EMPTY_TREE = {
+  roots: [],
+  index_status: {
+    retrieval_mode: 'KEYWORD_ONLY',
+    active_version: null,
+    embedding_model: null,
+    configured_model: null,
+    stale: false,
+    stale_reason: null,
+    building: false,
+    last_failure_reason: null,
+  },
+}
+
 describe('AdminGate', () => {
   const requests: TransportRequest[] = []
 
@@ -28,7 +42,7 @@ describe('AdminGate', () => {
     requests.length = 0
     setChatTransport(async (request) => {
       requests.push(request)
-      return Response.json({ roots: [] })
+      return Response.json(EMPTY_TREE)
     })
   })
 
@@ -85,7 +99,7 @@ describe('AdminGate', () => {
     let fail = true
     setChatTransport(async () => {
       if (fail) throw new AppError('NETWORK', '网络不可用', { status: 503 })
-      return Response.json({ roots: [] })
+      return Response.json(EMPTY_TREE)
     })
     const pinia = createPinia()
     const wrapper = mountGate(pinia)
@@ -130,7 +144,7 @@ describe('AdminGate', () => {
     expect(wrapper.find('[data-testid="protected"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="admin-gate-verifying"]').exists()).toBe(true)
 
-    release(Response.json({ roots: [] }))
+    release(Response.json(EMPTY_TREE))
     await flushPromises()
     expect(wrapper.find('[data-testid="protected"]').exists()).toBe(true)
   })
@@ -174,7 +188,7 @@ describe('凭证隔离：商家会话与管理员令牌互不混用', () => {
       'fetch',
       vi.fn(async (_url: string, init: { headers: Record<string, string> }) => {
         seen.push(init.headers)
-        return Response.json({ roots: [] })
+        return Response.json(EMPTY_TREE)
       }),
     )
     setChatTransport(createFetchTransport())

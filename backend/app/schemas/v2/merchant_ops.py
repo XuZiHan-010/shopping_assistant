@@ -20,7 +20,7 @@ from app.schemas.v2.common import (
     IdempotentWriteRequest,
     MoneyCents,
 )
-from app.schemas.v2.shop_session import CouponSummary
+from app.schemas.v2.shop_session import CouponSummary, ImageUrl
 
 PublicId = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)]
 UtcDatetime = Annotated[AwareDatetime, AfterValidator(lambda value: value.astimezone(UTC))]
@@ -124,6 +124,8 @@ class MerchantProductContent(OpsModel):
     title: str = Field(min_length=1, max_length=200)
     category: str = Field(min_length=1, max_length=64)
     status: str = Field(min_length=1, max_length=32)
+    #: 与顾客端同一份受控地址（§8.8.1）：演示静态路径或白名单 HTTPS，不可信来源为 null。
+    image_url: ImageUrl | None
     content_version: int = Field(strict=True, ge=1)
     missing_required_attributes: list[str]
     missing_content_fields: list[str]

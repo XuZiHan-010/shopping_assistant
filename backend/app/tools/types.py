@@ -209,6 +209,8 @@ class ToolResult:
     #: 图表用的完整数据点（N3 阶段 C）；不进 SSE，也不进 `_tool_message()` 序列化——
     #: 模型看不到，只供 `LoopOutcome.tool_results` 的后端消费方读取。见 `ToolOutput.chart_data`。
     chart_data: object | None = None
+    #: 为 False 时，确定性校验不把这次结果当作数字来源（记忆召回：只影响语气与呈现，M11）。
+    grounds_numbers: bool = True
 
 
 @dataclass(frozen=True)
@@ -246,3 +248,5 @@ class ToolSpec:
     option_source: OptionSource | None = None
     guardrail: Guardrail | None = None
     draft_kind: DraftKind | None = None
+    #: 结果能否给回答里的数字作证。记忆类只读工具设为 False（M11、A6：记忆是默认值不是事实）。
+    grounds_numbers: bool = True

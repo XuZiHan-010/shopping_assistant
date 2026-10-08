@@ -5,12 +5,24 @@ from decimal import ROUND_HALF_UP, Decimal
 from enum import StrEnum
 from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 from app.core.errors import ErrorResponse as ErrorResponse
 from app.core.session import SessionRole as SessionRole
 from app.schemas.chat import AnalysisSource, QualityStatus, ThinkingStep
 
+#: 店铺公开标识（契约 §8.8.1）。顾客端用它定位店铺，商家会话响应用它拼「顾客视角」链接（§8.9.1）；
+#: 放在共用模块，商家模块不必引用顾客端模块。
+ShopSlug = Annotated[
+    str, StringConstraints(min_length=1, max_length=64, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+]
 MAX_MONEY_CENTS = 99999999999999
 MoneyCents = Annotated[int, Field(strict=True, ge=0, le=MAX_MONEY_CENTS)]
 SuggestionText = Annotated[str, Field(min_length=1, max_length=200)]

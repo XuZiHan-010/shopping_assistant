@@ -72,7 +72,7 @@ async def domain_with_document(knowledge_admin_app: FastAPI) -> dict[str, str]:
         await session.commit()
 
     async with knowledge_admin_app.state.database.session() as session:
-        tree = await KnowledgeAdminService(session).tree()
-    business = next(root for root in tree.roots if root.path == "业务")
+        roots = await KnowledgeAdminService(session).tree_roots()
+    business = next(root for root in roots if root.path == "业务")
     domain = business.children[0]
     return {"name": document.source_path.split("/")[1], "version": domain.version}

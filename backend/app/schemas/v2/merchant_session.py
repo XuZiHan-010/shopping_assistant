@@ -17,7 +17,7 @@ from pydantic import (
 from app.core.session import SessionRole
 from app.schemas.chat import AnalysisSource, Visualization
 from app.schemas.feedback import FeedbackReaction
-from app.schemas.v2.common import CursorPage, IdempotentWriteRequest, V2ChatResponseBase
+from app.schemas.v2.common import CursorPage, IdempotentWriteRequest, ShopSlug, V2ChatResponseBase
 
 PublicId = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)]
 UtcDatetime = Annotated[AwareDatetime, AfterValidator(lambda value: value.astimezone(UTC))]
@@ -39,6 +39,8 @@ class MerchantSessionCreateResponse(MerchantModel):
     role: Literal[SessionRole.MERCHANT]
     expires_at: UtcDatetime
     merchant_display_name: str = Field(min_length=1, max_length=120)
+    #: 本店顾客端店铺标识（D-N5-4）：只供「顾客视角」拼新标签链接；从已验证会话解析，不接受传入。
+    shop_slug: ShopSlug
 
 
 class MerchantChatRequest(IdempotentWriteRequest):

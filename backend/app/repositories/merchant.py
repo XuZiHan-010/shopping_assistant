@@ -44,6 +44,18 @@ class MerchantRepository:
             for merchant_id, display_name, display_name_en in result.all()
         ]
 
+    async def get_session_profile(self, merchant_id: UUID) -> tuple[str, str] | None:
+        """商家会话响应要的两项：展示名与店铺标识（`merchant_code` 即 `shop_slug`，见下）。"""
+
+        row = (
+            await self._session.execute(
+                select(Merchant.display_name, Merchant.merchant_code).where(
+                    Merchant.id == merchant_id
+                )
+            )
+        ).one_or_none()
+        return None if row is None else (row.display_name, row.merchant_code)
+
     async def get_active_by_shop_slug(self, shop_slug: str) -> UUID | None:
         """公开 `shop_slug` 到可信 `merchant_id` 的唯一映射入口（PRD §9 SEC3）。
 

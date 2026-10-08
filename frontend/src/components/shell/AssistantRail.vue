@@ -55,6 +55,21 @@ const lastSuggestions = computed(() => lastTurn.value?.suggestions ?? [])
 // （契约 §8.7.11）；其余回合面板不挂载，不展示一个空图表占位。
 const lastChart = computed(() => lastTurn.value?.chart)
 
+const KNOWN_SOURCE_REASONS = new Set([
+  'INDEX_UNAVAILABLE_KEYWORD_FALLBACK',
+  'INDEX_STALE',
+  'KNOWLEDGE_TOOL_FAILED',
+] as const)
+type KnownSourceReason = typeof KNOWN_SOURCE_REASONS extends Set<infer T> ? T : never
+
+/** 已知原因码换成本地化说明；其余（如循环上限码）保持原样，不猜测含义。 */
+function sourceReasonText(reason: string | null): string {
+  if (reason !== null && KNOWN_SOURCE_REASONS.has(reason as KnownSourceReason)) {
+    return t(`opsAssistant.sourceReason.${reason as KnownSourceReason}`)
+  }
+  return reason ?? ''
+}
+
 function focusInput(): void {
   inputElement.value?.focus({ preventScroll: true })
 }
@@ -248,7 +263,7 @@ watch(
                 {{
                   t('opsAssistant.sourceDegraded', {
                     source: source.source,
-                    reason: source.degradedReason,
+                    reason: sourceReasonText(source.degradedReason),
                   })
                 }}
               </p>

@@ -1,5 +1,7 @@
 """商家会话与对话目录的传输边界，不访问数据库或模型。"""
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -43,7 +45,13 @@ def test_session_create_request_is_empty_body(field: str) -> None:
 
 def test_session_response_exposes_display_name_not_id() -> None:
     fields = MerchantSessionCreateResponse.model_fields
-    assert set(fields) == {"session_id", "role", "expires_at", "merchant_display_name"}
+    assert set(fields) == {
+        "session_id",
+        "role",
+        "expires_at",
+        "merchant_display_name",
+        "shop_slug",
+    }
     assert "merchant_id" not in fields
 
 
@@ -53,11 +61,36 @@ def test_session_response_role_is_merchant_and_credential_is_high_entropy() -> N
         "role": "MERCHANT",
         "expires_at": "2026-09-22T00:00:00Z",
         "merchant_display_name": "Borough商家100",
+        "shop_slug": "borough-demo-100",
     }
     assert MerchantSessionCreateResponse.model_validate(base).role == "MERCHANT"
     for changes in [{"role": "CUSTOMER"}, {"session_id": "uuid"}, {"merchant_display_name": ""}]:
         with pytest.raises(ValidationError):
             MerchantSessionCreateResponse.model_validate({**base, **changes})
+
+
+@pytest.mark.parametrize("bad", ["", "Borough-100", "a--b", "-a", "a b", "店铺", "a" * 65])
+def test_session_response_requires_a_well_formed_shop_slug(bad: str) -> None:
+    """D-N5-4：`shop_slug` 供「顾客视角」拼链接，格式与顾客端 `ShopSlug` 相同（契约 §8.9.1）。"""
+
+    base = {
+        "session_id": TOKEN,
+        "role": "MERCHANT",
+        "expires_at": "2026-09-22T00:00:00Z",
+        "merchant_display_name": "Borough商家100",
+    }
+    with pytest.raises(ValidationError):
+        MerchantSessionCreateResponse.model_validate(base)
+    with pytest.raises(ValidationError):
+        MerchantSessionCreateResponse.model_validate({**base, "shop_slug": bad})
+
+
+def test_shop_slug_constraint_is_shared_not_imported_from_the_customer_module() -> None:
+    from app.schemas.v2 import common, merchant_session, shop_session
+
+    assert shop_session.ShopSlug is common.ShopSlug
+    # 商家模块不引用顾客端模块（契约 §8.9.1）。
+    assert "shop_session" not in Path(merchant_session.__file__).read_text(encoding="utf-8")
 
 
 def test_answer_mode_drops_attachment() -> None:

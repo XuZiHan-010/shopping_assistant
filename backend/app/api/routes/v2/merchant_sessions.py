@@ -56,16 +56,19 @@ async def create_merchant_session(
 
     issuer = _raw_bearer_token(request)
     token, ctx = await service.issue_merchant(context, issuer=issuer)
-    display_name = await MerchantRepository(session).get_display_name(context.merchant_id)
+    profile = await MerchantRepository(session).get_session_profile(context.merchant_id)
     await session.commit()
     _no_store(response)
     assert ctx.expires_at is not None
-    assert display_name is not None
+    assert profile is not None
+    display_name, shop_slug = profile
     return MerchantSessionCreateResponse(
         session_id=token,
         role=ctx.role,
         expires_at=ctx.expires_at,
         merchant_display_name=display_name,
+        # 只从已验证会话对应的商家行取（R5）；请求体为空对象，传入任何字段都是 422。
+        shop_slug=shop_slug,
     )
 
 

@@ -66,7 +66,7 @@ it('完整商品页与浮层复用同一详情结构，英文缺口名称按固�
   expect(screen.getByText(/Not provided by the merchant/)).toBeInTheDocument()
 })
 
-it('演示商品图片尚未交付时显示暂无图片占位', () => {
+it('商品图片加载失败时显示暂无图片占位', () => {
   render(<ProductDetailBody product={{ ...product, imageUrl: '/demo/products/01.webp' }} shopSlug="borough-100" />)
   fireEvent.error(screen.getByRole('img', { name: '羊绒围巾' }))
   expect(screen.getByText('暂无图片')).toBeInTheDocument()

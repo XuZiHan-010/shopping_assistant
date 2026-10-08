@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
 from uuid import UUID
@@ -12,16 +13,19 @@ from app.core.config import AppEnvironment, Settings
 from app.llm.client import (
     DEFAULT_LLM_CALL_OPTIONS,
     LlmBudget,
+    LlmBudgetExceededError,
     LlmCallOptions,
     LlmClient,
     LlmDailyBudgetExceededError,
     LlmFailureKind,
+    LlmMessage,
     LlmResult,
     LlmTurn,
     LlmUnavailableError,
+    ToolSchema,
 )
 from app.llm.fake import FakeLlmClient
-from app.llm.guard import LlmCostGuard
+from app.llm.guard import BudgetScope, LlmCostGuard, estimate_call_tokens
 
 MERCHANT_ID = UUID("00000000-0000-0000-0000-000000000001")
 
@@ -85,6 +89,22 @@ class FakeLlmBudgetRepository:
     async def reconcile(self, *, usage_date: date, delta: int) -> None:
         self.reconcile_calls.append(_ReconcileCall(usage_date, delta))
 
+    async def reserve_scoped(
+        self, *, usage_date: date, tokens: int, scopes: Sequence[BudgetScope]
+    ) -> str | None:
+        """本文件只验证全局级行为：无角色的守卫只带一个 `GLOBAL` scope（三级见
+        `test_guard_three_level.py`）。"""
+
+        assert [scope.key for scope in scopes] == ["GLOBAL"]
+        reserved = await self.reserve(usage_date=usage_date, tokens=tokens, budget=scopes[0].budget)
+        return None if reserved is not None else "GLOBAL"
+
+    async def reconcile_scoped(
+        self, *, usage_date: date, delta: int, scope_keys: Sequence[str]
+    ) -> None:
+        assert list(scope_keys) == ["GLOBAL"]
+        await self.reconcile(usage_date=usage_date, delta=delta)
+
     async def snapshot(self, *, usage_date: date) -> object:
         raise AssertionError("guard.complete 不应调用 snapshot")
 
@@ -103,6 +123,9 @@ class FakeLlmBudgetRepository:
         status: str,
         merchant_id: UUID | None,
         purpose: str = "AGENT",
+        role: str | None = None,
+        cache_hit_tokens: int | None = None,
+        at: object = None,
     ) -> None:
         self.record_usage_calls.append(
             _RecordUsageCall(
@@ -163,6 +186,38 @@ def _guard(
         request_id="req-1",
         merchant_id=MERCHANT_ID,
     )
+
+
+def test_reservation_counts_utf8_payload_and_output_allowance() -> None:
+    system, user = "角色", "请说明😀"
+    estimated = estimate_call_tokens(
+        system=system, user=user, remaining_request_tokens=100, max_output_tokens=20
+    )
+    assert estimated >= len(system.encode()) + len(user.encode()) + 20
+
+
+def test_turn_reservation_includes_tool_parameters() -> None:
+    guard = _guard(FakeLlmBudgetRepository(reserve_returns=[]), StubInnerClient())
+    messages = [LlmMessage(role="user", content="查订单")]
+    tools = [ToolSchema(name="query", description="查询", parameters={"description": "字段" * 300})]
+    estimated = guard._estimate_turn(messages, tools, LlmBudget(max_calls=1, max_tokens=1000))
+    assert estimated >= len(("字段" * 300).encode()) + 200
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("calls,tokens", [(1, 0), (0, 100)])
+async def test_exhausted_request_budget_does_not_reserve_daily_tokens(calls, tokens) -> None:
+    repository = FakeLlmBudgetRepository(reserve_returns=[])
+    inner = StubInnerClient(result=LlmResult(text="unused", tokens=0, degraded=False))
+    guard = _guard(repository, inner)
+    budget = LlmBudget(max_calls=1, max_tokens=100, calls=calls, tokens=tokens)
+
+    with pytest.raises(LlmBudgetExceededError):
+        await guard.complete(system="s", user="u", fallback="f", budget=budget)
+
+    assert repository.reserve_calls == []
+    assert repository.record_usage_calls == []
+    assert inner.calls == 0
 
 
 @pytest.mark.asyncio

@@ -8,7 +8,7 @@ from io import BytesIO
 from pathlib import Path
 
 DESTINATION = Path(__file__).resolve().parents[1] / "shop/public/demo/products"
-EXPECTED = {f"{number:02d}.webp" for number in range(1, 25) if number != 6}
+EXPECTED = {f"{number:02d}.webp" for number in range(1, 25)}
 MAX_BYTES = 200 * 1024
 
 
@@ -45,7 +45,7 @@ def convert(source: Path, destination: Path = DESTINATION) -> None:
             continue
         name = f"{match[1]}.webp"
         if name not in EXPECTED:
-            raise ValueError(f"不应提供该编号（06 刻意无图）：{path.name}")
+            raise ValueError(f"编号不在 01–24 的商品清单内：{path.name}")
         if name in inputs:
             raise ValueError(f"同一编号存在多张原图：{name}")
         inputs[name] = path
@@ -83,7 +83,7 @@ def convert(source: Path, destination: Path = DESTINATION) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    conversion = commands.add_parser("convert", help="转换完整的 23 张原图，不覆盖已有资源")
+    conversion = commands.add_parser("convert", help="转换完整的 24 张原图，不覆盖已有资源")
     conversion.add_argument("source", type=Path)
     commands.add_parser("check", help="检查入库图片")
     args = parser.parse_args()
@@ -94,7 +94,7 @@ def main() -> None:
             check()
     except (ValueError, OSError) as error:
         parser.exit(1, f"校验失败：{error}\n")
-    print("23 张商品图片校验通过。")
+    print("24 张商品图片校验通过。")
 
 
 if __name__ == "__main__":

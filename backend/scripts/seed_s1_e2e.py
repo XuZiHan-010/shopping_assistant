@@ -72,6 +72,8 @@ async def main() -> None:
                         listed_at=listed_at,
                         short_description=f"{title}，冬季保暖",
                         detail_description=f"{title}的详细介绍。",
+                        # 使用正式演示目录中的羊绒围巾图片，让 WS 首页 E2E 覆盖真实静态图片加载。
+                        image_url="/demo/products/17.webp" if code == "S1-E2E-P002" else None,
                         attributes=attributes,
                         stock_on_hand=on_hand,
                         stock_reserved=0,

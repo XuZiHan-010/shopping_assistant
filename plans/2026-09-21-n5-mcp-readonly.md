@@ -25,11 +25,11 @@
 > 工具名、表字段、错误码都是**当时的设计**。开工前逐项对照上游**实际落地**的接口；
 > 不一致时先按 PRD → 契约 → 计划的顺序修正，**再动代码**，不得在实现里默默适配或绕过。
 
-- [ ] `n3-merchant-skills` 已完成：商家只读工具（指标、库存、口径）已注册；
-- [ ] 契约计划 Task 8 已完成：§8.14 的 MCP 工具白名单已定；
-- [ ] **核对 `n3-merchant-skills` 实际注册的只读工具名与 §8.14 白名单一致**——
+- [x] `n3-merchant-skills` 已完成：商家只读工具（指标、库存、口径）已注册；
+- [x] 契约计划 Task 8 已完成：§8.14 的 MCP 工具白名单已定；
+- [x] **核对 `n3-merchant-skills` 实际注册的只读工具名与 §8.14 白名单一致**——
       本计划写作时这些工具尚不存在，名字以实际注册表为准；
-- [ ] **重新核对官方协议说明**——协议版本固定为 `2026-07-28`，但 SDK 版本可能已更新，
+- [x] **重新核对官方协议说明**——协议版本固定为 `2026-07-28`，但 SDK 版本可能已更新，
       开工当天确认 SDK 对该版本的支持方式。
 
 > **2026-09-27 编组核对**（见 `plans/2026-09-27-n5-module-roadmap.md` §二）：`registry.surface_for_mcp()` 已存在
@@ -37,12 +37,27 @@
 > **只有 6 个**：`query_metrics`、`get_inventory_alerts`、`get_product_content`、`list_coupons`、`get_metric_definition`、
 > `search_rules`；**`attribute_change` 只有 `ToolRole.MERCHANT`**（`app/tools/merchant/metrics.py:164`）。
 > 契约是权威，按「整改实现」处理，见 Task 0。
+>
+> **2026-10-02 按 N4 收尾后的代码复核**（入口-N5 前的预核对，正式勾选仍由入口审查完成）：
+>
+> 1. 白名单枚举 `McpReadOnlyTool` 位于 `app/schemas/v2/memory.py:174`（7 项）；注册表中标 `MCP_READONLY` 的仍是 6 个
+>    （`query_metrics`、`get_inventory_alerts`、`get_product_content`、`list_coupons`、`get_metric_definition`、`search_rules`），
+>    **`attribute_change` 仍只有 `ToolRole.MERCHANT`**（`app/tools/merchant/metrics.py:173`），Task 0 仍需执行。
+> 2. N4 改动影响 MCP 的两点：`search_rules` 已改为全文档 + 混合检索（N4-C），MCP 与工作台走同一工具，结果一致性不受影响，
+>    但索引降级时 MCP 输出须同样带出降级来源（R7），Task 3 补一条断言；N4 新增的 `grounds_numbers=False` 只用于记忆召回工具，
+>    它们不在白名单内，Task 0 的双向相等测试会挡住误加。
+> 3. v2 路由对账（`docs/api.json` 对 PRD §11.2）：PRD 53 条、已导出 52 条，**只缺 `POST /api/v2/merchant/mcp`**，多 0。
+> 4. **MCP SDK 尚未引入**（`backend/pyproject.toml`、`uv.lock` 无 `mcp`）；Task 1 开工当天核对官方 SDK 对 `2026-07-28` 的支持，
+>    新增依赖须写明版本与理由。
+> 5. 当前 `CURRENT_MILESTONE = "N4"`；Task 4 步骤 3 登记的 S8 安全用例 `introduced_in: N5`，里程碑在 D 收尾才切到 N5，
+>    登记时确认门禁对「未来里程碑用例」的处理与 N4M 类别一致。
+> 6. 执行者：Opus（本会话，2026-10-02 用户指定「N5 由你负责开工」）；N5-1、N5-2 必审由独立子代理按 Astra 清单只读审查。
 
 ---
 
 ### Task 0：工具面与契约对齐（2026-09-27 编组新增）
 
-- [ ] **步骤 1：给 `attribute_change` 补 `ToolRole.MCP_READONLY`**，并写测试断言
+- [x] **步骤 1：给 `attribute_change` 补 `ToolRole.MCP_READONLY`**，并写测试断言
       `{s.name for s in registry.surface_for_mcp()} == set(McpReadOnlyTool)`（白名单与注册表双向相等，
       以后任一侧漂移都会失败）；同时断言 MCP 工具输出**不含 `chart_data`**——该字段专供工作台渲染
       （§8.7.11），不属于 MCP 契约
@@ -101,7 +116,7 @@
 - **撤销立即生效**：每次请求都查库校验 `revoked_at IS NULL`，**不缓存校验结果**
   （PRD §12.5"撤销后立即失效"——缓存哪怕 60 秒也会违反它）。
 
-- [ ] **步骤 1：写失败测试**
+- [x] **步骤 1：写失败测试**
 
 ```python
 async def test_revocation_takes_effect_on_next_request(client) -> None:
@@ -148,7 +163,7 @@ async def test_browser_session_id_rejected(client) -> None:
     assert r.status_code == 401
 ```
 
-- [ ] **步骤 2：确认失败 → 实现 → 确认通过**
+- [x] **步骤 2：确认失败 → 实现 → 确认通过**
 
 ---
 
@@ -168,7 +183,7 @@ async def test_browser_session_id_rejected(client) -> None:
 第 1 步在解析正文之前，是为了让未认证的请求**连正文解析器都碰不到**——
 解析器本身也是攻击面。
 
-- [ ] **步骤 1：写失败测试**
+- [x] **步骤 1：写失败测试**
 
 ```python
 async def test_unauthenticated_request_not_parsed(client, spy_parser) -> None:
@@ -207,7 +222,7 @@ async def test_tool_errors_are_json_rpc_errors(client, token) -> None:
     assert "request_id" not in body                  # 不是 v2 ErrorResponse
 ```
 
-- [ ] **步骤 2：确认失败 → 实现 → 确认通过**
+- [x] **步骤 2：确认失败 → 实现 → 确认通过**
 
 契约计划明确：**若 SDK 仍默认旧协议，必须显式配置版本**，并保留第三条反例测试。
 
@@ -220,7 +235,7 @@ async def test_tool_errors_are_json_rpc_errors(client, token) -> None:
 - 工具输出的 `ToolDisplay` 与 `payload` 按 MCP 格式返回，
   **审批证据、确认令牌、完整明细行一律不出现**。
 
-- [ ] **步骤 1：写失败测试**
+- [x] **步骤 1：写失败测试**
 
 ```python
 async def test_tools_list_is_intersection_of_whitelist_and_scopes(client) -> None:
@@ -242,7 +257,7 @@ async def test_cross_merchant_data_unreachable(client) -> None:
     assert body["result"]["merchant_scope"] == str(M_A)
 ```
 
-- [ ] **步骤 2：确认失败 → 实现 → 确认通过**
+- [x] **步骤 2：确认失败 → 实现 → 确认通过**
 
 ---
 
@@ -250,8 +265,8 @@ async def test_cross_merchant_data_unreachable(client) -> None:
 
 契约计划要求：**必须用标准 MCP 客户端做无 LLM 集成测试**。
 
-- [ ] **步骤 1：用官方 MCP 客户端库，显式指定协议版本 `2026-07-28`，连接本地 backend**
-- [ ] **步骤 2：S8 场景**
+- [x] **步骤 1：用官方 MCP 客户端库，显式指定协议版本 `2026-07-28`，连接本地 backend**
+- [x] **步骤 2：S8 场景**
 
 ```text
 脚本签发 24 小时、限 query_metrics 的凭证
@@ -264,7 +279,7 @@ async def test_cross_merchant_data_unreachable(client) -> None:
 "逐项一致"是因为两者走**同一个工具、同一个服务**——若不一致，说明 MCP 路径绕开了注册表，
 那才是要修的问题。
 
-- [ ] **步骤 3：把 S8 登记进 `app/eval/datasets/security/`**——撤销后仍可调用即为安全门禁失败
+- [x] **步骤 3：把 S8 登记进 `app/eval/datasets/security/`**——撤销后仍可调用即为安全门禁失败
 
 ---
 
@@ -284,6 +299,12 @@ uv run pytest; uv run ruff check .; uv run mypy app
 更新 `docs/project-progress.md`：S8 状态、协议版本与 SDK 配置方式、未执行 Git。
 
 ---
+
+## 执行记录（2026-10-03）
+
+14 步全部完成（Opus 单会话）。证据、全部偏离裁定（`Ruling:`）与审查整改见
+`.superpowers/sdd/2026-09-21-n5-mcp-readonly/progress.md`；入口-N5 与 N5-1/N5-2 审查结论见
+`plans/2026-09-22-astra-checklist.md` §三。
 
 ## 本计划明确不做的事
 

@@ -116,6 +116,7 @@ export function ShopShell({ shopSlug, children }: { shopSlug: string; children: 
                   : session ? <button className="btn" onClick={() => void fromHeader(value.bindDemoCustomer)}>{t('bind')}</button> : null}
               </div>}
             </div>
+            <PreferencesPopover />
           </div>
         </header>
         <div className="shop-layout">
@@ -129,7 +130,6 @@ export function ShopShell({ shopSlug, children }: { shopSlug: string; children: 
             {phase === 'ready' && <CartPanel />}
           </aside>
         </div>
-        <PreferencesPopover />
         {panel === 'cart' && <button className="shop-overlay" aria-label={t('close')} onClick={value.closePanel} />}
         <ActivityDrawer open={panel === 'activity' || panel === 'memory' || panel === 'history'} onClose={value.closePanel} initialTab={panel === 'memory' ? 'memory' : panel === 'history' ? 'history' : 'steps'} onTabChange={tab => value.openPanel(tab === 'steps' ? 'activity' : tab)} />
         {panel === 'product' && productId && <ProductSheet shopSlug={shopSlug} productId={productId} onClose={value.closePanel} />}

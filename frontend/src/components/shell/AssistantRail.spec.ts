@@ -455,6 +455,26 @@ describe('AssistantRail 助手栏', () => {
     expect(wrapper.text()).toContain('来源 KNOWLEDGE_BASE 降级：知识库暂不可用')
   })
 
+  it('知识索引降级码换成可读说明，不把原因码直接给商家看（N4-C）', async () => {
+    const { wrapper } = await mountRail({
+      [CHAT]: () =>
+        turnStream('c-1', '按关键词找到了规则。', {
+          analysis_sources: [
+            {
+              source: 'KNOWLEDGE',
+              degraded: true,
+              degraded_reason: 'INDEX_UNAVAILABLE_KEYWORD_FALLBACK',
+            },
+          ],
+        }),
+      [LIST]: () => json(page([summary('c-1', '规则')])),
+    })
+    await ask(wrapper, '退货运费谁出')
+
+    expect(wrapper.text()).toContain('来源 KNOWLEDGE 降级：向量索引不可用，本次只用关键词检索')
+    expect(wrapper.text()).not.toContain('INDEX_UNAVAILABLE_KEYWORD_FALLBACK')
+  })
+
   it('图表可视化 enabled 时挂载图表面板', async () => {
     const { wrapper } = await mountRail({
       [CHAT]: () =>

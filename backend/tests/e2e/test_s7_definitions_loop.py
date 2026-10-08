@@ -115,3 +115,63 @@ async def test_s7_metric_definition_version_and_rule_citation(
     assert "definition_version" in fed_back
     assert "source_path" in fed_back
     assert "gross_gmv - refund_amount" in fed_back
+
+
+@pytest.fixture
+def bigram_embedder_in_app(monkeypatch: pytest.MonkeyPatch) -> None:
+    """应用创建前替换 `build_embedder`：工具注册表与知识索引服务拿到同一个确定性嵌入器。"""
+
+    from tests.support.fake_embedders import BigramEmbedder
+
+    monkeypatch.setattr("app.main.build_embedder", lambda *args, **kwargs: BigramEmbedder())
+
+
+@pytest.mark.asyncio
+async def test_s7_rule_citation_through_hybrid_index(
+    bigram_embedder_in_app: None,
+    postgres_app: FastAPI,
+    postgres_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S7 在混合检索下回归（N4-C Task 7）：索引已生效时规则检索走混合路径，KNOWLEDGE 来源不降级。
+
+    用确定性假嵌入器代替真实模型（测试不下载模型）；
+    `bigram_embedder_in_app` 排在 `postgres_app` 前面。
+    """
+
+    app, client = postgres_app, postgres_client
+    await _seed_assets(app.state.database)
+    built = await app.state.knowledge_index.build()
+    assert built.result.value == "ACTIVATED"
+
+    fake = FakeLlmClient(
+        turns=[
+            _call("search_rules", "c1", query="退货运费谁出"),
+            LlmTurn(
+                text="退货运费由平台承担。来源：平台规则/after_sale_freight.md。",
+                tool_calls=[],
+                stop_reason="END_TURN",
+                tokens=10,
+            ),
+        ]
+    )
+    monkeypatch.setattr(
+        "app.api.routes.v2.merchant_chat.build_guarded_llm", lambda *args, **kwargs: fake
+    )
+    headers = await merchant_session_headers(client, MERCHANT_ONE_AUTH)
+    response = await client.post(
+        "/api/v2/merchant/chat",
+        json={"client_request_id": "s7-hybrid-rule", "message": "退货运费谁出？"},
+        headers={**headers, "Accept": "application/json"},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["degraded"] is False
+    assert body["analysis_sources"] == [
+        {"source": "KNOWLEDGE", "degraded": False, "degraded_reason": None}
+    ]
+    fed_back = "\n".join(
+        message.content for call in fake.converse_calls for message in call.messages
+    )
+    assert '"retrieval": "HYBRID"' in fed_back
+    assert "平台规则/after_sale_freight.md" in fed_back

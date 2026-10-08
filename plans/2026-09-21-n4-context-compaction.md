@@ -278,6 +278,11 @@ Task 4：`CompactionPolicy`（`compaction/__init__.py`）随 `LoopLimits.from_se
 发现并修复：截至时间锚点补 `[工具#call_id]`（数值与定义版本可关联）；正文出现 DeepSeek `DSML` 工具调用标记按上游异常降级（循环两条路径各一测）。
 评测集商家问题按依赖轮次重写（原问题与依赖不一致）。报告 `docs/history/eval/n4-e5-compaction-real.md`；修复后未重跑真实对比。
 
+**2026-10-01 独立复审 N4-3 更正：** 检查点③（评测口径在真实对比前冻结）**不满足**——运行前未经独立冻结、运行后改了样本，
+「人工复核合格」为事后定义且未盲审。该真实对比降为探索性证据，选型依据改为保守默认 + Fake 结构验证；
+数据集 SHA-256 前 16 位 `186448b48530a528`，待独立审定口径后冻结，如需真实证据须另取 R3 授权重跑。
+同轮审查修复：受信 Skill 在两种压缩策略下原样保留（`trusted_skill_calls`，`tests/unit/agent/loop/test_compaction_skills.py` 先红后绿）。
+
 ---
 
 ### Task 6：自检

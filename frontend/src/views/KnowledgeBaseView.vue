@@ -20,6 +20,15 @@ const dialogError = ref('')
 const dialogPending = ref(false)
 
 const selectedNode = computed(() => knowledgeStore.selectedNode)
+const indexStatus = computed(() => knowledgeStore.indexStatus)
+// 只有关键词、陈旧或最近失败都算降级展示（R7）；构建中本身不是降级。
+const indexDegraded = computed(
+  () =>
+    indexStatus.value !== undefined &&
+    (indexStatus.value.retrievalMode !== 'HYBRID' ||
+      indexStatus.value.stale ||
+      indexStatus.value.lastFailureReason !== null),
+)
 const canCreateDocument = computed(() => isDocumentParent(selectedNode.value))
 const canRenameDomain = computed(() => isBusinessDomain(selectedNode.value))
 const canDelete = computed(() => canDeleteNode(selectedNode.value))
@@ -99,6 +108,28 @@ async function confirmDelete(): Promise<void> {
       <p v-if="knowledgeStore.errorMessage" class="kb__error" role="alert">
         {{ knowledgeStore.errorMessage }}
       </p>
+      <div
+        v-if="indexStatus"
+        class="kb__index"
+        :class="{ 'kb__index--degraded': indexDegraded }"
+        data-testid="index-status"
+        role="status"
+      >
+        <p>
+          {{
+            indexStatus.retrievalMode === 'HYBRID'
+              ? t('knowledgeBaseView.index.hybrid', { version: indexStatus.activeVersion })
+              : t('knowledgeBaseView.index.keywordOnly')
+          }}
+        </p>
+        <p v-if="indexStatus.building">{{ t('knowledgeBaseView.index.building') }}</p>
+        <p v-if="indexStatus.staleReason">
+          {{ t(`knowledgeBaseView.index.stale.${indexStatus.staleReason}`) }}
+        </p>
+        <p v-if="indexStatus.lastFailureReason">
+          {{ t(`knowledgeBaseView.index.failure.${indexStatus.lastFailureReason}`) }}
+        </p>
+      </div>
       <section class="kb__workspace">
         <KnowledgeTree
           :roots="knowledgeStore.roots"
@@ -272,6 +303,23 @@ async function confirmDelete(): Promise<void> {
 
 .kb__sign-out:hover {
   background: var(--side-active);
+}
+
+.kb__index {
+  margin: 0 0 12px;
+  padding: 9px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-size: 12.5px;
+}
+
+.kb__index p {
+  margin: 0;
+}
+
+.kb__index--degraded {
+  background: var(--gilt-soft);
+  color: var(--gilt-ink);
 }
 
 .kb__error {

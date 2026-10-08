@@ -16,6 +16,7 @@ export default async function startMockE2EServer() {
     ],
     // F2 起的 E2E 跑的是 Mock 传输层，不依赖真实后端。显式注入而不是依赖
     // .env.development——CI 上没有那个文件时会静默退回真实传输并全线失败。
-    env: { VITE_USE_MOCK: 'true' },
+    // 顾客端地址是占位域名：「顾客视角」只是链接，E2E 在浏览器上下文里拦截这个域名。
+    env: { VITE_USE_MOCK: 'true', VITE_SHOP_BASE_URL: 'https://shop.e2e.example' },
   })
 }

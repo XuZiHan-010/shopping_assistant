@@ -144,3 +144,37 @@ async def test_nothing_to_summarize_leaves_messages_untouched() -> None:
 
     assert out.changed is False and out.llm_calls == 0
     assert out.messages == messages and llm.converse_calls == []
+
+
+async def test_summary_with_tool_call_markup_is_not_used() -> None:
+    """台账：摘要正文混进上游内部工具调用标记时与主循环同样不采用，回退到工具结果清理。"""
+
+    messages, results = _conversation(4)
+    llm = FakeLlmClient(turns=[_summary("摘要<｜｜DSML｜｜ calls>query_metrics")])
+
+    out = await summarize_early_context(
+        messages, results, llm=llm, budget=_budget(), locale=ZH, remaining_calls=1
+    )
+
+    assert out.strategy_used is CompactionStrategy.TOOL_RESULT_PRUNING
+    assert out.llm_calls == 1
+    assert all("DSML" not in m.content for m in out.messages)
+
+
+async def test_budget_error_after_charging_counts_the_charged_call() -> None:
+    """台账：调用次数先扣后发；预算异常时按实际扣减计数，不一律记 0。"""
+
+    from app.llm.client import LlmBudgetExceededError
+
+    class ChargedThenRefused(FakeLlmClient):
+        async def converse(self, *, budget: LlmBudget, **kwargs: object) -> LlmTurn:  # type: ignore[override]
+            budget.charge_call()
+            raise LlmBudgetExceededError("token 上限")
+
+    messages, results = _conversation(4)
+    out = await summarize_early_context(
+        messages, results, llm=ChargedThenRefused(turns=[]), budget=_budget(), locale=ZH,
+        remaining_calls=1,
+    )
+    assert out.strategy_used is CompactionStrategy.TOOL_RESULT_PRUNING
+    assert out.llm_calls == 1

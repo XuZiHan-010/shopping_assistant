@@ -317,6 +317,7 @@ def test_loading_a_skill_is_not_a_data_source(module) -> None:  # type: ignore[n
         gates=None,  # type: ignore[arg-type]
         limits=None,  # type: ignore[arg-type]
         ctx=customer_session() if customer else merchant_session(),
+        **({} if customer else {"business_timezone": "Asia/Shanghai"}),
     )
     outcome = LoopOutcome(
         answer="好的",

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping, MutableMapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
@@ -20,13 +20,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
 from app.core.security import MerchantContext
-from app.core.session import SessionAlreadyBoundError, SessionContext
+from app.core.session import (
+    SessionAlreadyBoundError,
+    SessionContext,
+    new_session_token,
+    token_fingerprint,
+)
 from app.intent.models import QueryIntent
 from app.models.analytics import Order, OrderItem, Product
 from app.models.answer import Answer
 from app.models.conversation import Conversation
 from app.models.drafts import Draft
 from app.models.knowledge import KnowledgeDocument
+from app.models.mcp_credential import McpCredential
 from app.models.provenance import ConversationProvenance
 from app.repositories.audit import AuditRepository
 from app.repositories.session import SessionRepository
@@ -524,6 +530,31 @@ async def _mint_newest_products_cursor(ctx: PrimitiveContext) -> PrimitiveOutcom
     return PrimitiveOutcome()
 
 
+async def _seed_mcp_credential(ctx: PrimitiveContext) -> PrimitiveOutcome:
+    """S8 turn0：为当前商家 actor 写入一枚 MCP 凭证（可选已撤销），原值只放进用例 state。
+
+    库里照生产口径只存指纹（复用会话凭证原语）；撤销与否只体现在 `revoked_at`，
+    校验是否立即失效交给后续 HTTP turn 打生产入口来判定，原语本身不做判断。
+    """
+
+    now = datetime.now(UTC)
+    token = new_session_token()
+    ctx.session.add(
+        McpCredential(
+            token_fingerprint=token_fingerprint(token),
+            merchant_id=ctx.actor_ctx.merchant_id,
+            scopes=["query_metrics"],
+            label="security-eval",
+            created_at=now,
+            expires_at=now + timedelta(hours=1),
+            revoked_at=now if ctx.args.get("revoked") else None,
+        )
+    )
+    await ctx.session.flush()
+    ctx.state[str(ctx.args["state_key"])] = token
+    return PrimitiveOutcome()
+
+
 PRIMITIVES: dict[str, PrimitiveFn] = {
     "resource_scope.resolve_shop_slugs": _resolve_shop_slugs,
     "resource_scope.seed_foreign_product": _seed_foreign_product,
@@ -542,6 +573,7 @@ PRIMITIVES: dict[str, PrimitiveFn] = {
     "session.attempt_conflicting_rebind": _attempt_conflicting_rebind,
     "orders.mint_merchant_orders_cursor": _mint_merchant_orders_cursor,
     "catalog.mint_newest_products_cursor": _mint_newest_products_cursor,
+    "mcp.seed_credential": _seed_mcp_credential,
 }
 
 

@@ -70,13 +70,28 @@ function toWireNode(node: KnowledgeTreeNode): Record<string, unknown> {
   }
 }
 
-function treeResponse(roots: KnowledgeTreeNode[]): Response {
-  return Response.json({ roots: roots.map(toWireNode) })
+const HYBRID_INDEX = {
+  retrieval_mode: 'HYBRID',
+  active_version: 3,
+  embedding_model: 'm',
+  configured_model: 'm',
+  stale: false,
+  stale_reason: null,
+  building: false,
+  last_failure_reason: null,
+}
+
+function treeResponse(
+  roots: KnowledgeTreeNode[],
+  indexStatus: Record<string, unknown> = HYBRID_INDEX,
+): Response {
+  return Response.json({ roots: roots.map(toWireNode), index_status: indexStatus })
 }
 
 async function mountAuthorized(
   roots: KnowledgeTreeNode[] = DEFAULT_ROOTS,
   locale: SupportedLocale = 'zh-CN',
+  indexStatus: Record<string, unknown> = HYBRID_INDEX,
 ) {
   const pinia = createPinia()
   setActivePinia(pinia)
@@ -85,7 +100,7 @@ async function mountAuthorized(
   useLocaleStore().setLocale(locale)
   // 页面挂载时的 onMounted 会自动重新拉取目录树；这里让它返回与手工种入的
   // roots 一致的数据，避免它把测试手工设置的选中状态覆盖成空目录。
-  setChatTransport(async () => treeResponse(roots))
+  setChatTransport(async () => treeResponse(roots, indexStatus))
   const wrapper = mount(KnowledgeBaseView, { global: { plugins: [pinia, i18n] } })
   await flushPromises()
   return { wrapper, store }
@@ -231,7 +246,7 @@ describe('KnowledgeBaseView', () => {
         })
       }
       if (request.method === 'DELETE') return new Response(null, { status: 204 })
-      return Response.json({ roots: [] })
+      return treeResponse([])
     })
 
     await wrapper.get('[data-path="index/运营手册.md"]').trigger('click')
@@ -343,7 +358,7 @@ describe('KnowledgeBaseView en-US 下确定性文案为英文', () => {
       if (request.method === 'PUT') {
         throw new AppError('WIKI_VERSION_CONFLICT', 'Conflict', { status: 412 })
       }
-      return Response.json({ roots: [] })
+      return treeResponse([])
     })
 
     await wrapper.get('[data-path="index/runbook.md"]').trigger('click')
@@ -442,5 +457,39 @@ describe('KnowledgeBaseView 只读令牌', () => {
     expect(wrapper.find('[data-testid="create-domain"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="create-document"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="readonly-notice"]').exists()).toBe(false)
+  })
+
+  describe('索引状态（N4-C，契约 §8.6.7）', () => {
+    it('混合检索正常时显示版本号，不标降级', async () => {
+      const { wrapper } = await mountAuthorized()
+      const status = wrapper.get('[data-testid="index-status"]')
+      expect(status.text()).toContain('关键词 + 向量混合召回 · 索引版本 3')
+      expect(status.classes()).not.toContain('kb__index--degraded')
+    })
+
+    it('关键词降级、陈旧与失败原因都如实显示（R7）', async () => {
+      const { wrapper } = await mountAuthorized(DEFAULT_ROOTS, 'zh-CN', {
+        ...HYBRID_INDEX,
+        retrieval_mode: 'KEYWORD_ONLY',
+        stale: true,
+        stale_reason: 'BUILD_FAILED',
+        last_failure_reason: 'QUALITY_REGRESSION',
+      })
+      const status = wrapper.get('[data-testid="index-status"]')
+      expect(status.classes()).toContain('kb__index--degraded')
+      expect(status.text()).toContain('仅关键词')
+      expect(status.text()).toContain('最近一次索引重建失败')
+      expect(status.text()).toContain('新版本召回率低于上一版本')
+    })
+
+    it('英文界面使用英文文案', async () => {
+      const { wrapper } = await mountAuthorized(DEFAULT_ROOTS, 'en-US', {
+        ...HYBRID_INDEX,
+        building: true,
+      })
+      const status = wrapper.get('[data-testid="index-status"]')
+      expect(status.text()).toContain('index version 3')
+      expect(status.text()).toContain('Building a new index version')
+    })
   })
 })

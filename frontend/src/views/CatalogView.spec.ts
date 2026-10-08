@@ -91,6 +91,39 @@ describe('CatalogView', () => {
     expect(row.text()).toContain('在售')
   })
 
+  it('缩略图：演示图拼到顾客端地址，无图、未配置顾客端地址或加载失败显示占位', async () => {
+    vi.stubEnv('VITE_SHOP_BASE_URL', 'https://shop.example.test/')
+    const { wrapper } = await mountCatalog(
+      json(
+        page([
+          productContent('p-1', { image_url: '/demo/products/01.webp' }),
+          productContent('p-2', { image_url: null }),
+          productContent('p-3', { image_url: 'https://cdn.example.test/a.webp' }),
+        ]),
+      ),
+    )
+    const rows = wrapper.findAll('[data-test=product-row]')
+    const first = rows[0]!.get('img')
+    expect(first.attributes('src')).toBe('https://shop.example.test/demo/products/01.webp')
+    expect(first.attributes('alt')).toBe('')
+    expect(rows[1]!.find('img').exists()).toBe(false)
+    expect(rows[1]!.find('[data-test=product-thumb-empty]').exists()).toBe(true)
+    expect(rows[2]!.get('img').attributes('src')).toBe('https://cdn.example.test/a.webp')
+
+    await first.trigger('error')
+    expect(rows[0]!.find('img').exists()).toBe(false)
+    expect(rows[0]!.find('[data-test=product-thumb-empty]').exists()).toBe(true)
+    wrapper.unmount()
+
+    vi.stubEnv('VITE_SHOP_BASE_URL', '')
+    const { wrapper: unconfigured } = await mountCatalog(
+      json(page([productContent('p-1', { image_url: '/demo/products/01.webp' })])),
+    )
+    // 商家端镜像里没有演示图：不回退同源去拿 404。
+    expect(unconfigured.find('img').exists()).toBe(false)
+    expect(unconfigured.find('[data-test=product-thumb-empty]').exists()).toBe(true)
+  })
+
   it('完整度与缺口标签逐字来自后端，顺序不变', async () => {
     const { wrapper } = await mountCatalog(
       json(

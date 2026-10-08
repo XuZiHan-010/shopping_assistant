@@ -21,6 +21,7 @@ from sqlalchemy import func, select
 from app.agent.loop.fencing import FENCE_NOTICE, FENCE_POLICY
 from app.api.dependencies import get_db_session
 from app.api.routes.v2.shop_chat import CHAT_OPERATION
+from app.core.rate_limit import SlidingWindowRateLimiter
 from app.core.session import SessionRole
 from app.db.session import Database
 from app.llm.client import LlmToolCall, LlmTurn
@@ -32,11 +33,38 @@ from app.models.conversation import Message
 from app.models.idempotency import IdempotencyRecord
 from app.models.knowledge import KnowledgeDocument
 from app.models.operations import AuditLog
+from app.services.v2.shop_chat import GUEST_SESSION_NOTE, SYSTEM_PROMPT
 from tests.conftest import MERCHANT_ONE_AUTH, MERCHANT_ONE_ID, MERCHANT_TWO_ID
 from tests.support.merchant_v2 import merchant_session_headers, seed_product
-from tests.support.trade import SHOP, database_of, set_product, stock
+from tests.support.trade import SHOP, bound_customer, database_of, set_product, stock
 
 pytestmark = pytest.mark.integration
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("surface", ["shop", "merchant"])
+async def test_chat_rate_limit_applies_to_each_authenticated_session(
+    postgres_app, postgres_client, surface
+):
+    headers = (
+        await _guest(postgres_client)
+        if surface == "shop"
+        else await merchant_session_headers(postgres_client, MERCHANT_ONE_AUTH)
+    )
+    postgres_app.state.rate_limiter = SlidingWindowRateLimiter(limit=1, clock=lambda: 0.0)
+    payload = {
+        "message": "继续",
+        "conversation_id": str(uuid4()),
+        "client_request_id": "rate-check",
+    }
+    first = await postgres_client.post(
+        f"/api/v2/{surface}/chat", headers={**headers, "Accept": "application/json"}, json=payload
+    )
+    second = await postgres_client.post(
+        f"/api/v2/{surface}/chat", headers={**headers, "Accept": "application/json"}, json=payload
+    )
+    assert first.status_code == 403
+    assert second.status_code == 429
 
 
 @pytest.mark.asyncio
@@ -686,3 +714,45 @@ async def test_injected_product_description_reaches_the_model_only_as_fenced_dat
     async with database.session() as session:
         orders = await session.scalar(select(func.count()).select_from(Order))
     assert orders == 0
+
+
+def _system_text(fake: FakeLlmClient) -> str:
+    return "\n".join(m.content for m in fake.converse_calls[-1].messages if m.role == "system")
+
+
+@pytest.mark.asyncio
+async def test_guest_turn_tells_the_model_to_guide_identity_selection(
+    postgres_app: FastAPI, postgres_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """访客没有订单、售后与记忆（PRD C2）：模型必须知道这一点，才能引导而不是去调本人订单工具。
+
+    单入口演示下访客会点到「订单 / 售后」类快捷提问（D-N5-4）；不告知身份状态时，模型只能用
+    猜的订单号调用 `get_my_order`，被归属闸门判为致命错误，整轮以 403 结束。
+    """
+
+    fake = _patch_llm(monkeypatch, [_answer("请先在页面上绑定演示顾客，我再帮你查订单。")])
+    headers = await _guest(postgres_client)
+
+    resp = await _chat(postgres_client, headers, "我的订单到哪了？不合适能退吗？")
+
+    assert resp.status_code == 200, resp.text
+    system = _system_text(fake)
+    assert GUEST_SESSION_NOTE in system
+    for tool in ("get_my_order", "check_after_sale_eligibility", "prepare_after_sale"):
+        assert tool in GUEST_SESSION_NOTE
+    # 说明放在稳定前缀之后，不改静态提示词（A9 前缀缓存）。
+    assert system.index(SYSTEM_PROMPT) < system.index(GUEST_SESSION_NOTE)
+    assert resp.json()["tool_calls"] == []
+
+
+@pytest.mark.asyncio
+async def test_bound_customer_turn_has_no_guest_note(
+    postgres_app: FastAPI, postgres_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = _patch_llm(monkeypatch, [_answer("好的。")])
+    headers = await bound_customer(postgres_client, postgres_app, buyer_key="note-buyer")
+
+    resp = await _chat(postgres_client, headers, "你好")
+
+    assert resp.status_code == 200, resp.text
+    assert GUEST_SESSION_NOTE not in _system_text(fake)

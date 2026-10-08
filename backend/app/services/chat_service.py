@@ -315,7 +315,7 @@ class ChatService:
                     }
                 )
             if self._metrics is not None and response.degraded:
-                self._metrics.degraded_count += 1
+                self._metrics.record_turn(degraded=True, reason="V1", degraded_sources=())
             # 历史详情从 ASSISTANT message 装配 Answer payload。纯明细正文虽为空，
             # 仍必须保存该消息，前端据 payload 展示表格而不会渲染空正文卡片。
             await self._conversations.create_message(

@@ -23,7 +23,9 @@ from app.models.drafts import ChangeLedger, Draft
 from app.models.events import AfterSaleEvent, FulfillmentEvent, InventoryEvent
 from app.models.idempotency import IdempotencyRecord
 from app.models.knowledge import KnowledgeDocument, MerchantMemory, MetricDefinition
+from app.models.knowledge_index import KnowledgeChunk, KnowledgeIndexState, KnowledgeIndexVersion
 from app.models.localization import MachineTranslationCache, ResourceLocalization
+from app.models.mcp_credential import McpCredential
 from app.models.memory_v2 import (
     CustomerMemory,
     CustomerMemoryPreference,
@@ -39,7 +41,9 @@ from app.models.operations import (
     ExportFile,
     LlmDailyBudget,
     LlmUsage,
+    ModelPriceVersion,
     OperationEvidenceNonce,
+    ScheduledJobRun,
 )
 from app.models.promotion import Coupon, GuardrailConfig
 from app.models.provenance import ConversationProvenance
@@ -72,10 +76,14 @@ __all__ = [
     "GuardrailConfig",
     "IdempotencyRecord",
     "InventoryEvent",
+    "KnowledgeChunk",
     "KnowledgeDocument",
+    "KnowledgeIndexState",
+    "KnowledgeIndexVersion",
     "LlmDailyBudget",
     "LlmUsage",
     "MachineTranslationCache",
+    "McpCredential",
     "MemoryExtractionJob",
     "Merchant",
     "MerchantMemory",
@@ -83,6 +91,7 @@ __all__ = [
     "MerchantMemorySummary",
     "Message",
     "MetricDefinition",
+    "ModelPriceVersion",
     "OperationEvidenceNonce",
     "Order",
     "OrderItem",
@@ -90,5 +99,6 @@ __all__ = [
     "Refund",
     "ResourceLocalization",
     "ReturnRecord",
+    "ScheduledJobRun",
     "SupportTicket",
 ]

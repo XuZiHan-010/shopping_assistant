@@ -179,6 +179,24 @@ async def test_chat_without_tools_reports_none_source(
 
 
 @pytest.mark.asyncio
+async def test_model_is_told_the_current_business_date(
+    postgres_app: FastAPI, postgres_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """没有当前日期时，模型只能给 `query_metrics` 编一个起止日期（2026-10-07 真实对照发现）。"""
+
+    from app.analytics.dates import business_today
+
+    fake = _patch_llm(monkeypatch, [_answer("今天还没有成交。")])
+    headers = await merchant_session_headers(postgres_client, MERCHANT_ONE_AUTH)
+
+    await _chat(postgres_client, headers, "今天销售额")
+
+    today = business_today(datetime.now(UTC), timezone="Asia/Shanghai").isoformat()
+    system = fake.converse_calls[0].messages[0].content
+    assert f"当前业务日期：{today}" in system
+
+
+@pytest.mark.asyncio
 async def test_sse_stream_ends_with_turn_complete(
     postgres_app: FastAPI, postgres_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -6,9 +6,14 @@ from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool
+from sqlalchemy.dialects.postgresql.base import ischema_names
 
 from app.core.config import get_settings
 from app.db.base import Base
+from app.models.knowledge_index import Vector
+
+# 让反射认得 pgvector 列，`alembic check` 才能比较 `knowledge_chunks.embedding` 的类型。
+ischema_names.setdefault("vector", Vector)
 
 config = context.config
 

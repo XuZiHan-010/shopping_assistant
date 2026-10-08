@@ -572,7 +572,7 @@ docker compose up --build
 | `shop` | `/shop` | 顾客端 Next.js；N2 创建 |
 | `merchant` | `/frontend` | 现有 Vue 商家工作台；由当前 `frontend` Service 迁移命名 |
 | `backend` | `/backend` | FastAPI API |
-| `postgres` | Railway Database | 主数据库，N4 启用 pgvector |
+| `postgres` | 外部 Neon PostgreSQL（不在 Railway 内） | 主数据库，经 `DATABASE_URL` 连接；N4 起启用 pgvector（`vector` 0.8.6，迁移 `20261002_0047` 执行 `CREATE EXTENSION`） |
 | `cron` | `/backend` | 幂等短任务：简报、汇总回补、演示数据刷新与过期清理 |
 
 本版不创建通用 `worker`、对象存储或默认 Redis Service；确有多实例共享限流/队列证据时另行评审 Redis。

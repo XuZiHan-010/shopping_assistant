@@ -1,0 +1,342 @@
+[
+  {
+    "retriever": "platform_domain_retriever",
+    "answerable_cases": 54,
+    "no_answer_cases": 10,
+    "overall": {
+      "recall_at_3": 0.0926,
+      "recall_at_5": 0.0926,
+      "mrr": 0.0741,
+      "ndcg_at_5": 0.0658,
+      "cases": 54
+    },
+    "by_kind": {
+      "caliber": {
+        "recall_at_3": 0.0,
+        "recall_at_5": 0.0,
+        "mrr": 0.0,
+        "ndcg_at_5": 0.0,
+        "cases": 12
+      },
+      "colloquial": {
+        "recall_at_3": 0.0625,
+        "recall_at_5": 0.0625,
+        "mrr": 0.0417,
+        "ndcg_at_5": 0.0383,
+        "cases": 8
+      },
+      "cross_language": {
+        "recall_at_3": 0.0,
+        "recall_at_5": 0.0,
+        "mrr": 0.0,
+        "ndcg_at_5": 0.0,
+        "cases": 8
+      },
+      "field": {
+        "recall_at_3": 0.0625,
+        "recall_at_5": 0.0625,
+        "mrr": 0.125,
+        "ndcg_at_5": 0.0766,
+        "cases": 8
+      },
+      "multi_doc": {
+        "recall_at_3": 0.0833,
+        "recall_at_5": 0.0833,
+        "mrr": 0.1667,
+        "ndcg_at_5": 0.1022,
+        "cases": 6
+      },
+      "process": {
+        "recall_at_3": 0.2917,
+        "recall_at_5": 0.2917,
+        "mrr": 0.1389,
+        "ndcg_at_5": 0.1681,
+        "cases": 12
+      }
+    },
+    "no_answer_rejection_rate": 0.5,
+    "mean_documents_returned": 1.453125,
+    "missed_case_ids": [
+      "R-001",
+      "R-002",
+      "R-003",
+      "R-004",
+      "R-005",
+      "R-006",
+      "R-007",
+      "R-008",
+      "R-009",
+      "R-010",
+      "R-011",
+      "R-012",
+      "R-016",
+      "R-017",
+      "R-018",
+      "R-019",
+      "R-020",
+      "R-021",
+      "R-022",
+      "R-023",
+      "R-025",
+      "R-026",
+      "R-027",
+      "R-028",
+      "R-029",
+      "R-030",
+      "R-031",
+      "R-033",
+      "R-034",
+      "R-036",
+      "R-037",
+      "R-038",
+      "R-039",
+      "R-040",
+      "R-041",
+      "R-042",
+      "R-043",
+      "R-044",
+      "R-045",
+      "R-046",
+      "R-047",
+      "R-048",
+      "R-049",
+      "R-050",
+      "R-051",
+      "R-052",
+      "R-054"
+    ],
+    "false_hit_case_ids": [
+      "R-056",
+      "R-057",
+      "R-058",
+      "R-062",
+      "R-063"
+    ],
+    "pending": [
+      "citation_accuracy",
+      "faithfulness"
+    ]
+  },
+  {
+    "retriever": "search_rules_retriever",
+    "answerable_cases": 54,
+    "no_answer_cases": 10,
+    "overall": {
+      "recall_at_3": 0.8148,
+      "recall_at_5": 0.8333,
+      "mrr": 0.7546,
+      "ndcg_at_5": 0.7564,
+      "cases": 54
+    },
+    "by_kind": {
+      "caliber": {
+        "recall_at_3": 1.0,
+        "recall_at_5": 1.0,
+        "mrr": 0.9028,
+        "ndcg_at_5": 0.9276,
+        "cases": 12
+      },
+      "colloquial": {
+        "recall_at_3": 0.375,
+        "recall_at_5": 0.375,
+        "mrr": 0.2917,
+        "ndcg_at_5": 0.3125,
+        "cases": 8
+      },
+      "cross_language": {
+        "recall_at_3": 0.625,
+        "recall_at_5": 0.75,
+        "mrr": 0.4479,
+        "ndcg_at_5": 0.5241,
+        "cases": 8
+      },
+      "field": {
+        "recall_at_3": 0.9375,
+        "recall_at_5": 0.9375,
+        "mrr": 1.0,
+        "ndcg_at_5": 0.9516,
+        "cases": 8
+      },
+      "multi_doc": {
+        "recall_at_3": 0.75,
+        "recall_at_5": 0.75,
+        "mrr": 0.8333,
+        "ndcg_at_5": 0.691,
+        "cases": 6
+      },
+      "process": {
+        "recall_at_3": 1.0,
+        "recall_at_5": 1.0,
+        "mrr": 0.9167,
+        "ndcg_at_5": 0.9385,
+        "cases": 12
+      }
+    },
+    "no_answer_rejection_rate": 0.9,
+    "mean_documents_returned": 2.59375,
+    "missed_case_ids": [
+      "R-035",
+      "R-036",
+      "R-038",
+      "R-039",
+      "R-040",
+      "R-043",
+      "R-045"
+    ],
+    "false_hit_case_ids": [
+      "R-060"
+    ],
+    "pending": [
+      "citation_accuracy",
+      "faithfulness"
+    ]
+  },
+  {
+    "retriever": "oracle_domain_retriever",
+    "answerable_cases": 54,
+    "no_answer_cases": 10,
+    "overall": {
+      "recall_at_3": 0.75,
+      "recall_at_5": 0.8611,
+      "mrr": 0.6462,
+      "ndcg_at_5": 0.6774,
+      "cases": 54
+    },
+    "by_kind": {
+      "caliber": {
+        "recall_at_3": 0.9167,
+        "recall_at_5": 0.9167,
+        "mrr": 0.9306,
+        "ndcg_at_5": 0.9167,
+        "cases": 12
+      },
+      "colloquial": {
+        "recall_at_3": 1.0,
+        "recall_at_5": 1.0,
+        "mrr": 0.7292,
+        "ndcg_at_5": 0.7991,
+        "cases": 8
+      },
+      "cross_language": {
+        "recall_at_3": 0.75,
+        "recall_at_5": 0.875,
+        "mrr": 0.5042,
+        "ndcg_at_5": 0.5975,
+        "cases": 8
+      },
+      "field": {
+        "recall_at_3": 0.5625,
+        "recall_at_5": 0.9375,
+        "mrr": 0.5604,
+        "ndcg_at_5": 0.6364,
+        "cases": 8
+      },
+      "multi_doc": {
+        "recall_at_3": 0.4167,
+        "recall_at_5": 0.5833,
+        "mrr": 0.6167,
+        "ndcg_at_5": 0.4814,
+        "cases": 6
+      },
+      "process": {
+        "recall_at_3": 0.7083,
+        "recall_at_5": 0.7917,
+        "mrr": 0.473,
+        "ndcg_at_5": 0.5357,
+        "cases": 12
+      }
+    },
+    "no_answer_rejection_rate": 0.5,
+    "mean_documents_returned": 2.453125,
+    "missed_case_ids": [
+      "R-012",
+      "R-022",
+      "R-024",
+      "R-043"
+    ],
+    "false_hit_case_ids": [
+      "R-056",
+      "R-057",
+      "R-058",
+      "R-062",
+      "R-063"
+    ],
+    "pending": [
+      "citation_accuracy",
+      "faithfulness"
+    ]
+  },
+  {
+    "retriever": "hybrid_retriever",
+    "answerable_cases": 54,
+    "no_answer_cases": 10,
+    "overall": {
+      "recall_at_3": 0.8704,
+      "recall_at_5": 0.9074,
+      "mrr": 0.8015,
+      "ndcg_at_5": 0.8173,
+      "cases": 54
+    },
+    "by_kind": {
+      "caliber": {
+        "recall_at_3": 1.0,
+        "recall_at_5": 1.0,
+        "mrr": 0.9444,
+        "ndcg_at_5": 0.9583,
+        "cases": 12
+      },
+      "colloquial": {
+        "recall_at_3": 0.6875,
+        "recall_at_5": 0.6875,
+        "mrr": 0.6875,
+        "ndcg_at_5": 0.6555,
+        "cases": 8
+      },
+      "cross_language": {
+        "recall_at_3": 0.625,
+        "recall_at_5": 0.75,
+        "mrr": 0.4479,
+        "ndcg_at_5": 0.5241,
+        "cases": 8
+      },
+      "field": {
+        "recall_at_3": 0.875,
+        "recall_at_5": 0.9375,
+        "mrr": 0.7333,
+        "ndcg_at_5": 0.7796,
+        "cases": 8
+      },
+      "multi_doc": {
+        "recall_at_3": 0.9167,
+        "recall_at_5": 1.0,
+        "mrr": 0.9167,
+        "ndcg_at_5": 0.8883,
+        "cases": 6
+      },
+      "process": {
+        "recall_at_3": 1.0,
+        "recall_at_5": 1.0,
+        "mrr": 0.9583,
+        "ndcg_at_5": 0.9692,
+        "cases": 12
+      }
+    },
+    "no_answer_rejection_rate": 0.9,
+    "mean_documents_returned": 2.90625,
+    "missed_case_ids": [
+      "R-039",
+      "R-040",
+      "R-043",
+      "R-045"
+    ],
+    "false_hit_case_ids": [
+      "R-060"
+    ],
+    "pending": [
+      "citation_accuracy",
+      "faithfulness"
+    ],
+    "embedding_model": "BAAI/bge-small-zh-v1.5",
+    "min_similarity": 0.575
+  }
+]

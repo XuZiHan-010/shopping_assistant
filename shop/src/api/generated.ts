@@ -516,6 +516,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/merchant/mcp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * MCP 只读服务入口
+         * @description 协议固定 `2026-07-28`，无协议会话的 Streamable HTTP：不实现旧版 `initialize`，不接收也不签发 `Mcp-Session-Id`。只支持 `server/discover`、`tools/list`、`tools/call`；工具面为只读白名单与凭证 scope 的交集。凭证缺失或无效时在解析正文之前返回 401。其余错误一律为 JSON-RPC error，不使用 v2 `ErrorResponse`。
+         */
+        post: operations["post_merchant_mcp_api_v2_merchant_mcp_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v2/merchant/products/content": {
         parameters: {
             query?: never;
@@ -1461,6 +1481,25 @@ export interface components {
             /** Client Request Id */
             client_request_id: string;
         };
+        /**
+         * BudgetLevelStatus
+         * @description 一级预算的当日用量（N5 B Task 3）。店铺级只给脱敏标识，不给商家 ID 或名称。
+         */
+        BudgetLevelStatus: {
+            /**
+             * Level
+             * @enum {string}
+             */
+            level: "GLOBAL" | "ROLE" | "SHOP";
+            /** Scope */
+            scope: string;
+            /** Budget Tokens */
+            budget_tokens: number;
+            /** Used Tokens */
+            used_tokens: number;
+            /** Remaining Tokens */
+            remaining_tokens: number;
+        };
         /** BusinessDomainRenameRequest */
         BusinessDomainRenameRequest: {
             /** New Name */
@@ -1885,6 +1924,13 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /** CostByCurrency */
+        CostByCurrency: {
+            /** Currency */
+            currency: string;
+            /** Amount */
+            amount: string;
         };
         /** CouponSummary */
         CouponSummary: {
@@ -2659,6 +2705,31 @@ export interface components {
             content_locale?: components["schemas"]["SupportedLocale"] | null;
         };
         /**
+         * KnowledgeIndexStatus
+         * @description 知识索引状态（N4-C，契约 §8.6.7）；不含分块正文、向量或异常原文。
+         */
+        KnowledgeIndexStatus: {
+            /**
+             * Retrieval Mode
+             * @enum {string}
+             */
+            retrieval_mode: "HYBRID" | "KEYWORD_ONLY";
+            /** Active Version */
+            active_version: number | null;
+            /** Embedding Model */
+            embedding_model: string | null;
+            /** Configured Model */
+            configured_model: string | null;
+            /** Stale */
+            stale: boolean;
+            /** Stale Reason */
+            stale_reason: ("BUILD_FAILED" | "CORPUS_CHANGED") | null;
+            /** Building */
+            building: boolean;
+            /** Last Failure Reason */
+            last_failure_reason: ("EMBEDDING_UNAVAILABLE" | "EMBEDDING_FAILED" | "QUALITY_REGRESSION" | "EMPTY_CORPUS" | "BUILD_TIMEOUT" | "BUILD_ABORTED" | "STORAGE_FAILED") | null;
+        };
+        /**
          * KnowledgeTreeNode
          * @description 虚拟知识库树的一个目录或文档节点。
          */
@@ -2685,6 +2756,7 @@ export interface components {
         KnowledgeTreeResponse: {
             /** Roots */
             roots: components["schemas"]["KnowledgeTreeNode"][];
+            index_status: components["schemas"]["KnowledgeIndexStatus"];
         };
         /** LedgerActor */
         LedgerActor: {
@@ -3125,6 +3197,8 @@ export interface components {
             category: string;
             /** Status */
             status: string;
+            /** Image Url */
+            image_url: string | null;
             /** Content Version */
             content_version: number;
             /** Missing Required Attributes */
@@ -3161,6 +3235,8 @@ export interface components {
             expires_at: string;
             /** Merchant Display Name */
             merchant_display_name: string;
+            /** Shop Slug */
+            shop_slug: string;
         };
         /** MetricDefinitionResponse */
         MetricDefinitionResponse: {
@@ -3226,6 +3302,40 @@ export interface components {
             };
             /** Demo Deployment Mode */
             demo_deployment_mode: boolean;
+            /** Budget Levels */
+            budget_levels: components["schemas"]["BudgetLevelStatus"][];
+            /** Llm Cost Today */
+            llm_cost_today: components["schemas"]["CostByCurrency"][];
+            /** Unpriced Calls Today */
+            unpriced_calls_today: number;
+            /** Cache Hit Tokens Today */
+            cache_hit_tokens_today: number;
+            /** Cache Hit Rate Today */
+            cache_hit_rate_today: number | null;
+            /** Tool Calls Total */
+            tool_calls_total: number;
+            /** Tool Errors Total */
+            tool_errors_total: number;
+            /** Route P95 Ms */
+            route_p95_ms: {
+                [key: string]: number;
+            };
+            /** Turns Today */
+            turns_today: number;
+            /** Avg Tokens Per Turn Today */
+            avg_tokens_per_turn_today: number | null;
+            /** Avg Cost Per Turn Today */
+            avg_cost_per_turn_today: components["schemas"]["CostByCurrency"][];
+            /** Avg Turn Elapsed Ms Today */
+            avg_turn_elapsed_ms_today: number | null;
+            /** Degraded Reason Counts */
+            degraded_reason_counts: {
+                [key: string]: number;
+            };
+            /** Source Degraded Counts */
+            source_degraded_counts: {
+                [key: string]: number;
+            };
         };
         /**
          * OrderAfterSaleProjection
@@ -5514,6 +5624,76 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
+            };
+        };
+    };
+    post_merchant_mcp_api_v2_merchant_mcp_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "MCP-Protocol-Version": "2026-07-28";
+                "Mcp-Method": string;
+                "Mcp-Name"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description JSON-RPC result 或 JSON-RPC error */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            /** @description 通知已接收（无正文） */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 解析失败、请求头与正文不一致或协议版本不受支持（JSON-RPC error） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description MCP 凭证缺失、无效、过期或已撤销；带 `WWW-Authenticate: Bearer` */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 请求正文过大（JSON-RPC error） */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 请求过于频繁 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 凭证库不可用、无法鉴权（`id: null` 的 JSON-RPC error，不解析请求正文） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

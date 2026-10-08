@@ -8,9 +8,10 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select
 
 from app.db.session import Database
-from app.localization.locales import SupportedLocale
+from app.localization.after_sales import after_sale_text
 from app.models.after_sales import AfterSale
 from app.repositories.audit import AuditRepository
+from app.schemas.v2.after_sales import AfterSaleState
 from app.schemas.v2.drafts import DraftKind
 from app.services.v2.after_sales import merchant_summary, sale_detail
 from app.services.v2.draft_handlers.after_sale_decision import Decision
@@ -32,7 +33,11 @@ AFTER_SALE_OBJECT = "AFTER_SALE"
 class ListAfterSalesArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    state: str | None = Field(default=None, max_length=32)
+    # 枚举而不是自由字符串：未知取值要被参数校验拒绝，不能悄悄筛出 0 条。
+    state: AfterSaleState | None = Field(
+        default=None,
+        description="按状态筛选；待商家处理是 PENDING_MERCHANT。不传则返回全部状态。",
+    )
 
 
 class GetAfterSaleArgs(BaseModel):
@@ -61,15 +66,22 @@ def build_after_sale_tools(database: Database, *, alias_secret: bytes) -> tuple[
         async with database.session() as session:
             query = select(AfterSale).where(AfterSale.merchant_id == ctx.session.merchant_id)
             if args.state:
-                query = query.where(AfterSale.state == args.state)
-            rows = list((await session.scalars(
-                query.order_by(AfterSale.created_at.desc(), AfterSale.id.desc()).limit(20)
-            )).all())
-            summaries = [merchant_summary(row, alias_secret=alias_secret, locale=ctx_locale(ctx))
-                         for row in rows]
+                query = query.where(AfterSale.state == args.state.value)
+            rows = list(
+                (
+                    await session.scalars(
+                        query.order_by(AfterSale.created_at.desc(), AfterSale.id.desc()).limit(20)
+                    )
+                ).all()
+            )
+            summaries = [
+                merchant_summary(row, alias_secret=alias_secret, locale=ctx.locale) for row in rows
+            ]
         return ToolOutput(
             payload={"items": [item.model_dump(mode="json") for item in summaries]},
-            summary=f"本店有 {len(rows)} 条售后事项，请按状态和规则处理",
+            summary=after_sale_text(
+                "本店有 {count} 条售后事项，请按状态和规则处理", ctx.locale
+            ).format(count=len(rows)),
             row_count=len(rows),
             produced=tuple(ObjectRef(AFTER_SALE_OBJECT, str(row.id)) for row in rows),
         )
@@ -79,51 +91,67 @@ def build_after_sale_tools(database: Database, *, alias_secret: bytes) -> tuple[
         await AuditRepository(database).record_event(
             merchant_id=ctx.session.merchant_id,
             event_type="AFTER_SALE_SUMMARY_VIEWED",
-            resource_type="after_sale", resource_id=str(record.id),
+            resource_type="after_sale",
+            resource_id=str(record.id),
             request_id=ctx.request_id,
             metadata={"session_record_id": str(ctx.session.session_record_id)},
         )
         async with database.session() as session:
             detail = await sale_detail(
-                session, record, customer=False,
-                alias_secret=alias_secret, locale=ctx_locale(ctx),
+                session,
+                record,
+                customer=False,
+                alias_secret=alias_secret,
+                locale=ctx.locale,
             )
         return ToolOutput(
             payload=detail.model_dump(mode="json"),
-            summary="售后详情来自本店业务记录；顾客标识已脱敏",
+            summary=after_sale_text("售后详情来自本店业务记录；顾客标识已脱敏", ctx.locale),
             row_count=1,
             produced=(ObjectRef(AFTER_SALE_OBJECT, str(record.id)),),
         )
 
-    async def draft_decision(
-        ctx: ToolContext, args: DraftAfterSaleDecisionArgs
-    ) -> DraftProposal:
+    async def draft_decision(ctx: ToolContext, args: DraftAfterSaleDecisionArgs) -> DraftProposal:
         record = await _owned(database, ctx, args.after_sale_id)
         return DraftProposal(
             target=ObjectRef(AFTER_SALE_OBJECT, str(record.id)),
-            changes={key: value for key, value in args.model_dump(exclude={"after_sale_id"}).items()
-                     if value is not None},
-            summary="售后决定已起草，须在审批界面批准后才会生效；退款金额由批准时后端计算。",
+            changes={
+                key: value
+                for key, value in args.model_dump(exclude={"after_sale_id"}).items()
+                if value is not None
+            },
+            summary=after_sale_text(
+                "售后决定已起草，须在审批界面批准后才会生效；退款金额由批准时后端计算。", ctx.locale
+            ),
         )
 
     return (
         ToolSpec(
-            name="list_after_sales", roles=frozenset({ToolRole.MERCHANT}),
-            args_model=ListAfterSalesArgs, write_policy=WritePolicy.READ_ONLY,
-            parallelizable=True, description="查询本店售后队列，只返回店铺级顾客别名。",
+            name="list_after_sales",
+            roles=frozenset({ToolRole.MERCHANT}),
+            args_model=ListAfterSalesArgs,
+            write_policy=WritePolicy.READ_ONLY,
+            parallelizable=True,
+            description="查询本店售后队列，只返回店铺级顾客别名。",
             executor=list_after_sales,
         ),
         ToolSpec(
-            name="get_after_sale", roles=frozenset({ToolRole.MERCHANT}),
-            args_model=GetAfterSaleArgs, write_policy=WritePolicy.READ_ONLY,
-            parallelizable=True, description="查看本店售后事项、事件及脱敏随单摘要。",
+            name="get_after_sale",
+            roles=frozenset({ToolRole.MERCHANT}),
+            args_model=GetAfterSaleArgs,
+            write_policy=WritePolicy.READ_ONLY,
+            parallelizable=True,
+            description="查看本店售后事项、事件及脱敏随单摘要。",
             executor=get_after_sale,
             provenance_refs=(ProvenanceRef(arg="after_sale_id", object_type=AFTER_SALE_OBJECT),),
         ),
         ToolSpec(
-            name="draft_after_sale_decision", roles=frozenset({ToolRole.MERCHANT}),
-            args_model=DraftAfterSaleDecisionArgs, write_policy=WritePolicy.MERCHANT_DRAFT,
-            parallelizable=False, description="起草售后决定供商家审批，不会直接变更状态或退款。",
+            name="draft_after_sale_decision",
+            roles=frozenset({ToolRole.MERCHANT}),
+            args_model=DraftAfterSaleDecisionArgs,
+            write_policy=WritePolicy.MERCHANT_DRAFT,
+            parallelizable=False,
+            description="起草售后决定供商家审批，不会直接变更状态或退款。",
             executor=draft_decision,
             provenance_refs=(ProvenanceRef(arg="after_sale_id", object_type=AFTER_SALE_OBJECT),),
             draft_kind=DraftKind.AFTER_SALE_DECISION,
@@ -137,18 +165,12 @@ async def _owned(database: Database, ctx: ToolContext, raw_id: str) -> AfterSale
     except ValueError:
         sale_id = None
     async with database.session() as session:
-        sale = await session.scalar(select(AfterSale).where(
-            AfterSale.id == sale_id, AfterSale.merchant_id == ctx.session.merchant_id
-        ))
+        sale = await session.scalar(
+            select(AfterSale).where(
+                AfterSale.id == sale_id, AfterSale.merchant_id == ctx.session.merchant_id
+            )
+        )
         if sale is not None:
             # ORM 的简单字段在会话关闭后仍可安全读取。
             return sale
-    raise FatalToolError(
-        gate="ownership", tool_name="get_after_sale", detail="售后事项不可用"
-    )
-
-
-def ctx_locale(ctx: ToolContext) -> SupportedLocale:
-    # 工具上下文暂不带显示语言，按现有商家工具的中文说明口径输出。
-    del ctx
-    return SupportedLocale.ZH_CN
+    raise FatalToolError(gate="ownership", tool_name="get_after_sale", detail="售后事项不可用")

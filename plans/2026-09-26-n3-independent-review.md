@@ -1,5 +1,22 @@
 # N3 独立审查记录（2026-09-26）
 
+## 2026-10-02 遗留整改执行清单
+
+用户授权处理 N1–N3 遗留；沿用本记录，不另建重复主计划。仅修改当前仍存在的缺陷，保留 N4 在途改动。不执行 Git 发布，不调用真实模型。
+
+- [x] CSV：在 `tests/unit/services/test_export_service.py` 用实际 CSV 生成/解析覆盖制表符、回车、换行起始单元格及正常数字；先复现后修复 `services/export_service.py`。
+- [x] 售后：在 `tests/integration/v2/test_shop_after_sales.py` 验证缺失关联工单返回明确的服务错误而非断言或 `"None"`；修复 `services/v2/after_sales.py`，沿用既有错误契约。
+- [x] 售后工具语言：对中英文实际工具输出（顾客资格/预览、商家列表/详情/草稿）测试；使用 `ToolContext.locale`，修复两个 `tools/*/after_sale.py` 中固定中文的展示信息，保留业务编号与用户原文。
+- [x] F2/F3：补选中已退完行、多行退款余额、过期/篡改令牌端点及失败不写入的数据库测试。
+- [x] 复核顾客端英文导航/绑定提示是否已由 WS 解决；已解决则以当前测试证据关闭，不重复实现。
+- [x] 运行相关定向回归、N1 指定独占库全量（同时强制 DB 与时序）、静态检查及双端单测/类型/生成类型/构建；结果写回 N1 整改计划和当前进度。
+- [x] 真实模型验收准备：已核对入口、样本与费用边界，见 `docs/history/eval/n1-n4-acceptance-2026-10-03.md`。简报当前是确定性事实生成，不存在可直接复测的模型入口；首次 Skill 选择 48 次、售后摘要 8 次的入口已完成 Fake 演练与独立复核。
+- [ ] 真实质量结果：取得 R3 单独授权后运行并人工复核；不得以 Fake 或脚本准备完成替代真实通过。
+
+**执行结果（2026-10-02 核对补记）**：前六项的代码与测试已于 2026-10-02 19:15–19:23 写入工作树（`export_service.py` 首字符补 `\t`/`\r`/`\n`、`sale_detail` 缺关联工单改抛 `DatabaseUnavailableError`、新增 `app/localization/after_sales.py` 并让两端售后工具按 `ctx.locale` 输出、`test_shop_after_sales.py` 补已退完行/多行/状态变化后中性证据错误），但当时未勾选。复核：独立库 `borough_n5entry_1002_test` 上定向 `test_export_service.py`、`test_shop_after_sales.py`、`tests/unit/tools` **147 passed**；英文导航与演示身份入口由 `shop/src/session/ShopShell.test.tsx`「英文模式的导航和演示身份入口使用英文」覆盖，WS 已解决。全量证据为 2026-10-02 N4 收尾全量（在上述改动之后运行）：后端 4405 passed / 4 skipped / 0 failed，独占时序哨兵 4/4，ruff、mypy、双端单测/类型/生成类型/构建通过。第七项（真实模型验收）仍待 R3 授权。
+
+数据库验证使用独立新建、名称以 `_test` 结尾的本地库；运行时清空 `LLM_API_KEY`，测试设置隔离 `.env`。共享数据库实例上另有测试时，最终时序验收另开独立实例，避免互扰。
+
 依据：`2026-09-24-n3-assignment-and-review.md`、`2026-09-22-astra-checklist.md` §六/§八/§九、现行 PRD 与后端契约。
 
 本轮为只读代码审查与本地验证，不承担修复。审查者：Codex（本轮独立审查）；实现者按分工文件为 Opus / Sol，前端为 Sonnet / Terra。审查对象是当前未提交工作树，不是固定提交。未调用真实 LLM，未执行 Git 发布操作，未修改生产代码或只读快照。

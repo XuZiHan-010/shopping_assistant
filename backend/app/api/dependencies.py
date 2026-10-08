@@ -21,6 +21,7 @@ from app.core.errors import (
     RateLimitedError,
 )
 from app.core.security import MerchantContext, resolve_demo_token
+from app.core.session import SessionRole
 from app.db.session import Database
 from app.knowledge.retrieval import KnowledgeRetrieval
 from app.llm.client import LlmBudget, LlmClient
@@ -199,15 +200,31 @@ def require_admin_or_viewer_token(
     raise AdminForbiddenError
 
 
+def holds_admin_token(request: Request, settings: Settings) -> bool:
+    """本次请求带的是不是管理员令牌本身（而不是只读令牌）。
+
+    只给已经过 `require_admin_or_viewer_token` 的 GET 端点用：读权限两把钥匙相同，
+    但读的过程中会产生费用或副作用的分支（如记忆机器翻译）只对管理员开放——只读令牌
+    等同公开，不能让它发起任何模型调用（R3、R6）。
+    """
+
+    token = request.headers.get("x-admin-token")
+    return bool(token and settings.admin_token and hmac.compare_digest(token, settings.admin_token))
+
+
 def build_guarded_llm(
     settings: Settings,
     database: Database,
     *,
     request_id: str,
     merchant_id: UUID | None,
+    role: SessionRole | None,
     purpose: Literal["AGENT", "LOCALIZATION", "MEMORY"] = "AGENT",
 ) -> LlmCostGuard:
     """构造带费用守卫的模型客户端。
+
+    `role` 必填（可为 `None`）：它决定三级预算里扣哪个角色池与店铺池（PRD §10.2）。
+    不给默认值是有意的——新调用点漏传就会落进「只扣全局」，顾客流量便能挤占商家额度。
 
     `merchant_id` 非空时必须是已确认存在的商家：它决定 token 用量与每日预算
     的归属，不能直接采信请求体（R5）。放宽为可空是为了给 `build_global_guarded_llm()`
@@ -226,6 +243,7 @@ def build_guarded_llm(
         request_id=request_id,
         merchant_id=merchant_id,
         purpose=purpose,
+        role=role,
     )
 
 
@@ -244,6 +262,7 @@ def build_global_guarded_llm(
         database,
         request_id=request_id,
         merchant_id=None,
+        role=None,
         purpose="LOCALIZATION",
     )
 
@@ -268,6 +287,7 @@ async def get_chat_service(
         database,
         request_id=str(request.state.request_id),
         merchant_id=context.merchant_id,
+        role=SessionRole.MERCHANT,
     )
     llm: LlmClient = guard
     conversations = ConversationRepository(session)
@@ -360,6 +380,7 @@ def _build_localization_runtime(
         database,
         request_id=request_id,
         merchant_id=merchant_id,
+        role=SessionRole.MERCHANT,
         purpose="LOCALIZATION",
     )
     service = LocalizationService(

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.session import SessionContext, SessionRole
 from app.memory.customer_store import CustomerMemoryStore
+from app.memory.owners import CustomerMemoryOwner
 from app.models.conversation import Conversation, Message
 from app.models.memory_v2 import MemoryExtractionJob
 from app.models.session import AgentSession
@@ -34,11 +35,10 @@ async def enqueue_turn(
     ):
         raise ValueError("记忆任务身份与已落库会话不一致")
     if ctx.role is SessionRole.CUSTOMER:
-        if ctx.buyer_key is None:
+        owner = CustomerMemoryOwner.from_session(ctx)
+        if owner is None:
             return False
-        enabled = await CustomerMemoryStore(session).memory_enabled(
-            merchant_id=ctx.merchant_id, buyer_key=ctx.buyer_key
-        )
+        enabled = await CustomerMemoryStore(session, owner).memory_enabled()
         if not enabled:
             return False
     row_id = await session.scalar(

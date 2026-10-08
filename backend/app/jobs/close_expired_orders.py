@@ -44,13 +44,21 @@ async def close_expired_orders(database: Database, *, now: datetime) -> int:
             )
         ).all()
     closed = 0
+    failed = 0
     for order_id, merchant_id in candidates:
-        async with database.session() as session:
-            if await close_order(
-                session, merchant_id=merchant_id, order_id=order_id, reason="TIMEOUT", now=now
-            ):
-                closed += 1
-            await session.commit()
+        try:
+            async with database.session() as session:
+                changed = await close_order(
+                    session, merchant_id=merchant_id, order_id=order_id, reason="TIMEOUT", now=now
+                )
+                await session.commit()
+                if changed:
+                    closed += 1
+        except Exception:
+            failed += 1
+    if failed:
+        # 成功行已经各自提交；整体仍须失败，保留 Cron 时间片供下次重试。
+        raise RuntimeError("expired order close failures")
     return closed
 
 

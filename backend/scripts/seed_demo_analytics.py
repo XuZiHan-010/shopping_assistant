@@ -15,7 +15,11 @@ from sqlalchemy import delete, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analytics.dates import business_today
-from app.analytics.demo_data import DEMO_ANALYTICS_SEED_BASE, build_demo_dataset
+from app.analytics.demo_data import (
+    BENCHMARK_DAILY_ORDER_SCALE,
+    DEMO_ANALYTICS_SEED_BASE,
+    build_demo_dataset,
+)
 from app.analytics.seed_safety import assert_local_database_url, reject_production
 from app.core.config import get_settings
 from app.core.runtime import configure_event_loop_policy
@@ -29,6 +33,9 @@ from app.models.memory_v2 import CustomerSignal, DailyBrief
 from app.models.promotion import Coupon
 from app.services.seed_service import default_merchants
 
+#: 单条 INSERT 的行数上限：基准规模下单表十几万行，绑定参数不能一次塞进一条语句。
+_INSERT_BATCH = 2_000
+
 
 def default_end_date(now: datetime, *, timezone: str) -> date:
     """最新一天的 `business_date` 必须按业务时区算，不能用宿主本地日期。
@@ -41,7 +48,9 @@ def default_end_date(now: datetime, *, timezone: str) -> date:
     return business_today(now, timezone=timezone)
 
 
-async def seed_analytics(session: AsyncSession, *, days: int, end_date: date) -> int:
+async def seed_analytics(
+    session: AsyncSession, *, days: int, end_date: date, daily_order_scale: int = 1
+) -> int:
     """全量重灌只面向三商家专用库，先检查商家集合，再改写任何事实。"""
 
     await _require_demo_merchants(session)
@@ -64,6 +73,7 @@ async def seed_analytics(session: AsyncSession, *, days: int, end_date: date) ->
             end_date=end_date,
             days=days,
             seed=DEMO_ANALYTICS_SEED_BASE + index,
+            daily_order_scale=daily_order_scale,
         )
         for model, rows in (
             (Product, dataset.products),
@@ -75,27 +85,32 @@ async def seed_analytics(session: AsyncSession, *, days: int, end_date: date) ->
             (InventoryEvent, dataset.inventory_events),
             (FulfillmentEvent, dataset.fulfillment_events),
         ):
-            if rows:
-                await session.execute(model.__table__.insert(), rows)
-                written += len(rows)
+            # 分批写入：基准规模下单表十几万行，一条语句的绑定参数会超过驱动上限。
+            for start in range(0, len(rows), _INSERT_BATCH):
+                await session.execute(
+                    model.__table__.insert(), rows[start : start + _INSERT_BATCH]
+                )
+            written += len(rows)
     return written
 
 
-async def _seed(days: int, end_date: date) -> int:
+async def _seed(days: int, end_date: date, daily_order_scale: int = 1) -> int:
     settings = get_settings()
     assert_local_database_url(settings.database_url)
     reject_production(settings)
     database = Database(settings)
     try:
         async with database.session() as session:
-            written = await seed_analytics(session, days=days, end_date=end_date)
+            written = await seed_analytics(
+                session, days=days, end_date=end_date, daily_order_scale=daily_order_scale
+            )
             await session.commit()
         return written
     finally:
         await database.dispose()
 
 
-def _dry_run(days: int, end_date: date) -> None:
+def _dry_run(days: int, end_date: date, daily_order_scale: int = 1) -> None:
     """只跑纯生成逻辑并报数，绝不连数据库——所以它也不需要生产护栏。"""
 
     total = 0
@@ -105,6 +120,7 @@ def _dry_run(days: int, end_date: date) -> None:
             end_date=end_date,
             days=days,
             seed=DEMO_ANALYTICS_SEED_BASE + index,
+            daily_order_scale=daily_order_scale,
         )
         rows = sum(
             len(part)
@@ -135,6 +151,14 @@ def main() -> None:
     )
     parser.add_argument("--dry-run", action="store_true", help="只展示计划，不写数据库")
     parser.add_argument(
+        "--benchmark-scale",
+        action="store_true",
+        help=(
+            "按性能基准规模生成（PRD §10.1：约 5 万订单）；只用于专门的基准库，"
+            "不要用在演示库上"
+        ),
+    )
+    parser.add_argument(
         "--force-full-rebuild",
         action="store_true",
         help="明确确认删除全部演示经营历史后重建",
@@ -143,8 +167,9 @@ def main() -> None:
     end_date = args.end_date or default_end_date(
         datetime.now(UTC), timezone=get_settings().business_timezone
     )
+    scale = BENCHMARK_DAILY_ORDER_SCALE if args.benchmark_scale else 1
     if args.dry_run:
-        _dry_run(args.days, end_date)
+        _dry_run(args.days, end_date, scale)
         return
     if not args.force_full_rebuild:
         parser.error(
@@ -153,7 +178,7 @@ def main() -> None:
         )
     # Windows 的默认事件循环跑不了 psycopg 异步模式，见 app.core.runtime 的说明。
     configure_event_loop_policy()
-    total = asyncio.run(_seed(args.days, end_date))
+    total = asyncio.run(_seed(args.days, end_date, scale))
     print(f"已写入 {total} 行演示经营数据")
 
 

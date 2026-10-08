@@ -46,6 +46,8 @@ class LlmCallOptions:
 
     json_output: bool = False
     thinking: Literal["enabled", "disabled"] = "enabled"
+    # Guard 可按本次剩余的总 token 预算进一步收紧生成上限。
+    max_output_tokens: int | None = None
 
 
 STRUCTURED_CALL_OPTIONS = LlmCallOptions(json_output=True, thinking="disabled")

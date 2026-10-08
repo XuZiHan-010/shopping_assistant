@@ -909,15 +909,19 @@ class CompactionStrategy(StrEnum):
 
 - 压缩后**必须保留**三项：工具来源、数据截至时间、草稿版本。丢了任一项，
   后续回答就无法满足 M3「必须返回数据截至时间与来源」和 D9「批准绑定草案版本」；
+- 指标工具的同一次调用锚点在同一行并排呈现指标、结果值、数据来源、截至时间和定义版本，
+  以 `工具名#call_id` 绑定；不同调用不得把数值与另一调用的定义版本拼接。此结构只改善模型可见上下文，
+  真实回答是否保留全部来源字段仍须按 PRD §12.5 专项评测判定；
 - **旧对话摘要是模型生成内容，不得升级为事实来源**——它只能影响语气与上下文理解，
   不能充当数字、规则或状态的依据（与 D18① 同一条原则）；
 - **回放的助手历史回答同样是模型生成内容**（D-N4-1）：本轮回答中的数字若只能在历史回答里找到、
-  不能追溯到本轮工具结果或锚点，确定性校验判为无来源并降级；跨回合锚点只从 `messages.response_payload`
-  的持久化字段重建，不从助手文字中抽取数字；
+  不能追溯到本轮工具结果或锚点，确定性校验判为无来源并降级；**跨回合不重建锚点**——回放只含文字，
+  不从 `messages.response_payload` 或助手文字中抽取数字，需要旧数字时本轮必须重新调用工具
+  （2026-10-02 按实现更正，原文「从 response_payload 重建」从未实现）；
 - **身份保存在服务端可信上下文，不反复塞进提示词**；
 - `SUMMARIZATION` 策略的 LLM 调用计入 `compaction_max_calls`，见 §6.10 的预算公式；
 - 两策略在同一评测集上的对比报告是 N4 交付物；选定后另一策略保留在 `eval/` 供回归。
-- **2026-09-30 选型（同日经真实模型对比确认）**：生产默认 `TOOL_RESULT_PRUNING`
+- **2026-09-30 选型（保守默认；同日的真实对比经 2026-10-01 独立复审判定为未冻结口径的探索性运行，不作为选型证据）**：生产默认 `TOOL_RESULT_PRUNING`
   （`COMPACTION_STRATEGY`），触发阈值 `COMPACTION_TRIGGER_TOKENS` 默认 8000（字符估算）。E5 Fake 评测两策略
   四项保持率均为 100%，摘要策略吸收历史、多一次计费调用，证据见 `docs/history/eval/n4-e5-compaction-fake.md`。
   `SUMMARIZATION` 仍可配置切换并由该评测回归。真实对比（`deepseek-flash` 90 次、383,755 token）人工复核后两策略各 28/30，
@@ -962,6 +966,11 @@ class CompactionStrategy(StrEnum):
 - 记忆经 `LoopRequest.memory_context` 注入：拼在系统消息的稳定前缀与围栏策略之后（A9），整体按外部文本围栏（A11），
   且**不计入确定性校验的数字来源**——只凭记忆复述的数字判无来源并降级（2026-09-30 修复：此前记忆拼进 `system_prompt`，
   会被当作来源）；
+- **访客回合的身份说明（2026-10-03，N5 E，D-N5-4）**：顾客会话未绑定演示身份（`buyer_key` 为空）时没有记忆可注入，
+  同一位置改放 `GUEST_SESSION_NOTE`（`services/v2/shop_chat.py`）：告知模型当前是访客、没有可查的订单 / 售后 / 记忆，
+  遇到这类请求引导顾客先在页面绑定演示顾客，不调用 `get_my_order`、`check_after_sale_eligibility`、`prepare_after_sale`。
+  说明只来自服务端会话，不含顾客文字，不进数字来源；三个工具的归属闸门不变（访客调用仍是致命错误 + 审计），
+  说明只是让正常提问得到引导而不是 403。必测：访客回合的系统消息含该说明且位于静态提示词之后；已绑定顾客回合不含。
 - 团队知识与记忆是**单向边界**：记忆绝不升级写回团队知识库；
 - **不预设「更便宜的模型足够」**——抽取模型须经敏感信息误写率与事实准确率评测后选择（A6）；
   真实调用遵守 R3。
@@ -995,6 +1004,60 @@ class CompactionStrategy(StrEnum):
   构建中 → 验证中 → 已就绪 →（原子切换）→ 生效；
   失败时**优先继续使用上一生效版本并标记陈旧**，无可用旧版本才降级为关键词检索并显式标注（R7）；
 - 知识文档正文是外部文本，进提示词前须按 A11 围栏。
+
+### 实现（N4-C，2026-10-02）
+
+```text
+backend/app/knowledge/
+  embedding.py        Embedder 协议；FastEmbedEmbedder（ONNX Runtime，不依赖 PyTorch，懒加载，失败即降级）
+  index_versions.py   KnowledgeIndexService（build / activate / rebuild_until_fresh / snapshot）、
+                      VectorIndexSearch（一条 SQL 读指针 + 分块）、验证探针 Recall@5 闸门
+  fusion.py           rrf_fuse（k=60）
+  probes/n4_e5_rag.yaml   E5 评测集，兼作切换验证探针（§5.6：评测依赖生产，不反向）
+  retrieval.py        search_documents(keywords, *, vector_ranking=()) 做 RRF 融合；load_domain 与 v1 不变
+backend/app/jobs/build_index.py   手动/Cron 构建入口；日常由启动后台与知识后台保存触发
+```
+
+- **分块**：按空行切段、累加到约 400 字一块，每块前缀标题；文档取最高块相似度。
+- **融合**：关键词候选（≥ min(2, 查询片段数) 个片段命中）与向量候选（相似度 ≥ 模型阈值，前 10）做 RRF，
+  取前 5；正文始终取自当前生效文档，索引里残留的已删文档不会返回。两路都空时如实返回未命中。
+- **触发**：backend 启动后在后台预热并 `rebuild_until_fresh()`；知识后台写入在同一事务标陈旧，提交后后台重建
+  （契约 §8.6.7）。分块只按版本插入、只 `DELETE` 旧版本，从不 `UPDATE`。
+- **配置**：`EMBEDDING_MODEL`（空 = 关闭向量，`search_rules` 标注 `INDEX_UNAVAILABLE_KEYWORD_FALLBACK`）、
+  `EMBEDDING_MIN_SIMILARITY`（留空取 `CALIBRATED_MIN_SIMILARITY` 标定值；未标定模型必须显式给出，否则启动失败）、
+  `EMBEDDING_CACHE_DIR`、`EMBEDDING_THREADS`。镜像构建期按同名构建参数下载模型，运行时 `HF_HUB_OFFLINE=1`。
+
+### 嵌入模型选型（Task 3，本机实测，2026-10-02）
+
+Railway 现状（用户提供）：Hobby 套餐，backend 空载约 100 MB、CPU 近 0（只看了 15 分钟曲线，未看 7 天峰值）；
+数据库为外部 Neon（`vector` 0.8.6）。Railway 未给出单服务内存硬上限的实测值，下表增量为本机
+（Windows，ONNX Runtime 2 线程）进程 RSS，用于横向比较；**部署估算以 Linux 容器单线程实测为准**：gemma 镜像模型层 +1.26 GB、
+预热后常驻 +795 MB、建索引峰值 +855 MB；bge-small-zh 分别 +95 MB、+170 MB、+275 MB（`docs/deployment.md`）。
+完整对比见 `docs/history/eval/rag-hybrid.md`。
+
+| 候选 | 多语种 | 模型体积 | 常驻 +RSS | 建索引峰值 +RSS | 查询 p50 | 混合 R@5（拒答率 0.90） | 结论 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `google/embeddinggemma-300m` | 是 | 1.2 GB | +536 MB | +815 MB | 30 ms | **0.935**（τ=0.40） | 质量最高；成本约为 bge 的 4–13 倍 |
+| `BAAI/bge-small-zh-v1.5` | 否（中文） | 91 MB | +138 MB | +244 MB | 11 ms | 0.870（τ=0.575） | **选定**（2026-10-02 用户裁定） |
+| `minishlab/potion-multilingual-128M` | 是 | 522 MB | +1018 MB | +1050 MB | 0.3 ms | 0.852（τ=0.425） | 内存大、效果次 |
+| `paraphrase-multilingual-MiniLM-L12-v2` | 是 | 440 MB | +562 MB | +590 MB | 15 ms | 0.769（τ=0.65） | 增益不足 |
+| `jinaai/jina-embeddings-v2-base-zh` | 中英 | 943 MB | +679 MB | +847 MB | 29 ms | 0.787（τ=0.50） | 增益不足 |
+| `Qwen/Qwen3-Embedding-0.6B-Q` | 是 | 1.1 GB | +1166 MB | +1714 MB | 2775 ms | 0.898（τ=0.50） | 查询延迟不可接受，排除 |
+
+关键词基线（同一评测集、当前生产路径）：R@5 0.759、MRR 0.639、nDCG@5 0.652、拒答率 0.90。
+阈值在同一评测集上选取，二折交叉验证显示召回提升稳定、拒答率对阈值敏感（每折仅 5 条「应找不到」），
+故 gemma 取 0.40 而非最优点 0.375。`bge-m3` 未列入：体积约 2.2 GB，已超过「多语种小模型」定位。
+
+**选定 `BAAI/bge-small-zh-v1.5`（2026-10-02 用户裁定：产品以中文场景为主，英文为锦上添花）。**
+这偏离了计划 Task 3「只列多语种候选」的规则，理由：计划写作时把跨语言当作硬需求，用户裁定后不再是。
+只看 46 条中文问题，三者 Recall@5 为 关键词 0.761 / **bge 0.891** / gemma 0.946（MRR 0.674 / 0.791 / 0.834），
+bge 已拿到大部分收益，与 gemma 的差距约 2–3 条用例；而 Linux 常驻内存 +170 MB 对 +795 MB、镜像 +95 MB 对 +1.26 GB、
+44 块建索引 14 s 对 65 s，许可证为 MIT（gemma 为 Gemma 使用条款）。代价：英文提问无增益（维持关键词 0.75）；
+字段名查询仍漏 2 条（`repay_status_name`、`appeal_status_name`），可在关键词侧补字段名精确匹配，不必换大模型。
+语料扩充后用同一评测器复评，换模型只改 `EMBEDDING_MODEL`（阈值须按新模型重新标定）。
+
+代码默认 `EMBEDDING_MODEL` 为空（测试不加载模型）；`docker-compose.yml` 与 Railway Variables 设为
+`BAAI/bge-small-zh-v1.5`，阈值取标定值 0.575。
 
 ### 必测
 
@@ -1949,6 +2012,31 @@ FAILED_FINAL      # 不可重试（参数非法、越权、内容被拒）
 - 同一份数据的中英文导出是**两个独立签名**，互不复用；旧签名不带 `locale` 时按 `zh-CN` 解释，
   保持既有链接可用（向后兼容，不使已发出的旧签名失效）。
 
+### 8.6.7 知识索引状态（N4-C，PRD M12、§7.6）
+
+不新增端点：`GET /api/admin/knowledge/tree` 的 `KnowledgeTreeResponse` 增加**必填**字段
+`index_status: KnowledgeIndexStatus`（管理员与只读令牌均可读，不含分块正文、向量或异常原文）：
+
+| 字段 | 类型 | 必填 | 可空 | 说明 |
+| --- | --- | --- | --- | --- |
+| `retrieval_mode` | `HYBRID` / `KEYWORD_ONLY` | 是 | 否 | 有生效版本且其模型与当前配置的嵌入模型一致时为 `HYBRID`；否则 `search_rules` 只用关键词并在来源上标注降级 |
+| `active_version` | integer | 是 | 是 | 生效索引版本号；从未成功构建时为 null |
+| `embedding_model` | string | 是 | 是 | 生效版本使用的嵌入模型标识 |
+| `configured_model` | string | 是 | 是 | 当前进程配置的嵌入模型（`EMBEDDING_MODEL`）；未配置时为 null |
+| `stale` | boolean | 是 | 否 | 生效版本落后于语料（最近一次构建失败，或文档已改而新版本未生效） |
+| `stale_reason` | `BUILD_FAILED` / `CORPUS_CHANGED` | 是 | 是 | 与 `stale` 成对：`stale=false` 时必须为 null，`true` 时必须非 null |
+| `building` | boolean | 是 | 否 | 是否有版本处于构建中/验证中（同一时刻至多一个） |
+| `last_failure_reason` | `EMBEDDING_UNAVAILABLE` / `EMBEDDING_FAILED` / `QUALITY_REGRESSION` / `EMPTY_CORPUS` / `BUILD_TIMEOUT` / `BUILD_ABORTED` / `STORAGE_FAILED` | 是 | 是 | 生效版本之后最近一次失败构建的稳定原因码；没有则 null |
+
+写入语义：文档创建、源正文更新、删除，以及业务域创建/改名/删除，**在同一事务内**把生效索引标为
+`CORPUS_CHANGED` 陈旧；提交后在进程内后台触发重建（构建期间旧版本继续服务，不原地改分块）。
+人工译文（`is_source_version=false`）不进入索引，不触发重建。切换时若语料指纹已与该版本不一致
+（构建期间又有保存），切换后仍保持陈旧并再构建一轮。
+
+Chat 侧（v2 商家）：本回合调用过 `search_rules` 时 `analysis_sources` 含 `KNOWLEDGE` 项；向量索引
+不可用时该项 `degraded=true`、`degraded_reason="INDEX_UNAVAILABLE_KEYWORD_FALLBACK"`，陈旧时为
+`"INDEX_STALE"`；单来源降级不使整轮 `degraded=true`（§8.7.6）。
+
 ---
 
 ## 8.7 v2 共用契约组件
@@ -2422,7 +2510,7 @@ turn_complete 携带唯一完整 ShopChatResponse，和 JSON 响应逐字段相�
 | 模型 | 字段、类型与范围 |
 | --- | --- |
 | `MerchantSessionCreateRequest` | 空对象 `{}`；身份只来自 `Authorization: Bearer <演示 Token>`，不接受 `merchant_id` 等任何字段 |
-| `MerchantSessionCreateResponse` | `session_id: string`（43–128 字符 base64url 凭证）；`role: MERCHANT`；`expires_at: UTC datetime`；`merchant_display_name: string[1..120]` |
+| `MerchantSessionCreateResponse` | `session_id: string`（43–128 字符 base64url 凭证）；`role: MERCHANT`；`expires_at: UTC datetime`；`merchant_display_name: string[1..120]`；`shop_slug: string`（2026-10-02 增补，D-N5-4：本商家顾客端店铺标识，规则同 §8.8.1 `ShopSlug`，取值即该商家的 `merchant_code`；只供商家端「顾客视角」拼接新标签链接，后端从已验证会话的 `merchant_id` 解析，不接受请求传入。约束由 `common.py` 共享，商家模块不引用顾客端模块） |
 | `MerchantChatRequest` | `message: string[1..2000]`（strip 后非空）；`conversation_id: PublicId或null`（可省略，默认null）；`client_request_id` 按 §8.7.3，必填 |
 | `MerchantAnswerMode` | `METRIC / DETAIL / RULE / IDENTITY / CHAT / INVALID`，无 `ATTACHMENT` |
 | `MerchantChatResponse` | §8.7.7 `V2ChatResponseBase` 的全部字段；`answer_mode: MerchantAnswerMode` |
@@ -2709,7 +2797,7 @@ SSE 逐事件使用 §8.7.5；turn_complete 携带唯一完整 MerchantChatRespo
 列表参数为 `cursor: string[1..2048]或null`（默认null）、`limit: int[1..100]`（默认20）；错误沿用 §8.3 ErrorResponse。
 401 为 `SESSION_REQUIRED / SESSION_INVALID`，403 角色错误为 `SESSION_ROLE_MISMATCH`，资源不存在与越权统一 `RESOURCE_FORBIDDEN`、空 details。
 
-`MerchantProductContent` 必填字段：`id: PublicId`、`title: string[1..200]`、`category: string[1..64]`、`status: string`、`content_version: int≥1`、`missing_required_attributes: string[]`（后端排序）、`missing_content_fields: string[]`（后端排序，取值 `商品描述`/`商品图片`）、`content_complete: bool`、`stock_on_hand/stock_reserved/stock_available: int≥0`。三项库存满足 `stock_available = stock_on_hand - stock_reserved`；完整度由后端按类目同时核对必填属性、最短详情描述及图片期望，未登记类目不臆造要求。
+`MerchantProductContent` 必填字段：`id: PublicId`、`title: string[1..200]`、`category: string[1..64]`、`status: string`、`image_url: ImageUrl或null`（2026-10-04 补入；与顾客端 §8.8.1 同一类型和同一份主机白名单，无图或不可信来源为 null；演示图 `/demo/products/NN.webp` 是顾客端站点的静态资源，商家端按 `VITE_SHOP_BASE_URL` 拼出完整地址，未配置时显示占位）、`content_version: int≥1`、`missing_required_attributes: string[]`（后端排序）、`missing_content_fields: string[]`（后端排序，取值 `商品描述`/`商品图片`）、`content_complete: bool`、`stock_on_hand/stock_reserved/stock_available: int≥0`。三项库存满足 `stock_available = stock_on_hand - stock_reserved`；完整度由后端按类目同时核对必填属性、最短详情描述及图片期望，未登记类目不臆造要求。
 
 `MerchantCoupon` 继承顾客券 `CouponSummary` 的金额、支付比例和时间字段，另必填 `state: string`、`currently_active: bool`；商家列表包含未生效及停用券，`currently_active` 与顾客可见券使用同一判定函数。两类列表均为 `CursorPage`，不接受业务写入。
 
@@ -2925,8 +3013,17 @@ accepted_entry_ids)`，结构上拿不到证据；不得提交事务、不得推
   不把浏览器会话交给第三方（AGENTS.md §8.3）。`merchant_id` 只从凭证解析。
 - **凭证签发与撤销（PRD A8，2026-09-21 用户裁定）只经后端命令行脚本**，契约中**不存在**签发、撤销或查询凭证的 HTTP 路径，也没有自助页；
   原值只在签发时展示一次，库中只存哈希；撤销后的下一次请求立即返回 401，校验结果不缓存。
+  有效期必须为正且**不超过 7 天**（签发脚本默认按命令行给定小时数，建议 24 小时）；商家停用或白名单收紧后，旧凭证随之失效
+  （2026-10-03 实现时补录，N5 A）。
 - **错误分层**：缺失或无效凭证在解析 JSON-RPC **之前**返回 HTTP `401` 并带 `WWW-Authenticate`；协议解析之后的方法、参数与工具错误使用 JSON-RPC error，
   **不包装成普通 v2 `ErrorResponse`**。该入口不支持 GET，返回 `405`（`Allow: POST`）。
+  HTTP 层的其余状态（2026-10-03 实现时补录，N5 A 审查 F2）：
+  - `429`：鉴权之前按来源限流（键为固定的 `mcp` + 客户端 IP，不含凭证，换 token 不换桶），沿用 v2 `ErrorResponse`；
+  - `503`：凭证库不可用、无法鉴权，正文为 `id: null` 的 JSON-RPC error，不解析请求正文；
+  - `400`：正文解析失败、批量请求、协议头与正文不一致或协议版本不受支持（JSON-RPC error，错误码沿用官方 SDK 定义）；
+  - `413`：请求正文超过 256 KiB（JSON-RPC error）；
+  - `202`：无 `id` 的通知在通过协议头校验后只确认、不处理，无正文。
+  解析之后的任何意外错误都以 JSON-RPC `INTERNAL_ERROR` 答复，不外泄异常细节。
 - **幂等**：本版只读、无写副作用，JSON-RPC `id` 只做请求/响应关联，不携带 `client_request_id`（§8.7.3）。
 - **工具白名单**（`McpReadOnlyTool`，全部只读）：`query_metrics`、`attribute_change`、`get_inventory_alerts`、`get_product_content`、
   `list_coupons`、`get_metric_definition`、`search_rules`。`tools/list` 只返回白名单与凭证 `scopes` 的交集；`scopes` 只能是白名单的子集。
@@ -3513,6 +3610,36 @@ PostgreSQL 钉住的一条（`test_return_count_reads_returns_not_refunds`）。
 - [x] **禁止返回**：任何 Token 明文、Prompt 内容、商家经营数据、完整请求正文、数据库连接串（`tests/api/test_admin_ops.py` 断言响应体不含管理员/商家 Token 与 `postgresql` 字样）；
 - [x] 商家标识以脱敏形式返回（哈希或序号），不返回商家名称：响应本身是系统级聚合，不含任何商家维度字段，天然满足；
 - [x] 必测：无管理员令牌返回 `401`，普通商家 Token 返回 `403`，响应体不含敏感字段（`tests/api/test_admin_ops.py`，真实库回归已过）。
+
+**N5 B Task 3 扩展（2026-10-03 契约先行，PRD §10.2、§10.4、D-N5-1）。** 只**新增**字段，既有字段语义不变；
+本端点仍是 `require_admin_or_viewer_token` 之外的**仅管理员**端点（`VIEWER_TOKEN` 403，见 R6 例外的范围）：
+
+| 新增字段 | 类型 | 语义 |
+| --- | --- | --- |
+| `budget_levels` | `BudgetLevelStatus[]` | 当日三级预算各行：`level`（`GLOBAL / ROLE / SHOP`）、`scope`（`GLOBAL`、`ROLE:CUSTOMER`、`ROLE:MERCHANT`，或店铺级的脱敏标识 `SHOP:<角色>:<商家 ID 的 SHA-256 前 8 位>`）、`budget_tokens`、`used_tokens`、`remaining_tokens`。店铺级只列当日已有用量的行，按 `used_tokens` 降序，最多 20 行 |
+| `llm_cost_today` | `CostByCurrency[]` | 当日已定价用量的成本合计：`currency`、`amount`（十进制字符串，8 位小数）；未定价的用量（`cost` 为 NULL）不计入，另由 `unpriced_calls_today` 说明 |
+| `unpriced_calls_today` | `int≥0` | 当日成本为 NULL 的调用数（用量未知或缺价格版本），避免把「未定价」误读为 0 |
+| `cache_hit_tokens_today` | `int≥0` | 当日记录到的缓存命中 token；`cache_hit_rate_today` 为它占输入 token 的比例，没有输入时为 `null` |
+| `tool_calls_total`、`tool_errors_total` | `int≥0` | 进程启动以来工具调用总数与失败数（含参数校验失败与护栏拒绝；闸门拦截的安全事件计入失败） |
+| `route_p95_ms` | `object<string, number>` | 各路由最近至多 500 次请求的 p95 耗时（进程内近似值，多实例不同步，同 `route_average_ms` 的约束） |
+
+
+**2026-10-04 再扩展（验收矩阵 §12.6「看板展示每回合 token、成本、耗时、降级原因」，契约先行）。** 同样只新增字段：
+
+| 新增字段 | 类型 | 语义 |
+| --- | --- | --- |
+| `turns_today` | `int≥0` | 当日发生过模型调用的对话回合数：`llm_usage` 中 `purpose = AGENT` 的不同追踪 ID 数 |
+| `avg_tokens_per_turn_today` | `number \| null` | 当日 `AGENT` 用量的 token 合计 ÷ `turns_today`；没有回合时为 `null`，不显示为 0 |
+| `avg_cost_per_turn_today` | `CostByCurrency[]` | 当日已定价 `AGENT` 用量的成本 ÷ `turns_today`，按币种；金额为十进制字符串（8 位小数） |
+| `avg_turn_elapsed_ms_today` | `number \| null` | 当日已完成回答的平均耗时（`answers.elapsed_ms`，v1 与 v2 一并统计）；没有回答时为 `null` |
+| `degraded_reason_counts` | `object<string, int>` | 进程启动以来**整轮降级**按原因码计数。v2 用 `DegradeReason`（`UPSTREAM / VALIDATION / BUDGET / LIMIT / TIMEOUT / CANCELLED`）；v1 回合统一记为 `V1`（v1 响应只有文案，没有原因码）；缺原因码记 `UNKNOWN`。各项之和等于 `degraded_count` |
+| `source_degraded_counts` | `object<string, int>` | 进程启动以来回答**未整轮降级**、但某个来源降级的次数，按来源（如 `KNOWLEDGE` 的关键词兜底）计数；与整轮降级分开统计 |
+
+`degraded_count` 的语义修正：此前只有 v1 回合计入，v2 两端的回合从不计数（看板恒为偏低）；自本次起 v1 与 v2 的整轮降级都计入。
+同一 `client_request_id` 的幂等重放不重复计数。前四项读数据库（跨实例一致），后两项与 `degraded_count` 是进程内近似值。
+这些字段只有计数与平均值，不含回答正文、提问文本、商家或顾客标识。
+
+禁止返回项不变：响应中不得出现任何 Token、Prompt、经营数据、完整请求正文与连接串；店铺级只给脱敏标识，不给商家 ID 或名称。
 
 ### 可观测性
 

@@ -54,6 +54,29 @@ async def test_merchant_product_content_lists_only_own_products_with_backend_mis
 
 
 @pytest.mark.asyncio
+async def test_merchant_product_content_returns_only_trusted_image_urls(
+    postgres_app: FastAPI, postgres_client: AsyncClient
+) -> None:
+    database = postgres_app.state.database
+    demo = await seed_product(
+        database, MERCHANT_ONE_ID, title="有演示图", image_url="/demo/products/01.webp"
+    )
+    external = await seed_product(
+        database, MERCHANT_ONE_ID, title="外部主机图", image_url="https://cdn.example.com/a.webp"
+    )
+    missing = await seed_product(database, MERCHANT_ONE_ID, title="无图")
+
+    headers = await merchant_session_headers(postgres_client, MERCHANT_ONE_AUTH)
+    response = await postgres_client.get("/api/v2/merchant/products/content", headers=headers)
+    assert response.status_code == 200, response.text
+    images = {item["id"]: item["image_url"] for item in response.json()["items"]}
+    assert images[str(demo)] == "/demo/products/01.webp"
+    # 白名单为空：外部主机与顾客端一样不下发，不让商家端成为绕过图片白名单的出口。
+    assert images[str(external)] is None
+    assert images[str(missing)] is None
+
+
+@pytest.mark.asyncio
 async def test_merchant_coupons_include_inactive_own_coupons_without_other_tenant(
     postgres_app: FastAPI, postgres_client: AsyncClient
 ) -> None:

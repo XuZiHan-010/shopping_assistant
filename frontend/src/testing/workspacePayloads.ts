@@ -64,6 +64,7 @@ export function productContent(
     title: `测试商品 ${id}`,
     category: '男装',
     status: 'ONLINE',
+    image_url: null,
     content_version: 3,
     missing_required_attributes: [],
     missing_content_fields: [],

@@ -51,7 +51,7 @@ def require_configured(settings: Settings) -> None:
         raise LlmUnavailableError("未配置 LLM_API_KEY")
 
 
-def reserve_call(settings: Settings, budget: LlmBudget) -> int:
+def reserve_call(settings: Settings, budget: LlmBudget, options: LlmCallOptions) -> int:
     """先扣后发：扣一次调用配额，并返回本次请求的 ``max_tokens``。
 
     事后记账挡不住一次超支：预算耗尽时这次调用照样要付钱。因此先在本地拦截，
@@ -63,7 +63,14 @@ def reserve_call(settings: Settings, budget: LlmBudget) -> int:
     remaining = budget.max_tokens - budget.tokens
     if remaining <= 0:
         raise LlmBudgetExceededError(f"单请求 LLM token 已达上限 {budget.max_tokens}")
-    return min(remaining, settings.llm_max_output_tokens_per_call)
+    output_limit = options.max_output_tokens
+    if output_limit is not None and output_limit <= 0:
+        raise LlmBudgetExceededError("单次 LLM 输出 token 上限必须为正数")
+    return min(
+        remaining,
+        settings.llm_max_output_tokens_per_call,
+        output_limit if output_limit is not None else remaining,
+    )
 
 
 def effective_thinking(

@@ -46,6 +46,8 @@ class CaseRunResult:
     case_id: str
     passed: bool
     failure_detail: str = ""
+    #: 被断言的那次请求的追踪 ID；据此可回查审计与用量行（PRD §10.4）。
+    request_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -172,7 +174,9 @@ class SecurityHarness:
             },
         )
         result = evaluate_all(case.assertions, assertion_ctx)
-        return CaseRunResult(case.id, passed=result.passed, failure_detail=result.detail)
+        return CaseRunResult(
+            case.id, passed=result.passed, failure_detail=result.detail, request_id=request_id
+        )
 
     async def _resolve_actor(self, name: str) -> _ResolvedActor:
         if name == "anonymous":
@@ -234,8 +238,11 @@ class SecurityHarness:
         state: dict[str, Any],
         locale: str,
     ) -> _TurnOutcome:
+        # 请求头同样支持 `{state:key}`：MCP 凭证这类运行时才签发的值只能经前置原语写入 state。
         headers = {
-            key: value for key, value in request.headers.items() if key.lower() != "accept-language"
+            key: _resolve_path(value, state)
+            for key, value in request.headers.items()
+            if key.lower() != "accept-language"
         }
         headers["Accept-Language"] = locale
         headers["X-Request-Id"] = request_id

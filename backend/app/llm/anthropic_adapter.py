@@ -431,7 +431,7 @@ class AnthropicConverseAdapter:
             "model": self._settings.llm_model,
             "messages": serialized,
             "stream": stream,
-            "max_tokens": reserve_call(self._settings, budget),
+            "max_tokens": reserve_call(self._settings, budget, options),
             # 每次都显式发送，不依赖提供方默认值。该接口对思考参数的支持以真实冒烟为准。
             "thinking": {"type": effective_thinking(self._settings, options)},
         }

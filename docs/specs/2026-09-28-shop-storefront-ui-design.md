@@ -24,7 +24,7 @@
 | 演示商品 | 保留五个类目，24 件换成真实商品名、简介、属性与价格 |
 | 商品图片 | 用户用外部 AI 工具生成，按 §4.3 规格放进仓库，随镜像部署 |
 | 命名 | 助手统一叫“智能助手”（英文 Assistant），不叫“店员” |
-| 左下角设置 | 做 Borough 自己的偏好设置（主题 / 语言 / 字号）。ACME 演示左下角的 “N” 是 Next.js 开发工具，不照搬 |
+| 设置入口 | 2026-10-04 用户裁定：齿轮从左下角悬浮按钮移到顶栏右上角（身份按钮右侧）。做 Borough 自己的偏好设置（主题 / 语言 / 字号）。ACME 演示左下角的 “N” 是 Next.js 开发工具，不照搬 |
 
 原第一版顾客端原型（店铺刊物式布局）作废，文件已被第二版覆盖。
 
@@ -37,7 +37,7 @@
   - 身份按钮打开小菜单：访客显示「绑定演示顾客」，已绑定显示「退出演示身份」，并注明“演示身份，非真实登录”。
 - **右侧购物车**：宽度 400px，宽屏常驻；窗口宽度 ≤1180px 时收进顶栏按钮，点开为抽屉。
 - **底部输入框**：主区底部常驻，所有视图可用。在订单视图提问时自动切回智能助手视图。输入框下方一行演示声明。
-- **左下角齿轮**：偏好设置，含主题（跟随系统 / 浅色 / 深色）、语言（中文 / English）、界面字号（小 / 标准 / 大）。
+- **顶栏右上角齿轮**（2026-10-04 起，原为左下角悬浮）：偏好设置，含主题（跟随系统 / 浅色 / 深色）、语言（中文 / English）、界面字号（小 / 标准 / 大）。
 - 断点：1180px 购物车改抽屉；760px 首页单列、热门两列、顶栏只留图标；420px 视图标签只留图标。**375px 宽度无横向滚动**（§12.4）。
 
 ### 2.2 智能助手视图：首页（尚未提问时）
@@ -132,7 +132,7 @@
 | 订单视图 | `orders/[order_id]/OrderClient.tsx`、`components/OrderView.tsx` | 新建订单列表视图，详情原地展开；支付、取消的幂等键逻辑保留 |
 | 售后 | `after-sales/AfterSalesClient.tsx` | 只换外壳样式，流程不变 |
 | 商品详情 | `products/[product_id]/page.tsx` | 抽出共用详情组件，页面与浮层共用 |
-| 偏好设置 | 无 | 新建。语言写 cookie（`shop_locale`，非敏感），服务端渲染与所有客户端请求据此设 `Accept-Language`。主题、字号存 localStorage，读写包 try/catch；布局头部内联脚本先设 `data-theme` / `data-size`，避免闪烁 |
+| 偏好设置 | 无 | 新建。语言写 cookie（`shop_locale`，非敏感），服务端渲染与所有客户端请求据此设 `Accept-Language`；没有 cookie 的首访一律中文，不按浏览器语言协商（2026-10-04 用户裁定，与商家端一致）。主题、字号存 localStorage，读写包 try/catch；布局头部内联脚本先设 `data-theme` / `data-size`，避免闪烁 |
 | 双语文案 | 各组件内联 `locale === 'en-US' ? … : …` | 新建 `shop/src/i18n/` 两份字典，组件不再内联中英对。工具显示名在字典里维护映射，未知工具名回退原名 |
 
 **路由调整：**
@@ -169,7 +169,7 @@
 | PRD C1 | 店铺页形态改为：智能助手首页 + 「全部商品」展开区，展开区显示规则摘要与优惠券；首页热门按近 30 天销量 |
 | PRD C2 | 助手对外名称统一为“智能助手”；新增只读订单查询工具（见 §3.5） |
 | PRD §11.2.2 | 路径不变。商品列表语义补 `sort`；订单列表语义补 `lead_item` / `last_event_at` |
-| PRD §8.3 | 演示目录改为 §4.1 的真实商品，保留三个刻意缺口，图片路径改 `.webp` |
+| PRD §8.3 | 演示目录改为 §4.1 的真实商品，保留刻意缺口（2026-10-04 起为两个，#06 已补图），图片路径改 `.webp` |
 | PRD §15 | 新增阶段「WS · 顾客端店面重设计」，位置见 §5 |
 | 契约 §8.8.2 | 商品列表 `sort` 参数、排序规则、游标绑定 |
 | 契约 §8.8.1 | `ProductDetailResponse` 新增 `missing_attributes` |
@@ -204,7 +204,7 @@
 | 03 | 鞋靴 | 手工缝线切尔西靴 | Goodyear-welt Chelsea boots | 699 | **刻意缺「产地」** |
 | 04 | 家居 | 粗陶手作咖啡杯（两只装） | Stoneware mug pair | 128 | 库存紧张 |
 | 05 | 美妆 | 燕麦舒缓保湿面霜 | Oat calming moisturiser | 159 | **刻意说明很短、无成分表** |
-| 06 | 女装 | 亚麻宽松开衫 | Relaxed linen cardigan | 329 | **刻意无图** |
+| 06 | 女装 | 亚麻宽松开衫 | Relaxed linen cardigan | 329 | 原为刻意无图；2026-10-04 用户裁定补图 |
 | 07 | 男装 | 水洗帆布工装夹克 | Washed canvas chore jacket | 459 | |
 | 08 | 鞋靴 | 复古德训运动鞋 | Retro trainers | 389 | |
 | 09 | 家居 | 橡木砧板 | Oak chopping board | 199 | 审核中，不上架 |
@@ -226,7 +226,7 @@
 
 - 简介、材质 / 功效、产地、尺码 / 规格以原型 `RAW` 数组为准，实施时搬进 `backend/app/analytics/demo_data.py`。源语言为中文，英文走现有本地化缓存。
 - **属性键必须覆盖后端类目必填表**，否则会误报内容缺口：女装、男装、鞋靴写「材质、产地、尺码」；家居写「材质、产地」（可另加尺寸或容量）；美妆写「产地、保质期」（可另加功效、规格）。原型里美妆没有「保质期」、服装用的是「尺码」以外的写法，以本条为准。刻意缺口只有 #03 的「产地」。
-- 审核状态、库存（#04 为 3 件，其余 100 件）、三个刻意缺口的下标都不变。售罄的展示由测试数据覆盖，不改种子库存，以免牵动库存告警等既有测试。
+- 审核状态、库存（#04 为 3 件，其余 100 件）、刻意缺口的下标都不变（2026-10-04 起只剩 #03、#05 两个，#06 已补图）。售罄的展示由测试数据覆盖，不改种子库存，以免牵动库存告警等既有测试。
 - **确定性约束**：价格改为上表固定值，但 `rng.uniform` 调用要保留（结果弃用），否则后续的商品 id 与上架日期会整体漂移，破坏 PRD §8.3 与 `test_demo_determinism`。
 - 商家端经营数据（成交额、类目归因）会随价格变化。演示事实由种子重新生成，不需要人工改数字。
 
@@ -237,7 +237,7 @@
 
 ### 4.3 图片交付规格（用户生成，我方接入与校验）
 
-- 数量：23 张。#06 刻意无图；三件审核中商品也要图，商家端将来可能用到。
+- 数量：24 张（2026-10-04 起；此前 23 张，#06 刻意无图）；三件审核中商品也要图，商家端商品页已用到。
 - 生成：1:1 正方形，建议生成 1024×1024。
 - 入库：
   - 转为 **800×800 WebP**，质量约 80，单张 ≤200KB；
@@ -306,6 +306,7 @@
 | 03.webp | 手工缝线切尔西靴 | a pair of dark brown calf-leather Chelsea boots with elastic side panels and visible welt stitching, three-quarter view |
 | 04.webp | 粗陶手作咖啡杯（两只装） | two hand-thrown stoneware mugs in matte oatmeal and sage glazes, slightly irregular shapes |
 | 05.webp | 燕麦舒缓保湿面霜 | a plain frosted glass cream jar with a white lid, a few oat flakes beside it |
+| 06.webp | 亚麻宽松开衫 | a relaxed-fit washed linen open-front cardigan in a natural flax beige colour, dropped shoulders, slightly crumpled linen texture, no buttons, laid flat with the sleeves loosely arranged（2026-10-04 补） |
 | 07.webp | 水洗帆布工装夹克 | an olive washed-canvas chore jacket with four patch pockets, laid flat |
 | 08.webp | 复古德训运动鞋 | a pair of white leather retro trainers with tan suede overlays and a gum rubber sole, side view |
 | 09.webp | 橡木砧板 | a solid white-oak chopping board with rounded corners, angled view |
@@ -325,4 +326,4 @@
 | 23.webp | 羊皮芭蕾平底鞋 | a pair of blush-pink lambskin ballet flats, top view |
 | 24.webp | 羊毛混纺沙发毯 | a folded oatmeal wool-blend throw blanket with fringed edges |
 
-#06（亚麻宽松开衫）刻意不生成。
+#06（亚麻宽松开衫）最初刻意不生成，2026-10-04 按用户裁定补上。

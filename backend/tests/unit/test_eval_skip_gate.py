@@ -34,7 +34,13 @@ def test_security_gate_skip_exit_code(tmp_path: Path, source: str, expected: int
         (backend / "tests/eval/conftest.py").read_text(encoding="utf-8"), encoding="utf-8"
     )
     (suite / "test_security_gate.py").write_text(source, encoding="utf-8")
-    env = {**os.environ, "PYTHONPATH": str(backend), "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"}
+    env = {
+        **os.environ,
+        "PYTHONPATH": str(backend),
+        "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+        # 子进程输出与父进程解码必须一致，不能依赖 Windows 的 GBK 默认编码。
+        "PYTHONIOENCODING": "utf-8",
+    }
     result = subprocess.run(
         [
             sys.executable,
@@ -49,6 +55,7 @@ def test_security_gate_skip_exit_code(tmp_path: Path, source: str, expected: int
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=30,
     )
     assert result.returncode == expected, result.stdout + result.stderr

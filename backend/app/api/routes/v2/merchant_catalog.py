@@ -17,6 +17,7 @@ from app.localization.locales import SupportedLocale
 from app.repositories.v2.catalog import CatalogReadRepository
 from app.schemas.v2.common import CursorPage
 from app.schemas.v2.merchant_ops import MerchantCoupon, MerchantProductContent
+from app.services.v2.catalog import ALLOWED_IMAGE_HOSTS, trusted_image
 from app.services.v2.content_completeness import (
     missing_content_fields,
     missing_required_attributes,
@@ -78,6 +79,7 @@ async def list_product_content(
                 title=row.title,
                 category=row.category,
                 status=row.status,
+                image_url=trusted_image(row.image_url, ALLOWED_IMAGE_HOSTS),
                 content_version=row.content_version,
                 missing_required_attributes=missing,
                 missing_content_fields=missing_fields,

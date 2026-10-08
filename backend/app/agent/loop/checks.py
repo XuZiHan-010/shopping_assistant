@@ -50,6 +50,10 @@ _NOT_A_QUANTITY: Final = re.compile(
     r"|\d{1,2}\s*月\s*\d{1,2}\s*[日号]"
     r"|\d+\s*(?:个月|天|周|小时|分钟|秒)"
     r"|\d{1,2}\s*月份?"
+    # 英文时长：「30 days」「30-day」「30d」。只认明确的时间单位词，且其后不能再接字母，
+    # 避免把「28 units」之类的数量一起抹掉。
+    r"|\d+(?:[\s-]*(?i:days?|weeks?|months?|years?|hours?|minutes?|seconds?|hrs?|mins?|secs?)"
+    r"|d)(?![A-Za-z])"
 )
 # 数字前不能是数字、小数点、ASCII 字母或下划线，也不能是「字母-」（标识符）；汉字可以。
 _QUANTITY: Final = re.compile(
@@ -109,8 +113,9 @@ def ungrounded_numbers(
 
     texts = list(sources)
     for result in evidence:
-        if isinstance(result.payload, SkillSpec):
-            # Skill 正文是做法说明，不是后端数据：其中的示例数字不能给回答里的数字作证（R4）。
+        if isinstance(result.payload, SkillSpec) or not result.grounds_numbers:
+            # Skill 正文是做法说明、记忆是可被覆盖的默认值，都不是后端数据：
+            # 其中的数字不能给回答里的数字作证（R4、M11）。
             continue
         texts.append(result.summary)
         if result.payload is not None:

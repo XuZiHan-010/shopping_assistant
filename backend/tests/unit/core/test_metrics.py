@@ -65,3 +65,68 @@ def test_route_average_ms_empty_when_nothing_recorded() -> None:
 
     assert metrics.route_average_ms == {}
     assert metrics.agent_node_average_ms == {}
+
+
+# ---------- N5 B Task 3：p95 与工具错误率 ----------
+
+
+def test_route_p95_uses_recent_samples() -> None:
+    from app.core.metrics import OperationalMetrics
+
+    metrics = OperationalMetrics()
+    for ms in range(1, 101):  # 1..100 ms
+        metrics.record_route_duration("/api/x", ms / 1000)
+
+    assert metrics.route_p95_ms["/api/x"] == pytest.approx(95.0, abs=1.0)
+
+
+def test_route_p95_window_is_bounded() -> None:
+    from app.core.metrics import ROUTE_SAMPLE_WINDOW, OperationalMetrics
+
+    metrics = OperationalMetrics()
+    for _ in range(ROUTE_SAMPLE_WINDOW):
+        metrics.record_route_duration("/api/x", 10.0)  # 旧的慢请求
+    for _ in range(ROUTE_SAMPLE_WINDOW):
+        metrics.record_route_duration("/api/x", 0.001)
+
+    assert metrics.route_p95_ms["/api/x"] == pytest.approx(1.0)
+
+
+def test_tool_counters() -> None:
+    from app.core.metrics import OperationalMetrics
+
+    metrics = OperationalMetrics()
+    metrics.record_tool_call(ok=True)
+    metrics.record_tool_call(ok=False)
+    metrics.record_tool_call(ok=False)
+
+    assert (metrics.tool_calls_total, metrics.tool_errors_total) == (3, 2)
+
+
+def test_turn_degradation_counts_whole_turns_by_reason_and_single_sources_separately() -> None:
+    """整轮降级按原因码计数；回答没整轮降级、只是某个来源降级的，另算一类（PRD §10.4）。"""
+
+    metrics = OperationalMetrics()
+
+    metrics.record_turn(degraded=True, reason="BUDGET", degraded_sources=[])
+    metrics.record_turn(degraded=True, reason="BUDGET", degraded_sources=["KNOWLEDGE"])
+    metrics.record_turn(degraded=True, reason=None, degraded_sources=[])
+    metrics.record_turn(degraded=False, reason=None, degraded_sources=["KNOWLEDGE"])
+    metrics.record_turn(degraded=False, reason=None, degraded_sources=[])
+
+    assert metrics.degraded_count == 3
+    assert metrics.degraded_reason_counts == {"BUDGET": 2, "UNKNOWN": 1}
+    assert sum(metrics.degraded_reason_counts.values()) == metrics.degraded_count
+    # 整轮已降级的回合不再重复计入「单来源降级」。
+    assert metrics.source_degraded_counts == {"KNOWLEDGE": 1}
+
+
+def test_degradation_counts_return_snapshots_not_live_references() -> None:
+    metrics = OperationalMetrics()
+    metrics.record_turn(degraded=True, reason="LIMIT", degraded_sources=[])
+
+    metrics.degraded_reason_counts["LIMIT"] = 999
+    metrics.source_degraded_counts["KNOWLEDGE"] = 999
+
+    assert metrics.degraded_reason_counts == {"LIMIT": 1}
+    assert metrics.source_degraded_counts == {}

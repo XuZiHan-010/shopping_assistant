@@ -28,7 +28,9 @@ from app.models.base import Base, CreatedAtMixin, UuidPrimaryKeyMixin
 class CustomerMemory(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
     __tablename__ = "customer_memories"
     __table_args__ = (
-        UniqueConstraint("merchant_id", "buyer_key", "key", name="uq_customer_memories_owner_key"),
+        UniqueConstraint(
+            "merchant_id", "buyer_key", "category", "key", name="uq_customer_memories_owner_key"
+        ),
     )
 
     merchant_id: Mapped[UUID] = mapped_column(

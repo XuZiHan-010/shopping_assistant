@@ -221,6 +221,15 @@ async def test_request_caps_max_tokens_at_the_per_call_limit() -> None:
     assert request_body(seen[0])["max_tokens"] == 512
 
 
+async def test_request_respects_guard_output_limit(settings: Settings) -> None:
+    transport, seen = recording_transport(_text_response())
+    await OpenAiConverseAdapter(settings, transport=transport).converse(
+        messages=hello(), tools=[], budget=budget(max_tokens=10_000),
+        options=LlmCallOptions(max_output_tokens=123),
+    )
+    assert request_body(seen[0])["max_tokens"] == 123
+
+
 async def test_successful_call_charges_the_reported_tokens(settings: Settings) -> None:
     transport, _ = recording_transport(
         _text_response(total_tokens=42, prompt_tokens=30, completion_tokens=12)

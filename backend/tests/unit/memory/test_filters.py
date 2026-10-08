@@ -74,3 +74,43 @@ def test_non_sensitive_preference_survives_both_filters() -> None:
     fact = CustomerFact("喜欢蓝色、宽松版型")
     assert not filter_candidate(fact).rejected
     assert not filter_persisted(fact).rejected
+
+
+# --- 审查 I2：常见的健康、地址、宗教表述与即时通讯账号 -----------------------------------
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "我对花生过敏",
+        "我在吃降压药",
+        "最近在备孕",
+        "我住在杭州西湖区文三路",
+        "家住朝阳区望京西园三区",
+        "我是素食者因为信佛",
+        "斋月期间不吃白天的东西",
+        "微信号 abc12345",
+        "加我QQ 123456789",
+    ],
+)
+def test_common_sensitive_statements_rejected(text: str) -> None:
+    assert filter_candidate(text).rejected
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "偏好素色",
+        "喜欢简约风格的衣服",
+        "常买 L 码",
+        "预算 300 元以内",
+        "不需要礼品包装",
+        "喜欢红色",
+        "回复语气偏正式",
+        "家里没有洗碗机",
+        "周末下单比较多",
+        "喜欢药妆品牌的面霜",
+    ],
+)
+def test_ordinary_preferences_still_pass(text: str) -> None:
+    assert not filter_candidate(text).rejected

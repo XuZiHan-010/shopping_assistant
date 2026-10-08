@@ -36,7 +36,17 @@ afterEach(() => {
   setChatTransport(undefined)
 })
 
-const EMPTY_TREE_RESPONSE = { roots: [] }
+const INDEX_STATUS = {
+  retrieval_mode: 'KEYWORD_ONLY',
+  active_version: null,
+  embedding_model: null,
+  configured_model: null,
+  stale: false,
+  stale_reason: null,
+  building: false,
+  last_failure_reason: null,
+}
+const EMPTY_TREE_RESPONSE = { roots: [], index_status: INDEX_STATUS }
 
 function domainNode(name: string, version: string) {
   return {
@@ -435,7 +445,7 @@ describe('语言切换：重新加载当前选中文档（Task 11 Step 6）', ()
     const requests: TransportRequest[] = []
     setChatTransport(async (request) => {
       requests.push(request)
-      return Response.json({ roots: [] })
+      return Response.json(EMPTY_TREE_RESPONSE)
     })
 
     localeStore.setLocale('en-US')

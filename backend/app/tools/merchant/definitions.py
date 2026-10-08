@@ -22,14 +22,14 @@ from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.agent.prefilter import tokenize
 from app.db.session import Database
-from app.knowledge.retrieval import KnowledgeRetrieval
+from app.knowledge.index_versions import INDEX_FALLBACK_REASON, VectorSearchResult
+from app.knowledge.query_terms import rule_query_terms
+from app.knowledge.retrieval import KnowledgeRetrieval, identifiers_in
 from app.metrics.caliber import METRIC_CALIBER_VERSION, VERSIONED_TRADE_METRICS
 from app.metrics.field_comments import find_field_comment
 from app.repositories.knowledge import KnowledgeRepository
 from app.repositories.metric import MetricRepository
-from app.schemas.chat import QuestionCategory
 from app.tools.types import ToolContext, ToolOutput, ToolRole, ToolSpec, WritePolicy
 
 
@@ -46,6 +46,12 @@ class _MetricRowLike(Protocol):
     source_table: str
     report_url: str | None
     updated_at: datetime
+
+
+class VectorSearchLike(Protocol):
+    """`VectorIndexSearch` 的形状；评测与单测可用内存实现替身。"""
+
+    async def search(self, query: str) -> VectorSearchResult: ...
 
 
 class _MetricRepositoryLike(Protocol):
@@ -140,15 +146,36 @@ async def resolve_metric_definition(
     )
 
 
-async def resolve_rule_search(query: str, *, retrieval: KnowledgeRetrieval) -> ToolOutput:
-    keywords = tokenize(query)
-    result = await retrieval.load_domain(QuestionCategory.PLATFORM_RULE, keywords)
+async def resolve_rule_search(
+    query: str,
+    *,
+    retrieval: KnowledgeRetrieval,
+    vector: VectorSearchLike | None = None,
+) -> ToolOutput:
+    # 在全部团队知识里检索：平台规则之外，退货、优惠券、口径等业务文档
+    # 同样是规则问答的依据（M8、A7）。N4-C 起关键词与向量混合召回（RRF）；
+    # 向量索引不可用或陈旧时照常用关键词回答，但把原因写进结果，供 Chat 服务在
+    # `analysis_sources` 的 KNOWLEDGE 项上如实标注（§7.6、R7）。
+    vector_result = await vector.search(query) if vector is not None else None
+    result = await retrieval.search_documents(
+        rule_query_terms(query),
+        vector_ranking=vector_result.ranking if vector_result else (),
+        exact_terms=identifiers_in(query),
+    )
     hits = [
         {"source_path": hit.source_path, "title": hit.title, "content": hit.content}
         for hit in result.hits
     ]
+    degraded_reason = (
+        vector_result.degraded_reason if vector_result is not None else INDEX_FALLBACK_REASON
+    )
     return ToolOutput(
-        payload={"matched": result.matched, "hits": hits},
+        payload={
+            "matched": result.matched,
+            "hits": hits,
+            "retrieval": "KEYWORD_ONLY" if degraded_reason == INDEX_FALLBACK_REASON else "HYBRID",
+            "index_degraded_reason": degraded_reason,
+        },
         summary=(
             f"命中 {len(hits)} 篇平台规则文档" if result.matched else "未在知识库中找到相关规则"
         ),
@@ -156,7 +183,9 @@ async def resolve_rule_search(query: str, *, retrieval: KnowledgeRetrieval) -> T
     )
 
 
-def build_definitions_tools(database: Database) -> tuple[ToolSpec, ...]:
+def build_definitions_tools(
+    database: Database, *, vector: VectorSearchLike | None = None
+) -> tuple[ToolSpec, ...]:
     async def get_metric_definition(ctx: ToolContext, args: GetMetricDefinitionArgs) -> ToolOutput:
         del ctx
         async with database.session() as session:
@@ -168,7 +197,7 @@ def build_definitions_tools(database: Database) -> tuple[ToolSpec, ...]:
         del ctx
         async with database.session() as session:
             retrieval = KnowledgeRetrieval(KnowledgeRepository(session))
-            return await resolve_rule_search(args.query, retrieval=retrieval)
+            return await resolve_rule_search(args.query, retrieval=retrieval, vector=vector)
 
     return (
         ToolSpec(

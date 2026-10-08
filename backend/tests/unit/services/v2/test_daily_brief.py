@@ -186,3 +186,32 @@ def test_cooldown_expires_after_window() -> None:
 def test_cooldown_boundary_is_inclusive_of_the_window() -> None:
     last = NOW - timedelta(seconds=REGENERATE_COOLDOWN_SECONDS)
     assert is_in_regenerate_cooldown(last, now=NOW) is False
+
+
+def test_brief_item_says_what_is_missing_instead_of_estimating() -> None:
+    """PRD M2 / §12.3：数字缺失时说明缺什么，不估算。
+
+    近 30 天没有销量就算不出「还能卖几天」；条目要直说这一项未知，而不是填一个估出来的天数。
+    """
+
+    no_sales = _alert("滞销品").model_copy(update={"sold_last_30d": 0, "days_of_supply": None})
+
+    [unknown] = build_full_brief(alerts=[no_sales], drafts=[], signals=[], now=NOW).items
+    [known] = build_full_brief(alerts=[_alert("常销品")], drafts=[], signals=[], now=NOW).items
+
+    assert "可售天数未知" in unknown.evidence
+    assert "约可支撑" not in unknown.evidence
+    assert "天数" in unknown.evidence and "约可支撑 9 天" in known.evidence
+    # 两种情况都保留确定的事实（在库、可售、阈值），并给出下一步动作。
+    for item in (unknown, known):
+        assert "可售 3" in item.evidence and "阈值 5" in item.evidence
+        assert item.title and item.next_action_prompt
+
+
+def test_every_brief_item_carries_problem_evidence_and_next_action() -> None:
+    brief = build_full_brief(alerts=[_alert()], drafts=[_draft()], signals=[_signal()], now=NOW)
+
+    assert len(brief.items) == 3
+    for item in brief.items:
+        assert item.title.strip() and item.evidence.strip()
+        assert item.next_action_prompt and item.next_action_prompt.strip()

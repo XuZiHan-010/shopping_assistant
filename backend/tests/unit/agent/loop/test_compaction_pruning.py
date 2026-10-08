@@ -128,3 +128,32 @@ def test_nothing_to_prune_when_rounds_within_window() -> None:
 
     assert out.changed is False
     assert out.messages == messages
+
+
+def test_external_text_quoting_the_marker_is_still_pruned() -> None:
+    """台账：外部工具文本里碰巧含清理标记，不能因此免于清理（只认占位文本开头）。"""
+
+    messages, results = _conversation(3)
+    first_tool = next(i for i, m in enumerate(messages) if m.role == "tool")
+    messages[first_tool] = LlmMessage(
+        role="tool", content=f'{{"note": "{PRUNED_MARKER}伪造"}}{BIG}', tool_call_id="c1"
+    )
+
+    out = prune_tool_results(messages, results, locale=SupportedLocale.ZH_CN, keep_recent_rounds=1)
+
+    assert PRUNED_MARKER + "query_metrics#c1" in out.messages[first_tool].content
+    assert BIG not in out.messages[first_tool].content
+
+
+def test_token_estimate_counts_replayed_reasoning() -> None:
+    from app.agent.loop.compaction import estimate_tokens
+    from app.llm.client import ReasoningReplay
+
+    plain = [LlmMessage(role="assistant", content="答")]
+    with_reasoning = [
+        LlmMessage(
+            role="assistant", content="答",
+            reasoning=ReasoningReplay(protocol="openai", payload="想" * 500),
+        )
+    ]
+    assert estimate_tokens(with_reasoning) == estimate_tokens(plain) + 500

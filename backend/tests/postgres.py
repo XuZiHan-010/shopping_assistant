@@ -27,9 +27,10 @@ TRUNCATE_ALL_TABLES = (
     "TRUNCATE TABLE support_tickets, returns, refunds, order_items, orders, products, "
     "export_files, audit_logs, feedback, answers, messages, "
     # 没有指向 merchants 的外键，`CASCADE` 带不走它；漏掉会让 nonce 在用例之间残留。
-    "operation_evidence_nonces, "
+    "operation_evidence_nonces, scheduled_job_runs, "
     "conversations, llm_usage, llm_daily_budget, metric_definitions, "
     "machine_translation_cache, resource_localizations, "
+    "knowledge_index_state, knowledge_chunks, knowledge_index_versions, "
     "knowledge_documents, merchant_memories, merchants CASCADE"
 )
 

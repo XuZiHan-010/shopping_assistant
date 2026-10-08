@@ -28,6 +28,10 @@ ENV VITE_USE_MOCK=$VITE_USE_MOCK
 # （AGENTS.md R6 的 VIEWER_TOKEN 例外）。
 ARG VITE_VIEWER_TOKEN
 ENV VITE_VIEWER_TOKEN=$VITE_VIEWER_TOKEN
+# 顾客端（shop 服务）地址，可选。配置后工作台显示「顾客视角」入口（D-N5-4）；
+# 只是公开链接的前缀，不是凭证。同样必须在这里声明，否则平台上配了也不生效。
+ARG VITE_SHOP_BASE_URL
+ENV VITE_SHOP_BASE_URL=$VITE_SHOP_BASE_URL
 RUN npm run build
 
 FROM caddy:2-alpine AS runtime

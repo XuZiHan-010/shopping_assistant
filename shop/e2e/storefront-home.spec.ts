@@ -23,10 +23,13 @@ test('访客首页不查订单，快捷提问进入对话', async ({ page }) => 
   await expect(page.getByText('绑定演示顾客后，这里会显示你最近的订单和物流。')).toBeVisible()
   await expect(page.getByText('购物车还是空的。')).toBeVisible() // 等待会话与客户端交互就绪
   await expect(page.getByRole('heading', { name: '本周热门' })).toBeVisible()
+  const cashmereImage = page.getByRole('img', { name: '羊绒围巾' })
+  await expect(cashmereImage).toBeVisible()
+  await expect.poll(() => cashmereImage.evaluate(image => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
   expect(orderRequests).toEqual([])
-  await page.getByRole('button', { name: /通勤穿的皮鞋/ }).click()
+  await page.getByRole('button', { name: /通勤穿的鞋/ }).click()
   await expect(page.getByRole('heading', { name: '和智能助手的对话' })).toBeVisible()
-  await expect(page.locator('[aria-live="polite"] > li').first()).toContainText('通勤穿的皮鞋')
+  await expect(page.locator('[aria-live="polite"] > li').first()).toContainText('通勤穿的鞋')
 })
 
 test('绑定后首页出现待付款订单，问问调用只读订单工具', async ({ page }) => {

@@ -48,6 +48,8 @@ export interface MerchantProductContent {
   title: string
   category: string
   status: string
+  /** 受控图片地址：`/demo/products/…` 相对顾客端站点，或白名单 HTTPS；无图或不可信为 `null`。 */
+  imageUrl: string | null
   contentVersion: number
   missingRequiredAttributes: string[]
   missingContentFields: string[]
@@ -236,6 +238,7 @@ export async function fetchMerchantProductContent(
       title: raw.title,
       category: raw.category,
       status: raw.status,
+      imageUrl: raw.image_url,
       contentVersion: raw.content_version,
       missingRequiredAttributes: raw.missing_required_attributes,
       missingContentFields: raw.missing_content_fields,

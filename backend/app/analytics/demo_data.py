@@ -31,6 +31,9 @@ DEMO_CATALOG_EPOCH = date(2026, 1, 1)
 #: 演示经营数据的随机基线：第 i 个演示商家用 BASE + i。
 #: 全量重灌脚本与每日滚动 Job 必须共用它，否则新旧两段历史会落在两条随机序列上。
 DEMO_ANALYTICS_SEED_BASE = 20260804
+#: 性能基准（PRD §10.1）用的单量倍数：三家店 180 天约 5.6 万订单、11 万订单项。
+#: 演示数据恒为 1；基准数据只灌进专门的基准库，不进演示库。
+BENCHMARK_DAILY_ORDER_SCALE: Final = 10
 
 
 @dataclass(frozen=True)
@@ -361,7 +364,7 @@ def build_demo_catalog(*, merchant_id: UUID, seed: int) -> list[dict[str, object
                 "short_description": item.description,
                 "detail_description": description,
                 "attributes": attributes,
-                "image_url": None if index == 5 else f"/demo/products/{index + 1:02d}.webp",
+                "image_url": f"/demo/products/{index + 1:02d}.webp",
                 "stock_on_hand": 3 if index == 3 else 100,
                 "stock_reserved": 0,
                 "low_stock_threshold": 5,
@@ -381,7 +384,12 @@ def build_demo_dataset(
     days: int = 180,
     seed: int,
     catalog: list[dict[str, object]] | None = None,
+    daily_order_scale: int = 1,
 ) -> DemoDataset:
+    """`daily_order_scale` 只放大每天的订单数；为 1 时与加这个参数之前逐行相同。"""
+
+    if daily_order_scale < 1:
+        raise ValueError("daily_order_scale 必须是正整数")
     start_date = end_date - timedelta(days=days - 1)
     products = (
         catalog if catalog is not None else build_demo_catalog(merchant_id=merchant_id, seed=seed)
@@ -410,7 +418,9 @@ def build_demo_dataset(
         rng = _day_rng(merchant_id, business_day, seed)
         ticket_sequence = 0
         # 周末单量略高，让「最近 7 天趋势」这类问题有可见的形状。
-        daily_orders = rng.randrange(6, 14) + (3 if business_day.weekday() >= 5 else 0)
+        daily_orders = (
+            rng.randrange(6, 14) + (3 if business_day.weekday() >= 5 else 0)
+        ) * daily_order_scale
 
         for sequence in range(daily_orders):
             status = _ORDER_STATUSES[rng.randrange(len(_ORDER_STATUSES))]

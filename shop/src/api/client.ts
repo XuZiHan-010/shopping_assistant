@@ -48,6 +48,8 @@ export async function rawRequest(path: string, options: RequestOptions = {}): Pr
   if (!Object.keys(headers).some(key => key.toLowerCase() === 'accept-language')) headers['Accept-Language'] = requestLocale
   if (options.body !== undefined) headers['Content-Type'] = 'application/json'
   if (options.sessionId) headers['X-Session-Id'] = options.sessionId
+  // 前端生成追踪 ID，后端缺失时才补生成（PRD §10.4）；调用方显式给了就沿用。
+  if (!Object.keys(headers).some(key => key.toLowerCase() === 'x-request-id')) headers['X-Request-Id'] = crypto.randomUUID()
 
   let response: Response
   try {

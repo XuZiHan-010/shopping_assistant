@@ -43,7 +43,11 @@ class QueryMetricsArgs(BaseModel):
 class AttributeChangeArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    metric: str = Field(min_length=1, max_length=64)
+    metric: str = Field(
+        min_length=1,
+        max_length=64,
+        description="受控指标机器码；净成交额使用 net_gmv，毛成交额使用 gross_gmv。",
+    )
     dimension: str = Field(default="category", min_length=1, max_length=32)
 
 
@@ -96,6 +100,12 @@ def build_metrics_tools(database: Database, *, business_timezone: str) -> tuple[
         )
 
     async def attribute_change(ctx: ToolContext, args: AttributeChangeArgs) -> ToolOutput:
+        if args.metric != "net_gmv" and args.metric not in METRIC_SPECS:
+            raise FatalToolError(
+                gate="unknown_metric",
+                tool_name="attribute_change",
+                detail=f"未知指标 {args.metric}",
+            )
         if args.dimension not in _ATTRIBUTION_DIMENSIONS:
             raise FatalToolError(
                 gate="unsupported_dimension",
@@ -170,7 +180,7 @@ def build_metrics_tools(database: Database, *, business_timezone: str) -> tuple[
         ),
         ToolSpec(
             name="attribute_change",
-            roles=frozenset({ToolRole.MERCHANT}),
+            roles=frozenset({ToolRole.MERCHANT, ToolRole.MCP_READONLY}),
             args_model=AttributeChangeArgs,
             write_policy=WritePolicy.READ_ONLY,
             parallelizable=True,

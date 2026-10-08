@@ -207,6 +207,22 @@ async def test_create_merchant_session_succeeds_with_display_name(
     body = resp.json()
     assert body["role"] == "MERCHANT"
     assert body["merchant_display_name"]
+    # D-N5-4：本店顾客端店铺标识，取自已验证会话对应商家的 merchant_code。
+    assert body["shop_slug"] == "borough-api-100"
+
+
+@pytest.mark.asyncio
+async def test_merchant_session_request_cannot_supply_shop_slug(
+    postgres_app: FastAPI, postgres_client: AsyncClient
+) -> None:
+    resp = await postgres_client.post(
+        "/api/v2/merchant/sessions",
+        json={"shop_slug": "borough-api-101"},
+        headers=MERCHANT_ONE_AUTH,
+    )
+
+    assert resp.status_code == 422
+    assert resp.json()["code"] == "INVALID_REQUEST"
 
 
 @pytest.mark.asyncio
