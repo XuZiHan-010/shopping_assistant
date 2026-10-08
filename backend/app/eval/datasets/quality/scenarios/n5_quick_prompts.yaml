@@ -1,0 +1,204 @@
+# N5 单入口演示：顾客端首页六条快捷提问（PRD C1，D-N5-4）——质量回归登记。
+#
+# 访问者从商家端「顾客视角」进入顾客端后，最先点到的就是这六句话；它们各对应一个顾客 Skill，
+# 外加一条平台规则问答。提问文案与 `shop/src/i18n/messages.ts` 逐字一致
+# （`tests/eval/test_quality_scenarios.py` 守着），改文案要两边一起改。
+#
+# 全部以**访客**身份提问——单入口进来的访问者默认就是访客。其中售后与记忆两条在访客身份下
+# 期望得到「先绑定演示顾客」的引导，而不是报错（`GUEST_SESSION_NOTE`，后端计划 §6.13）。
+#
+# 只登记**依赖模型质量**的部分：会不会选对 Skill 与工具、回答是否忠于工具结果、规则是否带出处。
+# 工具路径本身（Skill 可加载、工具可调用、闸门不误拒）由 `tests/e2e/test_n5_quick_prompts.py`
+# 用脚本化 Fake LLM 覆盖。真实模型跑这些用例属于另行授权的人工验收（R3），不进默认测试。
+
+- id: QLT-N5-001
+  introduced_in: N5
+  role: CUSTOMER
+  skill: search-discovery
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: answer_quality
+  turns:
+    - actor: customer_a
+      request:
+        method: POST
+        path: /api/v2/shop/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json:
+          client_request_id: eval-qlt-n5-001
+          message: "想找一双通勤穿的鞋，预算 500 元以内，有推荐吗？"
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: degraded
+      expected: false
+
+- id: QLT-N5-002
+  introduced_in: N5
+  role: CUSTOMER
+  skill: purchase-research
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: answer_quality
+  turns:
+    - actor: customer_a
+      request:
+        method: POST
+        path: /api/v2/shop/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json:
+          client_request_id: eval-qlt-n5-002
+          message: "羊毛混纺高领毛衣和美利奴羊毛针织开衫有什么区别，怎么选？"
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: degraded
+      expected: false
+
+- id: QLT-N5-003
+  introduced_in: N5
+  role: CUSTOMER
+  skill: planning-goals
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: answer_quality
+  turns:
+    - actor: customer_a
+      request:
+        method: POST
+        path: /api/v2/shop/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json:
+          client_request_id: eval-qlt-n5-003
+          message: "预算 1000 元，帮我搭一套秋天周末出门的穿搭"
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: degraded
+      expected: false
+
+- id: QLT-N5-004
+  introduced_in: N5
+  role: CUSTOMER
+  skill: after-sales-service
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: answer_quality
+  turns:
+    - actor: customer_a
+      request:
+        method: POST
+        path: /api/v2/shop/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json:
+          client_request_id: eval-qlt-n5-004
+          message: "收到的商品不合适，想申请退货，该怎么操作？"
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: degraded
+      expected: false
+
+- id: QLT-N5-005
+  introduced_in: N5
+  role: CUSTOMER
+  skill: memory-personalization
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: answer_quality
+  turns:
+    - actor: customer_a
+      request:
+        method: POST
+        path: /api/v2/shop/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json:
+          client_request_id: eval-qlt-n5-005
+          message: "记住：我穿 M 码，不喜欢太亮的颜色"
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: degraded
+      expected: false
+
+- id: QLT-N5-006
+  introduced_in: N5
+  role: CUSTOMER
+  skill: platform-rules
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: answer_quality
+  turns:
+    - actor: customer_a
+      request:
+        method: POST
+        path: /api/v2/shop/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json:
+          client_request_id: eval-qlt-n5-006
+          message: "平台的退货退款要经过哪些环节？请注明规则出处"
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: degraded
+      expected: false
+
+- id: QLT-N5-007
+  introduced_in: N5
+  role: CUSTOMER
+  skill: search-discovery
+  risk: QUALITY
+  locale: en-US
+  form: ENDPOINT
+  rubric_id: answer_quality
+  turns:
+    - actor: customer_a
+      request:
+        method: POST
+        path: /api/v2/shop/chat
+        headers: {Accept: application/json, Accept-Language: en-US}
+        json:
+          client_request_id: eval-qlt-n5-007
+          message: "I need shoes for my commute under ¥500. Any suggestions?"
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: degraded
+      expected: false
+
+- id: QLT-N5-008
+  introduced_in: N5
+  role: CUSTOMER
+  skill: platform-rules
+  risk: QUALITY
+  locale: en-US
+  form: ENDPOINT
+  rubric_id: answer_quality
+  turns:
+    - actor: customer_a
+      request:
+        method: POST
+        path: /api/v2/shop/chat
+        headers: {Accept: application/json, Accept-Language: en-US}
+        json:
+          client_request_id: eval-qlt-n5-008
+          message: "What steps does a return and refund go through? Please cite the rule"
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: degraded
+      expected: false

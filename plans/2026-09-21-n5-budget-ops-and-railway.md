@@ -1,0 +1,389 @@
+# N5 三级预算、运维看板与 Railway 部署实施计划
+
+> **给执行者：** 用 `superpowers:executing-plans` 逐任务推进。步骤用 `- [x]` 复选框跟踪。
+> **本计划不含任何 Git 提交步骤**（R2）。
+> **Railway 控制台操作、生产数据库迁移、把真实 `LLM_API_KEY` 配到公网实例，均属生产变更，
+> 每一项执行前单独取得用户同意**（`AGENTS.md` §三）。真实 LLM 调用另受 R3 约束。
+
+**目标：** 实现 PRD §10.2 三级预算与成本价格版本绑定、§10.4 运维看板与追踪 ID、
+§10.7 Railway 四服务 + 外部 Neon 主库的部署与 Cron 统一接线，达到**公开部署的前置条件**。
+
+**架构：** 预算在既有 `app/llm/guard.py` 的全局日预算之上扩展角色与商家两级，
+**不另起一套**。Cron 是**幂等短任务**，不是通用 Worker（Q34）。
+
+**技术栈：** FastAPI、PostgreSQL（advisory lock）、Railway、Docker。
+
+**规格来源：** PRD §10.2–§10.4、§10.7；`AGENTS.md` R3、R6、§十一；`docs/deployment.md`；
+融合决策 Q23、Q34、Q37。
+
+---
+
+## 入口条件
+
+> **预写计划不是已验证实现。** 本计划写于上游代码尚不存在时，文中引用的类名、函数签名、
+> 工具名、表字段、错误码都是**当时的设计**。开工前逐项对照上游**实际落地**的接口；
+> 不一致时先按 PRD → 契约 → 计划的顺序修正，**再动代码**，不得在实现里默默适配或绕过。
+
+- [x] N2–N4 全部计划已完成；
+- [x] `n5-mcp-readonly` 已完成——**只卡 Task 5 步骤 4（Railway 部署）与 Task 6**；Task 1–4 与 MCP 计划没有代码依赖，
+      可并行（2026-09-27 编组放宽，见 `plans/2026-09-27-n5-module-roadmap.md` §三）；
+- [x] **逐条核对 `docs/deployment.md` 的现状**——本计划基于写作时的内容，
+      部署文档可能在 N2–N4 期间被更新。
+
+> **2026-09-27 编组核对**（见 `plans/2026-09-27-n5-module-roadmap.md` §二），开工前按此修正：
+>
+> 1. **看板前端文件已不存在**：`frontend/src/views/OpsDashboardView.vue` 随 2026-09-27 两页合并下线，
+>    `/api/admin/ops/status` 目前没有任何前端消费方。**D-N5-1 于 2026-09-28 裁定：新建只读管理员页**，见 Task 3 步骤 3。
+> 2. **Cron 配置已有 3 份**，不是 2 份：`railway.cron.json`（`seed_demo_rolling`）、`railway.chatbi-cron.json`
+>    （`chatbi_rollup`）、`railway.provenance-cron.json`（`purge_guest_provenance`，N2 新增）。
+>    另有 `close_expired_orders`、`expire_drafts`、`rebuild_projections` 三个任务模块**没有任何调度配置**；
+>    操作证据 nonce 清理**尚无任务模块**。Task 4 的任务表已按此补齐。
+> 3. **`llm_usage` 已有 `request_id` 与 `purpose` 列**（`app/models/operations.py`），缺角色、价格版本与缓存命中 token；
+>    `X-Request-Id` 目前只在 `app/main.py` 与安全评测工具中出现，未贯穿工具调用。
+> 4. 既有 `LlmCostGuard` 只有全局日预算（`llm_daily_budget_tokens`），Task 1 的角色级、商家级都是新增。
+
+> **2026-10-02 按 N4 收尾后的代码复核**（入口-N5 前的预核对，正式勾选仍由入口审查完成）：
+>
+> 1. **主库是外部 Neon，不是 Railway Postgres**（用户 2026-10-02 确认；`AGENTS.md` §十一、PRD §10.7 已同步）。Railway 内只有
+>    `shop`、`merchant`、`backend`、`cron` 四个服务；`vector` 扩展由迁移 `20261002_0047` 的 `CREATE EXTENSION IF NOT EXISTS vector`
+>    创建，Neon 允许库所有者执行（`docs/deployment.md`「pgvector 与混合检索」）。Task 5 已按此改写。
+> 2. **迁移的执行方式以现行配置为准**：`backend/railway.json` 的 `preDeployCommand: python -m alembic upgrade head` 是 Railway 的
+>    发布阶段一次性命令，满足「发布阶段单独执行、不由 backend 或 cron 实例并发执行」；Dockerfile `CMD` 为 `python -m app.run`，
+>    不迁移。Task 7 的自检口径相应改为「只允许出现在 `railway.json` 的 `preDeployCommand`」。
+> 3. **Cron 配置**：`railway.json` 是 backend 服务配置；Cron 有 3 份（`railway.cron.json` → `seed_demo_rolling`、
+>    `railway.chatbi-cron.json` → `chatbi_rollup`、`railway.provenance-cron.json` → `purge_guest_provenance`），均未在 Railway 创建。
+>    N4 新增的任务模块**都已存在**：`drain_memory_outbox`、`purge_expired_customer_memory`、`rebuild_memory_summaries`、`build_index`；
+>    仍**没有**：操作证据 nonce 清理模块（`operation_evidence_nonces`）、本地化缓存清理的调用方（`purge_expired_machine()` 只有仓储方法）、
+>    简报预生成模块（只有 `daily_brief_schedule_enabled=False` 配置项）。Task 4 任务表已按此更新。
+> 4. **追踪 ID 已部分贯穿**：`app/main.py:178` 有 `request_id_middleware`（校验格式、缺失补生成、回写响应头），`LlmCostGuard` 写
+>    `llm_usage.request_id`。Task 3 的缺口收窄为：`ToolDisplay` / 工具审计 / 评测报告条目带上追踪 ID，以及前端发出 `X-Request-Id`。
+> 5. **`llm_usage` 仍缺**角色、价格版本、缓存命中 token；N4 新增的 `COMPACTION_MAX_CALLS`、`MEMORY_EXTRACTION_MAX_CALLS` 是单次任务上限，
+>    不是每日额度，Task 1「非对话调用计入三级预算」仍成立。
+> 6. **N4 带来的部署变量**：backend 服务须设 `EMBEDDING_MODEL=BAAI/bge-small-zh-v1.5`（同时是构建参数）；D-N5-4 新增 merchant 服务
+>    构建变量 `VITE_SHOP_BASE_URL`（`plans/2026-10-02-n5-single-entry.md`）。两者并入 Task 5 变量清单。
+> 7. 执行者：Opus（本会话，2026-10-02 用户指定）；Railway 控制台操作、生产迁移、真实 Key 仍逐项取得用户同意。
+
+---
+
+## 全局约束
+
+- 中文（R1）；**不执行 Git 操作**（R2）；**不调用真实 LLM**（R3）。
+- **公开部署的三项前置条件**（`AGENTS.md` §十一）：基础限流、单请求 LLM 上限、每日预算熔断。
+  **三项未全部验证前，不得把真实 `LLM_API_KEY` 部署到公网地址。**
+- 数据库迁移**在发布阶段单独执行**，不由 Backend 或 Cron 实例并发执行（PRD §8.2、Q34）。
+- CORS 只允许 `shop` 与 `merchant` 两个精确 Origin，**不使用 `*`**。
+- `/api/admin/ops/status` 继续**禁止返回** Token、Prompt、经营数据与完整请求正文。
+
+---
+
+## Cron 任务的一条总原则
+
+N2–N4 各计划顺延到这里的定时任务，全部遵守：
+
+> **Cron 只负责清理，不负责正确性。**
+> 任何"超时 / 过期"的判定，**都必须在业务读写路径上自行检查截止时间**；
+> Cron 迟跑、漏跑、跳跑，业务结果都不能变。
+
+这条原则已在以下计划中落实，本计划的 Task 4 **再逐项核对一遍**：
+
+| 任务 | 业务路径上的自检 | 来源计划 |
+| --- | --- | --- |
+| 关闭超时订单 | 支付时检查 30 分钟截止 | `n2-trade-closed-loop` Task 4 |
+| 草稿过期 | 应用时检查 `expires_at` | `n2-merchant-drafts-and-inventory` Task 4 |
+| 操作证据 nonce 清理 | 消费时条件更新检查 `expires_at` | `n2-merchant-drafts-and-inventory` Task 3 |
+| 顾客记忆 180 天过期 | 读取时过滤 | `n4-memory-pipeline` Task 4 |
+
+Railway Cron 按 UTC 调度、不保证精确到秒、上一次未结束时可能跳过本次（`docs/deployment.md`）。
+**依赖 Cron 准时的正确性设计，在 Railway 上必然出错。**
+
+---
+
+## 文件结构
+
+| 文件 | 责任 |
+| --- | --- |
+| `backend/app/llm/guard.py` | 扩展为三级预算 |
+| `backend/app/llm/pricing.py` | 模型价格版本表与成本计算 |
+| `backend/app/models/*` | `llm_usage` 补价格版本、角色；新增 `model_price_versions` |
+| `backend/app/core/tracing.py` | `X-Request-Id` 贯穿 |
+| `backend/app/jobs/run_scheduled.py` | Cron 分发器 |
+| `backend/app/api/routes/admin_ops.py` | 看板数据扩展 |
+| `frontend/src/views/OpsStatusView.vue` | 只读运维看板（D-N5-1）：Chat BI 概览 + §10.4 指标，走 `X-Admin-Token`（可用 `VIEWER_TOKEN`） |
+| `frontend/e2e/ops-status.spec.ts` | 取代已删除的 `ops-dashboard.spec.ts`，复用 `e2e/support/v2MerchantMock.ts` 的 `page.route` 写法 |
+| `backend/railway.cron.json` | 统一 Cron 配置 |
+| `docs/deployment.md` | 四服务 + 外部 Neon 的上线步骤 |
+
+---
+
+### Task 1：三级预算（§10.2、Q37）
+
+在既有全局日预算之上增加两级，**三级同时生效，任一耗尽即熔断**：
+
+| 级别 | 作用 | 耗尽后 |
+| --- | --- | --- |
+| 全局 | 整个平台每日上限（既有） | 全部 LLM 路径降级 |
+| 角色 | 顾客 / 商家各自每日上限 | 该角色降级，另一角色不受影响 |
+| 商家 | 单店每日上限 | 该店降级，其他店不受影响 |
+
+**为什么需要角色级**：顾客端是公开的，流量不可控。若只有全局预算，
+一波顾客流量就能耗尽预算，让所有商家的工作台一起降级。角色级把两端的风险隔开。
+
+- 预算耗尽按既有 §8.5 规则归为 `FAILED_RETRYABLE`，跨日重置后同一 `client_request_id` 可重试；
+- 预算检查在**发出请求前**完成（沿用 `deepseek.py` 先扣后发的做法）；
+- 2026-10-06 收紧：单请求剩余 token 还须覆盖完整输入（含工具参数与协议余量）和本次上游最大输出；不足时先抛 `LlmBudgetExceededError`，不预扣每日预算、不发出站请求。上游实际计量若超过保守估算，仍可能形成单次超额，不能据此宣称绝对零超额；
+- **非对话调用同样计入三级预算**（2026-09-27 编组补充）：记忆抽取（N4）、压缩摘要（N4）、简报预生成（N3）
+  按所属角色与商家计入角色级、商家级，并全部计入全局级。N4 的「记忆独立预算」只是**单次任务的调用上限**，
+  不是游离在每日熔断之外的额度；`llm_usage.purpose` 已有，可直接区分来源。
+
+- [x] **步骤 1：写失败测试**
+
+```python
+async def test_customer_traffic_cannot_exhaust_merchant_budget(guard) -> None:
+    await exhaust(guard, role="CUSTOMER")
+    assert await guard.allow(role="MERCHANT", merchant=M) is True
+
+
+async def test_one_shop_cannot_exhaust_another(guard) -> None:
+    await exhaust(guard, role="MERCHANT", merchant=M_A)
+    assert await guard.allow(role="MERCHANT", merchant=M_B) is True
+
+
+async def test_global_exhaustion_stops_everything(guard) -> None:
+    await exhaust(guard, level="GLOBAL")
+    assert await guard.allow(role="CUSTOMER", merchant=M) is False
+    assert await guard.allow(role="MERCHANT", merchant=M) is False
+
+
+async def test_budget_checked_before_request_sent(guard, spy_http) -> None:
+    await exhaust(guard, role="MERCHANT", merchant=M)
+    with pytest.raises(LlmDailyBudgetExceededError):
+        await call_llm(role="MERCHANT", merchant=M)
+    assert spy_http.request_count == 0
+```
+
+- [x] **步骤 2：确认失败 → 实现 → 确认通过**
+
+---
+
+### Task 2：成本绑定价格版本（§10.2）
+
+**成本按调用当时的价格版本计算，不用当前价格回算历史**。
+
+- 新表 `model_price_versions`：`id`、`model`、`input_price_per_mtok`、`output_price_per_mtok`、
+  `cache_hit_price_per_mtok`、`effective_from`；价格以 `Decimal` 存储；
+- `llm_usage` 每行记录 `price_version_id`，**成本在写入时算好并存储**，查询时不重算；
+- 价格变动时**新增一行版本**，不修改旧行；
+- 缓存命中 token 单独记录（A9 的计量部分），**缓存不作为正确性依赖**（Q23）。
+
+- [x] **步骤 1：写失败测试**
+
+```python
+async def test_historical_cost_unchanged_after_price_update(db) -> None:
+    await record_usage(tokens_in=1000, at=DAY1)            # 按 v1 价格
+    cost_before = await total_cost(db, day=DAY1)
+    await add_price_version(model="deepseek-flash", input_price="9.99", effective_from=DAY2)
+    assert await total_cost(db, day=DAY1) == cost_before
+
+
+async def test_price_rows_are_append_only(db) -> None:
+    with pytest.raises(Exception):
+        await db.execute("UPDATE model_price_versions SET input_price_per_mtok = 0")
+```
+
+价格表同样用 `BEFORE UPDATE OR DELETE` 触发器强制追加写——理由与事件账本相同。
+
+- [x] **步骤 2：确认失败 → 实现 → 确认通过**
+
+**价格数值从 DeepSeek 官方文档核实后录入**（O7：核实官方文档零费用），并在迁移注释里写明
+核实日期与出处。**不得凭记忆填写价格**。
+
+---
+
+### Task 3：追踪 ID 与运维看板（§10.4）
+
+- `X-Request-Id` 贯穿**前端 → 后端 → 工具调用 → 评测报告**：前端生成，后端缺失时补生成，
+  写入每条日志、每个 `ToolDisplay`、每条 `llm_usage`、每份评测报告条目；
+- 看板展示：**三级预算余量**、限流命中、降级计数（按整轮与单来源分开）、工具错误率、p95 延迟、
+  缓存命中率与节省 token；
+- `/api/admin/ops/status` 的禁止返回项保持不变。
+
+- [x] **步骤 1：写失败测试**
+
+```python
+async def test_request_id_propagates_to_tool_and_usage_rows(client, db) -> None:
+    await chat(client, headers={"X-Request-Id": "trace-abc"})
+    assert (await latest(db, "llm_usage")).request_id == "trace-abc"
+
+
+async def test_ops_status_never_leaks_forbidden_fields(client) -> None:
+    body = json.dumps((await client.get("/api/admin/ops/status", headers=ADMIN)).json())
+    for leak in (DEMO_TOKEN, "system_prompt", "gross_gmv", SESSION_ID):
+        assert leak not in body
+```
+
+- [x] **步骤 2：确认失败 → 实现 → 确认通过**
+- [x] **步骤 3：看板前端**（2026-09-27 编组新增；D-N5-1 于 2026-09-28 裁定）
+
+  裁定：**新建只读管理员页 `OpsStatusView.vue`**，一页合并 Chat BI 概览（既有 `/api/admin/analytics/chatbi/*`）与
+  §10.4 指标（三级预算余量、每回合 token 与成本、限流命中、降级计数、工具错误率、p95、缓存命中）。**不恢复旧页**——
+  旧页按 v1 结构组织，只作参考，用只读的 `git show HEAD:frontend/src/views/OpsDashboardView.vue` 查看，
+  不做 checkout / reset。范围克制：表格加至多两张趋势图，不做交互式 BI 下钻。
+
+  顺序：① **先改 PRD §14** 需求迁移表「Chat BI 运维看板」一行，写明新载体（消除与 §15 N2 两页合并裁定的冲突），
+  同步 `docs/frontend-development-plan.md`（**2026-09-28 已完成**：PRD §14、§15 N5；前端计划第 15 条）；② 再写页面、路由与导航入口（只对持管理令牌或只读令牌的访问显示）；
+  ③ 组件测试断言页面不渲染 Token、Prompt、经营数据或请求正文，`VIEWER_TOKEN` 下不存在任何写操作按钮
+  （含 Chat BI 手动 rollup）；④ `e2e/ops-status.spec.ts` 取代已删除的 `ops-dashboard.spec.ts`；
+  `npm run test`、`typecheck`、`lint`、`build` 通过
+
+  **（2026-09-28，PRD M1、§15「W」）** W 完成后，本步骤的做法：
+  - 「导航入口」即商家工作台侧栏的**「管理」分组**，与知识库并列；
+  - 令牌输入复用 W 的 `AdminGate`，未持令牌时不请求 `/api/admin/*`；
+  - 页面挂在 `MerchantShell` 下，使用新 token；
+  - `ops-status.spec.ts` 沿用 W 改过入口后的 `e2e/support/v2MerchantMock.ts` 写法。
+
+---
+
+### Task 4：Cron 统一接线
+
+PRD §10.7 定义**一个** `cron` 服务。仓库已有 `railway.cron.json`（演示数据滚动）、
+`railway.chatbi-cron.json`（Chat BI 汇总）与 `railway.provenance-cron.json`（访客来源状态清理）三份配置，
+**均尚未在 Railway 创建**；三份合并为一份指向分发器。
+
+**做法：单一分发器**。`cron` 服务每 5 分钟运行 `python -m app.jobs.run_scheduled`，
+分发器依次检查每个任务是否到期，到期则执行。每个任务：
+
+- **幂等、可重入、短任务**（Q34）；
+- 用 **PostgreSQL advisory lock** 防止重叠执行——Railway 上一次没跑完时可能再起一次；
+- 接受 `now` 参数，**不读墙钟**；
+- 支持**漏跑追赶**（`docs/deployment.md`：追赶是正确性要求）；
+- 失败只记录并继续下一个任务，**一个任务失败不阻塞其他任务**。
+
+| 任务 | 频率 | 来源计划 |
+| --- | --- | --- |
+| 演示数据滚动 `seed_demo_rolling` | 每日 | 既有 |
+| Chat BI 汇总 `chatbi_rollup` | 每日 | 既有 |
+| 本地化缓存清理 `purge_expired_machine` | 每日 | 既有，**至今无调用方**（进度快照风险项） |
+| 访客来源状态清理 `purge_guest_provenance` | 每日 | 既有（N2 顾客端），已有独立 Cron 配置，并入分发器 |
+| 关闭超时订单 `close_expired_orders` | 每 5 分钟 | `n2-trade-closed-loop`；任务模块已存在，无调度配置 |
+| 草稿过期 `expire_drafts` | 每小时 | `n2-merchant-drafts-and-inventory`；任务模块已存在，无调度配置 |
+| 操作证据 nonce 清理（`operation_evidence_nonces`） | 每小时 | `n2-merchant-drafts-and-inventory`；**尚无任务模块**，本 Task 新建；同时核对 N3 售后确认的 `after_sale_challenge_previews` 是否需要同一过期清理，需要则并入同一模块 |
+| 订单投影漂移检查 `rebuild_projections` | 每日（只报告不修复） | 既有（N2）；是否纳入定时属可选，纳入则只写报告 |
+| 记忆抽取 outbox 排空 `drain_memory_outbox` | 每 5 分钟 | `n4-memory-pipeline` Task 3，模块已存在；**调用 LLM**，单次受 `MEMORY_EXTRACTION_MAX_CALLS` 限制，并按 Task 1 计入三级预算；真实 Key 未授权时为 Fake 或关闭 |
+| 顾客记忆过期清理 `purge_expired_customer_memory` | 每日 | `n4-memory-pipeline`，模块已存在 |
+| 商家记忆总结重建 `rebuild_memory_summaries` | 每小时 | `n4-memory-pipeline`，模块已存在 |
+| 索引构建 `build_index` | 每小时检查一次（只在索引陈旧时重建） | `n4-hybrid-retrieval`，模块已存在；知识写入后已有后台重建与启动预热，Cron 只负责兜底重试陈旧索引（单构建约束保证不重叠） |
+| 每日简报预生成 | 每日 | `n3-merchant-skills`，**默认关闭**；目前只有 `daily_brief_schedule_enabled` 配置项、**没有任务模块**，本版不新建，分发器仅保留开关位 |
+
+最后一行：简报预生成会调用 LLM，**默认关闭**（D18⑩）；开启即产生真实费用，属 R3 范围，且须先另行计划任务模块。
+2026-10-06 补充：若误开启现阶段尚无模块的开关，分发器报告 `UNAVAILABLE` 且以非零状态退出，使 Railway Cron 明确显示失败，不把未提供的能力误报为成功。
+
+- [x] **步骤 1：写失败测试**
+
+```python
+async def test_overlapping_runs_do_not_double_execute(db_pool) -> None:
+    await asyncio.gather(run_scheduled(now=T), run_scheduled(now=T))
+    assert await executions_of("close_expired_orders", at=T) == 1
+
+
+async def test_one_failing_job_does_not_block_others(monkeypatch) -> None:
+    monkeypatch.setattr(jobs, "chatbi_rollup", raising(RuntimeError))
+    report = await run_scheduled(now=T)
+    assert report["chatbi_rollup"] == "FAILED"
+    assert report["close_expired_orders"] == "OK"
+
+
+async def test_missed_days_are_caught_up(db) -> None:
+    await set_last_run("chatbi_rollup", day=T - timedelta(days=3))
+    await run_scheduled(now=T)
+    assert await rollup_days(db) >= {T - timedelta(days=2), T - timedelta(days=1)}
+
+
+def test_brief_pregeneration_disabled_by_default() -> None:
+    assert "daily_brief" not in due_jobs(Settings(), now=T)
+```
+
+- [x] **步骤 2：确认失败 → 实现 → 确认通过**
+- [x] **步骤 3：逐项核对「Cron 只负责清理」原则**——对上表每个带过期语义的任务，
+      确认其来源计划中存在"业务路径自检截止时间"的测试，并在本地关闭 Cron 的情况下跑一遍
+
+---
+
+### Task 5：Railway 四服务 + 外部 Neon（2026-10-02 按实际拓扑改写）
+
+| Service | 位置 / Root | 说明 |
+| --- | --- | --- |
+| `shop` | Railway `/shop` | `shop/Dockerfile`、`shop/railway.json` 已备好；**服务尚未创建** |
+| `merchant` | Railway `/frontend` | 由现网 `Frontend` Service **改名**（`AGENTS.md` §十一）；新增构建变量 `VITE_SHOP_BASE_URL`（D-N5-4） |
+| `backend` | Railway `/backend` | 现网 `Backend` Service；监听 `PORT`；`preDeployCommand` 执行迁移；新增变量 `EMBEDDING_MODEL`（N4，兼构建参数）、Task 1 的三级预算上限 |
+| `cron` | Railway `/backend` | `railway.cron.json`（改为指向分发器），无健康检查，`restartPolicyType: NEVER` |
+| `postgres` | **外部 Neon**（不在 Railway） | 现网主库；`vector` 扩展由迁移 `20261002_0047` 创建，无需控制台操作 |
+
+**本任务在本地写完全部配置与文档；每一项 Railway 控制台操作与对 Neon 的写操作执行前单独征得同意。**
+
+- [x] **步骤 1：写配置**——三份既有 Cron 配置合并为一份 `railway.cron.json`，指向分发器；另两份删除前在进度快照登记
+- [x] **步骤 2：更新 `docs/deployment.md`**——四服务 + Neon 拓扑、上线顺序、变量清单（含 `EMBEDDING_MODEL`、`VITE_SHOP_BASE_URL`、
+      `SHOP_ORIGIN`、三级预算上限）、`merchant` 改名步骤；删除「现网 v1」各节中已不成立的「在 Railway 创建 PostgreSQL」说法。
+      **cron 服务变量单列**（入口审查 E4）：分发器要跑 `drain_memory_outbox`（调 LLM）与 `build_index`（需嵌入模型），
+      所以 cron 同样需要 `DATABASE_URL`、三级预算上限与 `EMBEDDING_MODEL`（构建参数 + 运行时）；`LLM_API_KEY` 在 R3 授权之前
+      **不配置**，此时记忆抽取任务按「未配置抽取模型」跳过（`drain_configured_once` 已如此实现），不得为了让任务跑起来而提前配 Key
+- [x] **步骤 3：本地 `docker compose` 起全部服务，跑一遍 S1–S8 的 Fake LLM E2E**（含 D-N5-4 的单入口跳转）
+- [ ] **步骤 4：请求用户授权后执行 Railway 部署**，顺序：
+      backend（`preDeployCommand` 在发布阶段执行一次迁移，含 `CREATE EXTENSION vector`；先确认 Neon 角色权限）→ cron →
+      shop → merchant（改名并设 `VITE_SHOP_BASE_URL`，指向已上线的 shop 地址）→ backend 设 `SHOP_ORIGIN` 并重新部署
+
+**迁移只由 backend 的 `preDeployCommand` 在发布阶段执行一次**，cron 与 backend 进程启动时都不迁移。
+
+---
+
+### Task 6：公开部署前置条件验收
+
+**三项全部通过才允许配置真实 `LLM_API_KEY`**。每项验收零费用。
+
+| 前置条件 | 验收方式 |
+| --- | --- |
+| 基础限流 | 经公网域名连续请求超过 `RATE_LIMIT_PER_MINUTE`，**每次更换 `X-Real-IP` 与 `X-Forwarded-For`**，超限后仍返回 429（`docs/deployment.md`「转发头伪造验收」） |
+| 单请求 LLM 上限 | `AGENT_LOOP_MAX_LLM_CALLS` 与 v1 `MAX_LLM_CALLS_PER_REQUEST` 在生产配置中生效，Fake 注入下触顶返回降级 |
+| 每日预算熔断 | 三级预算各设极小值，确认熔断生效且降级对用户可见 |
+
+- [ ] **步骤 1：逐项执行并记录结果**到 `docs/history/deploy-preflight-<date>.md`
+- [ ] **步骤 2：三项全过后，向用户报告并请求配置真实 Key 的授权**——
+      这一步同时属于生产变更与 R3 范围，**两项授权都要有**
+
+---
+
+### Task 7：自检
+
+```powershell
+cd backend
+rg -n "datetime.now\(\)|date.today\(\)" app/jobs/
+rg -n "alembic upgrade" railway*.json Dockerfile app/
+uv run pytest; uv run ruff check .; uv run mypy app
+```
+
+第一条期望零命中（任务不读墙钟）；第二条期望**只命中 `railway.json` 的 `preDeployCommand` 一处**——cron 配置、Dockerfile、
+`app/` 内零命中（**进程启动时不自动迁移**，2026-10-02 按现行发布阶段迁移方式修订）。
+
+更新 `docs/project-progress.md`：三级预算、价格版本、Cron 接线、部署状态、
+**前置条件验收结果**、是否已配置真实 Key 及对应授权记录。
+
+---
+
+## 执行记录（2026-10-03 – 10-04）
+
+Task 1–4 与 Task 5 步骤 1–3 已完成（Opus 单会话，Fake LLM，零费用）；Task 7 的自检命令已跑：`app/jobs/` 不读墙钟
+（并有单测守卫）、`alembic upgrade` 只出现在 `railway.json` 的 `preDeployCommand`；后端全量 4568 passed / 4 skipped / 0 failed。
+证据与全部偏离裁定（`Ruling:`）见 `.superpowers/sdd/2026-09-21-n5-budget-ops-and-railway/progress.md`。
+
+**未执行**：Task 5 步骤 4（Railway 部署）、Task 6（公网前置条件验收与真实 Key）——都是生产变更，等用户逐项同意；
+Task 7 里「部署状态、前置条件验收结果、是否已配置真实 Key」因此无内容可记。
+
+与计划原文的主要差异：到期判定新增状态表 `scheduled_job_runs`；cron 服务默认不设 `EMBEDDING_MODEL`；
+「compose 跑 S1–S8」拆成 compose 全栈拓扑冒烟 + 各场景套件；预算熔断的公网验收拆成配 Key 前后两步（未配置 Key 时触发不了熔断）。
+
+## 本计划明确不做的事
+
+| 不做 | 归属 |
+| --- | --- |
+| 通用 Worker、对象存储、Redis | 本版不建（Q34）；Redis 仅在多实例共享限流有证据时另行评审 |
+| Doris | 未达引入条件（`AGENTS.md` §七） |
+| 全量评测报告与对外演示 | `n5-final-eval-and-closeout` |

@@ -7,7 +7,7 @@ import { useLocaleStore } from '@/stores/locale'
 
 import ConfirmDeleteDialog from './ConfirmDeleteDialog.vue'
 
-function mountDialog(props: Record<string, unknown>) {
+function mountDialog(props: InstanceType<typeof ConfirmDeleteDialog>['$props']) {
   return mount(ConfirmDeleteDialog, { props, global: { plugins: [i18n] } })
 }
 

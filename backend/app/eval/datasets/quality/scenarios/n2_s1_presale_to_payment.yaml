@@ -1,0 +1,73 @@
+# 场景 S1：售前导购到支付（PRD §12.2，交易计划 Task 7）——质量回归登记。
+#
+# 放在 `quality/scenarios/` 子目录，而不是 `quality/` 根目录：`scripts/eval_quality_smoke.py`
+# 与 `tests/eval/baseline_comparison.py` 只加载根目录（非递归），它们按 v1 商家 Chat 执行用例，
+# 顾客端 v2 场景混进去会被误路由。
+#
+# 只登记**依赖模型质量**的那一段：顾客提问 → Agent 检索 / 对比 → 加购。提交订单与模拟支付是
+# 界面动作，结果完全确定，由后端 E2E `tests/e2e/test_s1_presale_to_payment.py`（Fake LLM）覆盖。
+# 真实模型跑这条用例属于另行授权的人工验收（R3），不进默认测试。
+
+- id: QLT-S1-001
+  introduced_in: N2
+  role: CUSTOMER
+  skill: v2_shop_guide
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: answer_quality
+  turns:
+    - actor: customer_a
+      primitive:
+        name: session.bind_actor
+        args:
+          buyer_key: eval-s1-buyer
+    - actor: customer_a
+      request:
+        method: POST
+        path: /api/v2/shop/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json:
+          client_request_id: eval-qlt-s1-001
+          message: 冬天想买条围巾，帮我比较一下店里的几款，再把最合适的一条加进购物车
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: answer_mode
+      expected: SHOP_GUIDE
+    - type: response_field
+      path: degraded
+      expected: false
+
+- id: QLT-S1-002
+  introduced_in: N2
+  role: CUSTOMER
+  skill: v2_shop_guide
+  risk: QUALITY
+  locale: en-US
+  form: ENDPOINT
+  rubric_id: answer_quality
+  turns:
+    - actor: customer_a
+      primitive:
+        name: session.bind_actor
+        args:
+          buyer_key: eval-s1-buyer-en
+    - actor: customer_a
+      request:
+        method: POST
+        path: /api/v2/shop/chat
+        headers: {Accept: application/json, Accept-Language: en-US}
+        json:
+          client_request_id: eval-qlt-s1-002
+          message: I need a warm scarf for winter. Compare a few from this shop and add the best one to my cart.
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: answer_mode
+      expected: SHOP_GUIDE
+    - type: response_field
+      path: degraded
+      expected: false

@@ -359,13 +359,9 @@ async def test_final_failure_replay_renders_a_localized_message_per_request_loca
     agent = CountingAgent()
     retried = build_service(db_session, agent)
     with pytest.raises(AppError) as zh_excinfo:
-        await retried.submit(
-            CONTEXT, request, request_id="request-2", locale=SupportedLocale.ZH_CN
-        )
+        await retried.submit(CONTEXT, request, request_id="request-2", locale=SupportedLocale.ZH_CN)
     with pytest.raises(AppError) as en_excinfo:
-        await retried.submit(
-            CONTEXT, request, request_id="request-3", locale=SupportedLocale.EN_US
-        )
+        await retried.submit(CONTEXT, request, request_id="request-3", locale=SupportedLocale.EN_US)
 
     assert zh_excinfo.value.code is ErrorCode.MERCHANT_SCOPE_VIOLATION
     assert en_excinfo.value.code is ErrorCode.MERCHANT_SCOPE_VIOLATION

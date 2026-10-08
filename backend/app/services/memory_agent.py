@@ -8,6 +8,7 @@ from typing import Protocol
 from uuid import UUID
 
 from app.core.config import Settings
+from app.core.session import SessionRole
 from app.db.session import Database
 from app.llm.client import LlmBudget
 from app.localization.locales import SupportedLocale
@@ -136,6 +137,7 @@ class MemoryAgent:
                     request_id=f"{self._request_id}:memory:{category}",
                     merchant_id=self._merchant_id,
                     purpose="AGENT",
+                    role=SessionRole.MERCHANT,
                 )
             else:
                 llm = FakeLlmClient(configured=False)

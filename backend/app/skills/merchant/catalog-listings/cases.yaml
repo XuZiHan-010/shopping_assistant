@@ -1,0 +1,89 @@
+# N3 阶段 C Task 0：商品内容 Skill 的触发用例。
+
+- id: catalog-listings-hit1
+  introduced_in: N3
+  role: MERCHANT
+  skill: catalog-listings
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: skill_trigger
+  turns:
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/merchant/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json: {message: 帮这个商品把描述写完整一点, client_request_id: skill-cat-hit1}
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: tool_calls_include
+      expected: load_skill:catalog-listings
+
+- id: catalog-listings-hit2
+  introduced_in: N3
+  role: MERCHANT
+  skill: catalog-listings
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: skill_trigger
+  turns:
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/merchant/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json: {message: 批量检查一下商品缺哪些属性没填, client_request_id: skill-cat-hit2}
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: tool_calls_include
+      expected: load_skill:catalog-listings
+
+- id: catalog-listings-miss1
+  introduced_in: N3
+  role: MERCHANT
+  skill: catalog-listings
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: skill_trigger
+  turns:
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/merchant/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json: {message: 这个商品这个月卖了多少件, client_request_id: skill-cat-miss1}
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: tool_calls_exclude
+      expected: load_skill:catalog-listings
+
+- id: catalog-listings-boundary1
+  introduced_in: N3
+  role: MERCHANT
+  skill: catalog-listings
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: skill_trigger
+  turns:
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/merchant/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json: {message: 把这个商品价格降到 99 元, client_request_id: skill-cat-boundary1}
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: tool_calls_exclude
+      expected: load_skill:catalog-listings

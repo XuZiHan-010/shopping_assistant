@@ -10,10 +10,16 @@ dependencies = [
     # 客户端断开时的清理能跑完，所以显式声明。
     "anyio>=4.9,<5",
     "fastapi>=0.116,<1",
+    "fastembed>=0.8,<0.9",
     "httpx>=0.28,<1",
     "langgraph>=0.2,<1",
+    # MCP 官方 SDK（N5 A，PRD A8；契约 §8.14.3）：只用它的 2026-07-28 协议类型与入站校验阶梯
+    # （`mcp.shared.inbound`），鉴权与分发由 `app/mcp/server.py` 自己做；测试用它的标准客户端。
+    # 精确钉版本：协议仍在快速演进，升级须重跑 `tests/integration/mcp/`。
+    "mcp==2.2.0",
     "psycopg[binary,pool]>=3.2,<4",
     "pydantic-settings>=2.10,<3",
+    "pyyaml>=6.0,<7",
     "sqlalchemy>=2.0,<3",
     "structlog>=25.4,<26",
     "uvicorn[standard]>=0.35,<1",
@@ -26,6 +32,7 @@ dev = [
     "pytest-asyncio>=1.1,<2",
     "pytest-cov>=6.2,<7",
     "ruff>=0.12,<1",
+    "types-pyyaml>=6.0,<7",
 ]
 
 [tool.pytest.ini_options]
@@ -33,6 +40,7 @@ addopts = "-ra"
 asyncio_mode = "auto"
 markers = [
     "integration: 需要真实 PostgreSQL 的集成测试",
+    "security_timing: 只在独占 PostgreSQL 的 security-timing job 中运行的时序侧信道哨兵",
 ]
 testpaths = ["tests"]
 

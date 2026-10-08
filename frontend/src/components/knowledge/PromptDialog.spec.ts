@@ -7,7 +7,7 @@ import { useLocaleStore } from '@/stores/locale'
 
 import PromptDialog from './PromptDialog.vue'
 
-function mountDialog(props: Record<string, unknown>) {
+function mountDialog(props: InstanceType<typeof PromptDialog>['$props']) {
   return mount(PromptDialog, { props, global: { plugins: [i18n] } })
 }
 

@@ -10,6 +10,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analytics.contract import DETAIL_SPECS
+from app.domain.order_status_mapping import from_legacy_status
 from app.models.analytics import Order, OrderItem, Product, ReturnRecord, SupportTicket
 from app.repositories.analytics import AnalyticsRepository
 
@@ -47,6 +48,11 @@ async def _return_record(session: AsyncSession, merchant_id: UUID, reason: str) 
         order_no=f"NO-{uuid4().hex[:8]}",
         buyer_key="buyer",
         order_status="COMPLETED",
+        payment_status=from_legacy_status("COMPLETED")[0],
+        fulfillment_status=from_legacy_status("COMPLETED")[1],
+        close_reason=from_legacy_status("COMPLETED")[2],
+        after_sale_status="NONE",
+        lifecycle_origin="LEGACY_V1",
         total_amount=Decimal("100.00"),
         paid_amount=Decimal("100.00"),
         placed_at=datetime(2026, 8, 3, 2, 0, tzinfo=UTC),
@@ -62,6 +68,9 @@ async def _return_record(session: AsyncSession, merchant_id: UUID, reason: str) 
         product_id=product.id,
         quantity=1,
         item_amount=Decimal("100.00"),
+        unit_price=(Decimal("100.00")),
+        discount_amount=(Decimal("100.00")) * ((1) - 1),
+        line_total=(Decimal("100.00")),
     )
     session.add(item)
     await session.flush()
@@ -125,6 +134,11 @@ async def _orders(session: AsyncSession, merchant_id: UUID, count: int) -> None:
                 order_no=f"NO-{index:05d}-{uuid4().hex[:6]}",
                 buyer_key=f"buyer-{index}",
                 order_status="COMPLETED",
+                payment_status=from_legacy_status("COMPLETED")[0],
+                fulfillment_status=from_legacy_status("COMPLETED")[1],
+                close_reason=from_legacy_status("COMPLETED")[2],
+                after_sale_status="NONE",
+                lifecycle_origin="LEGACY_V1",
                 total_amount=Decimal("10.00"),
                 paid_amount=Decimal("10.00"),
                 placed_at=datetime(2026, 8, 3, 2, 0, tzinfo=UTC),

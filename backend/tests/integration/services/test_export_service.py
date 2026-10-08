@@ -17,7 +17,12 @@ from uuid import UUID
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import ExportLinkExpiredError, MerchantScopeViolationError
+from app.core.errors import (
+    ExportLinkExpiredError,
+    GuardrailRejectedError,
+    MerchantScopeViolationError,
+)
+from app.domain.order_status_mapping import from_legacy_status
 from app.localization.locales import SourceLanguage
 from app.models.analytics import Order, Product
 from app.models.answer import Answer
@@ -57,6 +62,11 @@ async def _order(session: AsyncSession, merchant_id: UUID, order_no: str, day: d
             order_no=order_no,
             buyer_key="buyer",
             order_status="COMPLETED",
+            payment_status=from_legacy_status("COMPLETED")[0],
+            fulfillment_status=from_legacy_status("COMPLETED")[1],
+            close_reason=from_legacy_status("COMPLETED")[2],
+            after_sale_status="NONE",
+            lifecycle_origin="LEGACY_V1",
             total_amount=Decimal("100.00"),
             paid_amount=Decimal("100.00"),
             placed_at=datetime(day.year, day.month, day.day, 2, tzinfo=UTC),
@@ -116,6 +126,39 @@ async def test_download_replays_the_real_order_rows_within_the_saved_window(
 
     assert "NO-IN-WINDOW" in csv_data
     assert "NO-OUT-OF-WINDOW" not in csv_data
+
+
+@pytest.mark.asyncio
+async def test_export_download_rejects_more_rows_than_synchronous_limit(
+    db_session: AsyncSession, merchant_one_id: UUID, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.analytics import contract
+    from app.repositories import analytics
+
+    for index in range(2):
+        await _order(db_session, merchant_one_id, f"NO-OVER-{index}", WINDOW_START)
+    answer = await _answer_for_merchant(db_session, merchant_one_id)
+    service = _service(db_session)
+    info = await service.create(
+        merchant_id=merchant_one_id,
+        answer_id=answer.id,
+        spec=ExportSpec(
+            table="orders",
+            columns=tuple(name for name, _ in contract.detail_spec("orders").columns),
+            start=WINDOW_START,
+            end=WINDOW_END,
+        ),
+    )
+    monkeypatch.setattr(analytics, "MAX_EXPORT_ROWS", 2)
+    allowed_csv = await service.download_from_url(info.url)
+    assert "NO-OVER-0" in allowed_csv and "NO-OVER-1" in allowed_csv
+
+    # 签发时刚好等于上限，下载前新增一行仍必须拒绝，不能只依赖创建预检。
+    await _order(db_session, merchant_one_id, "NO-OVER-2", WINDOW_START)
+    await db_session.flush()
+    with pytest.raises(GuardrailRejectedError) as caught:
+        await service.download_from_url(info.url)
+    assert caught.value.code.value == "GUARDRAIL_REJECTED"
 
 
 @pytest.mark.asyncio

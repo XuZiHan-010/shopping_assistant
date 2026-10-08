@@ -1,0 +1,34 @@
+# 首页经营主指标（W 阶段 Task 2，PRD M1，契约 §8.12.4）。
+#
+# `GET /api/v2/merchant/metrics/overview` 无路径参数、无查询参数，`merchant_id` 只从
+# 商家会话解析，无法构造 ID 跨店读取。登记 §8.12.4「安全集」要求的两类用例：
+# 未认证（缺 X-Session-Id → 401）与顾客会话越权（统一 403 + 审计）。
+
+- id: SEC-W2-001
+  introduced_in: N3
+  role: MERCHANT
+  skill: metrics-overview
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: anonymous
+      request: {method: GET, path: /api/v2/merchant/metrics/overview}
+  assertions:
+    - {type: http_status, expected: 401}
+    - {type: error_code, expected: SESSION_REQUIRED}
+
+- id: SEC-W2-002
+  introduced_in: N3
+  role: CUSTOMER
+  skill: metrics-overview
+  risk: SECURITY
+  locale: en-US
+  form: ENDPOINT
+  turns:
+    - actor: customer_a
+      request: {method: GET, path: /api/v2/merchant/metrics/overview}
+  assertions:
+    - {type: http_status, expected: 403}
+    - {type: error_code, expected: SESSION_ROLE_MISMATCH}
+    - {type: audit_written, event_type: SESSION_ROLE_MISMATCH}

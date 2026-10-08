@@ -1,0 +1,95 @@
+# 跨租户类（CROSS）：商家/顾客角色互调端点、跨商家取他人资源。
+# 覆盖 PRD §15 N1 / E3；四类 N1 安全集之一。
+
+- id: SEC-CROSS-001
+  introduced_in: N1
+  role: MERCHANT
+  skill: session
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/shop/sessions/demo-customer
+        json: {}
+  assertions:
+    - type: http_status
+      expected: 403
+    - type: error_code
+      expected: SESSION_ROLE_MISMATCH
+    - type: audit_written
+      event_type: SESSION_ROLE_MISMATCH
+    - type: no_side_effect
+      table: agent_sessions
+
+- id: SEC-CROSS-002
+  introduced_in: N1
+  role: CUSTOMER
+  skill: session
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: customer_a
+      request:
+        method: DELETE
+        path: /api/v2/merchant/sessions/current
+  assertions:
+    - type: http_status
+      expected: 403
+    - type: error_code
+      expected: SESSION_ROLE_MISMATCH
+    - type: audit_written
+      event_type: SESSION_ROLE_MISMATCH
+    - type: no_side_effect
+      table: agent_sessions
+
+- id: SEC-CROSS-004
+  introduced_in: N1
+  role: MERCHANT
+  skill: session
+  risk: SECURITY
+  locale: en-US
+  form: ENDPOINT
+  turns:
+    - actor: merchant_a
+      request:
+        method: DELETE
+        path: /api/v2/shop/sessions/current
+  assertions:
+    - type: http_status
+      expected: 403
+    - type: error_code
+      expected: SESSION_ROLE_MISMATCH
+    - type: audit_written
+      event_type: SESSION_ROLE_MISMATCH
+    - type: no_side_effect
+      table: agent_sessions
+
+- id: SEC-CROSS-003
+  introduced_in: N1
+  role: MERCHANT
+  skill: resource_scope
+  risk: SECURITY
+  locale: en-US
+  form: PRIMITIVE
+  turns:
+    - actor: merchant_a
+      primitive:
+        name: resource_scope.seed_foreign_product
+        args:
+          other_merchant_id: "00000000-0000-0000-0000-0000000001a2"
+    - actor: merchant_a
+      primitive:
+        name: resource_scope.access_foreign_product
+  assertions:
+    - type: http_status
+      expected: 403
+    - type: error_code
+      expected: RESOURCE_FORBIDDEN
+    - type: audit_written
+      event_type: RESOURCE_SCOPE_VIOLATION
+    - type: no_side_effect
+      table: products

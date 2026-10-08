@@ -1,0 +1,37 @@
+# 商品内容与优惠券只读运营面（N3 阶段 C Task 3/4，PRD M4/M6）。
+#
+# `GET /api/v2/merchant/products/content` 与 `GET /api/v2/merchant/coupons` 是
+# 只按 `X-Session-Id` 解析出的 `merchant_id` 过滤的商家端只读列表，没有路径参数、
+# 无法通过构造 ID 跨店读取——真正的边界风险只有一种：顾客会话冒用这两个端点。
+# 与 `n3_after_sales_signals.yaml` 的 SEC-N3B-007 同一模式（跨角色统一 403 + 审计），
+# 不重复造 `resource_scope.seed_foreign_*` 类用例。
+
+- id: SEC-N3C-001
+  introduced_in: N3
+  role: CUSTOMER
+  skill: catalog-listings
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: customer_a
+      request: {method: GET, path: /api/v2/merchant/products/content}
+  assertions:
+    - {type: http_status, expected: 403}
+    - {type: error_code, expected: SESSION_ROLE_MISMATCH}
+    - {type: audit_written, event_type: SESSION_ROLE_MISMATCH}
+
+- id: SEC-N3C-002
+  introduced_in: N3
+  role: CUSTOMER
+  skill: pricing-promotions
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: customer_a
+      request: {method: GET, path: /api/v2/merchant/coupons}
+  assertions:
+    - {type: http_status, expected: 403}
+    - {type: error_code, expected: SESSION_ROLE_MISMATCH}
+    - {type: audit_written, event_type: SESSION_ROLE_MISMATCH}

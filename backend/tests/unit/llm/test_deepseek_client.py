@@ -10,6 +10,7 @@ from app.llm.client import (
     STRUCTURED_CALL_OPTIONS,
     LlmBudget,
     LlmBudgetExceededError,
+    LlmCallOptions,
     LlmFailureKind,
     LlmUnavailableError,
 )
@@ -82,6 +83,21 @@ async def test_request_caps_max_tokens_at_the_remaining_budget() -> None:
     )
 
     assert seen["max_tokens"] == 600
+
+
+@pytest.mark.asyncio
+async def test_complete_respects_guard_output_limit() -> None:
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.update(json.loads(request.content))
+        return httpx.Response(200, json=_ok_payload("0.8", {"total_tokens": 10}))
+
+    await DeepSeekLlmClient(_settings("key"), transport=httpx.MockTransport(handler)).complete(
+        system="rubric", user="answer", fallback="0", budget=_budget(),
+        options=LlmCallOptions(max_output_tokens=123),
+    )
+    assert seen["max_tokens"] == 123
 
 
 @pytest.mark.asyncio
@@ -167,7 +183,7 @@ async def test_upstream_401_is_recorded_and_logged_not_silently_swallowed(
                 "extra": {
                     "failure_kind": "HTTP_401",
                     "status_code": 401,
-                    "model": "deepseek-v4-flash",
+                    "model": "deepseek-flash",
                 }
             },
         )

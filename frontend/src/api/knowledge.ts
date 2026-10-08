@@ -3,21 +3,22 @@ import type { SupportedLocale } from '@/i18n'
 
 import {
   toKnowledgeDocument,
-  toKnowledgeTree,
   toKnowledgeTreeNode,
+  toKnowledgeTreeSnapshot,
   type KnowledgeDocument,
   type KnowledgeTreeNode,
+  type KnowledgeTreeSnapshot,
 } from './adapters/knowledge'
 import { resolveTransport } from './transport'
 
-export async function getKnowledgeTree(signal: AbortSignal): Promise<KnowledgeTreeNode[]> {
+export async function getKnowledgeTree(signal: AbortSignal): Promise<KnowledgeTreeSnapshot> {
   const transport = await resolveTransport()
   const response = await transport(
     { path: '/api/admin/knowledge/tree', method: 'GET', auth: 'admin' },
     signal,
   )
   const payload = (await response.json()) as components['schemas']['KnowledgeTreeResponse']
-  return toKnowledgeTree(payload)
+  return toKnowledgeTreeSnapshot(payload)
 }
 
 function encodeDocumentPath(path: string): string {

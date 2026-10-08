@@ -342,6 +342,7 @@ def test_b4_metric_and_dimension_contract_is_implemented_in_b3_whitelists() -> N
 
     assert {
         "gmv",
+        "gross_gmv",
         "order_count",
         "ordering_user_count",
         "paying_user_count",

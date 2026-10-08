@@ -68,20 +68,31 @@ psycopg 的异步模式跑不了 Windows 默认的 `ProactorEventLoop`。入口�
 
 ## DeepSeek LLM 配置
 
-真实 LLM Adapter 在 B3 实现；提供商已固定为 DeepSeek 的 OpenAI 兼容 Chat Completions API。
+提供商已固定为 DeepSeek。`app/llm/` 下有两条互相独立的调用路径：
+
+- `complete()`（v1）：OpenAI 兼容 Chat Completions，不受 `LLM_PROTOCOL` 影响；
+- `converse()` / `converse_stream()`（v2 工具调用与流式）：按 `LLM_PROTOCOL` 选择 OpenAI 兼容
+  （`/chat/completions`）或 Anthropic 兼容（`/anthropic/v1/messages`）适配器。
+
 示例配置在仓库根目录 `.env.example`：
 
 ```text
 LLM_API_KEY=<deepseek-api-key>
 LLM_BASE_URL=https://api.deepseek.com
-LLM_MODEL=deepseek-v4-flash
+LLM_MODEL=deepseek-flash
+LLM_PROTOCOL=openai
+LLM_THINKING=disabled
 LLM_ENABLED=false
 ```
 
-`LLM_API_KEY` 只能通过未纳入版本控制的环境变量或 Railway Variables 提供。`deepseek-v4-flash`
-是 MVP 默认模型；需要使用 `deepseek-v4-pro` 前，必须完成费用评估和真实模型离线验收。
-`deepseek-chat` 与 `deepseek-reasoner` 已弃用，不得配置。即使配置完成，也不得在未取得用户
-明确同意前发起真实 DeepSeek 调用。
+`LLM_API_KEY` 只能通过未纳入版本控制的环境变量或 Railway Variables 提供。`LLM_BASE_URL`
+始终是根地址，Anthropic 协议的 `/anthropic` 路径由适配器内部拼接。`deepseek-flash` 是默认模型；
+需要使用 `deepseek-v4-pro` 前，必须完成费用评估和真实模型离线验收。`deepseek-chat`、
+`deepseek-reasoner` 已弃用，兼容别名 `deepseek-v4-flash` 已退役，均不得配置。即使配置完成，
+也不得在未取得用户明确同意前发起真实 DeepSeek 调用。
+
+`LLM_PROTOCOL` 默认 `openai`，`LLM_THINKING` 默认 `disabled` 且每次请求都显式发送；两者改默认值都须以
+`scripts/llm_smoke.py` 的真实冒烟结果为据，见 `docs/backend-development-plan.md` §6.17。
 
 ## 演示 Seed
 

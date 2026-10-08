@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import (
@@ -13,12 +13,15 @@ from app.api.dependencies import (
     get_app_settings,
     get_database,
     get_db_session,
+    holds_admin_token,
     require_admin_or_viewer_token,
     require_admin_token,
 )
 from app.core.config import Settings
 from app.core.errors import ResourceNotFoundError, error_responses
+from app.core.session import SessionRole
 from app.db.session import Database
+from app.knowledge.index_versions import KnowledgeIndexService
 from app.llm.client import LlmBudget
 from app.localization.locales import SupportedLocale
 from app.repositories.audit import AuditRepository
@@ -30,6 +33,7 @@ from app.schemas.knowledge import (
     KnowledgeDocumentRequest,
     KnowledgeDocumentResponse,
     KnowledgeDocumentUpdateRequest,
+    KnowledgeIndexStatus,
     KnowledgeTreeNode,
     KnowledgeTreeResponse,
     MemoryCompressRequest,
@@ -49,11 +53,51 @@ _MEMORY_TRANSLATION_MAX_TOKENS = 4_000
 
 @router.get("/tree", response_model=KnowledgeTreeResponse, responses=error_responses(401, 403, 422))
 async def get_knowledge_tree(
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_db_session)],
     _admin: Annotated[None, Depends(require_admin_or_viewer_token)],
     content_locale: Annotated[SupportedLocale | None, Query()] = None,
 ) -> KnowledgeTreeResponse:
-    return await KnowledgeAdminService(session).tree(content_locale=content_locale)
+    roots = await KnowledgeAdminService(session).tree_roots(content_locale=content_locale)
+    snapshot = await _knowledge_index(request).snapshot()
+    return KnowledgeTreeResponse(
+        roots=roots,
+        index_status=KnowledgeIndexStatus.model_validate(
+            {
+                "retrieval_mode": "HYBRID" if snapshot.hybrid else "KEYWORD_ONLY",
+                "active_version": snapshot.active_version_id,
+                "embedding_model": snapshot.embedding_model,
+                "configured_model": snapshot.configured_model,
+                "stale": snapshot.stale,
+                "stale_reason": snapshot.stale_reason,
+                "building": snapshot.building,
+                "last_failure_reason": snapshot.last_failure_reason,
+            }
+        ),
+    )
+
+
+def _knowledge_index(request: Request) -> KnowledgeIndexService:
+    service: KnowledgeIndexService = request.app.state.knowledge_index
+    return service
+
+
+def _schedule_rebuild(request: Request, background: BackgroundTasks) -> None:
+    """语料写入已提交后在进程内重建索引（§8.6.7）；构建期间旧版本继续服务。
+
+    异常不外抛：构建失败已在状态机里落为 FAILED + 陈旧（知识后台可见），
+    这里只兜住意外错误，免得后台任务的异常污染已成功返回的写请求。
+    """
+
+    service = _knowledge_index(request)
+
+    async def rebuild() -> None:
+        try:
+            await service.rebuild_until_fresh()
+        except Exception:
+            request.app.state.logger.exception("knowledge_index_rebuild_crashed")
+
+    background.add_task(rebuild)
 
 
 def _set_etag(response: Response, version: str) -> None:
@@ -65,6 +109,8 @@ def _build_memory_localizer_factory(
     settings: Settings,
     database: Database,
     request: Request,
+    *,
+    allow_llm: bool,
 ) -> MemoryLocalizerFactory:
     """返回一个只在真正需要翻译某份记忆时才被调用的构造函数。
 
@@ -78,6 +124,10 @@ def _build_memory_localizer_factory(
     `build_global_guarded_llm()` 那样落进 `merchant_id=NULL` 的全局桶
     （复审 Finding 1）。请求语言与记忆 `source_locale` 一致时这个函数
     完全不会被调用，本身不产生任何 LLM 调用或额外查询。
+
+    `allow_llm=False`（只读令牌）时单请求调用上限为 0：词典与已有的机器译文缓存
+    照常命中，缓存缺失时费用守卫在预扣预算、发出请求之前就拒绝，调用方按
+    `MISSING` 原样返回源正文。只读令牌等同公开，不能让它发起模型调用（R3、R6）。
     """
 
     def build(merchant_id: UUID) -> tuple[LocalizationService, LlmBudget]:
@@ -86,6 +136,7 @@ def _build_memory_localizer_factory(
             database,
             request_id=str(request.state.request_id),
             merchant_id=merchant_id,
+            role=SessionRole.MERCHANT,
             purpose="LOCALIZATION",
         )
         localizer = LocalizationService(
@@ -95,7 +146,9 @@ def _build_memory_localizer_factory(
             max_batch_chars=settings.localization_max_batch_chars,
             model=settings.llm_model,
         )
-        budget = LlmBudget(max_calls=1, max_tokens=_MEMORY_TRANSLATION_MAX_TOKENS)
+        budget = LlmBudget(
+            max_calls=1 if allow_llm else 0, max_tokens=_MEMORY_TRANSLATION_MAX_TOKENS
+        )
         return localizer, budget
 
     return build
@@ -107,18 +160,20 @@ def _service(
     *,
     request: Request | None = None,
     database: Database | None = None,
+    allow_memory_translation: bool = False,
 ) -> KnowledgeAdminService:
     """知识文档的人工译文增删查（`localization`）永远装配——零 LLM。
     只读记忆节点的机器翻译兜底（`memory_localizer_factory`）需要
     `request`/`database` 才能在需要时构造按商家计费的模型客户端；写端点
     （创建/更新/删除文档、业务域维护）都不会触达这条路径，调用时省略这两个
-    参数即可。
+    参数即可。`allow_memory_translation` 默认关闭：只有确认持管理员令牌的读请求
+    才允许真正发起翻译调用，其余只读已有缓存。
     """
 
     memory_localizer_factory: MemoryLocalizerFactory | None = None
     if request is not None and database is not None:
         memory_localizer_factory = _build_memory_localizer_factory(
-            session, settings, database, request
+            session, settings, database, request, allow_llm=allow_memory_translation
         )
     return KnowledgeAdminService(
         session,
@@ -146,9 +201,16 @@ async def get_document(
     """`content_locale` 缺省时行为与本字段引入前完全一致：原样返回源正文，
     不涉及任何人工译文查找或记忆机器翻译（Task 8 向后兼容）。"""
 
-    document = await _service(session, settings, request=request, database=database).get_document(
-        document_path, content_locale=content_locale
-    )
+    document = await _service(
+        session,
+        settings,
+        request=request,
+        database=database,
+        allow_memory_translation=holds_admin_token(request, settings),
+    ).get_document(document_path, content_locale=content_locale)
+    # 记忆机器翻译成功时译文已写入缓存；不提交就会随会话关闭回滚，下一次读取又要
+    # 重新付费翻译一遍。只读令牌不会走到翻译，这里对它是空提交。
+    await session.commit()
     _set_etag(response, document.version)
     return document
 
@@ -160,6 +222,8 @@ async def get_document(
     responses=error_responses(400, 401, 403, 409, 413, 415, 422),
 )
 async def create_document(
+    request: Request,
+    background: BackgroundTasks,
     payload: KnowledgeDocumentRequest,
     response: Response,
     session: Annotated[AsyncSession, Depends(get_db_session)],
@@ -168,6 +232,7 @@ async def create_document(
 ) -> KnowledgeDocumentResponse:
     document = await _service(session, settings).create_document(payload.path, payload.content)
     await session.commit()
+    _schedule_rebuild(request, background)
     _set_etag(response, document.version)
     return document
 
@@ -178,6 +243,8 @@ async def create_document(
     responses=error_responses(400, 401, 403, 404, 412, 413, 415, 422, 428),
 )
 async def update_document(
+    request: Request,
+    background: BackgroundTasks,
     document_path: str,
     payload: KnowledgeDocumentUpdateRequest,
     response: Response,
@@ -194,6 +261,8 @@ async def update_document(
         content_locale=payload.content_locale,
     )
     await session.commit()
+    if payload.is_source_version:  # 人工译文不进索引
+        _schedule_rebuild(request, background)
     _set_etag(response, document.version)
     return document
 
@@ -204,6 +273,8 @@ async def update_document(
     responses=error_responses(400, 401, 403, 404, 412, 422, 428),
 )
 async def delete_document(
+    request: Request,
+    background: BackgroundTasks,
     document_path: str,
     session: Annotated[AsyncSession, Depends(get_db_session)],
     settings: Annotated[Settings, Depends(get_app_settings)],
@@ -212,6 +283,7 @@ async def delete_document(
 ) -> Response:
     await _service(session, settings).delete_document(document_path, if_match)
     await session.commit()
+    _schedule_rebuild(request, background)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -222,6 +294,8 @@ async def delete_document(
     responses=error_responses(400, 401, 403, 409, 422),
 )
 async def create_business_domain(
+    request: Request,
+    background: BackgroundTasks,
     payload: BusinessDomainRequest,
     session: Annotated[AsyncSession, Depends(get_db_session)],
     settings: Annotated[Settings, Depends(get_app_settings)],
@@ -229,6 +303,7 @@ async def create_business_domain(
 ) -> KnowledgeTreeNode:
     domain = await _service(session, settings).create_business_domain(payload.name)
     await session.commit()
+    _schedule_rebuild(request, background)
     return domain
 
 
@@ -238,6 +313,8 @@ async def create_business_domain(
     responses=error_responses(400, 401, 403, 404, 409, 412, 422, 428),
 )
 async def rename_business_domain(
+    request: Request,
+    background: BackgroundTasks,
     name: str,
     payload: BusinessDomainRenameRequest,
     session: Annotated[AsyncSession, Depends(get_db_session)],
@@ -249,6 +326,7 @@ async def rename_business_domain(
         name, payload.new_name, if_match
     )
     await session.commit()
+    _schedule_rebuild(request, background)
     return domain
 
 
@@ -258,6 +336,8 @@ async def rename_business_domain(
     responses=error_responses(400, 401, 403, 404, 409, 412, 422, 428),
 )
 async def delete_business_domain(
+    request: Request,
+    background: BackgroundTasks,
     name: str,
     session: Annotated[AsyncSession, Depends(get_db_session)],
     settings: Annotated[Settings, Depends(get_app_settings)],
@@ -267,6 +347,7 @@ async def delete_business_domain(
 ) -> Response:
     await _service(session, settings).delete_business_domain(name, if_match, recursive=recursive)
     await session.commit()
+    _schedule_rebuild(request, background)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -296,6 +377,7 @@ async def compress_memory(
             database,
             request_id=str(request.state.request_id),
             merchant_id=payload.merchant_id,
+            role=SessionRole.MERCHANT,
         ),
         audit=AuditRepository(database),
     )

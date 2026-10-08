@@ -21,6 +21,7 @@ from app.core.errors import (
     RateLimitedError,
 )
 from app.core.security import MerchantContext, resolve_demo_token
+from app.core.session import SessionRole
 from app.db.session import Database
 from app.knowledge.retrieval import KnowledgeRetrieval
 from app.llm.client import LlmBudget, LlmClient
@@ -56,6 +57,10 @@ _bearer = HTTPBearer(auto_error=False)
 # 生产路径上被使用。
 _DEV_EXPORT_SIGNING_SECRET = "development-export-signing-secret"
 
+# 同上，仅用于本地/测试环境未配置 BUYER_ALIAS_SECRET 时的兜底（v2 主体摘要，
+# `app/core/session.py` 的 `principal_digest`，供来源状态与幂等域共用）。
+_DEV_BUYER_ALIAS_SECRET = "development-buyer-alias-secret"
+
 
 def _build_export_service(session: AsyncSession, settings: Settings) -> ExportService:
     return ExportService(
@@ -68,6 +73,14 @@ def _build_export_service(session: AsyncSession, settings: Settings) -> ExportSe
 
 def get_app_settings(request: Request) -> Settings:
     return cast(Settings, request.app.state.settings)
+
+
+def get_principal_secret(
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> bytes:
+    """v2 主体摘要派生密钥，供 `principal_digest()` 的全部调用方共用（来源状态、幂等域）。"""
+
+    return (settings.buyer_alias_secret or _DEV_BUYER_ALIAS_SECRET).encode()
 
 
 def get_database(request: Request) -> Database:
@@ -130,6 +143,30 @@ def enforce_rate_limit(
         raise RateLimitedError
 
 
+def enforce_keyed_rate_limit(request: Request, settings: Settings, *, key: str) -> None:
+    """公开端点专用限流：没有商家身份可用时按调用方给定的业务键限流。
+
+    v2 顾客会话创建（`POST /api/v2/shop/sessions`）在拿到 `merchant_id` 之前
+    就要挡刷店铺探测，所以不能像 `enforce_rate_limit` 那样依赖
+    `get_merchant_context`；直接在路由体内调用而不是当 FastAPI 依赖，
+    是因为限流键（`shop_slug`）来自请求体，要等 Pydantic 解析完才能拿到。
+    复用同一个 `SlidingWindowRateLimiter` 实例与 `resolve_client_ip()`，
+    不新建第二套限流状态。
+    """
+
+    limiter = request.app.state.rate_limiter
+    if not limiter.allow(
+        token=key,
+        client_ip=resolve_client_ip(
+            request,
+            trusted_proxy_hops=settings.trusted_proxy_hops,
+            trusted_proxy_ips=settings.trusted_proxy_ip_set,
+        ),
+    ):
+        request.app.state.metrics.rate_limit_hits += 1
+        raise RateLimitedError
+
+
 def require_admin_token(
     request: Request,
     settings: Annotated[Settings, Depends(get_app_settings)],
@@ -163,15 +200,31 @@ def require_admin_or_viewer_token(
     raise AdminForbiddenError
 
 
+def holds_admin_token(request: Request, settings: Settings) -> bool:
+    """本次请求带的是不是管理员令牌本身（而不是只读令牌）。
+
+    只给已经过 `require_admin_or_viewer_token` 的 GET 端点用：读权限两把钥匙相同，
+    但读的过程中会产生费用或副作用的分支（如记忆机器翻译）只对管理员开放——只读令牌
+    等同公开，不能让它发起任何模型调用（R3、R6）。
+    """
+
+    token = request.headers.get("x-admin-token")
+    return bool(token and settings.admin_token and hmac.compare_digest(token, settings.admin_token))
+
+
 def build_guarded_llm(
     settings: Settings,
     database: Database,
     *,
     request_id: str,
     merchant_id: UUID | None,
-    purpose: Literal["AGENT", "LOCALIZATION"] = "AGENT",
+    role: SessionRole | None,
+    purpose: Literal["AGENT", "LOCALIZATION", "MEMORY"] = "AGENT",
 ) -> LlmCostGuard:
     """构造带费用守卫的模型客户端。
+
+    `role` 必填（可为 `None`）：它决定三级预算里扣哪个角色池与店铺池（PRD §10.2）。
+    不给默认值是有意的——新调用点漏传就会落进「只扣全局」，顾客流量便能挤占商家额度。
 
     `merchant_id` 非空时必须是已确认存在的商家：它决定 token 用量与每日预算
     的归属，不能直接采信请求体（R5）。放宽为可空是为了给 `build_global_guarded_llm()`
@@ -190,6 +243,7 @@ def build_guarded_llm(
         request_id=request_id,
         merchant_id=merchant_id,
         purpose=purpose,
+        role=role,
     )
 
 
@@ -208,6 +262,7 @@ def build_global_guarded_llm(
         database,
         request_id=request_id,
         merchant_id=None,
+        role=None,
         purpose="LOCALIZATION",
     )
 
@@ -232,6 +287,7 @@ async def get_chat_service(
         database,
         request_id=str(request.state.request_id),
         merchant_id=context.merchant_id,
+        role=SessionRole.MERCHANT,
     )
     llm: LlmClient = guard
     conversations = ConversationRepository(session)
@@ -324,6 +380,7 @@ def _build_localization_runtime(
         database,
         request_id=request_id,
         merchant_id=merchant_id,
+        role=SessionRole.MERCHANT,
         purpose="LOCALIZATION",
     )
     service = LocalizationService(

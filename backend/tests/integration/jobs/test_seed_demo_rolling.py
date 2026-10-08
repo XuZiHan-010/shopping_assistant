@@ -9,6 +9,7 @@ from sqlalchemy import String, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.seed_config import SeedSettings
+from app.domain.order_status_mapping import from_legacy_status
 from app.jobs.seed_demo_rolling import roll_forward
 from app.models.analytics import Order, OrderItem, Product, Refund, ReturnRecord
 from app.models.merchant import Merchant
@@ -144,6 +145,11 @@ async def test_rolling_seed_keeps_a_refund_still_in_window_even_if_its_order_lef
             buyer_key="legacy-buyer",
             address_city_name=None,
             order_status="COMPLETED",
+            payment_status=from_legacy_status("COMPLETED")[0],
+            fulfillment_status=from_legacy_status("COMPLETED")[1],
+            close_reason=from_legacy_status("COMPLETED")[2],
+            after_sale_status="NONE",
+            lifecycle_origin="LEGACY_V1",
             total_amount=Decimal("100.00"),
             paid_amount=Decimal("100.00"),
             placed_at=datetime(2026, 8, 10, tzinfo=UTC),
@@ -162,6 +168,9 @@ async def test_rolling_seed_keeps_a_refund_still_in_window_even_if_its_order_lef
             product_id=product_id,
             quantity=1,
             item_amount=Decimal("100.00"),
+            unit_price=(Decimal("100.00")),
+            discount_amount=(Decimal("100.00")) * ((1) - 1),
+            line_total=(Decimal("100.00")),
         )
     )
     await db_session.flush()
@@ -232,3 +241,159 @@ async def test_rolling_seed_refuses_without_the_explicit_write_permission(
         )
 
     assert await db_session.scalar(select(func.count()).select_from(Order)) == 0
+
+
+@pytest.mark.asyncio
+async def test_catalog_refresh_updates_only_untouched_legacy_seed_rows(
+    db_session: AsyncSession,
+) -> None:
+    from app.analytics.demo_data import DEMO_ANALYTICS_SEED_BASE, build_demo_catalog
+    from app.jobs.seed_demo_rolling import _catalog
+
+    await seed_demo_merchants(db_session, default_merchants())
+    merchant = default_merchants()[0]
+    generated = build_demo_catalog(merchant_id=merchant.id, seed=DEMO_ANALYTICS_SEED_BASE)
+    originals = []
+    for index in range(3):
+        row = dict(generated[index])
+        row.update(
+            title=f"演示商品 {index + 1:02d}",
+            price=Decimal("10.00"),
+            short_description="旧简介",
+            detail_description="旧说明",
+            attributes={},
+            image_url="/demo/products/old.png",
+            stock_on_hand=17,
+            status="OFFLINE",
+        )
+        if index == 1:
+            row["content_version"] = 2
+        if index == 2:
+            row["title"] = "商家自定义标题"
+        originals.append(row)
+        db_session.add(Product(**row))
+    await db_session.flush()
+
+    catalog = await _catalog(db_session, merchant.id, DEMO_ANALYTICS_SEED_BASE)
+    by_code = {row["product_code"]: row for row in catalog}
+    updated = by_code["SKU0000"]
+    for key in (
+        "title",
+        "price",
+        "short_description",
+        "detail_description",
+        "attributes",
+        "image_url",
+    ):
+        assert updated[key] == generated[0][key]
+    assert updated["content_version"] == 2
+    for key in ("id", "status", "listed_at", "stock_on_hand", "stock_reserved", "created_at"):
+        assert updated[key] == originals[0][key]
+    for original in originals[1:]:
+        persisted = by_code[original["product_code"]]
+        for key, value in original.items():
+            assert persisted[key] == value
+    assert await _catalog(db_session, merchant.id, DEMO_ANALYTICS_SEED_BASE) == catalog
+
+
+@pytest.mark.asyncio
+async def test_catalog_refresh_backfills_missing_seed_images_only(
+    db_session: AsyncSession,
+) -> None:
+    """已是现行目录的库：种子后来补的图只填「种子标题且无图」的行（06 号，2026-10-04）。"""
+
+    from app.analytics.demo_data import DEMO_ANALYTICS_SEED_BASE, build_demo_catalog
+    from app.jobs.seed_demo_rolling import _catalog
+
+    await seed_demo_merchants(db_session, default_merchants())
+    merchant = default_merchants()[0]
+    generated = build_demo_catalog(merchant_id=merchant.id, seed=DEMO_ANALYTICS_SEED_BASE)
+    originals = []
+    for index in (5, 6, 7):
+        row = dict(generated[index])
+        if index == 5:
+            row["image_url"] = None
+        if index == 6:
+            row.update(title="商家改过的标题", image_url=None)
+        if index == 7:
+            row["image_url"] = "/demo/products/merchant-choice.webp"
+        originals.append(row)
+        db_session.add(Product(**row))
+    await db_session.flush()
+
+    catalog = await _catalog(db_session, merchant.id, DEMO_ANALYTICS_SEED_BASE)
+    by_code = {row["product_code"]: row for row in catalog}
+    filled = by_code[generated[5]["product_code"]]
+    assert filled["image_url"] == "/demo/products/06.webp"
+    assert filled["content_version"] == 2
+    for original in originals[1:]:
+        persisted = by_code[original["product_code"]]
+        assert persisted["image_url"] == original["image_url"]
+        assert persisted["title"] == original["title"]
+        assert persisted["content_version"] == 1
+    assert await _catalog(db_session, merchant.id, DEMO_ANALYTICS_SEED_BASE) == catalog
+
+
+@pytest.mark.asyncio
+async def test_catalog_refresh_initialises_stock_for_rows_that_predate_inventory(
+    db_session: AsyncSession,
+) -> None:
+    """v1 时代的库升级上来：库存列是迁移默认值（在库 0、阈值为空），没有任何库存事件。
+
+    这种行从未有过库存，刷新时按种子补初始库存并记 INITIAL_STOCK 事件；
+    已经有过库存的行（哪怕卖到 0）不动。
+    """
+
+    from app.analytics.demo_data import DEMO_ANALYTICS_SEED_BASE, build_demo_catalog
+    from app.jobs.seed_demo_rolling import _catalog
+    from app.models.events import InventoryEvent
+
+    await seed_demo_merchants(db_session, default_merchants())
+    merchant = default_merchants()[0]
+    generated = build_demo_catalog(merchant_id=merchant.id, seed=DEMO_ANALYTICS_SEED_BASE)
+    for index in (0, 3, 9):
+        row = dict(generated[index])
+        row.update(stock_on_hand=0, stock_reserved=0)
+        if index == 9:
+            # 有过库存、已卖空：阈值是设过的，不能被当成「从未初始化」再灌一遍。
+            row["low_stock_threshold"] = 5
+        else:
+            row.update(
+                title=f"演示商品 {index + 1:02d}",
+                image_url=None,
+                attributes={},
+                low_stock_threshold=None,
+            )
+        db_session.add(Product(**row))
+    await db_session.flush()
+
+    catalog = await _catalog(db_session, merchant.id, DEMO_ANALYTICS_SEED_BASE)
+    by_code = {row["product_code"]: row for row in catalog}
+    for index in (0, 3):
+        refreshed = by_code[generated[index]["product_code"]]
+        assert refreshed["stock_on_hand"] == generated[index]["stock_on_hand"]
+        assert refreshed["low_stock_threshold"] == generated[index]["low_stock_threshold"]
+        assert refreshed["stock_reserved"] == 0
+    sold_out = by_code[generated[9]["product_code"]]
+    assert sold_out["stock_on_hand"] == 0
+
+    async def initial_stock_events() -> dict[UUID, int]:
+        rows = (
+            await db_session.execute(
+                select(InventoryEvent.subject_id, InventoryEvent.payload).where(
+                    InventoryEvent.merchant_id == merchant.id,
+                    InventoryEvent.event_type == "INITIAL_STOCK",
+                )
+            )
+        ).all()
+        return {row[0]: row[1]["quantity"] for row in rows}
+
+    # `_catalog` 同时会插入其余种子商品并各记一条事件；这里只看预置的三行。
+    events = await initial_stock_events()
+    for index in (0, 3):
+        product_id = by_code[generated[index]["product_code"]]["id"]
+        assert events[product_id] == generated[index]["stock_on_hand"]
+    assert sold_out["id"] not in events
+    assert await _catalog(db_session, merchant.id, DEMO_ANALYTICS_SEED_BASE) == catalog
+    assert await initial_stock_events() == events
+

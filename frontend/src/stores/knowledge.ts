@@ -12,7 +12,12 @@ import {
   updateKnowledgeDocument,
   type UpdateKnowledgeDocumentOptions,
 } from '@/api/knowledge'
-import type { KnowledgeDocument, KnowledgeTreeNode } from '@/api/adapters/knowledge'
+import type {
+  KnowledgeDocument,
+  KnowledgeIndexStatus,
+  KnowledgeTreeNode,
+} from '@/api/adapters/knowledge'
+import { resolveViewerToken } from '@/api/client'
 import { AppError } from '@/api/errors'
 import { findNode, isBusinessDomain } from '@/utils/knowledgeTree'
 
@@ -25,6 +30,8 @@ function quoteVersion(version: string): string {
 export const useKnowledgeStore = defineStore('knowledge', () => {
   const adminToken = ref('')
   const roots = ref<KnowledgeTreeNode[]>([])
+  /** 索引状态随目录树一起返回（§8.6.7）；保存后重新加载目录树即可看到重建结果。 */
+  const indexStatus = ref<KnowledgeIndexStatus | undefined>(undefined)
   const selectedDocument = ref<KnowledgeDocument | undefined>(undefined)
   const selectedPath = ref('')
   const loading = ref(false)
@@ -45,6 +52,15 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
 
   const selectedNode = computed(() => findNode(roots.value, selectedPath.value))
 
+  /**
+   * 当前令牌是不是只读（VIEWER_TOKEN 的构建期镜像）。后端才是权威（写请求一律 403），
+   * 这里只是让界面不再摆出注定失败的写按钮；令牌值只在内存里比较，不落盘、不进日志。
+   */
+  const isReadOnlyToken = computed(() => {
+    const viewer = resolveViewerToken()
+    return Boolean(viewer) && adminToken.value !== '' && adminToken.value === viewer
+  })
+
   function setAdminToken(token: string): void {
     adminToken.value = token.trim()
     errorMessage.value = ''
@@ -60,7 +76,9 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
     loading.value = true
     errorMessage.value = ''
     try {
-      roots.value = await getKnowledgeTree(new AbortController().signal)
+      const snapshot = await getKnowledgeTree(new AbortController().signal)
+      roots.value = snapshot.roots
+      indexStatus.value = snapshot.indexStatus
     } catch (error) {
       errorMessage.value = error instanceof Error ? error.message : '知识库目录加载失败。'
       throw error
@@ -172,6 +190,7 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
   function signOut(): void {
     adminToken.value = ''
     roots.value = []
+    indexStatus.value = undefined
     selectedDocument.value = undefined
     selectedPath.value = ''
     errorMessage.value = ''
@@ -207,6 +226,7 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
 
   return {
     adminToken,
+    isReadOnlyToken,
     roots,
     selectedDocument,
     selectedPath,
@@ -223,6 +243,7 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
     renameDomain,
     deleteSelected,
     saveDocument,
+    indexStatus,
     signOut,
     reloadForLocale,
   }

@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import openapi from '../../../docs/api.json'
+import type { components } from './generated'
 
 import { AppError, toAppError } from './errors'
 
@@ -26,6 +28,18 @@ describe('toAppError', () => {
 })
 
 describe('AppError.fromErrorResponse', () => {
+  it.each(openapi.components.schemas.ErrorCode.enum)('保留 OpenAPI 错误码 %s', (code) => {
+    const error = AppError.fromErrorResponse({
+      code: code as components['schemas']['ErrorCode'],
+      message: '业务错误',
+      request_id: 'contract-test',
+      details: [],
+      retryable: false,
+    })
+    expect(error.code).toBe(code)
+    expect(error.shouldReport).toBe(false)
+  })
+
   it('retryable 以后端返回为准，不由前端表推断', () => {
     const error = AppError.fromErrorResponse(
       {

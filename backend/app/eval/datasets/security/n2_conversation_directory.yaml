@@ -1,0 +1,158 @@
+# 跨主体类（CROSS）：N2 模块 D Task 1 的双端会话目录（契约 §8.8.2 / §8.9.2）。
+#
+# 攻击面：
+# - 商家读 / 删别家店的对话——统一 403 RESOURCE_FORBIDDEN、写审计、对话与来源状态无副作用；
+# - 顾客读 / 删**同店另一位顾客**的对话——同上（同店也不可见，对话按登录主体隔离）；
+# - 商家会话调顾客目录、顾客会话调商家目录——403 SESSION_ROLE_MISMATCH 并写审计。
+#
+# `introduced_in: N2`——与其余 N2 用例同一过渡态，`CURRENT_MILESTONE` 推进留给 N2 收尾。
+
+- id: SEC-CROSS-006
+  introduced_in: N2
+  role: MERCHANT
+  skill: v2_conversations
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: merchant_a
+      primitive:
+        name: resource_scope.seed_foreign_conversation
+        args:
+          surface: MERCHANT
+          other_merchant_id: "00000000-0000-0000-0000-0000000001a2"
+    - actor: merchant_a
+      request:
+        method: GET
+        path: /api/v2/merchant/conversations/{state:foreign_conversation_id}
+  assertions:
+    - type: http_status
+      expected: 403
+    - type: error_code
+      expected: RESOURCE_FORBIDDEN
+    - type: audit_written
+      event_type: RESOURCE_SCOPE_VIOLATION
+
+- id: SEC-CROSS-007
+  introduced_in: N2
+  role: MERCHANT
+  skill: v2_conversations
+  risk: SECURITY
+  locale: en-US
+  form: ENDPOINT
+  turns:
+    - actor: merchant_a
+      primitive:
+        name: resource_scope.seed_foreign_conversation
+        args:
+          surface: MERCHANT
+          other_merchant_id: "00000000-0000-0000-0000-0000000001a2"
+    - actor: merchant_a
+      request:
+        method: DELETE
+        path: /api/v2/merchant/conversations/{state:foreign_conversation_id}
+  assertions:
+    - type: http_status
+      expected: 403
+    - type: error_code
+      expected: RESOURCE_FORBIDDEN
+    - type: audit_written
+      event_type: RESOURCE_SCOPE_VIOLATION
+    - type: no_side_effect
+      table: conversations
+    - type: no_side_effect
+      table: conversation_provenance
+
+- id: SEC-CROSS-008
+  introduced_in: N2
+  role: CUSTOMER
+  skill: v2_conversations
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: customer_a
+      primitive:
+        name: resource_scope.seed_foreign_conversation
+        args:
+          surface: SHOP
+    - actor: customer_a
+      request:
+        method: GET
+        path: /api/v2/shop/conversations/{state:foreign_conversation_id}
+  assertions:
+    - type: http_status
+      expected: 403
+    - type: error_code
+      expected: RESOURCE_FORBIDDEN
+    - type: audit_written
+      event_type: RESOURCE_SCOPE_VIOLATION
+
+- id: SEC-CROSS-009
+  introduced_in: N2
+  role: CUSTOMER
+  skill: v2_conversations
+  risk: SECURITY
+  locale: en-US
+  form: ENDPOINT
+  turns:
+    - actor: customer_a
+      primitive:
+        name: resource_scope.seed_foreign_conversation
+        args:
+          surface: SHOP
+    - actor: customer_a
+      request:
+        method: DELETE
+        path: /api/v2/shop/conversations/{state:foreign_conversation_id}
+  assertions:
+    - type: http_status
+      expected: 403
+    - type: error_code
+      expected: RESOURCE_FORBIDDEN
+    - type: audit_written
+      event_type: RESOURCE_SCOPE_VIOLATION
+    - type: no_side_effect
+      table: conversations
+    - type: no_side_effect
+      table: conversation_provenance
+
+- id: SEC-CROSS-010
+  introduced_in: N2
+  role: MERCHANT
+  skill: v2_conversations
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: merchant_a
+      request:
+        method: GET
+        path: /api/v2/shop/conversations
+  assertions:
+    - type: http_status
+      expected: 403
+    - type: error_code
+      expected: SESSION_ROLE_MISMATCH
+    - type: audit_written
+      event_type: SESSION_ROLE_MISMATCH
+
+- id: SEC-CROSS-011
+  introduced_in: N2
+  role: CUSTOMER
+  skill: v2_conversations
+  risk: SECURITY
+  locale: en-US
+  form: ENDPOINT
+  turns:
+    - actor: customer_a
+      request:
+        method: GET
+        path: /api/v2/merchant/conversations
+  assertions:
+    - type: http_status
+      expected: 403
+    - type: error_code
+      expected: SESSION_ROLE_MISMATCH
+    - type: audit_written
+      event_type: SESSION_ROLE_MISMATCH

@@ -9,6 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.answer import Answer, Feedback
 from app.models.conversation import Message
+from app.services.resource_scope import ScopeLookupResult
+
+#: 商家可反馈的回答来源：v1（`surface` 为空）与 v2 商家端。
+_MERCHANT_SURFACES = frozenset({None, "MERCHANT"})
 
 
 class AnswerRepository:
@@ -19,7 +23,12 @@ class AnswerRepository:
         return cast(
             Answer | None,
             await self._session.scalar(
-                select(Answer).where(Answer.id == answer_id, Answer.merchant_id == merchant_id)
+                # v1 反馈一次覆盖采纳与赞踩两列，不能碰 v2 回答（§8.14.2 不变量 4）。
+                select(Answer).where(
+                    Answer.id == answer_id,
+                    Answer.merchant_id == merchant_id,
+                    Answer.surface.is_(None),
+                )
             ),
         )
 
@@ -27,6 +36,19 @@ class AnswerRepository:
         return (
             await self._session.scalar(select(Answer.id).where(Answer.id == answer_id)) is not None
         )
+
+    async def fetch_scoped(self, answer_id: UUID, merchant_id: UUID) -> ScopeLookupResult[Answer]:
+        """`require_owned()` 用的单次定形查询：不存在与跨商家都只查一次（R5、D5）。"""
+
+        row = (
+            await self._session.execute(select(Answer).where(Answer.id == answer_id))
+        ).scalar_one_or_none()
+        if row is None:
+            return ScopeLookupResult(resource=None, target_exists=False)
+        # 顾客回答同样挂在本店 `merchant_id` 下，商家只能反馈 v1 与商家端回答。
+        if row.merchant_id != merchant_id or row.surface not in _MERCHANT_SURFACES:
+            return ScopeLookupResult(resource=None, target_exists=True)
+        return ScopeLookupResult(resource=row, target_exists=True)
 
     async def upsert_feedback(
         self, *, merchant_id: UUID, answer_id: UUID, is_adopted: bool, reaction: str | None
@@ -46,6 +68,66 @@ class AnswerRepository:
             .returning(Feedback)
         )
         return (await self._session.execute(statement)).scalar_one()
+
+    async def set_adoption(self, *, merchant_id: UUID, answer_id: UUID, adopted: bool) -> Feedback:
+        """只改采纳状态，不触碰赞踩列（v2 §8.14.2 不变量 4：两种语义互不覆盖）。"""
+
+        statement = (
+            insert(Feedback)
+            .values(merchant_id=merchant_id, answer_id=answer_id, is_adopted=adopted)
+            .on_conflict_do_update(
+                constraint="uq_feedback_merchant_answer",
+                set_={"is_adopted": adopted, "updated_at": func.now()},
+            )
+            .returning(Feedback)
+        )
+        return (await self._session.execute(statement)).scalar_one()
+
+    async def set_reaction(
+        self,
+        *,
+        merchant_id: UUID,
+        answer_id: UUID,
+        reaction: str | None,
+        reason: str | None,
+    ) -> Feedback:
+        """只改赞踩与原因，不触碰采纳列（v2 §8.14.2 不变量 4：两种语义互不覆盖）。"""
+
+        statement = (
+            insert(Feedback)
+            .values(
+                merchant_id=merchant_id,
+                answer_id=answer_id,
+                reaction=reaction,
+                reason=reason,
+            )
+            .on_conflict_do_update(
+                constraint="uq_feedback_merchant_answer",
+                set_={"reaction": reaction, "reason": reason, "updated_at": func.now()},
+            )
+            .returning(Feedback)
+        )
+        return (await self._session.execute(statement)).scalar_one()
+
+    async def feedback_for_merchant_answers(
+        self, *, merchant_id: UUID, conversation_id: UUID, answer_ids: set[UUID]
+    ) -> dict[UUID, Feedback]:
+        """一次查出当前页本店商家回答的反馈；顾客、其他对话和其他商家行均不可进入。"""
+
+        if not answer_ids:
+            return {}
+        rows = await self._session.scalars(
+            select(Feedback)
+            .join(Answer, Answer.id == Feedback.answer_id)
+            .where(
+                Feedback.answer_id.in_(answer_ids),
+                Feedback.merchant_id == merchant_id,
+                Answer.merchant_id == merchant_id,
+                Answer.conversation_id == conversation_id,
+                Answer.surface == "MERCHANT",
+            )
+        )
+        return {row.answer_id: row for row in rows}
 
     async def recent_answers_for_category(
         self,

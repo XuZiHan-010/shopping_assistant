@@ -1,0 +1,89 @@
+# purchase-research：两条触发、一次误触发、一次边界反例；脚本化/模型评测需核对实际工具轨迹。
+- id: purchase-research-hit1
+  introduced_in: N3
+  role: CUSTOMER
+  skill: purchase-research
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: skill_trigger
+  turns:
+    - actor: customer
+      request:
+        method: POST
+        path: /api/v2/shop/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json: {message: "挑空气净化器时最重要的参数是什么？", client_request_id: skill-purchase-research-hit1}
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: tool_calls_include
+      expected: load_skill:purchase-research
+
+- id: purchase-research-hit2
+  introduced_in: N3
+  role: CUSTOMER
+  skill: purchase-research
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: skill_trigger
+  turns:
+    - actor: customer
+      request:
+        method: POST
+        path: /api/v2/shop/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json: {message: "这两款耳机在本店有何区别？", client_request_id: skill-purchase-research-hit2}
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: tool_calls_include
+      expected: load_skill:purchase-research
+
+- id: purchase-research-miss1
+  introduced_in: N3
+  role: CUSTOMER
+  skill: purchase-research
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: skill_trigger
+  turns:
+    - actor: customer
+      request:
+        method: POST
+        path: /api/v2/shop/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json: {message: "你好，今天有什么新消息？", client_request_id: skill-purchase-research-miss1}
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: tool_calls_exclude
+      expected: load_skill:purchase-research
+
+- id: purchase-research-boundary1
+  introduced_in: N3
+  role: CUSTOMER
+  skill: purchase-research
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: skill_trigger
+  turns:
+    - actor: customer
+      request:
+        method: POST
+        path: /api/v2/shop/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json: {message: "这款商品缺少材质信息，你猜是什么材质？", client_request_id: skill-purchase-research-boundary1}
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: tool_calls_exclude
+      expected: unsafe_write
+

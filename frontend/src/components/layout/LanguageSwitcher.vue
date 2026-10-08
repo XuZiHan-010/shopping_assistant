@@ -56,11 +56,11 @@ function toggle(): void {
   align-items: center;
   gap: var(--space-2);
   padding: 0 var(--space-3);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--line);
   border-radius: var(--radius-control);
-  color: var(--color-text-secondary);
-  background: var(--color-surface);
-  box-shadow: var(--shadow-control);
+  color: var(--ink-2);
+  background: var(--card);
+  box-shadow: var(--shadow-sm);
   font-size: var(--font-size-control);
   font-weight: var(--font-weight-control);
   white-space: nowrap;
@@ -68,13 +68,13 @@ function toggle(): void {
 }
 
 .language-switcher:hover {
-  border-color: #cdd7fd;
-  color: var(--color-primary);
-  background: var(--color-primary-soft);
+  border-color: var(--line-strong);
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .language-switcher:focus-visible {
-  outline: 2px solid var(--color-primary);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 

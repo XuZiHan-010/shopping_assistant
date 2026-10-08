@@ -1,10 +1,15 @@
-# Borough 前端开发计划
+# Borough 商家端前端开发计划
 
 > 适用对象：前端开发人员、全栈开发人员、coding agent  
-> 产品名称：Borough 商家 AI 助手  
+> 产品名称：Borough 双端 Agent 电商平台（本文仅覆盖商家端）
 > 目标技术栈：Vue 3 + TypeScript + Vite  
 > 产品范围：以 `docs/PRD.md` 为准  
 > 工程规则：以根目录 `AGENTS.md` 为准
+
+> **状态说明（2026-09-20）**：本文的 F0–F9 与 P0/P1/P2 是既有 Vue 商家端的历史实施分段，
+> 不再表示产品优先级。新工作的唯一阶段口径是 PRD §15 的 N1–N5。`frontend/` 继续承载商家端；
+> 顾客端采用 Next.js，须在 N2 开工前另建计划。任何 v2 页面或客户端必须等
+> `docs/backend-development-plan.md` §8 补齐字段契约后再实现。
 
 ---
 
@@ -14,14 +19,13 @@
 
 1. `AGENTS.md`
 2. `docs/PRD.md`
-3. `yshopping-prototype/index.html`
-4. `yshopping-prototype/styles.css`
-5. `yshopping-prototype/app.js`
-6. `yshopping-merchant-ai 4/yshopping-merchant-ai/frontend/src/App.vue`
-7. `yshopping-merchant-ai 4/yshopping-merchant-ai/frontend/src/components/`
-8. `yshopping-merchant-ai 4/yshopping-merchant-ai/frontend/src/api/client.js`
+3. `docs/backend-development-plan.md` §8
+4. `docs/project-progress.md`
+5. 仅在需要追溯既有视觉时读 `yshopping-prototype/index.html`、`styles.css`、`app.js`
+6. 仅在需要追溯既有行为时读 `yshopping-merchant-ai 4/.../frontend/src/`
 
-Prototype 是视觉和交互基准，旧 Vue 项目是业务字段和边界行为参考。新前端必须使用 TypeScript 重写，不直接复制旧 JavaScript 状态管理。
+Prototype 与旧 Vue 项目仅是非规范性参考，用于理解已有交互与可复用模式；范围和验收以 PRD 为准。
+新前端必须使用 TypeScript，不直接复制旧 JavaScript 状态管理。
 
 ---
 
@@ -29,9 +33,9 @@ Prototype 是视觉和交互基准，旧 Vue 项目是业务字段和边界行�
 
 前端交付物必须做到：
 
-- 桌面端 1:1 还原 Prototype 的三栏结构；
+- 商家端保留经验证的三栏信息架构，并按 PRD M1–M13 补齐新能力；
 - 移动端变为对话优先的单列结构；
-- 支持完整聊天、追问、附件、反馈和导出体验；
+- 支持完整聊天、追问、反馈和导出体验；附件不在当前范围；
 - 左右侧栏始终对应当前选中的助手回答；
 - 所有 API 数据都有 TypeScript 类型；
 - 错误、降级、数据来源和质量校验状态清晰可见；
@@ -156,7 +160,9 @@ frontend/
         └── KnowledgeBaseView.vue
 ```
 
-MVP 没有登录页——商家身份来自演示 Token 白名单，切换由顶栏的 `MerchantSwitcher.vue` 完成。P2 接入真实 SSO 时再增加登录视图。
+既有 v1 演示页没有登录页，商家身份来自演示 Token 白名单，切换由顶栏的
+`MerchantSwitcher.vue` 完成。N1 的目标形态改为“演示身份换取商家会话”，后续请求使用
+`X-Session-Id`；同一会话内角色和 `merchant_id` 均不可切换。真实 SSO 仍不在当前范围。
 
 不要一次创建所有空文件。按阶段创建真实需要的文件，并在目录或职责变化时更新 `AGENTS.md`。
 
@@ -195,13 +201,13 @@ Pinia Store → 组件
 
 ```ts
 type AnswerMode =
-  | 'METRIC'      // P0
-  | 'DETAIL'      // P0
-  | 'RULE'        // P0
-  | 'IDENTITY'    // P0
-  | 'CHAT'        // P0
-  | 'INVALID'     // P0
-  | 'ATTACHMENT'  // P1
+  | 'METRIC'
+  | 'DETAIL'
+  | 'RULE'
+  | 'IDENTITY'
+  | 'CHAT'
+  | 'INVALID'
+  | 'ATTACHMENT'  // 仅 v1 兼容；v2 不继承，当前不新增入口
 ```
 
 `INVALID` 只表示"危险请求"或"无法处理"，是正常的 200 回答，要进消息列表并可反馈。**越权不走这个模式**——后端返回 HTTP `403`，前端按权限错误提示，不当作一轮回答。
@@ -265,6 +271,7 @@ interface Recommendation {
 ```ts
 type AnalysisSource =
   | 'DATABASE' | 'KNOWLEDGE' | 'ATTACHMENT' | 'MEMORY' | 'FALLBACK' | 'NONE'
+  // ATTACHMENT 仅为 v1 兼容枚举值；v2 不继承，当前不得产生
 
 interface QualityTrace {
   status: 'PASSED' | 'DEGRADED' | 'FAILED' | 'NOT_RUN'
@@ -320,7 +327,9 @@ type MetricDefinitionSource = 'METRIC_CATALOG' | 'COLUMN_COMMENT' | 'AI_GENERATE
 
 口径接口是 `GET /api/metrics/{code}`，路径参数用 `metricCode` 而非中文名。
 
-**业务口径与 SQL 口径是两个并列字段。** 面向读者不同：业务口径回答"这个数是什么意思"，SQL 口径回答"这个数怎么算出来的"（PRD §6.3 故事 15/16）。前端不得把两者合并成一个"定义"分区。
+**业务口径与受控 SQL 口径是两个并列字段。** 面向读者不同：业务口径回答“这个数是什么意思”，
+受控 SQL 口径回答“这个数怎么算出来的”（PRD M8）。前端不得把两者合并成一个“定义”分区，
+也不得把受控 SQL 口径当作可执行 SQL。
 
 **`source` 是枚举，不是自由文本。** 前端负责把它映射成人类可读标签（`METRIC_CATALOG` → "指标目录"、`COLUMN_COMMENT` → "字段注释"、`AI_GENERATED` → "大模型生成"），并渲染成来源徽标。**不要直接把枚举值原样打印给用户。**
 
@@ -409,7 +418,7 @@ localStorage (`borough.locale`) -> Locale Store -> Vue I18n + document.lang
 - 当前会话 ID；
 - 消息列表；
 - 当前选中轮次；
-- 当前输入和待上传附件；
+- 当前输入；既有附件字段仅作为 v1 兼容数据读取，不提供新上传入口；
 - 加载、取消和重试状态；
 - **SSE 流式状态**：已到达的 `step` 事件列表、当前阶段标签；
 - 会话目录；
@@ -447,7 +456,8 @@ AbortController 负责取消
 - `cancelMessage` 调用 `AbortController.abort()` 中断底层流，不能只在 UI 上隐藏。取消后消息置为可重试状态，并提示"已取消"；
 - 代理或网络中断与用户主动取消要区分展示：前者可重试，后者是用户意图。
 
-不得把 DOM、ECharts 实例或原始 File 对象长期存入 Store。原始 File 保留在上传 composable 中，Store 只保存上传状态和服务端附件 ID。
+不得把 DOM、ECharts 实例或原始 File 对象长期存入 Store。附件能力已移出当前范围；旧代码中的
+附件状态不得被 v2 复用。
 
 建议动作：
 
@@ -459,21 +469,20 @@ retryMessage
 cancelMessage
 selectRound
 applyFeedback
-setPendingAttachment
-removePendingAttachment
 ```
 
 ### 6.2 Auth Store
 
-负责：
+以下是既有 v1 Auth Store 的兼容职责：
 
 - 演示商家列表（来自 `GET /api/demo/merchants`）；
 - 当前选中的演示商家及其 Token；
 - 当前商家展示信息；
-- 管理员权限（P1，独立的管理员令牌）；
+- 管理员权限（独立的管理员令牌）；
 - 切换商家与刷新。
 
-**MVP 没有用户概念**，只有商家。不做登录页、不存密码，身份来自演示 Token 白名单。
+v1 没有用户概念，只有商家；不做登录页、不存密码，身份来自演示 Token 白名单。
+N1 必须新增商家会话交换：Bearer 演示 Token 只用于创建会话，业务请求改带 `X-Session-Id`。
 
 Token 只放在内存与请求头 `Authorization: Bearer <token>`，**不写入 localStorage、URL、日志或前端构建产物**。
 
@@ -492,18 +501,21 @@ sessionStorage: selected_demo_merchant_key   ← 非敏感标识，如 "merchant
 3. Token 从该响应取得，**仍然只进内存**；
 4. 再加载该商家的会话列表与最近会话。
 
-若标识在列表中找不到（演示商家配置变了或接口已关闭），回退到默认商家并提示重新选择。真实认证上线后（P2）重新设计持久化方式。
+若标识在列表中找不到（演示商家配置变了或接口已关闭），回退到默认商家并提示重新选择。
+N1 接入会话后，刷新恢复必须遵循 PRD §7.5 的会话状态机，不得恢复成另一商家或另一角色。
 
 #### 401 的处理
 
-**MVP 没有登录页，401 不能跳转 `/login`。** 正确行为：
+**演示模式没有账号密码登录页，401 不能跳转 `/login`。** 正确行为：
 
 - 清理内存中的失效 Token 和 `sessionStorage` 标识；
 - 打开商家切换器；
 - 提示"演示身份已失效，请重新选择商家"；
 - **保留用户已输入但未发送的内容**，不清空输入框。
 
-切换商家的语义是**更换请求携带的 Token**，商家身份仍由服务端解析决定。前端不得把 `merchant_id` 作为查询参数或请求体字段传给后端——即使传了后端也会忽略。切换后必须清空当前会话与侧栏，避免跨商家串数据。
+v1 切换商家的语义是**更换请求携带的 Token**。N1 后切换商家必须先销毁本地旧会话状态，
+再显式换取新的商家会话；绝不能在同一 `X-Session-Id` 下改角色或 `merchant_id`。前端不得把
+`merchant_id` 作为可信参数传给后端。切换后必须清空当前会话与侧栏，避免跨商家串数据。
 
 #### 管理员 Token（P1）
 
@@ -628,7 +640,9 @@ sessionStorage: selected_demo_merchant_key   ← 非敏感标识，如 "merchant
 
 ### 商家切换器（`MerchantSwitcher.vue`）
 
-Prototype 中不存在此控件，它由演示 Token 方案引入，形态按 **Prototype 现有的 560px 断点**切换。PRD §13.1 是定稿依据。
+Prototype 中不存在此控件，它由既有 v1 演示 Token 方案引入，形态沿用 560px 断点。
+N1 迁移时保留这一选择入口，但选择结果必须通过会话交换端点取得新的 `X-Session-Id`；
+PRD §7.5 的身份不变量是定稿依据。
 
 | 视口 | 位置 | 形态 |
 | --- | --- | --- |
@@ -757,7 +771,8 @@ Mock 的边界：只有传输层是假的。载荷是后端 FakeAgent 的真实�
 - 401 时不会跳转到不存在的 `/login`，且未发送内容仍在输入框；
 - 同一会话追问携带正确会话 ID；
 - 网络中断显示错误并允许重试，**重试复用原 `clientRequestId`**；
-- Adapter 契约测试覆盖 **P0 六种模式全部载荷**：`METRIC`、`DETAIL`、`RULE`、`IDENTITY`、`CHAT`、`INVALID`（`ATTACHMENT` 随 F7 补第七条）；
+- Adapter 契约测试覆盖 v1 当前会产生的六种模式：`METRIC`、`DETAIL`、`RULE`、`IDENTITY`、`CHAT`、
+  `INVALID`；`ATTACHMENT` 只验证兼容解析，不新增生成场景；
 - TypeScript 不使用 `any` 绕过接口问题。
 
 ---
@@ -777,7 +792,8 @@ Mock 的边界：只有传输层是假的。载荷是后端 FakeAgent 的真实�
 - [ ] 有 `reportUrl` 且通过 `^https?://` 校验时，展示"查看关联报表"外链（`target="_blank"` + `rel="noopener noreferrer"`）；
 - [ ] 无口径时显示空状态。
 
-版式与分区顺序对齐参考项目 `frontend/src/components/MetricDefinitionPanel.vue`（R9：参考项目是需求基准）。可选字段一律"有才渲染"，这是参考项目的既有行为，不是降级。
+版式与分区顺序可参考旧项目 `frontend/src/components/MetricDefinitionPanel.vue`，但验收以 PRD M8 为准。
+可选字段一律“有才渲染”；这属于当前契约的空值表现，不代表参考项目具有需求权威。
 
 ### 4.2 Chart
 
@@ -917,9 +933,10 @@ Mock 的边界：只有传输层是假的。载荷是后端 FakeAgent 的真实�
 
 ---
 
-## F7 · 附件与日报（P1）
+## F7 · 日报（历史阶段；附件已延期）
 
-**本阶段属于 P1，在 MVP 上线之后执行。**
+F7 是既有计划编号，不再表示产品优先级。日报能力已实现并保留；附件能力按 PRD §13 延后，
+三个附件端点从当前路径清单移除，未经新的范围决策不得实现。
 
 ### 7.1 Daily Report
 
@@ -929,45 +946,14 @@ Mock 的边界：只有传输层是假的。载荷是后端 FakeAgent 的真实�
 - [x] 商家身份恢复后加载，切换商家时取消旧请求并清空旧日报；加载失败不阻塞主界面；
 - [x] Mock transport 按商家隔离并重放同一份日报契约。
 
-### 7.2 Attachments
+### 7.2 附件处置
 
-- [ ] 文件选择；
-- [ ] 拖拽上传；
-- [ ] 粘贴图片；
-- [ ] 数量、类型和大小前端预检查；
-- [ ] 发送前移除；
-- [ ] 聊天请求只发送服务端附件 ID；
-- [ ] 离开页面前提示未发送附件；
-- [ ] 前端检查只是体验优化，不能替代后端校验。
-
-#### 附件状态机与轮询策略
-
-后端状态枚举（后端 §9 B8）：`UPLOADING → PENDING → PARSING → PARSED`，失败进入 `FAILED`。前端据此实现统一状态机，**不要每个组件各写一套轮询**：
-
-| 项 | 规则 |
-| --- | --- |
-| 轮询间隔 | 初始 1s，指数退避 ×1.5，上限 8s |
-| 总超时 | 120s，超时后标记为"解析超时"并允许重试或移除 |
-| 页面隐藏 | `visibilitychange` 为 hidden 时暂停轮询，恢复时立即拉一次 |
-| 组件卸载 | 必须清理定时器，不允许泄漏 |
-| 轮询方式 | **每个附件独立轮询 `GET /api/attachments/{id}`**，不新增批量接口 |
-| 多附件并发 | 并发数上限 **3**，超出的排队 |
-| 删除解析中的附件 | 先停止该附件轮询，再调用删除；后端返回 409 时提示"正在解析，请稍后" |
-| 上传取消 | `AbortController` 中断上传请求，本地状态回到未上传 |
-
-### 7.3 `ATTACHMENT` 模式渲染
-
-- [ ] 附件分析回答与普通回答共用消息组件；
-- [ ] `analysisSources` 含 `ATTACHMENT` 时展示附件来源徽标；
-- [ ] 附件仍在解析时，回答明确显示"附件尚未解析完成"，不展示编造结论。
+- 既有 `Attachment` 类型、组件或枚举只能作为未启用的 v1 兼容残留，不得连接到新端点；
+- N1 契约迁移不得把 `attachment_ids`、`ATTACHMENT` 模式或附件来源带入 v2；
+- 若未来重新纳入范围，必须先修改 PRD、补齐后端 §8 契约、安全策略和独立验收，再实现 UI。
 
 ### 验收
 
-- 上传非法类型会被拒绝；
-- 上传成功后附件随消息展示；
-- 附件解析失败不影响继续纯文本问答；
-- 轮询在页面隐藏时暂停、组件卸载时清理，无定时器泄漏；
-- 解析超时有明确出口，不无限转圈；
 - 日报建议采纳能成功写入反馈。
 
 ---
@@ -1014,14 +1000,15 @@ KnowledgeBaseView
 
 ---
 
-## F9 · 内部可用版收尾（P1）
+## F9 · 内部可用版收尾（历史阶段）
 
 - [ ] 无障碍增强：读屏完整走查、复杂控件的键盘操作、动效偏好；
-- [ ] 性能：长会话虚拟列表评估与落地、大表渲染优化、图片预览释放 Object URL；
-- [ ] P1 功能的独立 E2E（附件、日报、知识库各一组）；
+- [ ] 性能：长会话虚拟列表评估与落地、大表渲染优化；
+- [ ] 日报与知识库各一组独立 E2E；
 - [ ] 内部可用版整体回归。
 
-**P2 才做**：真实 SSO、登录页 `/login`、令牌刷新、细粒度角色权限。在此之前不要创建 `LoginView.vue`。
+真实 SSO、账号密码登录页 `/login`、令牌刷新不在当前 PRD 范围。N1 的会话交换不是 SSO，
+不得用这一非目标阻塞 `X-Session-Id` 接入。
 
 ---
 
@@ -1046,7 +1033,6 @@ KnowledgeBaseView
 - [ ] 推荐问题的"换一换"在 `alternates` 内本地轮换且不发请求；
 - [ ] Quality Trace 的降级显示与 `analysisSources` 多来源渲染；
 - [ ] Feedback 乐观更新和回滚；
-- [ ] Attachment 状态机（P1）；
 - [ ] 当前轮次切换；
 - [ ] **Adapter 契约测试**：每个 Adapter 用 OpenAPI 示例载荷输入，P0 覆盖 `METRIC` / `DETAIL` / `RULE` / `IDENTITY` / `CHAT` / `INVALID` 六种模式，`IDENTITY` 不可遗漏（它有 `data_rows` 但无 `metric_*`，是最容易漏判的一种）；
 - [ ] **SSE 解析器**：跨分块事件、半个 UTF-8 字符跨块、单块内多个事件、心跳注释行、`done` 之后无残留；
@@ -1060,11 +1046,11 @@ KnowledgeBaseView
 
 **所有 Playwright 测试默认使用 Fake LLM**，通过后端的 Fake Agent 或"真实 Graph + Fake LLM"提供数据。CI 和默认本地运行**都不得连接真实 DeepSeek API**。任何真实模型的人工验收必须事先说明模型、次数和费用并获得同意（`AGENTS.md` R3）。
 
-E2E 按阶段分组，**MVP 出口只跑 P0 组**：
+下列目录名是既有测试分组，`p0` / `p1` 不再表示当前优先级：
 
 ```text
 e2e/p0/   assistant.spec.ts  responsive.spec.ts  isolation.spec.ts
-e2e/p1/   attachments.spec.ts  daily-report.spec.ts  knowledge.spec.ts
+e2e/p1/   daily-report.spec.ts  knowledge.spec.ts
 ```
 
 P0 场景：
@@ -1084,10 +1070,8 @@ P0 场景：
 - [ ] 后端 500 和降级回答；
 - [ ] **真实部署环境下的 SSE 流式**（跨域 + 首字延迟）。
 
-P1 场景：
+既有扩展场景：
 
-- [ ] 上传、移除和发送附件；
-- [ ] 附件解析轮询与超时；
 - [ ] 日报展示与建议采纳；
 - [ ] 知识库权限与版本冲突。
 
@@ -1139,10 +1123,27 @@ npm run test:e2e
 5. 后端提供反馈和会话；
 6. 前端完成恢复和反馈；
 7. **双方各自完成 Railway 部署与 MVP 收口**（后端 B7 / 前端 F6）；
-8. 后端提供附件与日报；
-9. 前端完成附件状态与日报；
+8. 后端提供日报；
+9. 前端完成日报；
 10. 后端提供知识库；
-11. 前端完成知识后台。
+11. 前端完成知识后台；
+12. N1 先冻结 v2 字段契约，再迁移商家身份、聊天、库存、售后、草稿和 MCP 客户端；
+13. N2 另建 Next.js 顾客端计划与工程，不在 Vue 商家端内混建；
+14. N4 新增商家记忆最小面板 `MerchantMemoryView.vue`（PRD M11，D-N4-3，第一个可砍项），顾客记忆页在 `shop/`；
+15. N5 新建只读运维看板 `OpsStatusView.vue`，取代已下线的 `OpsDashboardView.vue`（PRD §14，D-N5-1），不提供写操作入口。
+    W 完成后，它放在侧栏「管理」分组，复用 `AdminGate`。
+16. **W · 商家工作台界面重设计**（PRD M1、§15「W」，2026-09-28 用户裁定，插在 N4 剩余前端任务之前）——**已实施（2026-09-30，Task 0–11）**：
+    - 外壳 `layouts/MerchantShell.vue`：侧栏四个分组（工作区 / 运营 / 运营助手 / 管理，无「对话记录」）、默认收起的助手栏 `AssistantRail`（`Ctrl/⌘ + J`、「问助手」只预填不发送，1100px 以下为抽屉）、偏好设置（主题、字号、语言）、「管理」分组的 `AdminGate` 令牌关卡；
+    - 视觉 token 换为「市集大厅」色板（`assets/tokens.css`，浅色与两份深色），`frontend/src` 与 `shop/src` 旧变量名引用清零，兼容映射已删除（两端各有防回归测试）；
+    - `/` 为首页（今日简报、经营主指标 `metrics/overview`、需要你处理、最近订单），`/today`、`/ops-assistant` 重定向到首页；`TodayView`、`OpsAssistantView` 已删除；
+    - 新增只读订单页 `/orders`（筛选、游标翻页、详情抽屉）与商品页 `/catalog`；库存、审批、售后、顾客信号、商家记忆、知识库迁入外壳并换样式，行为不变。
+
+    验收结果与已知红项见 `docs/project-progress.md`。实施计划见 `plans/2026-09-28-merchant-workbench-redesign.md`，设计说明见 `docs/specs/2026-09-28-merchant-workbench-ui-design.md`。
+17. **WS · 顾客端店面重设计**（PRD C1–C2、§15「WS」）：`shop/` 沿用 W 完成的共享 token，重建智能助手首页、订单视图、购物车侧栏、动态抽屉与偏好设置；商品热门排序、缺失属性、订单摘要及只读订单工具先由后端提供确定性事实。实施计划见 `plans/2026-09-28-shop-storefront-redesign.md`，设计说明见 `docs/specs/2026-09-28-shop-storefront-ui-design.md`。
+18. **N5 · 单入口演示**（PRD M1、C1、§10.7，D-N5-4，2026-10-02 用户裁定；2026-10-04 本地联调确认位置）：商家端侧栏「顾客视角」按钮在新标签页打开
+    `${VITE_SHOP_BASE_URL}/{shop_slug}`（`shop_slug` 来自商家会话响应，经 Adapter → Store；变量缺失时不显示按钮，
+    不传任何凭证）；顾客端首页快捷提问扩为覆盖五个顾客 Skill 与一条规则问答的双语固定文案。实施计划
+    `plans/2026-10-02-n5-single-entry.md`。
 
 Mock 字段与 OpenAPI 不一致时，以 OpenAPI 为准并修 Mock，不要反过来改契约。
 
@@ -1161,8 +1162,8 @@ Mock 字段与 OpenAPI 不一致时，以 OpenAPI 为准并修 Mock，不要反�
 | 409 `REQUEST_IN_PROGRESS` | 提示"正在处理中"，不重复提交 |
 | 409 `IDEMPOTENCY_KEY_REUSED` | 内部错误，说明 ID 复用逻辑有 bug，上报而非提示用户重试 |
 | 410 `EXPORT_LINK_EXPIRED` | 导出链接已过期，提供重新生成入口 |
-| 413 | 文件过大 |
-| 415 | 文件类型不支持 |
+| 413 | 请求体过大；当前不用于附件上传 |
+| 415 | 媒体类型不支持；当前不表示附件能力已启用 |
 | 422 | 输入或协议错误 |
 | 429 `RATE_LIMITED` | 请求过多，提示稍后重试 |
 | 503 `LLM_BUDGET_EXCEEDED` | 明确提示"今日额度已用完"，与普通 5xx 区分 |
@@ -1172,6 +1173,11 @@ Mock 字段与 OpenAPI 不一致时，以 OpenAPI 为准并修 Mock，不要反�
 | 数据为空 | 解释为空，不显示错误图表 |
 
 错误码全集见 `docs/backend-development-plan.md` §14，代码侧出处是 `app.core.errors.ErrorCode`。
+N1 共享错误码已同步运行时白名单与双语文案：会话缺失、失效、角色不匹配与顾客未绑定提示身份问题；
+资源不可访问与商品不在范围内使用不暴露对象存在性的文案；库存不足、草稿过期与护栏拒绝提示调整请求；
+重复绑定、非法状态转换、版本冲突、缺少确认与游标失效分别提示对应原因。
+本次只同步错误处理，不接入 v2 会话或业务操作。运行时白名单通过 `Record<BackendErrorCode, true>`
+检查完整性，并以 OpenAPI 全部错误码回归验证，避免新增业务码被误判为 `HTTP_ERROR`。
 **遇到表中没有的码时按通用错误展示并上报，不要静默吞掉**——静默会让新增的后端错误在前端彻底不可见。
 
 ---
@@ -1181,11 +1187,11 @@ Mock 字段与 OpenAPI 不一致时，以 OpenAPI 为准并修 Mock，不要反�
 - 不在组件中直接拼 API URL；
 - **不在组件中直接消费 `api/generated.ts`，也不在组件里自行做字段转换**——只走 Adapter；
 - **不使用原生 `EventSource`** 消费聊天流；
-- **不创建 `/login` 路由或 `LoginView.vue`**，直到 P2 真实认证；
+- **不为演示会话创建账号密码 `/login` 或 `LoginView.vue`**；
 - **不把 Token 写入 `localStorage`**，只有非敏感商家标识可进 `sessionStorage`；
 - 不使用 `any` 掩盖接口问题；
 - 不让模型返回 HTML 后直接 `v-html`；
-- 不信任附件名称、Markdown 或外部链接；
+- 不信任 Markdown 或外部链接；附件能力未启用；
 - 不允许前端指定可信商家 ID，任何请求都不携带 `merchant_id`；
 - 不把 Token 写入代码、构建产物、日志或 URL；
 - 不用本地假进度冒充真实处理阶段，进度只来自 SSE 的 `step` 事件；
@@ -1218,40 +1224,36 @@ Mock 字段与 OpenAPI 不一致时，以 OpenAPI 为准并修 Mock，不要反�
 
 ## 13. 阶段总览
 
+下表只用于解释既有 Vue 商家端是怎样建成的；它不是当前路线图，也不得与 N1–N5 混用。
+
 | 阶段 | 内容 | 归属 |
 | --- | --- | --- |
-| F0 | 工程骨架 + **OpenAPI 类型生成** | P0 |
-| F1 | 视觉基础与主布局 | P0 |
-| F2 | Mock 会话闭环 | P0 |
-| F3 | API 契约与真实会话接入 | P0 |
-| F4 | 指标、图表、明细和建议 | P0 |
-| F5 | 质量轨迹、反馈与无障碍基础 | P0 |
-| **F6** | **Railway 与 MVP 收口** | **P0 · MVP 完成** |
-| F7 | 附件与日报 | P1 |
-| F8 | 知识库后台 | P1 |
-| F9 | 内部可用版收尾 | P1 |
+| F0 | 工程骨架 + **OpenAPI 类型生成** | 历史基线 |
+| F1 | 视觉基础与主布局 | 历史基线 |
+| F2 | Mock 会话闭环 | 历史基线 |
+| F3 | API 契约与真实会话接入 | 历史基线 |
+| F4 | 指标、图表、明细和建议 | 历史基线 |
+| F5 | 质量轨迹、反馈与无障碍基础 | 历史基线 |
+| F6 | Railway 与 MVP 收口 | 历史基线 |
+| F7 | 日报（附件未实现且已延期） | 历史扩展 |
+| F8 | 知识库后台 | 历史扩展 |
+| F9 | 内部可用版收尾 | 历史扩展 |
 
-**MVP = F0–F6。** 无障碍基础在 F5 就要满足，不整体延后到 P1。真实认证、`/login`、SSO 属于 P2，不在本表内。
+当前工作按 PRD §15 执行：N1 先完成契约与商家端会话迁移；N2 再建设 Next.js 顾客端。
 
 ---
 
-## 14. 建议的首批任务
+## 14. 当前建议的首批任务
 
-coding agent 可以按以下顺序直接开工：
+既有 F0–F9 已不是待办清单。当前 coding agent 应按以下顺序工作：
 
-1. 创建 `frontend/` Vue 3 + TypeScript 工程，`package.json` 的 `name` 设为 `@borough/web`；
-2. 配置 Router（`/` 实页 + `/knowledge-base` 占位，无 `/login`）、Pinia、Vitest 和 Playwright；
-3. **接入后端提交的 OpenAPI Schema，生成 `api/generated.ts`，搭 `api/adapters/` 与首个契约测试**；
-4. 迁移 Prototype Design Tokens，创建 `borough-logo.svg`（不复制旧 Logo）；
-5. 创建 `AssistantView.vue` 三栏布局；
-6. 创建 `MerchantSwitcher.vue`，两种断点形态（形态已定稿，见 F1）；
-7. 创建 Chat Store、Auth Store 和领域类型，消息持有 `clientRequestId`；
-8. 实现 `api/sse.ts` 解析器与阶段标签（可先用 mock 事件流驱动）；
-9. 用基于生成类型构造的 Mock 完成快速问题闭环；
-10. 创建指标口径、图表和建议组件；
-11. 创建明细表和质量轨迹；
-12. 增加桌面及移动端 Playwright 测试。
+1. 在后端计划 §8 补齐 v2 请求、响应、错误、幂等和 SSE 字段；
+2. 生成新 OpenAPI 类型并更新 Adapter 契约测试，禁止手改 `generated.ts`；
+3. 把 v1 Bearer 常驻鉴权迁移为商家会话交换 + `X-Session-Id`；
+4. 按 PRD M1–M13 逐项迁移商家端，优先会话、库存、售后、草稿审批和 MCP；
+5. 补齐 PRD §12 要求的桌面、移动端、跨租户与降级 E2E；
+6. N2 开工前为 Next.js 顾客端建立独立实施计划与工程目录。
 
-第 3 步不能后移。先手写字段再等 OpenAPI，会形成一套本地定义并在接入真实 API 时集中返工。
+第 1 步不能后移。v2 路径已定，但字段契约尚未冻结；先写页面或客户端会固化未经评审的协议。
 
 每完成一个阶段，都应先运行该阶段测试，再进入下一阶段。

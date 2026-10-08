@@ -85,7 +85,7 @@ def test_english_stopwords_are_filtered_out() -> None:
 
 
 def test_english_conjunctions_are_not_treated_as_stopwords() -> None:
-    """"and"/"or" 可能出现在正当的合并问法里（如 "CNN and RNN 的区别"），
+    """ "and"/"or" 可能出现在正当的合并问法里（如 "CNN and RNN 的区别"），
     不能和真正的通用功能词一样被滤掉。"""
 
     tokens = tokenize("What is the difference between CNN and RNN")

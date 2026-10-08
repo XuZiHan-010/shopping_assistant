@@ -21,43 +21,57 @@ export type AppErrorCode = BackendErrorCode | LocalErrorCode
  * 直接判断某个字符串是否属于它。这份列表是它的运行时镜像，用来校验后端实际
  * 返回的 `code` 是否在册。
  *
- * `as const satisfies readonly BackendErrorCode[]` 让每一项都必须能赋值给
- * `BackendErrorCode`——后端删除或重命名某个码时，这里会在 typecheck 阶段报错。
- * 但它**不会**在后端新增码时报错（数组缺项不会被 satisfies 拦下）；真正防止
- * 新码被漏掉展示文案的防线在 `errorCopy.ts` 的 `Record<AppErrorCode, ErrorCopy>`。
+ * `Record<BackendErrorCode, true>` 同时检查缺项和多余项；后端新增、删除或重命名
+ * 错误码时，运行时白名单必须同步，否则 typecheck 报错。另有 OpenAPI 全枚举回归测试。
  */
-const KNOWN_BACKEND_ERROR_CODES = [
-  'AUTH_REQUIRED',
-  'MERCHANT_SCOPE_VIOLATION',
-  'NOT_FOUND',
-  'METHOD_NOT_ALLOWED',
-  'INVALID_REQUEST',
-  'IDEMPOTENCY_KEY_REUSED',
-  'REQUEST_IN_PROGRESS',
-  'DAILY_REPORT_FEEDBACK_CONFLICT',
-  'DATA_SOURCE_UNAVAILABLE',
-  'EXPORT_LINK_EXPIRED',
-  'RATE_LIMITED',
-  'LLM_BUDGET_EXCEEDED',
-  'FORBIDDEN',
-  'HTTP_ERROR',
-  'INTERNAL_ERROR',
-  'INVALID_WIKI_PATH',
-  'WIKI_READ_ONLY',
-  'INVALID_FILE_TYPE',
-  'INVALID_WIKI_PARENT',
-  'WIKI_NODE_EXISTS',
-  'WIKI_NODE_NOT_FOUND',
-  'WIKI_DIRECTORY_NOT_EMPTY',
-  'WIKI_VERSION_REQUIRED',
-  'WIKI_VERSION_CONFLICT',
-  'WIKI_DOCUMENT_TOO_LARGE',
-  'INVALID_WIKI_ENCODING',
-  'INVALID_WIKI_CONTENT',
-  'WIKI_IO_ERROR',
-] as const satisfies readonly BackendErrorCode[]
+const KNOWN_BACKEND_ERROR_CODES = {
+  AUTH_REQUIRED: true,
+  MERCHANT_SCOPE_VIOLATION: true,
+  NOT_FOUND: true,
+  METHOD_NOT_ALLOWED: true,
+  INVALID_REQUEST: true,
+  IDEMPOTENCY_KEY_REUSED: true,
+  REQUEST_IN_PROGRESS: true,
+  DAILY_REPORT_FEEDBACK_CONFLICT: true,
+  DATA_SOURCE_UNAVAILABLE: true,
+  EXPORT_LINK_EXPIRED: true,
+  RATE_LIMITED: true,
+  LLM_BUDGET_EXCEEDED: true,
+  FORBIDDEN: true,
+  HTTP_ERROR: true,
+  INTERNAL_ERROR: true,
+  INVALID_WIKI_PATH: true,
+  WIKI_READ_ONLY: true,
+  INVALID_FILE_TYPE: true,
+  INVALID_WIKI_PARENT: true,
+  WIKI_NODE_EXISTS: true,
+  WIKI_NODE_NOT_FOUND: true,
+  WIKI_DIRECTORY_NOT_EMPTY: true,
+  WIKI_VERSION_REQUIRED: true,
+  WIKI_VERSION_CONFLICT: true,
+  WIKI_DOCUMENT_TOO_LARGE: true,
+  INVALID_WIKI_ENCODING: true,
+  INVALID_WIKI_CONTENT: true,
+  WIKI_IO_ERROR: true,
+  SESSION_REQUIRED: true,
+  SESSION_INVALID: true,
+  SESSION_ROLE_MISMATCH: true,
+  CUSTOMER_BINDING_REQUIRED: true,
+  SESSION_ALREADY_BOUND: true,
+  RESOURCE_FORBIDDEN: true,
+  PRODUCT_NOT_IN_SCOPE: true,
+  INSUFFICIENT_STOCK: true,
+  ILLEGAL_STATE_TRANSITION: true,
+  VERSION_CONFLICT: true,
+  DRAFT_EXPIRED: true,
+  GUARDRAIL_REJECTED: true,
+  CONFIRMATION_REQUIRED: true,
+  INVALID_CURSOR: true,
+} as const satisfies Record<BackendErrorCode, true>
 
-const KNOWN_BACKEND_ERROR_CODE_SET: ReadonlySet<string> = new Set(KNOWN_BACKEND_ERROR_CODES)
+const KNOWN_BACKEND_ERROR_CODE_SET: ReadonlySet<string> = new Set(
+  Object.keys(KNOWN_BACKEND_ERROR_CODES),
+)
 
 export interface AppErrorInit {
   status?: number

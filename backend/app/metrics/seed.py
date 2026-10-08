@@ -35,6 +35,17 @@ METRIC_SEED: Final[tuple[MetricSeedItem, ...]] = (
         "orders",
     ),
     MetricSeedItem(
+        "gross_gmv",
+        "成交总额（毛）",
+        "元",
+        "统计周期内已支付订单金额之和，按支付日计入，不因后续退款追溯改写（O3 退款口径）。"
+        "与商家 v2 归因 Skill 使用的 net_gmv = gross_gmv - refund_amount 配套。",
+        "SUM(orders.paid_amount) WHERE order_status IN ('PAID','SHIPPED','COMPLETED')",
+        ("date", "product", "category"),
+        "public",
+        "orders",
+    ),
+    MetricSeedItem(
         "order_count",
         "订单量",
         "单",

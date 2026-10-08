@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ErrorCode, KnowledgeAdminError
+from app.knowledge.index_versions import mark_corpus_changed
 from app.knowledge.path_policy import (
     BUSINESS_SECTIONS,
     KnowledgePathError,
@@ -35,7 +36,6 @@ from app.schemas.knowledge import (
     ContentLanguage,
     KnowledgeDocumentResponse,
     KnowledgeTreeNode,
-    KnowledgeTreeResponse,
     TranslationStatus,
 )
 from app.schemas.localization import LocalizeItem
@@ -89,9 +89,9 @@ class KnowledgeAdminService:
         self._localization = localization or LocalizationRepository(session)
         self._memory_localizer_factory = memory_localizer_factory
 
-    async def tree(
+    async def tree_roots(
         self, *, content_locale: SupportedLocale | None = None
-    ) -> KnowledgeTreeResponse:
+    ) -> list[KnowledgeTreeNode]:
         """`content_locale` 只本地化节点的 `name`（导航标签），`path`
         （API 用来定位文档/记忆的真实标识符）与 `version` 永远不变——Step 4
         原文"树节点只本地化 name，API path 不变"。只有固定导航标签（"业务"
@@ -103,13 +103,11 @@ class KnowledgeAdminService:
         index_documents = await self._documents.list_paths("index/")
         business_documents = await self._documents.list_paths("业务/")
         memory_rows = await self._list_active_memories()
-        return KnowledgeTreeResponse(
-            roots=[
-                self._index_root(index_documents, content_locale),
-                self._business_root(business_documents, content_locale),
-                self._memory_root(memory_rows, content_locale),
-            ]
-        )
+        return [
+            self._index_root(index_documents, content_locale),
+            self._business_root(business_documents, content_locale),
+            self._memory_root(memory_rows, content_locale),
+        ]
 
     async def get_document(
         self, raw_path: str, *, content_locale: SupportedLocale | None = None
@@ -144,6 +142,7 @@ class KnowledgeAdminService:
             title=name.removesuffix(".md"),
             content=content,
         )
+        await mark_corpus_changed(self._session)
         await self._session.flush()
         return self._source_document_response(resolved, document)
 
@@ -188,6 +187,7 @@ class KnowledgeAdminService:
                 raise KnowledgeAdminError(
                     ErrorCode.WIKI_VERSION_CONFLICT, "文档已被其他维护者更新", 412
                 )
+            await mark_corpus_changed(self._session)
             await self._session.flush()
             return self._source_document_response(resolved, updated)
 
@@ -230,6 +230,7 @@ class KnowledgeAdminService:
             scope=_KNOWLEDGE_DOCUMENT_SCOPE,
             source_hashes=source_hashes,
         )
+        await mark_corpus_changed(self._session)
         await self._session.flush()
 
     async def create_business_domain(self, raw_name: str) -> KnowledgeTreeNode:
@@ -244,6 +245,7 @@ class KnowledgeAdminService:
                 content=f"# {name}／{section}\n\n资料尚未完整，请由管理员补充。",
                 is_complete=False,
             )
+        await mark_corpus_changed(self._session)
         await self._session.flush()
         return await self._domain_node(name)
 
@@ -259,6 +261,7 @@ class KnowledgeAdminService:
         if await self._domain_exists(new_name):
             raise KnowledgeAdminError(ErrorCode.WIKI_NODE_EXISTS, "同名业务域已存在", 409)
         await self._documents.move_prefix(f"业务/{name}/", f"业务/{new_name}/")
+        await mark_corpus_changed(self._session)
         await self._session.flush()
         return await self._domain_node(new_name)
 
@@ -278,6 +281,7 @@ class KnowledgeAdminService:
             )
         for document in documents:
             await self._documents.delete(document)
+        await mark_corpus_changed(self._session)
         await self._session.flush()
 
     async def _domain_node(self, name: str) -> KnowledgeTreeNode:

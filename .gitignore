@@ -48,8 +48,18 @@ Thumbs.db
 .superpowers/
 .worktrees/
 
+# ── 个人求职资料：只留在本地 ──────────────────────────
+interview/
+
+# ── 评测运行的本地副本 ────────────────────────────────
+# 根目录的 n1x-*.json 是评测脚本的落盘副本，归档件在 docs/history/eval/。
+/n1[0-9]-*.json
+# 验收候选的源码快照：体积大且与仓库源码重复，仓库里只保留它的 sha256 清单。
+docs/history/eval/*.zip
+
 # ── 只读参考项目：本地对照用，不进版本库 ──────────────
 # AGENTS.md 多处引用它们做口径与视觉参考，但它们既非 Borough 代码，
 # 也不被构建消费，占仓库一半体积。保留在本地即可。
 yshopping-merchant-ai 4/
 yshopping-prototype/
+vendor/

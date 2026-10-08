@@ -48,6 +48,7 @@ def demo_settings(
         demo_merchants_endpoint_enabled=enabled,
         demo_deployment_mode=demo_deployment_mode,
         export_signing_secret="a-secure-export-signing-secret",
+        buyer_alias_secret="a-secure-buyer-alias-secret",
     )
 
 
@@ -85,9 +86,7 @@ async def test_demo_endpoint_returns_english_display_name_with_accept_language_h
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://testserver"
     ) as client:
-        response = await client.get(
-            "/api/demo/merchants", headers={"Accept-Language": "en-US"}
-        )
+        response = await client.get("/api/demo/merchants", headers={"Accept-Language": "en-US"})
 
     assert response.status_code == 200
     assert response.json()["merchants"] == [
@@ -108,9 +107,7 @@ async def test_demo_endpoint_falls_back_to_chinese_name_when_english_name_is_uns
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://testserver"
     ) as client:
-        response = await client.get(
-            "/api/demo/merchants", headers={"Accept-Language": "en-US"}
-        )
+        response = await client.get("/api/demo/merchants", headers={"Accept-Language": "en-US"})
 
     assert response.status_code == 200
     assert response.json()["merchants"][0]["display_name"] == "Borough商家100"

@@ -10,6 +10,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import MerchantContext
+from app.domain.order_status_mapping import from_legacy_status
 from app.intent.models import CrossBusinessPlanType, DateRange, QueryIntent
 from app.models.analytics import Order, OrderItem, Product, Refund, ReturnRecord, SupportTicket
 from app.repositories.analytics import AnalyticsRepository
@@ -46,6 +47,11 @@ async def _order(session: AsyncSession, merchant_id: UUID) -> None:
             order_no=f"NO-{uuid4().hex[:8]}",
             buyer_key="buyer-1",
             order_status="COMPLETED",
+            payment_status=from_legacy_status("COMPLETED")[0],
+            fulfillment_status=from_legacy_status("COMPLETED")[1],
+            close_reason=from_legacy_status("COMPLETED")[2],
+            after_sale_status="NONE",
+            lifecycle_origin="LEGACY_V1",
             total_amount=Decimal("88.00"),
             paid_amount=Decimal("88.00"),
             placed_at=NOW,
@@ -85,6 +91,11 @@ async def _return_record(
         order_no=f"NO-{uuid4().hex[:8]}",
         buyer_key="buyer",
         order_status="COMPLETED",
+        payment_status=from_legacy_status("COMPLETED")[0],
+        fulfillment_status=from_legacy_status("COMPLETED")[1],
+        close_reason=from_legacy_status("COMPLETED")[2],
+        after_sale_status="NONE",
+        lifecycle_origin="LEGACY_V1",
         total_amount=Decimal("100.00"),
         paid_amount=Decimal("100.00"),
         placed_at=NOW,
@@ -100,6 +111,9 @@ async def _return_record(
         product_id=product.id,
         quantity=quantity,
         item_amount=Decimal("100.00"),
+        unit_price=(Decimal("100.00")),
+        discount_amount=(Decimal("100.00")) * ((quantity) - 1),
+        line_total=(Decimal("100.00")),
     )
     session.add(item)
     await session.flush()
@@ -146,6 +160,11 @@ async def _cross_business_records(
         order_no=order_no,
         buyer_key="cross-business-buyer",
         order_status="COMPLETED",
+        payment_status=from_legacy_status("COMPLETED")[0],
+        fulfillment_status=from_legacy_status("COMPLETED")[1],
+        close_reason=from_legacy_status("COMPLETED")[2],
+        after_sale_status="NONE",
+        lifecycle_origin="LEGACY_V1",
         total_amount=Decimal("100.00"),
         paid_amount=Decimal("88.00"),
         placed_at=NOW,
@@ -162,6 +181,9 @@ async def _cross_business_records(
             product_id=product.id,
             quantity=1,
             item_amount=Decimal("88.00"),
+            unit_price=(Decimal("88.00")),
+            discount_amount=(Decimal("88.00")) * ((1) - 1),
+            line_total=(Decimal("88.00")),
         )
         session.add(item)
         await session.flush()
@@ -447,6 +469,11 @@ async def test_sort_by_metric_desc_puts_the_largest_first(
                 order_no=f"NO-{uuid4().hex[:8]}",
                 buyer_key="buyer",
                 order_status="COMPLETED",
+                payment_status=from_legacy_status("COMPLETED")[0],
+                fulfillment_status=from_legacy_status("COMPLETED")[1],
+                close_reason=from_legacy_status("COMPLETED")[2],
+                after_sale_status="NONE",
+                lifecycle_origin="LEGACY_V1",
                 total_amount=Decimal(amount),
                 paid_amount=Decimal(amount),
                 placed_at=NOW,
@@ -586,6 +613,11 @@ async def test_metric_result_is_truncated_when_group_count_exceeds_the_preview_l
                 order_no=f"NO-{uuid4().hex[:8]}",
                 buyer_key="buyer",
                 order_status="COMPLETED",
+                payment_status=from_legacy_status("COMPLETED")[0],
+                fulfillment_status=from_legacy_status("COMPLETED")[1],
+                close_reason=from_legacy_status("COMPLETED")[2],
+                after_sale_status="NONE",
+                lifecycle_origin="LEGACY_V1",
                 total_amount=Decimal("10.00"),
                 paid_amount=Decimal("10.00"),
                 placed_at=NOW,

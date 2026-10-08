@@ -1,0 +1,85 @@
+# 商家订单只读面（W 阶段 Task 3，PRD M1，契约 §8.12.4）。
+#
+# `GET /api/v2/merchant/orders`（列表）与 `GET /api/v2/merchant/orders/{order_id}`（详情）。
+# 登记 §8.12.4「安全集」要求的四类用例：未认证、顾客会话越权、跨商家详情越权（写审计）、
+# 列表伪造他店游标。跨商家用例复用 `trade.seed_foreign_order`（已用于顾客订单 N2 用例）
+# 造一笔属于别家店的真实 v2 订单，验证不存在与不属于当前商家对外同一个
+# 403 RESOURCE_FORBIDDEN。游标用例用新增原语 `orders.mint_merchant_orders_cursor` 现算一枚
+# 绑定 `payment_status=PAID` 的真实签名游标，再用 `payment_status=PENDING` 重放，验证游标
+# 绑定筛选条件生效（换筛选后旧游标必须失效，不能只换 limit 之类无关参数）。
+
+- id: SEC-W3-001
+  introduced_in: N3
+  role: MERCHANT
+  skill: orders
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: anonymous
+      request: {method: GET, path: /api/v2/merchant/orders}
+  assertions:
+    - {type: http_status, expected: 401}
+    - {type: error_code, expected: SESSION_REQUIRED}
+
+- id: SEC-W3-002
+  introduced_in: N3
+  role: CUSTOMER
+  skill: orders
+  risk: SECURITY
+  locale: en-US
+  form: ENDPOINT
+  turns:
+    - actor: customer_a
+      request: {method: GET, path: /api/v2/merchant/orders}
+  assertions:
+    - {type: http_status, expected: 403}
+    - {type: error_code, expected: SESSION_ROLE_MISMATCH}
+    - {type: audit_written, event_type: SESSION_ROLE_MISMATCH}
+
+- id: SEC-W3-003
+  introduced_in: N3
+  role: MERCHANT
+  skill: orders
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  # 别家店的真实 v2 订单：详情与不存在同一个 403，并写审计。
+  turns:
+    - actor: merchant_a
+      primitive:
+        name: trade.seed_foreign_order
+        args:
+          other_merchant_id: "00000000-0000-0000-0000-0000000001a2"
+          other_buyer_key: eval-w3-buyer
+    - actor: merchant_a
+      request:
+        method: GET
+        path: /api/v2/merchant/orders/{state:foreign_order_id}
+  assertions:
+    - {type: http_status, expected: 403}
+    - {type: error_code, expected: RESOURCE_FORBIDDEN}
+    - {type: audit_written, event_type: RESOURCE_SCOPE_VIOLATION}
+
+- id: SEC-W3-004
+  introduced_in: N3
+  role: MERCHANT
+  skill: orders
+  risk: SECURITY
+  locale: en-US
+  form: ENDPOINT
+  # 签发一枚绑定 payment_status=PAID 的真实游标，换一种筛选重放：422 INVALID_CURSOR。
+  turns:
+    - actor: merchant_a
+      primitive:
+        name: orders.mint_merchant_orders_cursor
+        args:
+          payment_status: PAID
+    - actor: merchant_a
+      request:
+        method: GET
+        path: /api/v2/merchant/orders
+        query: {limit: "1", payment_status: PENDING, cursor: "{state:merchant_orders_cursor}"}
+  assertions:
+    - {type: http_status, expected: 422}
+    - {type: error_code, expected: INVALID_CURSOR}

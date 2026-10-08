@@ -32,6 +32,14 @@ FIELD_COMMENT_DEFINITIONS: Final[dict[str, FieldCommentDefinition]] = {
         "public",
         "orders",
     ),
+    "gross_gmv": FieldCommentDefinition(
+        "gross_gmv",
+        "已支付订单的实付金额，按支付日计入，不因后续退款追溯改写（O3 退款口径）。",
+        "SUM(orders.paid_amount) WHERE orders.order_status IN ('PAID','SHIPPED','COMPLETED')",
+        ("date", "product", "category"),
+        "public",
+        "orders",
+    ),
     "order_count": FieldCommentDefinition(
         "order_count",
         "订单主键数量。",

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -58,6 +58,21 @@ class ErrorCode(StrEnum):
     INVALID_WIKI_ENCODING = "INVALID_WIKI_ENCODING"
     INVALID_WIKI_CONTENT = "INVALID_WIKI_CONTENT"
     WIKI_IO_ERROR = "WIKI_IO_ERROR"
+
+    SESSION_REQUIRED = "SESSION_REQUIRED"
+    SESSION_INVALID = "SESSION_INVALID"
+    SESSION_ROLE_MISMATCH = "SESSION_ROLE_MISMATCH"
+    CUSTOMER_BINDING_REQUIRED = "CUSTOMER_BINDING_REQUIRED"
+    SESSION_ALREADY_BOUND = "SESSION_ALREADY_BOUND"
+    RESOURCE_FORBIDDEN = "RESOURCE_FORBIDDEN"
+    PRODUCT_NOT_IN_SCOPE = "PRODUCT_NOT_IN_SCOPE"
+    INSUFFICIENT_STOCK = "INSUFFICIENT_STOCK"
+    ILLEGAL_STATE_TRANSITION = "ILLEGAL_STATE_TRANSITION"
+    VERSION_CONFLICT = "VERSION_CONFLICT"
+    DRAFT_EXPIRED = "DRAFT_EXPIRED"
+    GUARDRAIL_REJECTED = "GUARDRAIL_REJECTED"
+    CONFIRMATION_REQUIRED = "CONFIRMATION_REQUIRED"
+    INVALID_CURSOR = "INVALID_CURSOR"
 
 
 class ErrorResponse(BaseModel):
@@ -210,11 +225,14 @@ class DailyReportFeedbackConflictError(AppError):
 class InvalidRequestError(AppError):
     """请求在语法正确后仍违反受控业务边界。"""
 
-    def __init__(self, message: str = "请求参数不合法") -> None:
+    def __init__(
+        self, message: str = "请求参数不合法", *, details: list[dict[str, Any]] | None = None
+    ) -> None:
         super().__init__(
             code=ErrorCode.INVALID_REQUEST,
             message=message,
             status_code=422,
+            details=details,
         )
 
 
@@ -274,6 +292,177 @@ class AdminTokenRequiredError(AppError):
 class AdminForbiddenError(AppError):
     def __init__(self) -> None:
         super().__init__(code=ErrorCode.FORBIDDEN, message="无管理员权限", status_code=403)
+
+
+class SessionRequiredError(AppError):
+    """请求缺少 `X-Session-Id`。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            code=ErrorCode.SESSION_REQUIRED,
+            message="请提供有效的会话凭证",
+            status_code=401,
+        )
+
+
+class SessionInvalidError(AppError):
+    """会话不存在、已过期、已注销或已被撤销——三种情况对外不可区分。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            code=ErrorCode.SESSION_INVALID,
+            message="会话已失效，请重新建立会话",
+            status_code=401,
+        )
+
+
+class SessionRoleMismatchError(AppError):
+    """会话角色与端点要求的角色不符，须写审计（D8③）。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            code=ErrorCode.SESSION_ROLE_MISMATCH,
+            message="当前会话无权执行此操作",
+            status_code=403,
+        )
+
+
+class CustomerBindingRequiredError(AppError):
+    """访客会话调用了要求已绑定顾客身份的端点。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            code=ErrorCode.CUSTOMER_BINDING_REQUIRED,
+            message="请先绑定演示顾客身份",
+            status_code=403,
+        )
+
+
+class SessionAlreadyBoundConflictError(AppError):
+    """已绑定顾客会话尝试改绑另一身份（D7⑥）。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            code=ErrorCode.SESSION_ALREADY_BOUND,
+            message="当前会话已绑定身份，无法切换",
+            status_code=409,
+        )
+
+
+class ResourceForbiddenError(AppError):
+    """目标不存在与目标不属于当前主体统一走这一个码（R5、O1）。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            code=ErrorCode.RESOURCE_FORBIDDEN,
+            message="无权访问该资源",
+            status_code=403,
+        )
+
+
+class ProductNotInScopeError(AppError):
+    """商品不属于本店、不可售或未通过来源闸门（契约 §8.10.2 不变量 4）。
+
+    与 `ResourceForbiddenError` 同一原则：不存在、非本店、已下架对外逐字段一致。
+    下单时 `details` 为 `UnavailableItemDetail[]`，加购时为空。
+    """
+
+    def __init__(self, *, details: list[dict[str, Any]] | None = None) -> None:
+        super().__init__(
+            code=ErrorCode.PRODUCT_NOT_IN_SCOPE,
+            message="当前操作不可使用该商品",
+            status_code=403,
+            details=details,
+        )
+
+
+class InsufficientStockError(AppError):
+    """可售量不足（PRD §7.4 不变量 1）；`details` 只给档位，不给数量。"""
+
+    def __init__(self, *, details: list[dict[str, Any]] | None = None) -> None:
+        super().__init__(
+            code=ErrorCode.INSUFFICIENT_STOCK,
+            message="可售库存不足，请调整数量",
+            status_code=409,
+            details=details,
+        )
+
+
+class IllegalStateTransitionError(AppError):
+    """当前状态不允许该迁移（PRD §7.1 不变量 2、§7.3 不变量 1）。"""
+
+    def __init__(self, *, details: list[dict[str, Any]] | None = None) -> None:
+        super().__init__(
+            code=ErrorCode.ILLEGAL_STATE_TRANSITION,
+            message="当前状态不允许此操作",
+            status_code=409,
+            details=details,
+        )
+
+
+class VersionConflictError(AppError):
+    """草案版本或目标对象版本不匹配。
+
+    `retryable=False`：盲重试同一请求不会成功，客户端必须重取详情、重新确认后再发
+    （契约 §8.7.2、§8.7.4 第 5 条）。
+    """
+
+    def __init__(self, *, scope: Literal["DRAFT", "TARGET"]) -> None:
+        super().__init__(
+            code=ErrorCode.VERSION_CONFLICT,
+            message="内容已更新，请刷新后重新确认",
+            status_code=409,
+            details=[{"scope": scope}],
+        )
+
+
+class DraftExpiredError(AppError):
+    """草稿超过有效期；过期由业务路径自检，不依赖清理任务是否已跑。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            code=ErrorCode.DRAFT_EXPIRED,
+            message="草稿已过期，请重新起草",
+            status_code=409,
+        )
+
+
+class GuardrailRejectedError(AppError):
+    """业务护栏未通过；`details` 是未通过的护栏结果，供界面显示限制与修正方法。"""
+
+    def __init__(self, *, details: list[dict[str, Any]] | None = None) -> None:
+        super().__init__(
+            code=ErrorCode.GUARDRAIL_REJECTED,
+            message="此操作未通过业务护栏检查，请调整方案",
+            status_code=422,
+            details=details,
+        )
+
+
+class ConfirmationRequiredError(AppError):
+    """界面操作证据缺失、无效、过期或已消费。
+
+    五类失败对外共用这一个构造（§8.7.9）：`details` 恒为空，不披露具体原因；
+    原因枚举只写内部安全审计。
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            code=ErrorCode.CONFIRMATION_REQUIRED,
+            message="请在操作界面重新确认",
+            status_code=422,
+        )
+
+
+class InvalidCursorError(AppError):
+    """游标不可解析、已失效或与当前主体/资源不匹配（§8.7.4）。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            code=ErrorCode.INVALID_CURSOR,
+            message="分页凭证不可用，请从首页重新加载",
+            status_code=422,
+        )
 
 
 class KnowledgeAdminError(AppError):

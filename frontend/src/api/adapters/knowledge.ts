@@ -13,6 +13,24 @@ export type TranslationStatus =
   components['schemas']['KnowledgeDocumentResponse']['translation_status']
 
 type RawKnowledgeDocument = components['schemas']['KnowledgeDocumentResponse']
+type RawKnowledgeIndexStatus = components['schemas']['KnowledgeIndexStatus']
+
+/** 知识索引状态（契约 §8.6.7）；取值从 `generated.ts` 派生，不重复手写。 */
+export interface KnowledgeIndexStatus {
+  retrievalMode: RawKnowledgeIndexStatus['retrieval_mode']
+  activeVersion: number | null
+  embeddingModel: string | null
+  configuredModel: string | null
+  stale: boolean
+  staleReason: RawKnowledgeIndexStatus['stale_reason']
+  building: boolean
+  lastFailureReason: RawKnowledgeIndexStatus['last_failure_reason']
+}
+
+export interface KnowledgeTreeSnapshot {
+  roots: KnowledgeTreeNode[]
+  indexStatus: KnowledgeIndexStatus
+}
 
 export interface KnowledgeTreeNode {
   name: string
@@ -43,6 +61,28 @@ export function toKnowledgeTree(
   response: components['schemas']['KnowledgeTreeResponse'],
 ): KnowledgeTreeNode[] {
   return response.roots.map(toKnowledgeTreeNode)
+}
+
+export function toKnowledgeIndexStatus(raw: RawKnowledgeIndexStatus): KnowledgeIndexStatus {
+  return {
+    retrievalMode: raw.retrieval_mode,
+    activeVersion: raw.active_version ?? null,
+    embeddingModel: raw.embedding_model ?? null,
+    configuredModel: raw.configured_model ?? null,
+    stale: raw.stale,
+    staleReason: raw.stale_reason ?? null,
+    building: raw.building,
+    lastFailureReason: raw.last_failure_reason ?? null,
+  }
+}
+
+export function toKnowledgeTreeSnapshot(
+  response: components['schemas']['KnowledgeTreeResponse'],
+): KnowledgeTreeSnapshot {
+  return {
+    roots: toKnowledgeTree(response),
+    indexStatus: toKnowledgeIndexStatus(response.index_status),
+  }
 }
 
 export function toKnowledgeDocument(raw: RawKnowledgeDocument): KnowledgeDocument {

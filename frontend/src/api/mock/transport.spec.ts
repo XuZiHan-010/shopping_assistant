@@ -177,6 +177,24 @@ describe('createMockTransport', () => {
     expect(await response.text()).toContain('order_no')
   })
 
+  it('Chat BI 总览与分类缺少统计窗口时与后端一样返回 422', async () => {
+    // 后端的 start_date / end_date 是必填 query。Mock 若放过缺参请求，
+    // 漏传窗口的调用方在测试里全绿、接上真实后端才 422。
+    const adminTransport = createMockTransport()
+    setCredentialProvider(() => ({ adminToken: 'mock-admin-token' }))
+
+    for (const path of [
+      '/api/admin/analytics/chatbi/overview',
+      '/api/admin/analytics/chatbi/categories?start_date=2026-08-17',
+    ]) {
+      const response = await adminTransport(
+        { path, method: 'GET', auth: 'admin' },
+        new AbortController().signal,
+      )
+      expect(response.status).toBe(422)
+    }
+  })
+
   it('管理员可在 Mock 中读取 Chat BI 总览、分类并重刷汇总', async () => {
     const adminTransport = createMockTransport()
     setCredentialProvider(() => ({ adminToken: 'mock-admin-token' }))

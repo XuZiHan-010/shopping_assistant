@@ -46,8 +46,11 @@ const identity = identityProfile as RawChatResponse
  */
 function toEnglishRaw(raw: RawChatResponse): RawChatResponse {
   const en = (value: string) => `EN: ${value}`
-  const enOrNull = (value: string | null | undefined) =>
-    value == null ? value : en(value)
+  function enOrNull(value: string | null): string | null
+  function enOrNull(value: string | null | undefined): string | null | undefined
+  function enOrNull(value: string | null | undefined): string | null | undefined {
+    return value == null ? value : en(value)
+  }
 
   return {
     ...raw,

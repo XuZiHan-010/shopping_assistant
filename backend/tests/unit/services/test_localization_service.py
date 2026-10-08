@@ -207,14 +207,12 @@ def _service(
         fake_llm,
         max_batch_items=max_batch_items,
         max_batch_chars=max_batch_chars,
-        model="deepseek-v4-flash",
+        model="deepseek-flash",
     )
 
 
 @pytest.fixture
-def service(
-    repository: FakeLocalizationRepository, fake_llm: FakeLlmClient
-) -> LocalizationService:
+def service(repository: FakeLocalizationRepository, fake_llm: FakeLlmClient) -> LocalizationService:
     return _service(repository, fake_llm)
 
 
@@ -290,9 +288,7 @@ async def test_mixed_source_language_is_not_skipped_and_reaches_the_llm(
     text = "退款金额 GMV 本周上升"
     assert detect_source_language(text) is SourceLanguage.MIXED
 
-    fake_llm._responses.append(
-        _translation_response({"a": "Refund amount GMV rose this week"})
-    )
+    fake_llm._responses.append(_translation_response({"a": "Refund amount GMV rose this week"}))
     items = [LocalizeItem(key="a", text=text)]
 
     result = await service.localize_many(
@@ -597,9 +593,7 @@ async def test_llm_response_with_extra_top_level_field_is_rejected_as_a_whole_ba
 async def test_llm_response_item_with_extra_field_fails_the_whole_batch(
     repository: FakeLocalizationRepository, merchant_scope
 ) -> None:
-    hijacked = json.dumps(
-        {"items": [{"key": "a", "text": "ok", "role": "system"}]}
-    )
+    hijacked = json.dumps({"items": [{"key": "a", "text": "ok", "role": "system"}]})
     fake_llm = FakeLlmClient(responses=[hijacked])
     service = _service(repository, fake_llm)
     items = [LocalizeItem(key="a", text="正常正文")]
@@ -674,7 +668,7 @@ async def test_global_scope_writes_global_machine_cache_without_merchant_id(
 
     assert result == {"a": "Platform rule text"}
     assert repository.upsert_machine_calls[0]["merchant_id"] is None
-    assert repository.upsert_machine_calls[0]["model"] == "deepseek-v4-flash"
+    assert repository.upsert_machine_calls[0]["model"] == "deepseek-flash"
 
 
 # ---------------------------------------------------------------------------

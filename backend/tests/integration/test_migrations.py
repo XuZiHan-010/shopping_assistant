@@ -9,14 +9,25 @@ from uuid import uuid4
 import pytest
 import sqlalchemy as sa
 from alembic import command
+from alembic.script import ScriptDirectory
 from pytest import MonkeyPatch
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import IntegrityError
 
 from app.core.config import Settings
+from tests.integration._db_asserts import (
+    CHECK_VIOLATION,
+    UNIQUE_VIOLATION,
+    assert_sqlstate,
+)
 from tests.postgres import DEFAULT_TEST_DATABASE_URL, alembic_config, assert_test_database
 
 DATABASE_URL = os.environ.get("TEST_DATABASE_URL", DEFAULT_TEST_DATABASE_URL)
+
+
+def test_alembic_has_single_head() -> None:
+    script = ScriptDirectory.from_config(alembic_config(DEFAULT_TEST_DATABASE_URL))
+    assert len(script.get_heads()) == 1, script.get_heads()
 
 
 def test_migration_settings_honors_test_database_url(monkeypatch: MonkeyPatch) -> None:
@@ -90,6 +101,21 @@ def test_first_migration_upgrades_empty_postgres_and_can_repeat(
         "refunds",
         "returns",
         "support_tickets",
+        "inventory_events",
+        "fulfillment_events",
+        "after_sale_events",
+        "drafts",
+        "change_ledger",
+        "coupons",
+        "guardrail_configs",
+        "customer_memories",
+        "merchant_memory_facts",
+        "merchant_memory_summaries",
+        "customer_signals",
+        "daily_briefs",
+        "after_sales",
+        "after_sale_lines",
+        "idempotency_records",
         "machine_translation_cache",
         "resource_localizations",
         "alembic_version",
@@ -139,7 +165,7 @@ def test_llm_usage_observability_migration_backfills_and_enforces_reservation(
                     {
                         **record,
                         "usage_date": date(2026, 8, 18),
-                        "model": "deepseek-v4-flash",
+                        "model": "deepseek-flash",
                     }
                     for record in records
                 ],
@@ -179,7 +205,7 @@ def test_llm_usage_observability_migration_backfills_and_enforces_reservation(
             },
         ]
 
-        with pytest.raises(IntegrityError), engine.begin() as connection:
+        with pytest.raises(IntegrityError) as error, engine.begin() as connection:
             connection.execute(
                 text(
                     "INSERT INTO llm_usage "
@@ -190,11 +216,12 @@ def test_llm_usage_observability_migration_backfills_and_enforces_reservation(
                     "id": uuid4(),
                     "request_id": "negative-reservation",
                     "usage_date": date(2026, 8, 18),
-                    "model": "deepseek-v4-flash",
+                    "model": "deepseek-flash",
                     "status": "FAILED",
                     "reserved_tokens": -1,
                 },
             )
+        assert_sqlstate(error, CHECK_VIOLATION, "ck_llm_usage_reserved_tokens_nonnegative")
     finally:
         command.upgrade(config, "head")
         engine.dispose()
@@ -423,10 +450,11 @@ def test_machine_translation_cache_check_rejects_merchant_scope_without_merchant
 ) -> None:
     engine = create_engine(migrated_postgres)
     try:
-        with pytest.raises(IntegrityError), engine.begin() as connection:
+        with pytest.raises(IntegrityError) as error, engine.begin() as connection:
             _insert_machine_translation_cache_row(
                 connection, scope_kind="MERCHANT", merchant_id=None, source_hash="s" * 64
             )
+        assert_sqlstate(error, CHECK_VIOLATION, "ck_machine_translation_cache_scope_merchant")
     finally:
         engine.dispose()
 
@@ -436,13 +464,14 @@ def test_machine_translation_cache_check_rejects_global_scope_with_merchant_id(
 ) -> None:
     engine = create_engine(migrated_postgres)
     try:
-        with pytest.raises(IntegrityError), engine.begin() as connection:
+        with pytest.raises(IntegrityError) as error, engine.begin() as connection:
             _insert_machine_translation_cache_row(
                 connection,
                 scope_kind="GLOBAL",
                 merchant_id=merchant_one_id_for_migration_test,
                 source_hash="t" * 64,
             )
+        assert_sqlstate(error, CHECK_VIOLATION, "ck_machine_translation_cache_scope_merchant")
     finally:
         engine.dispose()
 
@@ -506,10 +535,11 @@ def test_machine_translation_cache_unique_index_isolates_by_merchant(
                 connection, scope_kind="MERCHANT", merchant_id=merchant_b, source_hash="u" * 64
             )
 
-        with pytest.raises(IntegrityError), engine.begin() as connection:
+        with pytest.raises(IntegrityError) as error, engine.begin() as connection:
             _insert_machine_translation_cache_row(
                 connection, scope_kind="MERCHANT", merchant_id=merchant_a, source_hash="u" * 64
             )
+        assert_sqlstate(error, UNIQUE_VIOLATION, "uq_machine_translation_cache_merchant")
     finally:
         with engine.begin() as connection:
             connection.execute(text("DELETE FROM machine_translation_cache"))
@@ -548,7 +578,7 @@ def test_resource_localizations_unique_index_does_not_dedupe_by_source_hash(
                     {"id": uuid4(), "resource_id": resource_id, "source_hash": same_source_hash},
                 )
 
-        with pytest.raises(IntegrityError), engine.begin() as connection:
+        with pytest.raises(IntegrityError) as error, engine.begin() as connection:
             connection.execute(
                 text(
                     "INSERT INTO resource_localizations "
@@ -559,6 +589,7 @@ def test_resource_localizations_unique_index_does_not_dedupe_by_source_hash(
                 ),
                 {"id": uuid4(), "resource_id": resource_a, "source_hash": same_source_hash},
             )
+        assert_sqlstate(error, UNIQUE_VIOLATION, "uq_resource_localizations_global")
     finally:
         with engine.begin() as connection:
             connection.execute(text("DELETE FROM resource_localizations"))

@@ -41,6 +41,9 @@ _TABLES: Mapping[str, type[Any]] = {
     "support_tickets": SupportTicket,
 }
 
+# 同步 CSV 在数据库层最多取上限加一行；第 1001 行只用于判定拒绝。
+MAX_EXPORT_ROWS = 1000
+
 
 @dataclass(frozen=True)
 class ResultColumn:
@@ -95,7 +98,8 @@ def _metric_expression(metric: MetricSpec, *, via_order_items: bool = False) -> 
     不为了统一实现而牺牲已经验证过的默认路径。
     """
 
-    if metric.code == "gmv":
+    if metric.code in ("gmv", "gross_gmv"):
+        # gross_gmv 与 gmv 计算口径相同（按支付日、已支付状态求和），只是 O3 裁定的正式命名。
         amount_column = OrderItem.item_amount if via_order_items else Order.paid_amount
         return func.sum(amount_column).filter(
             Order.order_status.in_(("PAID", "SHIPPED", "COMPLETED"))
@@ -760,15 +764,33 @@ class AnalyticsRepository:
             if dimension.table == spec.table:
                 conditions.append(getattr(table, dimension.column) == value)
         result = await self._session.execute(
-            select(*columns).where(*conditions).order_by(table.business_date.desc(), table.id)
+            select(*columns)
+            .where(*conditions)
+            .order_by(table.business_date.desc(), table.id)
+            .limit(MAX_EXPORT_ROWS + 1)
         )
         rows = [dict(row) for row in result.mappings()]
+        over_limit = len(rows) > MAX_EXPORT_ROWS
         return DetailResult(
             columns=tuple(ResultColumn(name, label, "DIMENSION") for name, label in spec.columns),
-            rows=rows,
+            rows=rows[:MAX_EXPORT_ROWS],
             total_rows=len(rows),
-            truncated=False,
+            truncated=over_limit,
             source_tables=(spec.table,),
+        )
+
+    async def count_export_detail(
+        self, *, merchant_id: UUID, spec: DetailSpec, start: date, end: date
+    ) -> int:
+        """签发链接前只数本商家受控表的行，不把明细取入工具或模型。"""
+
+        table = _TABLES[spec.table]
+        conditions = [table.merchant_id == merchant_id]
+        if spec.date_filtered:
+            conditions.extend((table.business_date >= start, table.business_date <= end))
+        return int(
+            await self._session.scalar(select(func.count()).select_from(table).where(*conditions))
+            or 0
         )
 
     async def _aggregate_ratio(
@@ -877,10 +899,28 @@ class AnalyticsRepository:
     ) -> Select[Any]:
         """按需连接维度表。连接路径写死在代码里，不由入参决定。"""
 
-        if _needs_products_join(specs, filters) and metric.table in {"orders", "order_items"}:
+        if _needs_products_join(specs, filters) and metric.table in {
+            "orders",
+            "order_items",
+            "refunds",
+        }:
             if metric.table == "orders":
-                statement = statement.join(OrderItem, OrderItem.order_id == Order.id)
-            statement = statement.join(Product, Product.id == OrderItem.product_id)
+                statement = statement.join(
+                    OrderItem,
+                    (OrderItem.order_id == Order.id)
+                    & (OrderItem.merchant_id == Order.merchant_id),
+                )
+            elif metric.table == "refunds":
+                statement = statement.join(
+                    OrderItem,
+                    (OrderItem.id == Refund.order_item_id)
+                    & (OrderItem.merchant_id == Refund.merchant_id),
+                )
+            statement = statement.join(
+                Product,
+                (Product.id == OrderItem.product_id)
+                & (Product.merchant_id == OrderItem.merchant_id),
+            )
         return statement
 
     def _apply_filters(

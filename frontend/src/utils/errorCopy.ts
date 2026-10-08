@@ -28,7 +28,7 @@ export interface ErrorCopy {
 type Behavior = Pick<ErrorCopy, 'surface' | 'action'>
 
 const BEHAVIOR: Record<AppErrorCode, Behavior> = {
-  // —— 后端 ErrorCode（28 项） ——
+  // —— 后端 ErrorCode（v1 + v2） ——
   AUTH_REQUIRED: { surface: 'global', action: 'reselect-merchant' },
   MERCHANT_SCOPE_VIOLATION: { surface: 'global', action: 'reselect-merchant' },
   NOT_FOUND: { surface: 'message', action: 'none' },
@@ -57,6 +57,20 @@ const BEHAVIOR: Record<AppErrorCode, Behavior> = {
   INVALID_WIKI_ENCODING: { surface: 'message', action: 'none' },
   INVALID_WIKI_CONTENT: { surface: 'message', action: 'none' },
   WIKI_IO_ERROR: { surface: 'message', action: 'retry' },
+  SESSION_REQUIRED: { surface: 'global', action: 'none' },
+  SESSION_INVALID: { surface: 'global', action: 'none' },
+  SESSION_ROLE_MISMATCH: { surface: 'global', action: 'none' },
+  CUSTOMER_BINDING_REQUIRED: { surface: 'global', action: 'none' },
+  SESSION_ALREADY_BOUND: { surface: 'message', action: 'none' },
+  RESOURCE_FORBIDDEN: { surface: 'message', action: 'none' },
+  PRODUCT_NOT_IN_SCOPE: { surface: 'message', action: 'none' },
+  INSUFFICIENT_STOCK: { surface: 'message', action: 'reask' },
+  ILLEGAL_STATE_TRANSITION: { surface: 'message', action: 'none' },
+  VERSION_CONFLICT: { surface: 'message', action: 'none' },
+  DRAFT_EXPIRED: { surface: 'message', action: 'reask' },
+  GUARDRAIL_REJECTED: { surface: 'message', action: 'reask' },
+  CONFIRMATION_REQUIRED: { surface: 'message', action: 'none' },
+  INVALID_CURSOR: { surface: 'message', action: 'none' },
 
   // —— 前端本地错误码（5 项） ——
   CONFIG: { surface: 'global', action: 'none' },

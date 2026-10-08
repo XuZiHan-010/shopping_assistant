@@ -1,0 +1,89 @@
+# N3 阶段 C Task 0：库存运营与每日简报 Skill 的触发用例。
+
+- id: inventory-operations-hit1
+  introduced_in: N3
+  role: MERCHANT
+  skill: inventory-operations
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: skill_trigger
+  turns:
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/merchant/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json: {message: 今天有什么需要处理的, client_request_id: skill-inv-hit1}
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: tool_calls_include
+      expected: load_skill:inventory-operations
+
+- id: inventory-operations-hit2
+  introduced_in: N3
+  role: MERCHANT
+  skill: inventory-operations
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: skill_trigger
+  turns:
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/merchant/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json: {message: 帮这个商品补货 60 件, client_request_id: skill-inv-hit2}
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: tool_calls_include
+      expected: load_skill:inventory-operations
+
+- id: inventory-operations-miss1
+  introduced_in: N3
+  role: MERCHANT
+  skill: inventory-operations
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: skill_trigger
+  turns:
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/merchant/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json: {message: 净成交额怎么计算的, client_request_id: skill-inv-miss1}
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: tool_calls_exclude
+      expected: load_skill:inventory-operations
+
+- id: inventory-operations-boundary1
+  introduced_in: N3
+  role: MERCHANT
+  skill: inventory-operations
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: skill_trigger
+  turns:
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/merchant/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json: {message: 这个商品这个月卖得怎么样, client_request_id: skill-inv-boundary1}
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: tool_calls_exclude
+      expected: load_skill:inventory-operations

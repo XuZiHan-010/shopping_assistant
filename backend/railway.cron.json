@@ -5,8 +5,8 @@
     "dockerfilePath": "Dockerfile"
   },
   "deploy": {
-    "startCommand": "python -m app.jobs.seed_demo_rolling",
-    "cronSchedule": "10 16 * * *",
+    "startCommand": "python -m app.jobs.run_scheduled",
+    "cronSchedule": "*/5 * * * *",
     "restartPolicyType": "NEVER"
   }
 }

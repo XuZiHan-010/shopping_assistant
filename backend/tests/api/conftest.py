@@ -7,14 +7,13 @@ from collections.abc import AsyncIterator
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
 
 from app.core.config import AppEnvironment, Settings
 from app.db.session import Database
 from app.main import create_app
 from app.repositories.knowledge_admin import KnowledgeAdminRepository
 from app.services.knowledge_admin_service import KnowledgeAdminService
-from tests.postgres import TRUNCATE_ALL_TABLES
+from tests.postgres import truncate_all_tables
 
 ADMIN_TOKEN = "test-only-admin-token-value"
 
@@ -29,7 +28,7 @@ async def knowledge_admin_app(migrated_postgres: str) -> AsyncIterator[FastAPI]:
     )
     database = Database(settings)
     async with database.session() as session:
-        await session.execute(text(TRUNCATE_ALL_TABLES))
+        await truncate_all_tables(session)
         await session.commit()
     app = create_app(settings, database=database)
     yield app
@@ -73,7 +72,7 @@ async def domain_with_document(knowledge_admin_app: FastAPI) -> dict[str, str]:
         await session.commit()
 
     async with knowledge_admin_app.state.database.session() as session:
-        tree = await KnowledgeAdminService(session).tree()
-    business = next(root for root in tree.roots if root.path == "业务")
+        roots = await KnowledgeAdminService(session).tree_roots()
+    business = next(root for root in roots if root.path == "业务")
     domain = business.children[0]
     return {"name": document.source_path.split("/")[1], "version": domain.version}

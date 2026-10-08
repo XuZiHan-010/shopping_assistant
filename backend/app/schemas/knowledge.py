@@ -37,8 +37,39 @@ class KnowledgeTreeNode(BaseModel):
     children: list[KnowledgeTreeNode] = Field(default_factory=list)
 
 
+class KnowledgeIndexStatus(BaseModel):
+    """知识索引状态（N4-C，契约 §8.6.7）；不含分块正文、向量或异常原文。"""
+
+    retrieval_mode: Literal["HYBRID", "KEYWORD_ONLY"]
+    active_version: int | None
+    embedding_model: str | None
+    configured_model: str | None
+    stale: bool
+    stale_reason: Literal["BUILD_FAILED", "CORPUS_CHANGED"] | None
+    building: bool
+    last_failure_reason: (
+        Literal[
+            "EMBEDDING_UNAVAILABLE",
+            "EMBEDDING_FAILED",
+            "QUALITY_REGRESSION",
+            "EMPTY_CORPUS",
+            "BUILD_TIMEOUT",
+            "BUILD_ABORTED",
+            "STORAGE_FAILED",
+        ]
+        | None
+    )
+
+    @model_validator(mode="after")
+    def _stale_reason_pairs_with_stale(self) -> KnowledgeIndexStatus:
+        if self.stale != (self.stale_reason is not None):
+            raise ValueError("stale 与 stale_reason 必须成对")
+        return self
+
+
 class KnowledgeTreeResponse(BaseModel):
     roots: list[KnowledgeTreeNode]
+    index_status: KnowledgeIndexStatus
 
 
 class KnowledgeDocumentRequest(BaseModel):

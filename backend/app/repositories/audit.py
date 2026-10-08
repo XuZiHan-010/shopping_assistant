@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from uuid import UUID
 
 from app.db.session import Database
@@ -11,6 +12,35 @@ from app.models.operations import AuditLog
 class AuditRepository:
     def __init__(self, database: Database) -> None:
         self._database = database
+
+    async def record_event(
+        self,
+        *,
+        merchant_id: UUID | None,
+        event_type: str,
+        resource_type: str | None = None,
+        resource_id: str | None = None,
+        request_id: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """会话与来源状态相关审计的统一入口（D8③、O2）。
+
+        调用方必须只传内部标识、角色、结果码与请求 ID；明文会话凭证、
+        `buyer_key` 或请求正文一律不得出现在 `metadata` 里。
+        """
+
+        async with self._database.session() as session:
+            session.add(
+                AuditLog(
+                    merchant_id=merchant_id,
+                    event_type=event_type,
+                    resource_type=resource_type,
+                    resource_id=resource_id,
+                    request_id=request_id,
+                    event_metadata=metadata or {},
+                )
+            )
+            await session.commit()
 
     async def record_scope_violation(
         self,

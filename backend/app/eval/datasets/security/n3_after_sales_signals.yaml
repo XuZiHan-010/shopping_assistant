@@ -1,0 +1,134 @@
+# N3 B 新增八条双端售后与信号路径的跨角色安全登记。
+# 身份依赖必须在读取或写入任何业务记录前拒绝错误角色并写审计。
+
+- id: SEC-N3B-001
+  introduced_in: N3
+  role: MERCHANT
+  skill: customer-service-replies
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/shop/after-sales
+        json: {client_request_id: sec-n3b-001, order_id: "00000000-0000-0000-0000-000000000001", after_sale_type: TICKET, reason: test}
+  assertions:
+    - {type: http_status, expected: 403}
+    - {type: error_code, expected: SESSION_ROLE_MISMATCH}
+    - {type: audit_written, event_type: SESSION_ROLE_MISMATCH}
+    - {type: no_side_effect, table: after_sales}
+
+- id: SEC-N3B-002
+  introduced_in: N3
+  role: MERCHANT
+  skill: customer-service-replies
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: merchant_a
+      request: {method: GET, path: /api/v2/shop/after-sales}
+  assertions:
+    - {type: http_status, expected: 403}
+    - {type: error_code, expected: SESSION_ROLE_MISMATCH}
+    - {type: audit_written, event_type: SESSION_ROLE_MISMATCH}
+
+- id: SEC-N3B-003
+  introduced_in: N3
+  role: MERCHANT
+  skill: customer-service-replies
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: merchant_a
+      request: {method: GET, path: "/api/v2/shop/after-sales/{after_sale_id}"}
+  assertions:
+    - {type: http_status, expected: 403}
+    - {type: error_code, expected: SESSION_ROLE_MISMATCH}
+    - {type: audit_written, event_type: SESSION_ROLE_MISMATCH}
+
+- id: SEC-N3B-004
+  introduced_in: N3
+  role: MERCHANT
+  skill: customer-service-replies
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/shop/after-sales/{after_sale_id}/supplements
+        json: {client_request_id: sec-n3b-004, note: test}
+  assertions:
+    - {type: http_status, expected: 403}
+    - {type: error_code, expected: SESSION_ROLE_MISMATCH}
+    - {type: audit_written, event_type: SESSION_ROLE_MISMATCH}
+    - {type: no_side_effect, table: after_sale_supplements}
+
+- id: SEC-N3B-005
+  introduced_in: N3
+  role: CUSTOMER
+  skill: customer-service-replies
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: customer_a
+      request: {method: GET, path: /api/v2/merchant/after-sales}
+  assertions:
+    - {type: http_status, expected: 403}
+    - {type: error_code, expected: SESSION_ROLE_MISMATCH}
+    - {type: audit_written, event_type: SESSION_ROLE_MISMATCH}
+
+- id: SEC-N3B-006
+  introduced_in: N3
+  role: CUSTOMER
+  skill: customer-service-replies
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: customer_a
+      request: {method: GET, path: "/api/v2/merchant/after-sales/{after_sale_id}"}
+  assertions:
+    - {type: http_status, expected: 403}
+    - {type: error_code, expected: SESSION_ROLE_MISMATCH}
+    - {type: audit_written, event_type: SESSION_ROLE_MISMATCH}
+
+- id: SEC-N3B-007
+  introduced_in: N3
+  role: CUSTOMER
+  skill: customer-service-replies
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: customer_a
+      request: {method: GET, path: /api/v2/merchant/customer-signals}
+  assertions:
+    - {type: http_status, expected: 403}
+    - {type: error_code, expected: SESSION_ROLE_MISMATCH}
+    - {type: audit_written, event_type: SESSION_ROLE_MISMATCH}
+
+- id: SEC-N3B-008
+  introduced_in: N3
+  role: CUSTOMER
+  skill: customer-service-replies
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: customer_a
+      request:
+        method: POST
+        path: /api/v2/merchant/customer-signals/{signal_id}/ignore
+        json: {client_request_id: sec-n3b-008, reason: test}
+  assertions:
+    - {type: http_status, expected: 403}
+    - {type: error_code, expected: SESSION_ROLE_MISMATCH}
+    - {type: audit_written, event_type: SESSION_ROLE_MISMATCH}
+    - {type: no_side_effect, table: customer_signals}

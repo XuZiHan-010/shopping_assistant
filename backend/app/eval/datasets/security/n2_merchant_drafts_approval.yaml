@@ -1,0 +1,172 @@
+# 审批类（APPROVAL）：N2 模块 C 的草稿审批与库存运营路由。
+#
+# 这一类回答同一个问题的三个侧面：**别人的草稿，你动不了**——既不能读、不能批准，
+# 也不能丢弃，而且三种失败对外长得一模一样（R5：不泄露对象是否存在）。
+#
+# `introduced_in: N2`——与 `n2_merchant_feedback_cross_tenant.yaml` 同一过渡态：
+# 用例随路由落地，`CURRENT_MILESTONE` 的推进留给 N2 收尾统一执行。
+
+- id: SEC-APPROVAL-001
+  introduced_in: N2
+  role: MERCHANT
+  skill: v2_drafts
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: merchant_a
+      primitive:
+        name: resource_scope.seed_foreign_draft
+        args:
+          other_merchant_id: "00000000-0000-0000-0000-0000000001a2"
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/merchant/drafts/{state:foreign_draft_id}/apply
+        json:
+          client_request_id: eval-sec-approval-001
+          draft_version: 1
+          target_version: 12
+          approval_evidence: forged.evidence
+  assertions:
+    - type: http_status
+      expected: 403
+    - type: error_code
+      expected: RESOURCE_FORBIDDEN
+    - type: audit_written
+      event_type: RESOURCE_SCOPE_VIOLATION
+    # 跨店应用绝不能改到别人的库存，也不能留下账本条目。
+    - type: no_side_effect
+      table: change_ledger
+
+- id: SEC-APPROVAL-002
+  introduced_in: N2
+  role: MERCHANT
+  skill: v2_drafts
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: merchant_a
+      primitive:
+        name: resource_scope.seed_foreign_draft
+        args:
+          other_merchant_id: "00000000-0000-0000-0000-0000000001a2"
+    # 读取草稿详情是审批证据的唯一签发点；跨店读到它就等于拿到了批准别人草稿的钥匙。
+    - actor: merchant_a
+      request:
+        method: GET
+        path: /api/v2/merchant/drafts/{state:foreign_draft_id}
+  assertions:
+    - type: http_status
+      expected: 403
+    - type: error_code
+      expected: RESOURCE_FORBIDDEN
+    - type: audit_written
+      event_type: RESOURCE_SCOPE_VIOLATION
+
+- id: SEC-APPROVAL-003
+  introduced_in: N2
+  role: MERCHANT
+  skill: v2_drafts
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: merchant_a
+      primitive:
+        name: resource_scope.seed_foreign_draft
+        args:
+          other_merchant_id: "00000000-0000-0000-0000-0000000001a2"
+    # 丢弃同样是写操作：跨店丢弃能让别人的待办凭空消失。
+    - actor: merchant_a
+      request:
+        method: DELETE
+        path: /api/v2/merchant/drafts/{state:foreign_draft_id}
+  assertions:
+    - type: http_status
+      expected: 403
+    - type: error_code
+      expected: RESOURCE_FORBIDDEN
+    - type: audit_written
+      event_type: RESOURCE_SCOPE_VIOLATION
+
+- id: SEC-APPROVAL-004
+  introduced_in: N2
+  role: MERCHANT
+  skill: v2_drafts
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  # 顾客会话拿商家草稿列表：跨角色访问一律 403，不降级成 401 或空列表。
+  turns:
+    - actor: customer_a
+      request:
+        method: GET
+        path: /api/v2/merchant/drafts
+  assertions:
+    - type: http_status
+      expected: 403
+    - type: error_code
+      expected: SESSION_ROLE_MISMATCH
+
+- id: SEC-APPROVAL-005
+  introduced_in: N2
+  role: MERCHANT
+  skill: v2_inventory
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  # 精确库存三元组只属于商家侧；顾客会话连告警列表都不该看到。
+  turns:
+    - actor: customer_a
+      request:
+        method: GET
+        path: /api/v2/merchant/inventory/alerts
+  assertions:
+    - type: http_status
+      expected: 403
+    - type: error_code
+      expected: SESSION_ROLE_MISMATCH
+
+- id: SEC-APPROVAL-006
+  introduced_in: N2
+  role: MERCHANT
+  skill: v2_brief
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  # 当日简报汇总的是经营事实，同样是商家侧专属。
+  turns:
+    - actor: customer_a
+      request:
+        method: GET
+        path: /api/v2/merchant/briefs/daily/current
+  assertions:
+    - type: http_status
+      expected: 403
+    - type: error_code
+      expected: SESSION_ROLE_MISMATCH
+
+- id: SEC-APPROVAL-007
+  introduced_in: N3
+  role: MERCHANT
+  skill: v2_brief
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  # 完整简报的限流重新生成同样是商家侧专属（阶段 C Task 2）。
+  turns:
+    - actor: customer_a
+      request:
+        method: POST
+        path: /api/v2/merchant/briefs/daily/current/regenerate
+        json:
+          client_request_id: sec-approval-007
+  assertions:
+    - type: http_status
+      expected: 403
+    - type: error_code
+      expected: SESSION_ROLE_MISMATCH
+    - type: no_side_effect
+      table: daily_briefs

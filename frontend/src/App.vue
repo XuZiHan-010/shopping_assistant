@@ -56,10 +56,10 @@ watch(i18n.global.locale, syncFavicon, { immediate: true })
   align-items: center;
   justify-content: space-between;
   padding: var(--space-3) var(--space-4);
-  border: 1px solid #f4c7c1;
+  border: 1px solid var(--danger-soft);
   border-radius: var(--radius-control);
-  background: var(--color-danger-surface);
-  color: var(--color-danger-text);
-  box-shadow: var(--shadow-control);
+  background: var(--danger-soft);
+  color: var(--danger);
+  box-shadow: var(--shadow-sm);
 }
 </style>

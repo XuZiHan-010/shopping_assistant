@@ -1,0 +1,40 @@
+# 跨租户类（CROSS）：N2 模块 D 新增的商家回答反馈端点。
+#
+# `introduced_in: N2`——这条用例登记时 `CURRENT_MILESTONE` 仍是 "N1"（trade-closed-loop /
+# merchant-drafts-and-inventory 两份 N2 计划尚未落地），会让
+# `test_no_case_is_introduced_ahead_of_its_milestone` 暂时失败；这是刻意接受的过渡态，
+# 而不是遗漏——`test_every_v2_route_has_an_endpoint_security_case` 要求这条 v2 路由
+# 必须有登记的端点级安全用例，两条门禁在"N2 路由先于 N2 收尾落地"时天然冲突，
+# 按 `plans/2026-09-21-n2-trade-closed-loop.md` Task 8 同一场景的既有裁定处理：
+# 用例先落地，`CURRENT_MILESTONE` 的推进留给 N2 收尾统一执行（届时一并确认七类 ≥21 条）。
+
+- id: SEC-CROSS-005
+  introduced_in: N2
+  role: MERCHANT
+  skill: v2_feedback
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: merchant_a
+      primitive:
+        name: resource_scope.seed_foreign_answer
+        args:
+          other_merchant_id: "00000000-0000-0000-0000-0000000001a2"
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/merchant/answers/{state:foreign_answer_id}/feedback
+        json:
+          kind: ADOPTION
+          adopted: true
+          client_request_id: eval-sec-cross-005
+  assertions:
+    - type: http_status
+      expected: 403
+    - type: error_code
+      expected: RESOURCE_FORBIDDEN
+    - type: audit_written
+      event_type: RESOURCE_SCOPE_VIOLATION
+    - type: no_side_effect
+      table: feedback

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from time import monotonic
+from typing import Any
 from uuid import uuid4
 
 from fastapi import FastAPI, Request, Response
@@ -18,16 +20,25 @@ from app.core.logging import configure_logging
 from app.core.metrics import OperationalMetrics
 from app.core.rate_limit import SlidingWindowRateLimiter
 from app.db.session import Database
+from app.knowledge.embedding import Embedder, EmbeddingUnavailableError, build_embedder
+from app.knowledge.index_versions import KnowledgeIndexService, VectorIndexSearch
 from app.knowledge.wiki_seed import seed_wiki_documents
 from app.localization.locales import parse_accept_language
+from app.services.session_reconciliation import reconcile_demo_issuers
+from app.skills.registry import DEFAULT_ROOTS, SkillRegistry
+from app.skills.tool import skill_tools
+from app.tools.customer import build_customer_tools
+from app.tools.merchant import build_merchant_tools
+from app.tools.registry import build_tool_registry
 
 _REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 
-# 跨域放行的请求头。两套凭证走两个不同的头：商家用 Authorization，
-# 管理员用 X-Admin-Token，后端据此区分调用方，详见 AGENTS.md §10.2.1。
+# 跨域放行的请求头。商家 Bearer 走 Authorization，管理员走 X-Admin-Token，
+# v2 顾客/商家会话走 X-Session-Id，后端据此区分调用方，详见 AGENTS.md §八。
 _ALLOWED_HEADERS = [
     "Authorization",
     "X-Admin-Token",
+    "X-Session-Id",
     "Accept",
     "Content-Type",
     "X-Request-Id",
@@ -43,6 +54,33 @@ def _resolve_request_id(value: str | None) -> str:
 RequestHandler = Callable[[Request], Awaitable[Response]]
 
 
+async def _warm_up_and_index(
+    embedder: Embedder, index: KnowledgeIndexService, logger: Any
+) -> None:
+    """预热模型，并在生效索引缺失、陈旧、换模型或语料已变时重建（§7.6）。
+
+    放在启动后台而不是部署前置命令：首次部署时团队知识种子在启动阶段才导入；构建失败不阻塞部署，
+    旧版本继续服务或检索降级为关键词，两者都在知识后台与回答来源上可见。多实例同时启动时，
+    数据库的单构建约束保证只有一个实例真正构建。
+    """
+
+    # 加载失败时查询同样会失败并降级为关键词，那里有可见标注，这里不必再报。
+    with suppress(EmbeddingUnavailableError):
+        await asyncio.to_thread(embedder.embed_queries, ["预热"])
+    try:
+        outcome = await index.rebuild_until_fresh()
+    except Exception:  # 后台任务的异常不能悄悄丢失，也不能拖垮服务
+        logger.exception("knowledge_index_startup_build_crashed")
+        return
+    if outcome is not None:
+        logger.info(
+            "knowledge_index_startup_build",
+            result=outcome.result.value,
+            version_id=outcome.version_id,
+            failure_reason=outcome.failure_reason.value if outcome.failure_reason else None,
+        )
+
+
 def create_app(
     settings: Settings | None = None,
     *,
@@ -53,23 +91,42 @@ def create_app(
     resolved_settings = settings or get_settings()
     logger = configure_logging(resolved_settings)
     resolved_database = database or Database(resolved_settings)
+    # N4-C：嵌入模型在 backend 进程内推理；未配置时为 None，`search_rules` 如实标注关键词降级。
+    embedder = build_embedder(
+        resolved_settings.embedding_model,
+        cache_dir=resolved_settings.embedding_cache_dir,
+        threads=resolved_settings.embedding_threads,
+    )
+    knowledge_vector = VectorIndexSearch(
+        resolved_database,
+        embedder,
+        min_similarity=resolved_settings.resolved_embedding_min_similarity,
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        database_ready = False
         try:
             await resolved_database.connect_with_retry()
-            database_ready = True
-        except Exception as exc:
-            logger.warning(
-                "database_startup_degraded",
-                exception_type=type(exc).__name__,
-            )
-        if database_ready:
+            # 先于其他启动任务执行，且失败即中止启动：对账没跑成，被移除的演示
+            # Token 换出的商家会话就仍然有效，宁可起不来也不带着这个缺口对外服务。
+            revoked = await reconcile_demo_issuers(resolved_database, resolved_settings)
+            logger.info("session_issuers_reconciled", revoked_sessions=revoked)
             created = await seed_wiki_documents(resolved_database)
             logger.info("wiki_seed_imported", created=created)
-        yield
-        await resolved_database.dispose()
+            # 模型预热与索引检查在后台进行：不阻塞健康检查；失败只影响向量召回（降级可见）。
+            warmup = (
+                asyncio.create_task(
+                    _warm_up_and_index(embedder, app.state.knowledge_index, logger)
+                )
+                if embedder is not None
+                else None
+            )
+            yield
+            if warmup is not None:
+                warmup.cancel()
+        finally:
+            # 连接、对账或种子导入失败也必须释放连接池。
+            await resolved_database.dispose()
 
     app = FastAPI(
         title="Borough 商家 AI 助手 API",
@@ -83,10 +140,34 @@ def create_app(
         resolved_settings.rate_limit_per_minute, clock=monotonic
     )
     app.state.metrics = OperationalMetrics()
+    app.state.knowledge_index = KnowledgeIndexService(resolved_database, embedder)
+    # 工具注册表自检在这里执行：错误的工具定义让服务起不来，而不是在某次提问时才暴露（§6.9）。
+    # N2 模块 C 登记商家工具面，`n2-trade-closed-loop` Task 6 登记顾客工具面；两面互不相交。
+    # Skill 注册表同样在启动期扫描白名单目录并自检（PRD A4）：格式、长度或路径不合格让服务起不来。
+    # 索引非空的角色才会得到 `load_skill` 工具；两端都为空时工具面与 N2 相同。
+    app.state.skill_registry = SkillRegistry.from_roots(
+        DEFAULT_ROOTS, max_chars=resolved_settings.skill_max_chars
+    )
+    app.state.tool_registry = build_tool_registry(
+        (
+            *build_merchant_tools(
+                resolved_database,
+                business_timezone=resolved_settings.business_timezone,
+                alias_secret=(
+                    resolved_settings.buyer_alias_secret or "development-buyer-alias-secret"
+                ).encode(),
+                export_signing_secret=resolved_settings.export_signing_secret,
+                export_url_ttl_minutes=resolved_settings.export_url_ttl_minutes,
+                knowledge_vector=knowledge_vector,
+            ),
+            *build_customer_tools(resolved_database),
+            *skill_tools(app.state.skill_registry),
+        )
+    )
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[str(resolved_settings.frontend_origin).rstrip("/")],
+        allow_origins=resolved_settings.cors_allowed_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=_ALLOWED_HEADERS,

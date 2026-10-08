@@ -18,6 +18,10 @@ class DegradeReason(StrEnum):
     UPSTREAM = "UPSTREAM"
     VALIDATION = "VALIDATION"
     BUDGET = "BUDGET"
+    # 以下三项只由 v2 工具循环产生（§6.10）；v1 不会产生它们，v1 的映射表不需要登记。
+    LIMIT = "LIMIT"  # 轮数或工具调用次数触顶
+    TIMEOUT = "TIMEOUT"  # 墙钟时间触顶
+    CANCELLED = "CANCELLED"  # 客户端断开
 
 
 @dataclass(frozen=True)

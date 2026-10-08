@@ -20,6 +20,7 @@ MAX_DETAIL_LIMIT: Final[int] = 200
 METRIC_WHITELIST: Final[frozenset[str]] = frozenset(
     {
         "gmv",
+        "gross_gmv",
         "order_count",
         "ordering_user_count",
         "paying_user_count",

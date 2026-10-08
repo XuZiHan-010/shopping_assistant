@@ -9,12 +9,7 @@ import type { components } from '@/api/generated'
 import { resolveRequestLocale } from '@/api/credentials'
 import type { ChatAnswer, FeedbackState, ThinkingStep } from '@/types/chat'
 
-import {
-  toChatAnswer,
-  toConversationAnswer,
-  toFeedbackRequestPayload,
-  toFeedbackState,
-} from './adapters/chat'
+import { toChatAnswer, toFeedbackRequestPayload, toFeedbackState } from './adapters/chat'
 import { AppError } from './errors'
 import { assertResponseLocale, ChatStreamInterruptedError, readChatStream } from './sse'
 import { resolveTransport } from './transport'
@@ -127,84 +122,6 @@ export async function listConversations(
   }
 }
 
-export interface ConversationDetailView {
-  id: string
-  title: string
-  messages: Array<{
-    id: string
-    role: 'user' | 'assistant'
-    content: string
-    createdAt: string
-    answer?: ChatAnswer
-    feedback?: FeedbackState
-  }>
-  /** 更早一页的游标；为 `undefined` 时已经翻到最早一条（后端 §8.6.3）。 */
-  nextMessageCursor?: string
-  hasMoreMessages: boolean
-  /** 本页任意条目未能在预算内翻译完成时为 true，改用目标语言占位文案（R7）。 */
-  localizationDegraded: boolean
-  localizationDegradedReason?: string
-}
-
-export interface GetConversationOptions {
-  /** 游标分页：省略即第一页（最新 `messageLimit` 条）。 */
-  before?: string
-  messageLimit?: number
-}
-
-export async function getConversation(
-  id: string,
-  signal: AbortSignal,
-  options: GetConversationOptions = {},
-): Promise<ConversationDetailView> {
-  const transport = await resolveTransport()
-  const query = new URLSearchParams()
-  if (options.messageLimit) query.set('message_limit', String(options.messageLimit))
-  if (options.before) query.set('message_before', options.before)
-  const queryString = query.toString()
-  const response = await transport(
-    {
-      path: `/api/conversations/${id}${queryString ? `?${queryString}` : ''}`,
-      method: 'GET',
-      auth: 'merchant',
-    },
-    signal,
-  )
-  const payload = (await response.json()) as components['schemas']['ConversationDetailResponse']
-
-  return {
-    id: payload.id,
-    title: payload.title ?? '未命名会话',
-    nextMessageCursor: payload.next_message_cursor ?? undefined,
-    hasMoreMessages: payload.has_more_messages ?? false,
-    localizationDegraded: payload.localization_degraded ?? false,
-    localizationDegradedReason: payload.localization_degraded_reason ?? undefined,
-    messages: payload.messages.map((item) => {
-      const answerPayload = item.answer_payload
-      return {
-        id: item.id,
-        role: item.role === 'user' ? 'user' : 'assistant',
-        content: item.content,
-        createdAt: item.created_at,
-        answer: answerPayload
-          ? toConversationAnswer(answerPayload, {
-              sessionId: payload.id,
-              content: item.content,
-              createdAt: item.created_at,
-            })
-          : undefined,
-        feedback: answerPayload
-          ? { isAdopted: answerPayload.is_adopted, reaction: answerPayload.reaction }
-          : undefined,
-      }
-    }),
-  }
-}
-
-export async function deleteConversation(id: string, signal: AbortSignal): Promise<void> {
-  const transport = await resolveTransport()
-  await transport({ path: `/api/conversations/${id}`, method: 'DELETE', auth: 'merchant' }, signal)
-}
 
 export async function submitFeedback(
   answerId: string,

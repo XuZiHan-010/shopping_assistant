@@ -40,6 +40,11 @@ class DimensionSpec:
 
 METRIC_SPECS: Final[Mapping[str, MetricSpec]] = {
     "gmv": MetricSpec("gmv", "成交 GMV", "元", "orders", True),
+    # N3 阶段 C（PRD O3 退款口径）：与 gmv 计算口径完全相同（按支付日、已支付状态求和），
+    # 只是采用 O3 裁定的正式命名，供 v2 归因/查询工具使用；v1 的 gmv 不删除、不改行为。
+    # net_gmv = gross_gmv - refund_amount 由 `services/v2/attribution.py` 在查询层之上
+    # 用两次单表聚合相减得出，不进 AnalyticsRepository——它不是单表可聚合的指标。
+    "gross_gmv": MetricSpec("gross_gmv", "成交总额（毛）", "元", "orders", True),
     "order_count": MetricSpec("order_count", "订单量", "单", "orders", True),
     "ordering_user_count": MetricSpec("ordering_user_count", "下单用户数", "人", "orders", False),
     "paying_user_count": MetricSpec("paying_user_count", "付款用户数", "人", "orders", False),
@@ -69,7 +74,7 @@ DIMENSION_SPECS: Final[Mapping[str, DimensionSpec]] = {
 #: 每张主表能连到哪些维度表。空字符串代表「用主表自己的列」（date）。
 _COMPATIBLE: Final[Mapping[str, frozenset[str]]] = {
     "orders": frozenset({"", "orders", "products"}),
-    "refunds": frozenset({"", "refunds"}),
+    "refunds": frozenset({"", "refunds", "products"}),
     "returns": frozenset({"", "returns"}),
     "order_items": frozenset({"", "products"}),
     "support_tickets": frozenset({"", "support_tickets"}),
@@ -127,6 +132,20 @@ DETAIL_SPECS: Final[Mapping[str, DetailSpec]] = {
             ("order_status", "订单状态"),
             ("paid_amount", "实付金额"),
             ("placed_at", "下单时间"),
+        ),
+    ),
+    # N3 阶段 C（PRD M7）：与 "orders"（整单）分开，导出订单行级明细。
+    "order_items": DetailSpec(
+        "order_items",
+        "订单明细",
+        (
+            ("business_date", "日期"),
+            ("order_id", "订单标识"),
+            ("product_id", "商品标识"),
+            ("quantity", "数量"),
+            ("unit_price", "单价"),
+            ("discount_amount", "优惠金额"),
+            ("line_total", "行合计"),
         ),
     ),
     "refunds": DetailSpec(

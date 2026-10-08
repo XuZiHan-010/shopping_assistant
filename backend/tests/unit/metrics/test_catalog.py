@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from datetime import date
 from uuid import UUID
 
@@ -10,6 +11,7 @@ import pytest
 
 from app.core.config import AppEnvironment, Settings
 from app.intent.models import QueryIntent
+from app.llm.budget_scope import BudgetScope
 from app.llm.client import STRUCTURED_CALL_OPTIONS, LlmBudget
 from app.llm.fake import FakeLlmClient
 from app.llm.guard import LlmCostGuard
@@ -49,6 +51,19 @@ class _UsageRecordingBudgetRepository:
         return tokens
 
     async def reconcile(self, *, usage_date: date, delta: int) -> None:
+        del usage_date, delta
+
+    async def reserve_scoped(
+        self, *, usage_date: date, tokens: int, scopes: Sequence[BudgetScope]
+    ) -> str | None:
+        assert tokens > 0 and scopes
+        del usage_date
+        return None
+
+    async def reconcile_scoped(
+        self, *, usage_date: date, delta: int, scope_keys: Sequence[str]
+    ) -> None:
+        assert scope_keys
         del usage_date, delta
 
     async def snapshot(self, *, usage_date: date) -> object:

@@ -1,0 +1,89 @@
+# N3 阶段 C Task 0：明细导出 Skill 的触发用例。
+
+- id: detail-export-hit1
+  introduced_in: N3
+  role: MERCHANT
+  skill: detail-export
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: skill_trigger
+  turns:
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/merchant/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json: {message: 帮我导出最近 7 天的订单明细, client_request_id: skill-export-hit1}
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: tool_calls_include
+      expected: load_skill:detail-export
+
+- id: detail-export-hit2
+  introduced_in: N3
+  role: MERCHANT
+  skill: detail-export
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: skill_trigger
+  turns:
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/merchant/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json: {message: 把这个月的退款清单导出成文件, client_request_id: skill-export-hit2}
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: tool_calls_include
+      expected: load_skill:detail-export
+
+- id: detail-export-miss1
+  introduced_in: N3
+  role: MERCHANT
+  skill: detail-export
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: skill_trigger
+  turns:
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/merchant/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json: {message: 最近 7 天的净成交额是多少, client_request_id: skill-export-miss1}
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: tool_calls_exclude
+      expected: load_skill:detail-export
+
+- id: detail-export-boundary1
+  introduced_in: N3
+  role: MERCHANT
+  skill: detail-export
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: skill_trigger
+  turns:
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/merchant/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json: {message: 把最近 7 天的订单明细直接列出来给我看看, client_request_id: skill-export-boundary1}
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: tool_calls_include
+      expected: load_skill:detail-export

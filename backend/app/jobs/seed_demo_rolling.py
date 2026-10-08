@@ -8,13 +8,14 @@ from contextlib import nullcontext
 from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import delete, exists, func, select, text
+from sqlalchemy import case, delete, exists, func, select, text, tuple_, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analytics.dates import business_today
 from app.analytics.demo_data import (
     DEMO_ANALYTICS_SEED_BASE,
+    _event_row,
     build_demo_catalog,
     build_demo_dataset,
 )
@@ -22,10 +23,14 @@ from app.core.runtime import configure_event_loop_policy
 from app.core.seed_config import SeedSettings
 from app.db.session import Database
 from app.models.analytics import Order, OrderItem, Product, Refund, ReturnRecord, SupportTicket
+from app.models.events import FulfillmentEvent, InventoryEvent
 from app.models.merchant import Merchant
 from app.services.seed_service import default_merchants
 
 ADVISORY_LOCK_ID = 2026081801
+_ANALYZE_PRUNED_TABLES = "ANALYZE " + ", ".join(
+    model.__tablename__ for model in (Order, OrderItem, Refund, ReturnRecord, SupportTicket)
+)
 DEFAULT_WINDOW_DAYS = 180
 
 
@@ -43,18 +48,91 @@ async def _require_demo_merchants(session: AsyncSession) -> None:
 
 async def _catalog(session: AsyncSession, merchant_id: UUID, seed: int) -> list[dict[str, object]]:
     generated = build_demo_catalog(merchant_id=merchant_id, seed=seed)
-    statement = (
-        insert(Product)
-        .values(generated)
-        .on_conflict_do_nothing(index_elements=[Product.merchant_id, Product.product_code])
-    )
+    insert_stmt = insert(Product).values(generated)
+    statement = insert_stmt.on_conflict_do_update(
+            index_elements=[Product.merchant_id, Product.product_code],
+            set_={
+                "title": insert_stmt.excluded.title,
+                "short_description": insert_stmt.excluded.short_description,
+                "detail_description": insert_stmt.excluded.detail_description,
+                "attributes": insert_stmt.excluded.attributes,
+                "price": insert_stmt.excluded.price,
+                "image_url": insert_stmt.excluded.image_url,
+                "content_version": Product.content_version + 1,
+            },
+            where=(Product.content_version == 1) & Product.title.like("演示商品%"),
+        )
     await session.execute(statement)
+    # 种子后来才补上的图片（06 号，2026-10-04）：上面的刷新只认旧版「演示商品 NN」行，
+    # 已是现行目录的库里这一行图片仍为空。只补「标题仍是种子标题且尚无图片」的行，
+    # 不覆盖商家已有的图片或改过名的商品；补完即不再命中，重复执行无副作用。
+    seed_images = {str(row["product_code"]): row["image_url"] for row in generated}
+    await session.execute(
+        update(Product)
+        .where(
+            Product.merchant_id == merchant_id,
+            Product.image_url.is_(None),
+            tuple_(Product.product_code, Product.title).in_(
+                [(row["product_code"], row["title"]) for row in generated]
+            ),
+        )
+        .values(
+            image_url=case(seed_images, value=Product.product_code),
+            content_version=Product.content_version + 1,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    # 从 v1 库升级上来的行：库存列是迁移补的默认值（在库 0、阈值为空），也没有任何库存事件，
+    # 不补的话线上整店显示售罄。只认「从未有过库存」的种子行——卖到 0 的行阈值是设过的、
+    # 也有事件，不会命中；补完即不再命中。INITIAL_STOCK 事件由下面的既有逻辑按补后的在库量写入。
+    seed_stock = {str(row["product_code"]): row["stock_on_hand"] for row in generated}
+    seed_threshold = {str(row["product_code"]): row["low_stock_threshold"] for row in generated}
+    await session.execute(
+        update(Product)
+        .where(
+            Product.merchant_id == merchant_id,
+            Product.stock_on_hand == 0,
+            Product.stock_reserved == 0,
+            Product.low_stock_threshold.is_(None),
+            tuple_(Product.product_code, Product.title).in_(
+                [(row["product_code"], row["title"]) for row in generated]
+            ),
+            ~exists().where(
+                InventoryEvent.merchant_id == merchant_id,
+                InventoryEvent.subject_id == Product.id,
+            ),
+        )
+        .values(
+            stock_on_hand=case(seed_stock, value=Product.product_code),
+            low_stock_threshold=case(seed_threshold, value=Product.product_code),
+        )
+        .execution_options(synchronize_session=False)
+    )
     persisted = list(
         (await session.execute(select(Product.__table__).where(Product.merchant_id == merchant_id)))
         .mappings()
         .all()
     )
-    return [dict(row) for row in sorted(persisted, key=lambda row: str(row["product_code"]))]
+    catalog = [dict(row) for row in sorted(persisted, key=lambda row: str(row["product_code"]))]
+    initial_events = [
+        _event_row(
+            merchant_id=merchant_id,
+            subject_id=product["id"],
+            event_type="INITIAL_STOCK",
+            occurred_at=product["listed_at"],
+            dedupe_key=f"demo:initial-stock:{product['id']}",
+            payload={"quantity": product["stock_on_hand"], "origin": "DEMO_SEED"},
+        )
+        for product in catalog
+        if product["stock_on_hand"] > 0
+    ]
+    if initial_events:
+        await session.execute(
+            insert(InventoryEvent)
+            .values(initial_events)
+            .on_conflict_do_nothing(index_elements=[InventoryEvent.dedupe_key])
+        )
+    return catalog
 
 
 async def roll_forward(
@@ -78,7 +156,10 @@ async def roll_forward(
         await _require_demo_merchants(session)
         for index, merchant in enumerate(default_merchants()):
             latest = await session.scalar(
-                select(func.max(Order.business_date)).where(Order.merchant_id == merchant.id)
+                select(func.max(Order.business_date)).where(
+                    Order.merchant_id == merchant.id,
+                    Order.lifecycle_origin == "LEGACY_V1",
+                )
             )
             start = (
                 latest + timedelta(days=1)
@@ -101,15 +182,33 @@ async def roll_forward(
                     (Refund, dataset.refunds),
                     (ReturnRecord, dataset.returns),
                     (SupportTicket, dataset.tickets),
+                    (FulfillmentEvent, dataset.fulfillment_events),
                 ):
                     if rows:
                         await session.execute(insert(model).values(rows))
                         written += len(rows)
+            # 清理前由本事务自己刷新统计信息。autovacuum 看不到未提交的行：它若在本事务写入途中
+            # 分析这些表，会把刚灌进上万行的表记成空表，下面的清理语句随即按空表规划成嵌套全表扫描，
+            # 触发语句超时（首次补齐 180 天时最容易撞上）。事务内的 ANALYZE 能看到自己写入的行。
+            await session.execute(text(_ANALYZE_PRUNED_TABLES))
             cutoff = business_day - timedelta(days=window_days - 1)
-            for model in (SupportTicket, ReturnRecord, Refund):
+            legacy_orders = select(Order.id).where(
+                Order.merchant_id == merchant.id, Order.lifecycle_origin == "LEGACY_V1"
+            )
+            legacy_items = select(OrderItem.id).where(OrderItem.order_id.in_(legacy_orders))
+            await session.execute(
+                delete(SupportTicket).where(
+                    SupportTicket.merchant_id == merchant.id,
+                    SupportTicket.business_date < cutoff,
+                    SupportTicket.order_id.in_(legacy_orders),
+                )
+            )
+            for model in (ReturnRecord, Refund):
                 await session.execute(
                     delete(model).where(
-                        model.merchant_id == merchant.id, model.business_date < cutoff
+                        model.merchant_id == merchant.id,
+                        model.business_date < cutoff,
+                        model.order_item_id.in_(legacy_items),
                     )
                 )
             # OrderItem/Order 不能只按自己的 business_date 删：外键是 ON DELETE
@@ -122,6 +221,7 @@ async def roll_forward(
                 delete(OrderItem).where(
                     OrderItem.merchant_id == merchant.id,
                     OrderItem.business_date < cutoff,
+                    OrderItem.order_id.in_(legacy_orders),
                     ~exists().where(Refund.order_item_id == OrderItem.id),
                     ~exists().where(ReturnRecord.order_item_id == OrderItem.id),
                 )
@@ -130,6 +230,7 @@ async def roll_forward(
                 delete(Order).where(
                     Order.merchant_id == merchant.id,
                     Order.business_date < cutoff,
+                    Order.lifecycle_origin == "LEGACY_V1",
                     ~exists().where(OrderItem.order_id == Order.id),
                 )
             )

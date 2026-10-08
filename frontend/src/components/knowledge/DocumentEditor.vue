@@ -8,6 +8,8 @@ import { useLocaleStore } from '@/stores/locale'
 
 const props = defineProps<{
   document: KnowledgeDocument
+  /** 只读令牌：不给保存入口，文本域只读。 */
+  readOnlyAccess?: boolean
   save?: (
     content: string,
     headers: Record<string, string>,
@@ -45,17 +47,19 @@ watch(
  * 源文档覆盖成本该是译文的内容——这正是 Task 11 要收掉的坑。
  */
 const isEditingSource = computed(
-  () => props.document.translationStatus === undefined || props.document.translationStatus === 'SOURCE',
+  () =>
+    props.document.translationStatus === undefined || props.document.translationStatus === 'SOURCE',
 )
 const isStale = computed(() => props.document.translationStatus === 'STALE')
-const canSave = computed(() => !props.document.readOnly && (!isStale.value || staleAcknowledged.value))
+const locked = computed(() => props.document.readOnly || props.readOnlyAccess === true)
+const canSave = computed(() => !locked.value && (!isStale.value || staleAcknowledged.value))
 
 async function handleConflict(): Promise<void> {
   conflictMessage.value = t('documentEditor.conflictMessage')
 }
 
 async function saveDocument(): Promise<void> {
-  if (props.document.readOnly || !props.save || !canSave.value) return
+  if (locked.value || !props.save || !canSave.value) return
   const options: UpdateKnowledgeDocumentOptions = isEditingSource.value
     ? { isSourceVersion: true }
     : { isSourceVersion: false, contentLocale: localeStore.locale }
@@ -92,10 +96,10 @@ defineExpose({ handleConflict })
     </div>
     <textarea
       v-model="content"
-      :readonly="document.readOnly"
+      :readonly="locked"
       :aria-label="t('documentEditor.contentAria', { path: document.path })"
     />
-    <footer v-if="!document.readOnly">
+    <footer v-if="!locked">
       <button type="button" data-testid="save" :disabled="!canSave" @click="saveDocument">
         {{ t('documentEditor.save') }}
       </button>
@@ -108,40 +112,53 @@ defineExpose({ handleConflict })
   display: grid;
   grid-template-rows: auto auto 1fr auto;
   min-width: 0;
-  padding: var(--space-4);
+  padding: 16px 18px;
 }
 
 header {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
 }
 header p {
+  min-width: 0;
   margin: 0;
+  font-family: var(--font-mono);
+  font-size: 13px;
   font-weight: var(--font-weight-control);
+  color: var(--ink);
+  overflow-wrap: anywhere;
 }
 header span {
-  color: var(--color-text-muted);
+  padding: 1px 8px;
+  border-radius: 99px;
+  background: var(--gilt-soft);
+  color: var(--gilt-ink);
   font-size: var(--font-size-caption);
+  font-weight: 600;
 }
 textarea {
   min-height: 25rem;
   margin-top: var(--space-4);
   padding: var(--space-3);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius-small);
+  background: var(--raised);
+  color: var(--ink);
   resize: vertical;
-  font:
-    0.875rem/1.6 ui-monospace,
-    SFMono-Regular,
-    Consolas,
-    monospace;
+  font: 0.875rem/1.6 var(--font-mono);
+}
+textarea[readonly] {
+  background: var(--well);
+  color: var(--ink-2);
 }
 .document-editor__conflict {
   margin: var(--space-3) 0 0;
   padding: var(--space-2);
-  color: var(--color-danger-text);
-  background: var(--color-danger-surface);
+  color: var(--danger);
+  background: var(--danger-soft);
   border-radius: var(--radius-small);
 }
 .document-editor__stale {
@@ -151,8 +168,8 @@ textarea {
   gap: var(--space-2);
   margin: var(--space-3) 0 0;
   padding: var(--space-2);
-  color: var(--color-danger-text);
-  background: var(--color-danger-surface);
+  color: var(--danger);
+  background: var(--danger-soft);
   border-radius: var(--radius-small);
 }
 .document-editor__stale p {
@@ -164,16 +181,25 @@ footer {
   text-align: right;
 }
 button {
-  min-height: var(--control-height);
+  min-height: 34px;
   padding: 0 var(--space-4);
   border: 0;
-  border-radius: var(--radius-control);
-  color: white;
-  background: var(--color-primary);
+  border-radius: 9px;
+  color: var(--on-accent);
+  background: var(--accent);
+  font-size: 13px;
   font-weight: var(--font-weight-control);
+}
+button:hover:not(:disabled) {
+  background: var(--accent-strong);
 }
 button:disabled {
   cursor: not-allowed;
-  opacity: 0.5;
+  opacity: 0.45;
+}
+@media (max-width: 820px) {
+  textarea {
+    min-height: 18rem;
+  }
 }
 </style>

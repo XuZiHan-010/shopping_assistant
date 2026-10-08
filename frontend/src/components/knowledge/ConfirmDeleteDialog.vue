@@ -61,65 +61,89 @@ const emit = defineEmits<{ confirm: []; cancel: [] }>()
   inset: 0;
   display: grid;
   place-items: center;
-  background: rgba(15, 23, 42, 0.4);
+  padding: 16px;
+  background: rgba(10, 16, 13, 0.4);
   z-index: 20;
 }
 
 .confirm-delete-dialog {
-  width: min(90vw, 26rem);
+  width: min(100%, 26rem);
   padding: var(--space-5);
+  border: 1px solid var(--line);
   border-radius: var(--radius-column);
-  background: var(--color-surface);
-  box-shadow: var(--shadow-card);
+  background: var(--raised);
+  color: var(--ink);
+  box-shadow: var(--shadow-lg);
 }
 
 .confirm-delete-dialog h2 {
-  margin: 0 0 var(--space-3);
+  margin: 0 0 var(--space-4);
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 600;
+}
+
+footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+footer button {
+  min-height: 34px;
+  border-radius: 9px;
+  padding: 0 var(--space-4);
+  font: inherit;
+  font-size: 13px;
+  font-weight: var(--font-weight-control);
+}
+
+footer button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+footer button[data-testid='cancel'] {
+  border: 1px solid var(--line-strong);
+  background: var(--raised);
+  color: var(--ink);
+}
+
+footer button[data-testid='cancel']:hover {
+  background: var(--hover);
+}
+
+.confirm-delete-dialog h2 {
+  margin-bottom: var(--space-3);
 }
 
 .confirm-delete-dialog__target {
   display: grid;
   gap: var(--space-1);
   margin: 0 0 var(--space-3);
+  overflow-wrap: anywhere;
 }
 
 .confirm-delete-dialog__target span {
-  color: var(--color-text-secondary);
+  color: var(--ink-2);
+  font-family: var(--font-mono);
   font-size: var(--font-size-caption);
 }
 
 .confirm-delete-dialog__warning {
   margin: 0 0 var(--space-3);
-  color: var(--color-text-secondary);
+  color: var(--ink-2);
 }
 
 .confirm-delete-dialog__error {
   margin: 0 0 var(--space-3);
-  color: var(--color-danger-text);
-}
-
-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--space-2);
-}
-
-footer button {
-  min-height: var(--control-height);
-  border-radius: var(--radius-control);
-  padding: 0 var(--space-4);
-  font: inherit;
+  color: var(--danger);
 }
 
 footer button[data-testid='confirm'] {
   border: 0;
-  color: white;
-  background: var(--color-danger-text);
-  font-weight: var(--font-weight-control);
-}
-
-footer button[data-testid='cancel'] {
-  border: 1px solid var(--color-border);
-  background: white;
+  color: var(--on-accent);
+  background: var(--danger);
 }
 </style>

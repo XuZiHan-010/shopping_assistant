@@ -1,0 +1,67 @@
+# 场景 S3：库存告警闭环（PRD M5、M10，草稿计划 Task 8）——质量回归登记。
+#
+# 放在 `quality/scenarios/` 子目录，而不是 `quality/` 根目录：`scripts/eval_quality_smoke.py`
+# 与 `tests/eval/baseline_comparison.py` 只加载根目录（非递归），它们按 v1 商家 Chat 执行用例，
+# v2 商家场景混进去会被误路由（同 `n2_s1_presale_to_payment.yaml`）。
+#
+# 只登记**依赖模型质量**的那一段：商家问库存 → Agent 查告警 → 起草补货草稿，
+# 措辞是否得体、有没有在聊天里误称"已批准"由 rubric 判断。演示商家恒有一件
+# `stock_on_hand=3 < low_stock_threshold=5` 的商品（`app/analytics/demo_data.py`），
+# 保证这条用例在真实环境里总能触发 `get_inventory_alerts` 工具调用。
+# 批准、应用与顾客端档位恢复是确定性的界面/事务动作，由后端 E2E
+# `tests/e2e/test_s3_inventory_loop.py`（Fake LLM）覆盖。真实模型跑这条用例
+# 属于另行授权的人工验收（R3），不进默认测试。
+
+- id: QLT-S3-001
+  introduced_in: N2
+  role: MERCHANT
+  skill: v2_merchant_restock_draft
+  risk: QUALITY
+  locale: zh-CN
+  form: ENDPOINT
+  rubric_id: answer_quality
+  turns:
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/merchant/chat
+        headers: {Accept: application/json, Accept-Language: zh-CN}
+        json:
+          client_request_id: eval-qlt-s3-001
+          message: 店里有没有库存偏低的商品？如果有的话帮我起草一份补货草稿。
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: answer_mode
+      expected: METRIC
+    - type: response_field
+      path: degraded
+      expected: false
+
+- id: QLT-S3-002
+  introduced_in: N2
+  role: MERCHANT
+  skill: v2_merchant_restock_draft
+  risk: QUALITY
+  locale: en-US
+  form: ENDPOINT
+  rubric_id: answer_quality
+  turns:
+    - actor: merchant_a
+      request:
+        method: POST
+        path: /api/v2/merchant/chat
+        headers: {Accept: application/json, Accept-Language: en-US}
+        json:
+          client_request_id: eval-qlt-s3-002
+          message: Do we have any products running low on stock? If so, draft a restock for it.
+  assertions:
+    - type: http_status
+      expected: 200
+    - type: response_field
+      path: answer_mode
+      expected: METRIC
+    - type: response_field
+      path: degraded
+      expected: false

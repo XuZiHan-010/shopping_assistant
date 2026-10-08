@@ -1,0 +1,82 @@
+# E5 RAG 检索评测集（N4-C Task 1，PRD A7 / E5，契约 §6.14）
+#
+# 语料：app/knowledge/wiki_seed.json（21 篇团队知识，全部中文；每个业务域「名词解释」+「业务流程」各一篇，另有索引 README）。
+# 每条 query 是商家对 `search_rules` 工具的提问；expected 按正文内容标注应命中的文档（source_path），
+# 第一项为最主要的文档；expected 为空表示语料里没有答案，检索应承认找不到（matched=false）。
+# kind：caliber 口径问答 / process 流程与规则 / field 字段与数据表 / colloquial 口语化改写 /
+#       cross_language 英文问中文文档 / multi_doc 多文档组合 / no_answer 应当找不到。
+#
+# 双重用途（2026-10-02）：既是 E5 评测集（`app/eval/rag_e5.py`），也是索引版本切换的验证探针
+# （`app/knowledge/index_versions.py`，§7.6：新版本 Recall@5 低于上一生效版本 95% 不切换）。
+# 放在生产侧是因为 §5.6 只允许评测依赖生产、不允许反向。改动本文件会同时改变评测口径与切换闸门。
+
+- {id: R-001, kind: caliber, query: 客单价是怎么计算的, expected: [业务/交易/业务名词解释/交易名词.md]}
+- {id: R-002, kind: caliber, query: 支付GMV的口径是什么, expected: [业务/交易/业务名词解释/交易名词.md]}
+- {id: R-003, kind: caliber, query: 订单量统计的是子订单还是主订单, expected: [业务/交易/业务名词解释/交易名词.md]}
+- {id: R-004, kind: caliber, query: 下单用户量怎么去重, expected: [业务/交易/业务名词解释/交易名词.md]}
+- {id: R-005, kind: caliber, query: 退货量包括退款吗, expected: [业务/交易/业务名词解释/交易名词.md]}
+- {id: R-006, kind: caliber, query: 金额字段的单位是分还是元, expected: [业务/交易/业务名词解释/交易名词.md]}
+- {id: R-007, kind: caliber, query: 交易成功订单量的定义, expected: [业务/交易/业务名词解释/交易名词.md]}
+- {id: R-008, kind: caliber, query: 供应链履约量是什么口径, expected: [业务/供应链/业务名词解释/供应链名词.md]}
+- {id: R-009, kind: caliber, query: 入库单指的是什么, expected: [业务/供应链/业务名词解释/供应链名词.md]}
+- {id: R-010, kind: caliber, query: 质检和鉴定有什么区别, expected: [业务/供应链/业务名词解释/供应链名词.md, 业务/供应链/业务流程/供应链业务流程图.md]}
+- {id: R-011, kind: caliber, query: GMV包含运费吗, expected: [业务/交易/业务名词解释/交易名词.md]}
+- {id: R-012, kind: caliber, query: 身份信息里哪些字段可以回答, expected: [业务/身份信息/业务名词解释/身份信息名词.md]}
+
+- {id: R-013, kind: process, query: 违规处罚之后怎么申诉, expected: [业务/平台规则/业务流程/平台规则业务流程图.md, 业务/商家其他/业务流程/商家其他业务流程图.md]}
+- {id: R-014, kind: process, query: 平台规则是怎么发布和执行的, expected: [业务/平台规则/业务流程/平台规则业务流程图.md]}
+- {id: R-015, kind: process, query: 平台巡检发现违规会怎样, expected: [业务/平台规则/业务流程/平台规则业务流程图.md]}
+- {id: R-016, kind: process, query: 退货退款的流程是怎样的, expected: [业务/退货/业务流程/退货业务流程图.md]}
+- {id: R-017, kind: process, query: 理赔是由谁判责的, expected: [业务/理赔赔付/业务流程/理赔赔付业务流程图.md]}
+- {id: R-018, kind: process, query: 优惠券从创建到核销结算的流程, expected: [业务/优惠券/业务流程/优惠券业务流程图.md]}
+- {id: R-019, kind: process, query: 商品上架要经过哪些审核, expected: [业务/商品/业务流程/商品业务流程图.md]}
+- {id: R-020, kind: process, query: 客服工单关闭后还能二次开启吗, expected: [业务/客服工单/业务流程/客服工单业务流程图.md]}
+- {id: R-021, kind: process, query: 保证金什么情况下会被扣划, expected: [业务/商家其他/业务流程/商家其他业务流程图.md]}
+- {id: R-022, kind: process, query: 商家入驻开店需要哪些步骤, expected: [业务/身份信息/业务流程/身份信息业务流程图.md]}
+- {id: R-023, kind: process, query: 用户没有签收时订单怎么处理, expected: [业务/交易/业务流程/交易业务流程图.md]}
+- {id: R-024, kind: process, query: 知识库检索的顺序规则是什么, expected: [index/README.md]}
+
+- {id: R-025, kind: field, query: refund_status_name 有哪些取值, expected: [业务/退货/业务名词解释/退货名词.md]}
+- {id: R-026, kind: field, query: ticket_status_name 是什么字段, expected: [业务/客服工单/业务名词解释/客服工单名词.md]}
+- {id: R-027, kind: field, query: spu_status_name 状态含义, expected: [业务/商品/业务名词解释/商品名词.md]}
+- {id: R-028, kind: field, query: is_unconditional_refund 是什么意思, expected: [业务/身份信息/业务名词解释/身份信息名词.md]}
+- {id: R-029, kind: field, query: repay_status_name 的取值, expected: [业务/理赔赔付/业务名词解释/理赔赔付名词.md]}
+- {id: R-030, kind: field, query: appeal_status_name 有哪些状态, expected: [业务/商家其他/业务名词解释/商家其他名词.md]}
+- {id: R-031, kind: field, query: coupon_send_status_name 字段说明, expected: [业务/优惠券/业务名词解释/优惠券名词.md]}
+- {id: R-032, kind: field, query: 订单明细存在哪张表里, expected: [业务/交易/业务流程/交易业务流程图.md, index/README.md]}
+
+- {id: R-033, kind: colloquial, query: 买家不想要了能退吗流程咋走, expected: [业务/退货/业务流程/退货业务流程图.md]}
+- {id: R-034, kind: colloquial, query: 顾客找客服的单子我该怎么处理, expected: [业务/客服工单/业务流程/客服工单业务流程图.md]}
+- {id: R-035, kind: colloquial, query: 我被平台罚了不服怎么办, expected: [业务/商家其他/业务流程/商家其他业务流程图.md, 业务/平台规则/业务流程/平台规则业务流程图.md]}
+- {id: R-036, kind: colloquial, query: 货送到仓库验货没过咋整, expected: [业务/供应链/业务流程/供应链业务流程图.md]}
+- {id: R-037, kind: colloquial, query: 钱什么时候退回给买家, expected: [业务/退货/业务流程/退货业务流程图.md]}
+- {id: R-038, kind: colloquial, query: 券发出去以后钱怎么分摊, expected: [业务/优惠券/业务流程/优惠券业务流程图.md]}
+- {id: R-039, kind: colloquial, query: 东西坏了买家要赔偿怎么弄, expected: [业务/理赔赔付/业务流程/理赔赔付业务流程图.md]}
+- {id: R-040, kind: colloquial, query: 新品挂上去要等多久审核, expected: [业务/商品/业务流程/商品业务流程图.md]}
+
+- {id: R-041, kind: cross_language, query: "How is average order value calculated?", expected: [业务/交易/业务名词解释/交易名词.md]}
+- {id: R-042, kind: cross_language, query: "What is the return and refund process?", expected: [业务/退货/业务流程/退货业务流程图.md]}
+- {id: R-043, kind: cross_language, query: "How do I appeal a penalty?", expected: [业务/商家其他/业务流程/商家其他业务流程图.md, 业务/平台规则/业务流程/平台规则业务流程图.md]}
+- {id: R-044, kind: cross_language, query: "What is quality inspection in the supply chain?", expected: [业务/供应链/业务名词解释/供应链名词.md, 业务/供应链/业务流程/供应链业务流程图.md]}
+- {id: R-045, kind: cross_language, query: "How does coupon redemption and settlement work?", expected: [业务/优惠券/业务流程/优惠券业务流程图.md]}
+- {id: R-046, kind: cross_language, query: "Who decides liability in a compensation claim?", expected: [业务/理赔赔付/业务流程/理赔赔付业务流程图.md]}
+- {id: R-047, kind: cross_language, query: "What review steps are needed before goods are listed?", expected: [业务/商品/业务流程/商品业务流程图.md]}
+- {id: R-048, kind: cross_language, query: "Can a closed support ticket be reopened?", expected: [业务/客服工单/业务流程/客服工单业务流程图.md]}
+
+- {id: R-049, kind: multi_doc, query: 退货和理赔赔付有什么区别, expected: [业务/退货/业务流程/退货业务流程图.md, 业务/理赔赔付/业务流程/理赔赔付业务流程图.md]}
+- {id: R-050, kind: multi_doc, query: 从下单到售后退款的完整链路, expected: [业务/交易/业务流程/交易业务流程图.md, 业务/退货/业务流程/退货业务流程图.md]}
+- {id: R-051, kind: multi_doc, query: 入驻时交的保证金违规后会被扣吗, expected: [业务/身份信息/业务流程/身份信息业务流程图.md, 业务/商家其他/业务流程/商家其他业务流程图.md]}
+- {id: R-052, kind: multi_doc, query: 商品审核和供应链质检分别管什么, expected: [业务/商品/业务流程/商品业务流程图.md, 业务/供应链/业务流程/供应链业务流程图.md]}
+- {id: R-053, kind: multi_doc, query: 平台规则的申诉和商家处罚申诉是一回事吗, expected: [业务/平台规则/业务流程/平台规则业务流程图.md, 业务/商家其他/业务流程/商家其他业务流程图.md]}
+- {id: R-054, kind: multi_doc, query: 优惠券核销后退货了券怎么处理, expected: [业务/优惠券/业务流程/优惠券业务流程图.md, 业务/退货/业务流程/退货业务流程图.md]}
+
+- {id: R-055, kind: no_answer, query: 直播带货的佣金比例是多少, expected: []}
+- {id: R-056, kind: no_answer, query: 跨境商品的关税怎么计算, expected: []}
+- {id: R-057, kind: no_answer, query: 平台年费要交多少钱, expected: []}
+- {id: R-058, kind: no_answer, query: 广告投放的出价规则, expected: []}
+- {id: R-059, kind: no_answer, query: 积分商城的积分怎么兑换, expected: []}
+- {id: R-060, kind: no_answer, query: 分期付款的手续费由谁承担, expected: []}
+- {id: R-061, kind: no_answer, query: 会员等级是怎么划分的, expected: []}
+- {id: R-062, kind: no_answer, query: "What is the commission rate for livestream sales?", expected: []}
+- {id: R-063, kind: no_answer, query: 节假日发货时效有什么要求, expected: []}
+- {id: R-064, kind: no_answer, query: 店铺装修模板在哪里设置, expected: []}

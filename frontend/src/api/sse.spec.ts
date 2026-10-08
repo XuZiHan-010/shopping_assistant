@@ -83,6 +83,21 @@ describe('readChatStream', () => {
     expect(last?.type === 'done' && last.raw.answer).toContain('受控数据查询')
   })
 
+  it('done 事件带上与 v2 turn_complete 共用的最终响应 envelope（Task 6：只保留一处最终响应解析）', async () => {
+    const fixture = CHAT_FIXTURES.metricGmv
+    const events = []
+    for await (const event of readChatStream(streamOf(encodeStream(fixture), [64]))) {
+      events.push(event)
+    }
+
+    const last = events.at(-1)
+    expect(last?.type === 'done' && last.envelope.answer).toBe(fixture.answer)
+    expect(last?.type === 'done' && last.envelope.degraded).toBe(fixture.degraded)
+    expect(last?.type === 'done' && last.envelope.analysisSources[0]?.source).toBe(
+      fixture.analysis_sources[0],
+    )
+  })
+
   it('流结束却没有 done 或 error 时抛中断错误', async () => {
     const bytes = new TextEncoder().encode('event: step\ndata: {"label":"x","node":"y"}\n\n')
 

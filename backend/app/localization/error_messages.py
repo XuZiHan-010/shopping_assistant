@@ -26,6 +26,62 @@ _EN = SupportedLocale.EN_US
 # 已存在"），这里保留跨场景都成立的通用措辞；需要按具体资源细化措辞的码
 # （AUTH_REQUIRED / NOT_FOUND）改走下面的 `message_params` 占位符。
 _MESSAGES: dict[str, dict[SupportedLocale, str]] = {
+    "SESSION_REQUIRED": {
+        _ZH: "请提供有效的会话凭证",
+        _EN: "Please provide a valid session credential.",
+    },
+    "SESSION_INVALID": {
+        _ZH: "会话已失效，请重新建立会话",
+        _EN: "This session is invalid. Please start a new session.",
+    },
+    "SESSION_ROLE_MISMATCH": {
+        _ZH: "当前会话无权执行此操作",
+        _EN: "This session is not permitted to perform this operation.",
+    },
+    "CUSTOMER_BINDING_REQUIRED": {
+        _ZH: "请先绑定演示顾客身份",
+        _EN: "Please bind a demo customer identity first.",
+    },
+    "SESSION_ALREADY_BOUND": {
+        _ZH: "当前会话已绑定身份，无法切换",
+        _EN: "This session is already bound and cannot switch identities.",
+    },
+    "RESOURCE_FORBIDDEN": {
+        _ZH: "无权访问该资源",
+        _EN: "You do not have permission to access this resource.",
+    },
+    "PRODUCT_NOT_IN_SCOPE": {
+        _ZH: "当前操作不可使用该商品",
+        _EN: "This product is unavailable for the current operation.",
+    },
+    "INSUFFICIENT_STOCK": {
+        _ZH: "可售库存不足，请调整数量",
+        _EN: "Insufficient available stock. Please adjust the quantity.",
+    },
+    "ILLEGAL_STATE_TRANSITION": {
+        _ZH: "当前状态不允许此操作",
+        _EN: "This operation is not allowed in the current state.",
+    },
+    "VERSION_CONFLICT": {
+        _ZH: "内容已更新，请刷新后重新确认",
+        _EN: "The content has changed. Please refresh and confirm again.",
+    },
+    "DRAFT_EXPIRED": {
+        _ZH: "草稿已过期，请重新起草",
+        _EN: "This draft has expired. Please create a new draft.",
+    },
+    "GUARDRAIL_REJECTED": {
+        _ZH: "此操作未通过业务护栏检查，请调整方案",
+        _EN: "This operation did not pass the business guardrail checks. Please revise it.",
+    },
+    "CONFIRMATION_REQUIRED": {
+        _ZH: "请在操作界面重新确认",
+        _EN: "Please confirm again in the action interface.",
+    },
+    "INVALID_CURSOR": {
+        _ZH: "分页凭证不可用，请从首页重新加载",
+        _EN: "This pagination cursor is invalid. Please reload from the first page.",
+    },
     "AUTH_REQUIRED": {
         _ZH: "请提供有效的{audience}访问凭证",
         _EN: "Please provide a valid {audience} access token.",

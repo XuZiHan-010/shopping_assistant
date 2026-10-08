@@ -20,6 +20,7 @@ from app.knowledge.domains import (
     INDEX_PATH_MARKERS,
     MAX_KNOWLEDGE_CHARS,
 )
+from app.knowledge.fusion import rrf_fuse
 from app.llm.client import LlmBudget
 from app.localization.locales import SourceLanguage, SupportedLocale, detect_source_language
 from app.repositories.localization import LocalizationScope
@@ -45,6 +46,24 @@ _CONTENT_WEIGHT = 1
 
 #: 复合问法命中过多时只保留前若干篇，避免整域文档灌进模型上下文。
 _TOP_N = 3
+
+#: 全文档检索（`search_documents`）：至少命中几个不同的**分词片段**才算候选，以及最多返回几篇。
+#: 片段来自 `tokenize` 的 2–4 字滑窗，重叠片段分别计数——所以这不是「两个独立概念」，
+#: 实际效果约等于「命中查询里一段至少 3 字的连续文字，或两段各 2 字」。查询本身只切出
+#: 1 个片段（如「退款」）时，阈值降为 1（审查 N4 I-3）。取值依据 E5 RAG 评测集
+#: （`docs/history/eval/rag-baseline.md`）：要求 2 个时拒答率 0.90；要求 1 个时拒答率降到 0.30。
+_MIN_DISTINCT_TERMS = 2
+_SEARCH_TOP_N = 5
+
+#: 问题里的 snake_case 字段名（如 `repay_status_name`）：分词会把它切成 repay / status / name，
+#: 「status」又扩展出一串泛化状态词，含完整字段名的那篇反被淹没。完整字段名命中作排序硬优先。
+_IDENTIFIER = re.compile(r"[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+")
+
+
+def identifiers_in(text: str) -> tuple[str, ...]:
+    """抽出问题里的 snake_case 字段名（去重保序、小写）。"""
+
+    return tuple(dict.fromkeys(match.lower() for match in _IDENTIFIER.findall(text)))
 
 
 class KnowledgeSource(StrEnum):
@@ -216,6 +235,66 @@ class KnowledgeRetrieval:
             return _render(hits, KnowledgeSource.MAINTAINED)
         return await self._load_memory_fallback(category)
 
+    async def search_documents(
+        self,
+        keywords: Sequence[str],
+        *,
+        vector_ranking: Sequence[tuple[str, float]] = (),
+        exact_terms: Sequence[str] = (),
+    ) -> KnowledgeResult:
+        """在全部团队维护文档里按相关性检索（v2 `search_rules` 使用）。
+
+        与 `load_domain` 不同，不先按业务域过滤：商家问「退货运费谁承担」时答案在退货域文档里，
+        固定某个域会让正确文档根本进不了候选（2026-10-01 E5 RAG 基线：
+        固定平台规则域时 Recall@5 仅 0.093）。
+
+        - 至少命中 `min(_MIN_DISTINCT_TERMS, 查询片段数)` 个不同的分词片段才算关键词候选：
+          只碰巧命中一个两字片段的证据太弱，
+          检索不到时必须如实返回未命中，而不是凑一篇；
+        - 关键词候选按标题 > 路径 > 正文的加权分排序；同分保持仓储顺序；
+        - `vector_ranking`（N4-C 混合召回）：向量召回给出的 `(source_path, 相似度)`，调用方已按
+          最低相似度过滤。非空时与关键词候选做 RRF 融合（`app.knowledge.fusion`）；只认当前
+          生效的文档——索引里残留的已删除文档不会被返回，正文永远取自最新文档而不是旧分块；
+        - `exact_terms`：问题里的完整字段名；正文含完整字段名的文档直接成为候选并强加权；
+        - 英文（纯 ASCII）片段按词边界匹配，`or` 不命中 `order`——只在本方法生效，
+          v1 `load_domain` 与零 LLM 闸门的匹配语义不变；
+        - 同分时索引类文档（README 等）排后，避免目录说明压过真正的业务文档；
+        - 取前 `_SEARCH_TOP_N` 篇；只读团队知识，不回落到商家记忆（规则不能来自记忆，M11）。
+        """
+
+        terms = [keyword for keyword in keywords if keyword.strip()]
+        exact = [term.lower() for term in exact_terms if term.strip()]
+        if not terms and not exact and not vector_ranking:
+            return _EMPTY
+        documents = await self._repository.list_active()
+        ranked: list[tuple[tuple[int, int, bool], _DocumentLike]] = []
+        if terms or exact:
+            required = min(_MIN_DISTINCT_TERMS, len({term.lower() for term in terms}))
+            scored = []
+            for document in documents:
+                exact_hits = _search_distinct(document, exact)
+                if exact_hits == 0 and (not terms or _search_distinct(document, terms) < required):
+                    continue
+                # 排序键：完整字段名命中数优先（硬优先，泛化扩展词再多也压不过它）→ 加权分 →
+                # 同分时业务文档在前、索引文档在后；sorted 稳定，其余保持仓储顺序。
+                key = (-exact_hits, -_search_score(document, terms), _is_index_document(document))
+                scored.append((key, document))
+            ranked = sorted(scored, key=lambda pair: pair[0])
+        if not vector_ranking:
+            return _render(
+                [document for _score, document in ranked[:_SEARCH_TOP_N]],
+                KnowledgeSource.MAINTAINED,
+            )
+
+        by_path = {document.source_path: document for document in documents}
+        fused = rrf_fuse(
+            [(document.source_path, float(-key[1])) for key, document in ranked],
+            [(path, similarity) for path, similarity in vector_ranking if path in by_path],
+        )
+        return _render(
+            [by_path[path] for path, _score in fused[:_SEARCH_TOP_N]], KnowledgeSource.MAINTAINED
+        )
+
     async def load_domain_with_cross_language_retrieval(
         self,
         category: QuestionCategory,
@@ -365,6 +444,40 @@ def _relevance_score(
         if include_content and term in content:
             score += _CONTENT_WEIGHT
     return score
+
+
+def _term_in(term: str, text: str) -> bool:
+    """纯 ASCII 片段按词边界（字母数字之外即边界，下划线也算）匹配；其余按子串。"""
+
+    if term.isascii():
+        return re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", text) is not None
+    return term in text
+
+
+def _search_score(document: _DocumentLike, terms: Sequence[str]) -> int:
+    title, path, content = _weighted_fields(document)
+    score = 0
+    for raw in terms:
+        term = raw.lower()
+        score += _TITLE_WEIGHT * _term_in(term, title)
+        score += _PATH_WEIGHT * _term_in(term, path)
+        score += _CONTENT_WEIGHT * _term_in(term, content)
+    return score
+
+
+def _search_distinct(document: _DocumentLike, terms: Sequence[str]) -> int:
+    haystack = " ".join(_weighted_fields(document))
+    return sum(1 for term in {t.lower() for t in terms} if _term_in(term, haystack))
+
+
+def _is_index_document(document: _DocumentLike) -> bool:
+    path = document.source_path.lower()
+    return any(marker in path for marker in INDEX_PATH_MARKERS)
+
+
+def _distinct_matches(document: _DocumentLike, terms: Sequence[str]) -> int:
+    haystack = " ".join(_weighted_fields(document))
+    return sum(1 for term in {t.lower() for t in terms} if term in haystack)
 
 
 def _narrow_by_keywords(

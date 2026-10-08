@@ -2,7 +2,18 @@ import { describe, expect, it } from 'vitest'
 
 import type { components } from '@/api/generated'
 
-import { toKnowledgeDocument, toKnowledgeTree } from './knowledge'
+import { toKnowledgeDocument, toKnowledgeTree, toKnowledgeTreeSnapshot } from './knowledge'
+
+const INDEX_STATUS: components['schemas']['KnowledgeIndexStatus'] = {
+  retrieval_mode: 'HYBRID',
+  active_version: 1,
+  embedding_model: 'm',
+  configured_model: 'm',
+  stale: false,
+  stale_reason: null,
+  building: false,
+  last_failure_reason: null,
+}
 
 describe('知识库后台契约 Adapter', () => {
   it('完整映射目录树节点，并保留 read_only', () => {
@@ -18,6 +29,7 @@ describe('知识库后台契约 Adapter', () => {
           children: [],
         },
       ],
+      index_status: INDEX_STATUS,
     } as components['schemas']['KnowledgeTreeResponse']
 
     expect(toKnowledgeTree(raw)).toEqual([
@@ -45,6 +57,7 @@ describe('知识库后台契约 Adapter', () => {
           version: 'tree-v1',
         },
       ],
+      index_status: INDEX_STATUS,
     } as components['schemas']['KnowledgeTreeResponse']
 
     expect(toKnowledgeTree(raw)[0]?.children).toEqual([])
@@ -114,5 +127,35 @@ describe('知识库后台契约 Adapter', () => {
 
     expect(document.contentLocale).toBe('und')
     expect(document.translationStatus).toBe('SOURCE')
+  })
+
+  it('目录树响应同时映射索引状态（§8.6.7）', () => {
+    const raw = {
+      roots: [],
+      index_status: {
+        retrieval_mode: 'KEYWORD_ONLY',
+        active_version: null,
+        embedding_model: null,
+        configured_model: 'bge',
+        stale: true,
+        stale_reason: 'CORPUS_CHANGED',
+        building: true,
+        last_failure_reason: 'EMBEDDING_FAILED',
+      },
+    } as components['schemas']['KnowledgeTreeResponse']
+
+    expect(toKnowledgeTreeSnapshot(raw)).toEqual({
+      roots: [],
+      indexStatus: {
+        retrievalMode: 'KEYWORD_ONLY',
+        activeVersion: null,
+        embeddingModel: null,
+        configuredModel: 'bge',
+        stale: true,
+        staleReason: 'CORPUS_CHANGED',
+        building: true,
+        lastFailureReason: 'EMBEDDING_FAILED',
+      },
+    })
   })
 })

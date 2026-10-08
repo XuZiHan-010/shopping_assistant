@@ -183,6 +183,17 @@ function mockKnowledgeTree(
       mockBusinessRoot(knowledgeDocuments),
       mockMemoryRoot(knowledgeDocuments),
     ],
+    // Mock 后端没有真实索引：固定为一个已生效的版本，模型名明确标为 mock。
+    index_status: {
+      retrieval_mode: 'HYBRID',
+      active_version: 1,
+      embedding_model: 'mock-embedding',
+      configured_model: 'mock-embedding',
+      stale: false,
+      stale_reason: null,
+      building: false,
+      last_failure_reason: null,
+    },
   }
 }
 
@@ -538,9 +549,54 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
 
     const pathname = request.path.split('?')[0]
 
+    if (pathname === '/api/admin/ops/status' && request.method === 'GET') {
+      // 与后端一致：只认管理员令牌；只读令牌在后端会被 403（R6），Mock 里没有只读令牌这一档。
+      if (tenantKeyFor(request) !== MOCK_ADMIN_TOKEN) {
+        return errorResponse('AUTH_REQUIRED', '管理员令牌无效', 401)
+      }
+      return jsonResponse({
+        llm_tokens_used_today: 1_200,
+        llm_tokens_remaining_today: 498_800,
+        llm_calls_today: 4,
+        rate_limit_hits: 2,
+        degraded_count: 1,
+        error_code_counts: { RATE_LIMITED: 2 },
+        agent_node_average_ms: {},
+        demo_deployment_mode: true,
+        budget_levels: [
+          { level: 'GLOBAL', scope: 'GLOBAL', budget_tokens: 500_000, used_tokens: 1_200, remaining_tokens: 498_800 },
+          { level: 'ROLE', scope: 'ROLE:CUSTOMER', budget_tokens: 200_000, used_tokens: 200, remaining_tokens: 199_800 },
+          { level: 'ROLE', scope: 'ROLE:MERCHANT', budget_tokens: 300_000, used_tokens: 1_000, remaining_tokens: 299_000 },
+          { level: 'SHOP', scope: 'SHOP:MERCHANT:1a2b3c4d', budget_tokens: 100_000, used_tokens: 1_000, remaining_tokens: 99_000 },
+        ],
+        llm_cost_today: [{ currency: 'USD', amount: '0.00075000' }],
+        unpriced_calls_today: 0,
+        cache_hit_tokens_today: 400,
+        cache_hit_rate_today: 0.2,
+        tool_calls_total: 10,
+        tool_errors_total: 1,
+        route_p95_ms: { '/api/v2/merchant/chat': 1_800, '/api/health': 3 },
+        turns_today: 3,
+        avg_tokens_per_turn_today: 400,
+        avg_cost_per_turn_today: [{ currency: 'USD', amount: '0.00025000' }],
+        avg_turn_elapsed_ms_today: 2_250,
+        degraded_reason_counts: { BUDGET: 1 },
+        source_degraded_counts: { KNOWLEDGE: 2 },
+      } satisfies components['schemas']['OpsStatusResponse'])
+    }
+
     if (pathname.startsWith('/api/admin/analytics/chatbi/')) {
       if (tenantKeyFor(request) !== MOCK_ADMIN_TOKEN) {
         return errorResponse('AUTH_REQUIRED', '管理员令牌无效', 401)
+      }
+
+      // 与后端 `ChatBiWindow` 一致：两个 GET 的 start_date / end_date 都是必填 query。
+      // 放过缺参请求会让漏传窗口的调用方在 Mock 下全绿、接上真实后端才 422。
+      if (request.method === 'GET') {
+        const query = new URLSearchParams(request.path.split('?')[1] ?? '')
+        if (!query.get('start_date') || !query.get('end_date')) {
+          return errorResponse('INVALID_REQUEST', '缺少 start_date 或 end_date', 422)
+        }
       }
 
       if (pathname === '/api/admin/analytics/chatbi/overview' && request.method === 'GET') {

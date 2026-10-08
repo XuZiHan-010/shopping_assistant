@@ -1,0 +1,83 @@
+# 顾客购物车（N2 模块 B Task 2）：`/api/v2/shop/cart` 与 `/api/v2/shop/cart/items/{product_id}`。
+#
+# 攻击面两类：
+# - 跨店加购：本店顾客会话把别家商品加进购物车——统一 403 PRODUCT_NOT_IN_SCOPE、写审计、购物车表无副作用；
+# - 跨角色：商家会话调用顾客购物车端点——403 SESSION_ROLE_MISMATCH 并写审计（R5）。
+#
+# `introduced_in: N2`——与其余 N2 用例同一过渡态，`CURRENT_MILESTONE` 推进留给 N2 收尾。
+
+- id: SEC-CART-001
+  introduced_in: N2
+  role: CUSTOMER
+  skill: v2_shop_cart
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: customer_a
+      primitive:
+        name: resource_scope.seed_foreign_product
+        args:
+          other_merchant_id: "00000000-0000-0000-0000-0000000001a2"
+    - actor: customer_a
+      request:
+        method: PUT
+        path: /api/v2/shop/cart/items/{state:foreign_product_id}
+        json:
+          quantity: 1
+  assertions:
+    - type: http_status
+      expected: 403
+    - type: error_code
+      expected: PRODUCT_NOT_IN_SCOPE
+    - type: audit_written
+      event_type: RESOURCE_SCOPE_VIOLATION
+    - type: no_side_effect
+      table: cart_items
+
+- id: SEC-CART-002
+  introduced_in: N2
+  role: MERCHANT
+  skill: v2_shop_cart
+  risk: SECURITY
+  locale: en-US
+  form: ENDPOINT
+  turns:
+    - actor: merchant_a
+      request:
+        method: GET
+        path: /api/v2/shop/cart
+  assertions:
+    - type: http_status
+      expected: 403
+    - type: error_code
+      expected: SESSION_ROLE_MISMATCH
+    - type: audit_written
+      event_type: SESSION_ROLE_MISMATCH
+
+- id: SEC-CART-003
+  introduced_in: N2
+  role: MERCHANT
+  skill: v2_shop_cart
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: merchant_a
+      primitive:
+        name: resource_scope.seed_foreign_product
+        args:
+          other_merchant_id: "00000000-0000-0000-0000-0000000001a2"
+    - actor: merchant_a
+      request:
+        method: DELETE
+        path: /api/v2/shop/cart/items/{state:foreign_product_id}
+  assertions:
+    - type: http_status
+      expected: 403
+    - type: error_code
+      expected: SESSION_ROLE_MISMATCH
+    - type: audit_written
+      event_type: SESSION_ROLE_MISMATCH
+    - type: no_side_effect
+      table: cart_items

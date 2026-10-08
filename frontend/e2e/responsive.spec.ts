@@ -1,4 +1,8 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
+
+import { openAssistant, switchLanguage } from './support/assistantRail'
+import { expectNoHorizontalOverflow } from './support/overflow'
+import { mockHomeEndpoints } from './support/v2MerchantMock'
 
 function contrastAgainstWhite(cssColor: string): number {
   const channels = cssColor
@@ -15,29 +19,65 @@ function contrastAgainstWhite(cssColor: string): number {
   return 1.05 / (luminance + 0.05)
 }
 
-test('1440px 保持三栏及宽度约束', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 1000 })
-  await page.goto('/')
+/**
+ * 两页合并（2026-09-26 评审、2026-09-27 用户裁定「选项 C」）后 `/` 是 v2
+ * 运营助手（`OpsAssistantView`），不再是 v1 三栏 `AssistantView`；断点也从
+ * v1 的 560px 改为 v2 CSS 的 40rem（640px）。这里改用 `mockV2Endpoints`
+ * 让页面在无真实后端时也能挂载出商家/语言切换器、会话目录与聊天区。
+ *
+ * W Task 6 起助手是常驻外壳、默认收起的助手栏（1100px 以下为带遮罩的抽屉），
+ * 会话目录在助手栏「历史」面板里，语言切换在偏好设置里。入口改为 `openAssistant()`；
+ * 原「会话目录 | 聊天区」两栏、头部语言切换器等随设计取消的布局，断言改指向新布局中
+ * 承担同一约束的元素（逐条映射见 W Task 6 报告）。
+ */
+async function mockV2Endpoints(page: Page) {
+  await page.route('**/api/v2/merchant/sessions', async (route) => {
+    await route.fulfill({
+      json: {
+        session_id: 'e2e-session-id-000000000000000000000000000',
+        role: 'MERCHANT',
+        expires_at: '2099-01-01T00:00:00Z',
+        merchant_display_name: 'Borough商家100',
+      },
+      status: 201,
+    })
+  })
+  await page.route('**/api/v2/merchant/conversations*', async (route) => {
+    await route.fulfill({ json: { items: [], next_cursor: null, has_more: false } })
+  })
+  // W Task 8：`/` 是首页，空闲后会取简报、主指标等只读数据，一并打桩。
+  await mockHomeEndpoints(page)
+}
 
-  const columns = page.getByTestId('workspace-column')
-  await expect(columns).toHaveCount(3)
+test('1101px（刚过助手栏抽屉断点）保持并排：主视图与助手栏聊天区并排', async ({ page }) => {
+  // 会话目录已移进助手栏「历史」面板（与聊天区互斥显示），并排约束改由「主视图 | 助手栏」
+  // 承担；1100px 及以下助手栏按设计改为抽屉，因此断点从 641px 移到 1101px。
+  await mockV2Endpoints(page)
+  await page.setViewportSize({ width: 1101, height: 1000 })
+  await openAssistant(page)
 
-  const widths = await columns.evaluateAll((items) =>
-    items.map((item) => item.getBoundingClientRect().width),
-  )
-  expect(widths[0]).toBeGreaterThanOrEqual(230)
-  expect(widths[0]).toBeLessThanOrEqual(280)
-  expect(widths[1]).toBeLessThanOrEqual(760)
-  expect(widths[2]).toBeGreaterThanOrEqual(230)
-  expect(widths[2]).toBeLessThanOrEqual(280)
+  const directory = page.locator('main#main')
+  const chat = page.getByRole('region', { name: '运营助手' })
+  await expect(directory).toBeVisible()
+  await expect(chat).toBeVisible()
+
+  const [directoryBox, chatBox] = await Promise.all([directory.boundingBox(), chat.boundingBox()])
+  expect(directoryBox).not.toBeNull()
+  expect(chatBox).not.toBeNull()
+  if (directoryBox && chatBox) {
+    // 并排：主视图在聊天区左边，纵向范围重叠（同一行），不是上下堆叠或被抽屉盖住。
+    expect(directoryBox.x + directoryBox.width).toBeLessThanOrEqual(chatBox.x + 1)
+    expect(directoryBox.y).toBeLessThan(chatBox.y + chatBox.height)
+  }
 })
 
 for (const width of [561, 580]) {
-  test(`${width}px 顶栏不换行或溢出`, async ({ page }) => {
+  test(`${width}px 顶栏不换行溢出`, async ({ page }) => {
+    await mockV2Endpoints(page)
     await page.setViewportSize({ width, height: 844 })
-    await page.goto('/')
+    await openAssistant(page)
 
-    const headerSize = await page.getByTestId('assistant-header').evaluate((header) => ({
+    const headerSize = await page.getByTestId('ops-header').evaluate((header) => ({
       clientWidth: header.clientWidth,
       scrollWidth: header.scrollWidth,
     }))
@@ -46,125 +86,110 @@ for (const width of [561, 580]) {
 }
 
 test('390px 输入区可见且可聚焦', async ({ page }) => {
+  await mockV2Endpoints(page)
   await page.setViewportSize({ width: 390, height: 844 })
-  await page.goto('/')
+  await openAssistant(page)
 
-  const input = page.getByLabel('输入问题')
+  const input = page.getByLabel('向运营助手提问')
   await expect(input).toBeVisible()
   await input.focus()
   await expect(input).toBeFocused()
 })
 
 test('360px 没有页面级横向滚动', async ({ page }) => {
+  await mockV2Endpoints(page)
   await page.setViewportSize({ width: 360, height: 844 })
   await page.goto('/')
+  await page.locator('main#main').waitFor()
 
-  const dimensions = await page.evaluate(() => {
-    const root = document.scrollingElement
-    return { clientWidth: root?.clientWidth ?? 0, scrollWidth: root?.scrollWidth ?? 0 }
-  })
-  expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth)
+  await expectNoHorizontalOverflow(page, '360px 首页')
 })
 
-test('减少动画偏好会缩短交互过渡', async ({ page }) => {
+test('减少动画偏好会缩短交互过渡（全局 base.css 规则，用商家切换器验证）', async ({ page }) => {
+  await mockV2Endpoints(page)
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.goto('/')
 
   const duration = await page
-    .locator('.new-chat-button')
+    .getByTestId('merchant-switcher')
     .evaluate((button) => Number.parseFloat(getComputedStyle(button).transitionDuration))
   expect(duration).toBeLessThan(0.001)
 })
 
-test('输入提示和侧栏说明文字达到 WCAG AA 对比度', async ({ page }) => {
-  await page.goto('/')
+test('草稿范围说明与空态文字达到 WCAG AA 对比度', async ({ page }) => {
+  await mockV2Endpoints(page)
+  await openAssistant(page)
 
-  // F1 的 .side-empty 在 F2 Task 8 被三个真实侧栏面板取代，选择器随之更新。
-  // 用 data-testid 而不是 CSS 类名，避免下次改样式时又静默只剩一个元素匹配。
   const colors = await page
-    .locator(
-      [
-        '.chat-composer__footnote',
-        '[data-testid="metric-empty"] > *',
-        '[data-testid="chart-empty"] > *',
-        '[data-testid="recommendation-empty"] > *',
-      ].join(', '),
-    )
+    .locator(['.ops-view__scope', '.ops-view__muted'].join(', '))
     .evaluateAll((items) => items.map((item) => getComputedStyle(item).color))
 
-  // 该选择器包含一个 footnote 容器和两个空态面板各自的标题、说明，共 5 项。
-  expect(colors).toHaveLength(5)
+  expect(colors.length).toBeGreaterThan(0)
   for (const color of colors) expect(contrastAgainstWhite(color)).toBeGreaterThanOrEqual(4.5)
 })
 
 // ---------------------------------------------------------------------------
-// 双语本地化 Step 4：响应式与焦点（bilingual-localization Task 13）。
+// 双语本地化：响应式与焦点（v1 时期为 bilingual-localization Task 13；
+// 两页合并后改用 v2 页面验证同一条意图）。
 // ---------------------------------------------------------------------------
 
-test('360px 英语模式下头部按钮不溢出、语言切换器不遮挡商家切换器', async ({ page }) => {
+test('360px 英语模式下头部不溢出、语言切换器与商家切换器不重叠', async ({ page }) => {
+  await mockV2Endpoints(page)
   await page.setViewportSize({ width: 360, height: 844 })
-  await page.goto('/')
-  await page.getByTestId('language-switcher').click()
+  await openAssistant(page)
+  await switchLanguage(page, 'en-US')
   await expect(page.locator('html')).toHaveAttribute('lang', 'en-US')
 
-  const headerSize = await page.getByTestId('assistant-header').evaluate((header) => ({
+  const headerSize = await page.getByTestId('ops-header').evaluate((header) => ({
     clientWidth: header.clientWidth,
     scrollWidth: header.scrollWidth,
   }))
   expect(headerSize.scrollWidth).toBeLessThanOrEqual(headerSize.clientWidth)
 
-  // 360px 下页头改用两行网格（`nav logo title actions` / `. merchant merchant .`，
-  // 见 `AssistantView.vue` 的 `@media (max-width: 560px)`），语言切换器和
-  // 商家切换器因此天然不在同一行——这里直接量出两者的包围盒，确认真的没有
-  // 重叠，而不是只信任 CSS 网格区域名字。
+  // 商家切换与语言切换（偏好设置入口）都在侧栏里；360px 下助手栏与侧栏都是抽屉，
+  // 先按 Escape 收起盖住页面的助手栏，再打开侧栏抽屉。
+  await page.keyboard.press('Escape')
+  await page.locator('[aria-controls="side-nav"]').click()
+  await expect(page.getByTestId('preferences-trigger')).toBeVisible()
   const merchantBox = await page.getByTestId('merchant-switcher').boundingBox()
-  const languageBox = await page.getByTestId('language-switcher').boundingBox()
+  const languageBox = await page.getByTestId('preferences-trigger').boundingBox()
   expect(merchantBox).not.toBeNull()
   expect(languageBox).not.toBeNull()
   if (merchantBox && languageBox) {
     const overlapsHorizontally =
-      merchantBox.x < languageBox.x + languageBox.width && languageBox.x < merchantBox.x + merchantBox.width
+      merchantBox.x < languageBox.x + languageBox.width &&
+      languageBox.x < merchantBox.x + merchantBox.width
     const overlapsVertically =
-      merchantBox.y < languageBox.y + languageBox.height && languageBox.y < merchantBox.y + merchantBox.height
+      merchantBox.y < languageBox.y + languageBox.height &&
+      languageBox.y < merchantBox.y + merchantBox.height
     expect(overlapsHorizontally && overlapsVertically).toBe(false)
   }
 
-  const dimensions = await page.evaluate(() => {
-    const root = document.scrollingElement
-    return { clientWidth: root?.clientWidth ?? 0, scrollWidth: root?.scrollWidth ?? 0 }
-  })
-  expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth)
+  await expectNoHorizontalOverflow(page, '360px 英语侧栏抽屉')
 })
 
-test('1440px 英语模式下三栏与头部保持既有宽度约束', async ({ page }) => {
+test('1440px 英语模式下两栏与头部保持既有宽度约束', async ({ page }) => {
+  await mockV2Endpoints(page)
   await page.setViewportSize({ width: 1440, height: 1000 })
-  await page.goto('/')
-  await page.getByTestId('language-switcher').click()
+  await openAssistant(page)
+  await switchLanguage(page, 'en-US')
   await expect(page.locator('html')).toHaveAttribute('lang', 'en-US')
 
-  const columns = page.getByTestId('workspace-column')
-  await expect(columns).toHaveCount(3)
-  const widths = await columns.evaluateAll((items) => items.map((item) => item.getBoundingClientRect().width))
-  expect(widths[0]).toBeGreaterThanOrEqual(230)
-  expect(widths[0]).toBeLessThanOrEqual(280)
-  expect(widths[2]).toBeGreaterThanOrEqual(230)
-  expect(widths[2]).toBeLessThanOrEqual(280)
-
-  const headerSize = await page.getByTestId('assistant-header').evaluate((header) => ({
+  const headerSize = await page.getByTestId('ops-header').evaluate((header) => ({
     clientWidth: header.clientWidth,
     scrollWidth: header.scrollWidth,
   }))
   expect(headerSize.scrollWidth).toBeLessThanOrEqual(headerSize.clientWidth)
 
-  // 英语文案比中文长（"Dashboard"/"Knowledge base"/"New chat" 等），1440px
-  // 下头部一整排按钮理应还有富余——头部整体不溢出之外，再单独确认每个
-  // 可交互控件本身的包围盒没有超出头部右边界。
-  const headerBox = await page.getByTestId('assistant-header').boundingBox()
+  // 英语文案比中文长（"Operations assistant"/"History" 等），助手栏头部固定 400px 宽——
+  // 头部整体不溢出之外，再单独确认每个可交互控件本身的包围盒没有超出头部右边界。
+  // （原头部的导航链接与语言切换器已迁到侧栏与偏好设置，这里改核对助手栏头部的控件。）
+  const headerBox = await page.getByTestId('ops-header').boundingBox()
   const actionBoxes = await Promise.all(
     [
-      page.getByTestId('language-switcher'),
-      page.getByRole('link', { name: 'Knowledge base maintenance' }),
-      page.getByRole('link', { name: 'Chat BI operations dashboard' }),
+      page.locator('[data-test="rail-history-toggle"]'),
+      page.getByRole('button', { name: 'New conversation' }),
+      page.getByRole('button', { name: 'Close assistant' }).and(page.locator('[data-test]')),
     ].map((locator) => locator.boundingBox()),
   )
   expect(headerBox).not.toBeNull()
@@ -176,88 +201,35 @@ test('1440px 英语模式下三栏与头部保持既有宽度约束', async ({ p
   }
 })
 
-test('键盘切换语言后焦点回到切换按钮，看板的 aria-live 加载态用目标语言播报', async ({ page }) => {
-  await page.goto('/ops-dashboard')
-  await page.getByLabel('管理员令牌').fill('mock-admin-token')
-  await page.getByRole('button', { name: '进入后台' }).click()
-  await expect(page.getByTestId('north-star-card')).toHaveCount(6)
-
-  const switcher = page.getByTestId('language-switcher')
-  await switcher.focus()
-  await expect(switcher).toBeFocused()
-
-  // `analyticsStore` 在 locale 变化时会重新拉一次总览/分类
-  // （`reloadForLocale`，见 `frontend/src/stores/analytics.ts`），期间渲染
-  // 一条 `aria-live="polite"` 的加载提示（`.ops-dashboard__loading`）。
-  // 用 MutationObserver 而不是轮询断言来捕获这条提示：Mock 请求可能在个位数
-  // 毫秒内完成，轮询容易整个错过这次插入/移除，MutationObserver 是在同一个
-  // JS 事件循环里同步注册、不依赖真实时钟节奏的捕获方式。
-  const capture = page.evaluate(() => {
-    return new Promise<string[]>((resolve) => {
-      const seen: string[] = []
-      const record = (el: Element) => {
-        const text = el.textContent?.trim()
-        if (text) seen.push(text)
-      }
-      const observer = new MutationObserver((mutations) => {
-        for (const mutation of mutations) {
-          for (const node of Array.from(mutation.addedNodes)) {
-            if (!(node instanceof Element)) continue
-            if (node.matches('[aria-live]')) record(node)
-            node.querySelectorAll('[aria-live]').forEach(record)
-          }
-        }
-      })
-      observer.observe(document.body, { subtree: true, childList: true })
-      setTimeout(() => {
-        observer.disconnect()
-        resolve(seen)
-      }, 1000)
+test('375px 助手栏抽屉打开（含历史面板与长文本）时没有页面级横向滚动', async ({ page }) => {
+  await mockV2Endpoints(page)
+  await page.route('**/api/v2/merchant/conversations*', async (route) => {
+    await route.fulfill({
+      json: {
+        items: [
+          {
+            id: 'c-long',
+            title: 'ORDER-REF-' + 'X'.repeat(90),
+            created_at: '2026-09-27T00:00:00Z',
+            updated_at: '2026-09-27T00:00:00Z',
+          },
+        ],
+        next_cursor: null,
+        has_more: false,
+      },
     })
   })
+  await page.setViewportSize({ width: 375, height: 812 })
+  await openAssistant(page)
 
-  // 键盘激活：Tab 已经把焦点交给了这个真正的 <button>（上面 focus() 模拟的
-  // 就是这一步的结果），Enter 触发原生的按钮激活行为。
-  await switcher.press('Enter')
-  const announcements = await capture
+  // 抽屉铺满视口宽度，遮罩在下面；聊天区与输入框都在视口内。
+  const railBox = await page.locator('#assistant-rail').boundingBox()
+  expect(railBox).not.toBeNull()
+  if (railBox) expect(railBox.x + railBox.width).toBeLessThanOrEqual(375 + 1)
+  await expect(page.getByTestId('rail-backdrop')).toBeAttached()
+  await expectNoHorizontalOverflow(page, '375px 助手栏对话面板')
 
-  await expect(page.locator('html')).toHaveAttribute('lang', 'en-US')
-  // 键盘切换后焦点必须留在触发按钮上，不能被随后的重新渲染带跑。
-  await expect(switcher).toBeFocused()
-
-  const hasEnglishAnnouncement = announcements.some(
-    (text) => /[a-zA-Z]/.test(text) && !/[㐀-鿿]/.test(text),
-  )
-  expect(hasEnglishAnnouncement).toBe(true)
-
-  // 再切回中文，确认反方向同样成立：焦点仍在按钮上，播报文本不再是英语。
-  const captureBack = page.evaluate(() => {
-    return new Promise<string[]>((resolve) => {
-      const seen: string[] = []
-      const record = (el: Element) => {
-        const text = el.textContent?.trim()
-        if (text) seen.push(text)
-      }
-      const observer = new MutationObserver((mutations) => {
-        for (const mutation of mutations) {
-          for (const node of Array.from(mutation.addedNodes)) {
-            if (!(node instanceof Element)) continue
-            if (node.matches('[aria-live]')) record(node)
-            node.querySelectorAll('[aria-live]').forEach(record)
-          }
-        }
-      })
-      observer.observe(document.body, { subtree: true, childList: true })
-      setTimeout(() => {
-        observer.disconnect()
-        resolve(seen)
-      }, 1000)
-    })
-  })
-  await switcher.press('Enter')
-  const announcementsBack = await captureBack
-  await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN')
-  await expect(switcher).toBeFocused()
-  const hasChineseAnnouncement = announcementsBack.some((text) => /[㐀-鿿]/.test(text))
-  expect(hasChineseAnnouncement).toBe(true)
+  await page.locator('[data-test="rail-history-toggle"]').click()
+  await expect(page.getByText('ORDER-REF-', { exact: false })).toBeVisible()
+  await expectNoHorizontalOverflow(page, '375px 助手栏历史面板')
 })

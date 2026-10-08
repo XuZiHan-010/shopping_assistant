@@ -14,6 +14,8 @@
     "test:e2e:first-paint": "npm run build:first-paint && playwright test --config playwright.first-paint.config.ts",
     "firstpaint:check": "node scripts/check-first-paint.mjs",
     "test:e2e:real": "playwright test --config playwright.real-api.config.ts",
+    "test:e2e:s3": "playwright test --config playwright.s3.config.ts",
+    "test:e2e:n3": "playwright test --config playwright.n3.config.ts",
     "lint": "eslint .",
     "format:check": "prettier --check .",
     "format": "prettier --write .",

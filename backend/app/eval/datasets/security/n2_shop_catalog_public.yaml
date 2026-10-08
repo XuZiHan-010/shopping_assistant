@@ -1,0 +1,105 @@
+# 顾客端公开目录（N2 模块 B Task 1）：`/api/v2/shop/stores/{shop_slug}` 及其商品、券。
+#
+# 这组端点不要求任何凭证，攻击面是**枚举**：用猜出来的店铺 slug 或别家商品 ID
+# 探测对象是否存在。请求都以匿名身份发起，断言统一 403 RESOURCE_FORBIDDEN，
+# 与「对象不存在」同构（R5、PRD §9 SEC3）。店铺 slug 由前置原语从已验证的顾客会话取得，
+# 未知 slug 每次随机生成，都不写死在本文件里。
+#
+# 不断言 `audit_written`：匿名请求没有可归属的主体，逐条写审计会让任何人都能无限制地
+# 灌写审计表（执行期裁定，见 `n2-trade-closed-loop` 台账）。
+#
+# `introduced_in: N2`——与其余 N2 用例同一过渡态，`CURRENT_MILESTONE` 推进留给 N2 收尾。
+
+- id: SEC-CATALOG-001
+  introduced_in: N2
+  role: CUSTOMER
+  skill: v2_shop_catalog
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  # 别家商品挂在本店 slug 下读取：非本店与不存在同一个 403，且不改动商品表。
+  turns:
+    - actor: customer_a
+      primitive:
+        name: resource_scope.resolve_shop_slugs
+    - actor: customer_a
+      primitive:
+        name: resource_scope.seed_foreign_product
+        args:
+          other_merchant_id: "00000000-0000-0000-0000-0000000001a2"
+    - actor: anonymous
+      request:
+        method: GET
+        path: /api/v2/shop/stores/{state:own_shop_slug}/products/{state:foreign_product_id}
+  assertions:
+    - type: http_status
+      expected: 403
+    - type: error_code
+      expected: RESOURCE_FORBIDDEN
+    - type: no_side_effect
+      table: products
+
+- id: SEC-CATALOG-002
+  introduced_in: N2
+  role: CUSTOMER
+  skill: v2_shop_catalog
+  risk: SECURITY
+  locale: en-US
+  form: ENDPOINT
+  # 未知店铺：不能借店铺主页确认某个 slug 是否存在。
+  turns:
+    - actor: customer_a
+      primitive:
+        name: resource_scope.resolve_shop_slugs
+    - actor: anonymous
+      request:
+        method: GET
+        path: /api/v2/shop/stores/{state:unknown_shop_slug}
+  assertions:
+    - type: http_status
+      expected: 403
+    - type: error_code
+      expected: RESOURCE_FORBIDDEN
+
+- id: SEC-CATALOG-003
+  introduced_in: N2
+  role: CUSTOMER
+  skill: v2_shop_catalog
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  # 商品列表同样按 slug 在服务端解析店铺；未知店铺不得返回空列表（那等于确认「店在、没货」）。
+  turns:
+    - actor: customer_a
+      primitive:
+        name: resource_scope.resolve_shop_slugs
+    - actor: anonymous
+      request:
+        method: GET
+        path: /api/v2/shop/stores/{state:unknown_shop_slug}/products
+  assertions:
+    - type: http_status
+      expected: 403
+    - type: error_code
+      expected: RESOURCE_FORBIDDEN
+
+- id: SEC-CATALOG-004
+  introduced_in: N2
+  role: CUSTOMER
+  skill: v2_shop_catalog
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: customer_a
+      primitive:
+        name: resource_scope.resolve_shop_slugs
+    - actor: anonymous
+      request:
+        method: GET
+        path: /api/v2/shop/stores/{state:unknown_shop_slug}/coupons
+  assertions:
+    - type: http_status
+      expected: 403
+    - type: error_code
+      expected: RESOURCE_FORBIDDEN

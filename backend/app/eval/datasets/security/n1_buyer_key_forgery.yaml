@@ -1,0 +1,76 @@
+# buyer_key 伪造类（BUYERKEY）：绑定演示顾客时自带 buyer_key；已绑定会话试图改绑他人。
+#
+# SEC-BUYERKEY-003 只断言仓储层不变量（拒绝改绑 + buyer_key 不变），
+# 不声明 http_status/error_code。生产服务已把冲突转换为 409 SESSION_ALREADY_BOUND，
+# HTTP 行为另由 tests/api/v2/test_session_routes.py 覆盖。
+
+- id: SEC-BUYERKEY-001
+  introduced_in: N1
+  role: CUSTOMER
+  skill: session
+  risk: SECURITY
+  locale: zh-CN
+  form: ENDPOINT
+  turns:
+    - actor: customer_a
+      request:
+        method: POST
+        path: /api/v2/shop/sessions/demo-customer
+        json:
+          buyer_key: attacker-supplied-buyer-key
+  assertions:
+    - type: http_status
+      expected: 422
+    - type: error_code
+      expected: INVALID_REQUEST
+    - type: no_side_effect
+      table: agent_sessions
+
+- id: SEC-BUYERKEY-002
+  introduced_in: N1
+  role: CUSTOMER
+  skill: session
+  risk: SECURITY
+  locale: en-US
+  form: ENDPOINT
+  turns:
+    - actor: customer_a
+      request:
+        method: POST
+        path: /api/v2/shop/sessions/demo-customer
+        json: {}
+    - actor: customer_a
+      request:
+        method: POST
+        path: /api/v2/shop/sessions/demo-customer
+        json:
+          buyer_key: attacker-supplied-buyer-key
+  assertions:
+    - type: http_status
+      expected: 422
+    - type: error_code
+      expected: INVALID_REQUEST
+    - type: no_side_effect
+      table: agent_sessions
+
+- id: SEC-BUYERKEY-003
+  introduced_in: N1
+  role: CUSTOMER
+  skill: session
+  risk: SECURITY
+  locale: zh-CN
+  form: PRIMITIVE
+  turns:
+    - actor: customer_a
+      primitive:
+        name: session.setup_bound_guest
+        args:
+          buyer_key: legit-buyer-001
+    - actor: customer_a
+      primitive:
+        name: session.attempt_conflicting_rebind
+        args:
+          attacker_buyer_key: attacker-buyer-002
+  assertions:
+    - type: no_side_effect
+      table: agent_sessions

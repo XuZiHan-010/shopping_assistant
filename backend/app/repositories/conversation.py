@@ -87,6 +87,12 @@ def _decode_message_cursor(
     return created_at, message_id
 
 
+#: v1 接口只认 v1 对话：v2 对话（`surface` 非空）与顾客对话（`owner_kind` 非空）同样
+#: 挂在 `merchant_id` 下，不排除就会让商家经 v1 目录读到本店顾客的对话（R5），
+#: 也会让 v1 拿 v1 结构去解析 v2 回答。
+_V1_CONVERSATION = (Conversation.surface.is_(None), Conversation.owner_kind.is_(None))
+
+
 @dataclass(frozen=True)
 class MessagePage:
     """`ConversationRepository.list_messages_page()` 的返回形状。
@@ -170,6 +176,7 @@ class ConversationRepository:
             .where(
                 Conversation.merchant_id == merchant_id,
                 Conversation.conversation_kind == "CHAT",
+                *_V1_CONVERSATION,
             )
             .order_by(Conversation.created_at.desc(), Conversation.id.desc())
             .limit(limit)
@@ -186,6 +193,7 @@ class ConversationRepository:
             select(Conversation).where(
                 Conversation.id == conversation_id,
                 Conversation.merchant_id == merchant_id,
+                *_V1_CONVERSATION,
             )
         )
         return result.one_or_none()
@@ -410,6 +418,7 @@ class ConversationRepository:
                 Answer.merchant_id == merchant_id,
                 Answer.conversation_id == conversation_id,
                 Answer.processing_status == "SUCCEEDED",
+                Answer.surface.is_(None),
             )
             .order_by(Answer.created_at.asc(), Answer.id.asc())
         )
@@ -424,6 +433,7 @@ class ConversationRepository:
             select(Answer).where(
                 Answer.merchant_id == merchant_id,
                 Answer.client_request_id == client_request_id,
+                Answer.surface.is_(None),
             )
         )
         return result
@@ -454,6 +464,7 @@ class ConversationRepository:
                 .where(
                     Answer.merchant_id == merchant_id,
                     Answer.client_request_id == client_request_id,
+                    Answer.surface.is_(None),
                 )
                 .with_for_update()
             ),

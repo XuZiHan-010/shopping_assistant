@@ -17,6 +17,11 @@ def test_create_app_never_enables_debug_mode() -> None:
                 if env is AppEnvironment.PRODUCTION
                 else None
             ),
+            buyer_alias_secret=(
+                "a-genuinely-long-random-buyer-alias-secret"
+                if env is AppEnvironment.PRODUCTION
+                else None
+            ),
         )
         app = create_app(settings)
 

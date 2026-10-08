@@ -40,19 +40,46 @@ test('首屏不请求 ECharts chunk', async ({ page }) => {
       return
     }
 
-    if (request.method() === 'GET' && url.pathname === '/api/conversations') {
-      await route.fulfill({ headers, json: { items: [], limit: 50, offset: 0 } })
+    // 身份换取与助手栏会话目录走 `/api/v2/merchant/*`（W 阶段起 `/` 是首页，
+    // 运营助手是常驻外壳的助手栏），取代了 v1 的 `/api/conversations`。
+    if (request.method() === 'POST' && url.pathname === '/api/v2/merchant/sessions') {
+      await route.fulfill({
+        headers,
+        status: 201,
+        json: {
+          session_id: 'first-paint-session-id-00000000000000000000',
+          role: 'MERCHANT',
+          expires_at: '2099-01-01T00:00:00Z',
+          merchant_display_name: 'Borough商家100',
+        },
+      })
+      return
+    }
+
+    if (request.method() === 'GET' && url.pathname === '/api/v2/merchant/conversations') {
+      await route.fulfill({ headers, json: { items: [], next_cursor: null, has_more: false } })
       return
     }
 
     await route.fulfill({ headers, status: 404, json: { detail: '首屏测试未允许该请求' } })
   })
 
-  await page.goto('/')
-  await expect(page.getByTestId('quick-question').first()).toBeVisible()
+  // W Task 6：运营助手是默认收起的助手栏，从 `/?assistant=open`（`/ops-assistant` 的落点）进入。
+  await page.goto('/?assistant=open')
+  await expect(page.getByLabel('向运营助手提问')).toBeVisible()
   await expect
     .poll(() => interceptedApiPaths)
-    .toEqual(['/api/demo/merchants', '/api/conversations'])
+    .toEqual(['/api/demo/merchants', '/api/v2/merchant/sessions', '/api/v2/merchant/conversations'])
+
+  // W Task 8：`/` 是首页。首屏只画出区块骨架，简报、主指标、订单等取数与趋势图都推迟到
+  // 空闲之后（这里空闲回调被冻结），所以请求序列仍然只有上面三条。
+  await expect(page.getByRole('heading', { name: '今日简报' })).toBeVisible()
+  await expect(page.locator('[data-test=home-metric]')).toBeVisible()
+  expect(interceptedApiPaths).toEqual([
+    '/api/demo/merchants',
+    '/api/v2/merchant/sessions',
+    '/api/v2/merchant/conversations',
+  ])
 
   expect(requested).toEqual([])
 })
