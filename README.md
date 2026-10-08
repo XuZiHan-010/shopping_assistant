@@ -4,6 +4,9 @@
 
 # Borough 双端 Agent 电商平台
 
+> 基于 Anthropic 的 [Claude Commerce Agents 参考蓝图](https://github.com/anthropics/commerce-agents)进行二次设计与实现。
+> 上游来源、改编范围和版权许可见[项目来源与许可](#项目来源与许可)。
+
 > 一套后端、两个 Agent：**顾客端**在店铺里导购、加购和办售后，**商家端**查经营数据、管库存和内容、审批草稿。
 > 两端共用同一份身份、订单、库存与审计事实；模型负责理解和选择工具，**金额、库存、SQL 与每一次写入都由后端确定性代码决定**。
 
@@ -29,6 +32,7 @@
 ## 目录
 
 - [一分钟看懂](#一分钟看懂)
+- [项目来源与许可](#项目来源与许可)
 - [界面](#界面)
 - [能力一览](#能力一览)
 - [系统架构](#系统架构)
@@ -62,6 +66,21 @@
 | 回归 | 自动化测试全部使用脚本化模型，不产生费用 | 后端 4700+、商家端 793、顾客端 141 |
 
 失败的数字同样写在这张表里。完整结果、分母与复核记录见[评测](#评测)。
+
+## 项目来源与许可
+
+Borough 基于 Anthropic 的 [Claude Commerce Agents](https://github.com/anthropics/commerce-agents) 参考蓝图构建，
+参考版本为 [`fd4d592`](https://github.com/anthropics/commerce-agents/tree/fd4d59224ab96b43c6dc6888207c67b3bd5a24cf)。
+双端 Agent、按需加载的 Skill、受控工具循环及商家写入审批等设计借鉴了该蓝图；
+顾客端 4 个、商家端 4 个 Skill 根据上游内容改编，具体来源保留在各 `SKILL.md` 的 `source` 字段中。
+Borough 自行实现电商领域模型、可信身份与租户隔离、后端工具和状态机、前端界面、接口契约及评测。
+它使用 DeepSeek 模型和自有 `LlmClient`；支持 Anthropic 兼容协议并不表示调用 Claude 或使用 Anthropic 托管服务。
+
+**版权与许可**：上游 `commerce-agents` 版权所有 © 2026 Anthropic PBC，按
+[Apache License 2.0](https://github.com/anthropics/commerce-agents/blob/fd4d59224ab96b43c6dc6888207c67b3bd5a24cf/LICENSE)
+发布；其版权和许可声明适用于本项目包含或改编的上游材料。Borough 原创部分的版权归相应贡献者所有。
+本仓库目前没有根级 `LICENSE`，因此上游的 Apache-2.0 许可**不等于**整个 Borough 仓库都按 Apache-2.0 授权。
+Borough 是独立的个人工程项目，与 Anthropic 无隶属或官方背书关系。
 
 ## 界面
 
@@ -253,9 +272,6 @@ structlog · pytest · Ruff · mypy
 **数据与基础设施**　PostgreSQL 16 + pgvector · Docker · Caddy · Railway
 
 **模型**　DeepSeek `deepseek-flash`，经自有 `LlmClient` 接 OpenAI 兼容与 Anthropic 兼容两种协议
-
-Skill 与工具循环的总体思路参考了 Anthropic 的 [commerce-agents](https://github.com/anthropics/commerce-agents) 蓝图（Apache-2.0）；
-领域模型、契约、安全边界与评测为本项目自行设计实现。
 
 ## 快速开始
 
