@@ -385,7 +385,7 @@ N3 阶段 C（2026-09-25）追加 `price_change.py`、`coupon.py`、`content_cha
 明细导出、指标口径与规则问答、商品内容起草五组只读/起草工具）。
 
 上下文压缩（§6.12）不单独建目录，随 `app/agent/loop/` 一并实现。
-N4-A（2026-09-30）已落地：`app/agent/loop/compaction/`（`__init__.py` 策略枚举、`CompactionPolicy`、`compaction_step`；`anchors.py` 三项锚点；`pruning.py` 工具结果清理；`summarization.py` 摘要压缩），由 `LoopLimits.compaction` 接入 `runner.py`，配置 `COMPACTION_STRATEGY` / `COMPACTION_TRIGGER_TOKENS` / `COMPACTION_MAX_CALLS`；E5 压缩评测 `app/eval/compaction_e5.py` + `app/eval/datasets/compaction/`，报告 `docs/history/eval/n4-e5-compaction-fake.md`。
+N4-A（2026-09-30）已落地：`app/agent/loop/compaction/`（`__init__.py` 策略枚举、`CompactionPolicy`、`compaction_step`；`anchors.py` 三项锚点；`pruning.py` 工具结果清理；`summarization.py` 摘要压缩），由 `LoopLimits.compaction` 接入 `runner.py`，配置 `COMPACTION_STRATEGY` / `COMPACTION_TRIGGER_TOKENS` / `COMPACTION_MAX_CALLS`；E5 压缩评测 `app/eval/compaction_e5.py` + `app/eval/datasets/compaction/`，报告 `docs/history/eval/n4-e5-compaction-fake.md`。2026-10-10 整改（小结果原样保留、调用序号、知识文档出处、触顶收尾、英文商品搜索、成文售后规则）的规格、计划与任务清单在 `docs/specs/2026-10-10-real-eval-defect-fixes/`。
 
 ### 5.4 业务服务与领域模块
 
@@ -457,6 +457,9 @@ Repository 只负责数据访问，不调用 LLM，也不拼接来自用户的�
 | `backend/app/api/routes/v2/shop_after_sales.py`、`merchant_after_sales.py`、`merchant_signals.py` | N3 B 双端售后与信号路由；商家详情先写查看审计 |
 | `backend/app/api/routes/v2/merchant_catalog.py` | N3 C 商家会话只读商品内容与优惠券列表；租户隔离、签名游标、内容缺口由后端确定 |
 | `backend/app/tools/customer/after_sale.py`、`backend/app/tools/merchant/after_sale.py`、`signals.py` | 顾客只读预检、商家售后只读与决定草稿、信号只读；决定必须经审批界面应用 |
+| `backend/app/tools/customer/search_terms.py` | 商品搜索的检索词表：英文 → 中文与中文近义词（零 LLM 调用）；`catalog.py` 的 `search_products` 用它展开查询词。新增演示品类时在这里补词 |
+| `backend/app/tools/customer/catalog.py` 的 `estimate_bundle_total` | 顾客端只读工具（2026-10-10）：后端计算一组本店在售商品的标价合计与预算差额。模型不得自己做加减，预算类提问靠它；新增顾客工具时同步 `shop/src/i18n/toolNames.ts` 与 `tests/integration/v2/test_shop_chat.py` 的工具面断言 |
+| `backend/app/knowledge/borough_rules.py` | Borough 自有的成文平台规则（现有《Borough 平台售后规则》），由 `wiki_seed.py` 的 `seed_wiki_documents` 与镜像种子一并「不存在才插入」；条款须与售后资格、状态迁移、退款计算的代码一致。镜像种子 `wiki_seed.json` 不改 |
 | `shop/src/app/[shop_slug]/after-sales/`、`frontend/src/views/AfterSalesView.vue`、`SignalsView.vue` | N3 B 顾客申请确认与双端售后/信号界面；传输层由各自 `api/adapters/afterSales.ts` 适配 |
 
 ORM 模型与 API Schema 分开，禁止直接把 ORM 对象作为外部接口协议。

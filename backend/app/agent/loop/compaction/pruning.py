@@ -6,6 +6,8 @@
 - 消息条数、角色、`tool_call_id` 与 assistant 的 `tool_calls` 全部不变，两种协议适配器要求的
   「工具结果紧跟其调用」「角色交替」结构因此始终合法；
 - 每个被清理的结果就地带上自己的来源、截至时间与草稿版本（`anchors.py`），不另插消息；
+- 不超过 `min_prunable_chars` 的结果原样保留：清掉它省不下空间，却会丢掉后续步骤要用的事实；
+- 占位写明这是本回合第几次工具调用，模型才分得清「最早那次查询」是哪一条；
 - 已清理的消息是带 `PRUNED_MARKER` 的围栏占位，再次清理时跳过，结果幂等。
 
 回答里数字的确定性校验读的是完整 `ToolResult` 列表，不读消息，清理不会放宽校验。
@@ -36,8 +38,15 @@ from app.tools.types import ToolResult
 PRUNED_MARKER: Final = "[工具结果已清理："
 
 _PLACEHOLDER: Final[Mapping[SupportedLocale, str]] = {
-    SupportedLocale.ZH_CN: PRUNED_MARKER + "{tool}#{call_id}，关键值见下方锚点]",
-    SupportedLocale.EN_US: PRUNED_MARKER + "{tool}#{call_id}; key values in the anchors below]",
+    SupportedLocale.ZH_CN: PRUNED_MARKER
+    + "{tool}#{call_id}，本回合第 {ordinal} 次工具调用，关键值见下方锚点]",
+    SupportedLocale.EN_US: PRUNED_MARKER
+    + "{tool}#{call_id}; tool call {ordinal} of this turn; key values in the anchors below]",
+}
+#: 结果列表里找不到该调用时的占位（理论上不会发生：每条工具消息都对应一条结果）。
+_PLACEHOLDER_UNKNOWN: Final[Mapping[SupportedLocale, str]] = {
+    SupportedLocale.ZH_CN: PRUNED_MARKER + "{tool}#{call_id}]",
+    SupportedLocale.EN_US: PRUNED_MARKER + "{tool}#{call_id}]",
 }
 
 #: 占位的固定开头：`fence()` 的围栏头 + 说明行 + 标记。
@@ -55,10 +64,13 @@ def prune_tool_results(
     *,
     locale: SupportedLocale,
     keep_recent_rounds: int = DEFAULT_KEEP_RECENT_ROUNDS,
+    min_prunable_chars: int = 0,
 ) -> CompactionOutcome:
     prefix, rounds = split_rounds(messages)
     cutoff = max(len(rounds) - keep_recent_rounds, 0)
-    by_call = {result.display.call_id: result for result in results}
+    by_call = {
+        result.display.call_id: (ordinal, result) for ordinal, result in enumerate(results, 1)
+    }
     skills = trusted_skill_calls(results)
     changed = False
     new_rounds: list[list[LlmMessage]] = []
@@ -73,6 +85,7 @@ def prune_tool_results(
                 message.role != "tool"
                 or _is_placeholder(message.content)
                 or message.tool_call_id in skills
+                or len(message.content) <= min_prunable_chars
             ):
                 pruned_round.append(message)
                 continue
@@ -104,11 +117,18 @@ def _is_placeholder(content: str) -> bool:
 
 
 def _placeholder(
-    tool: str, call_id: str, by_call: Mapping[str, ToolResult], locale: SupportedLocale
+    tool: str,
+    call_id: str,
+    by_call: Mapping[str, tuple[int, ToolResult]],
+    locale: SupportedLocale,
 ) -> str:
-    head = _PLACEHOLDER[locale].format(tool=tool, call_id=call_id)
-    result = by_call.get(call_id)
-    anchors = format_anchors(extract_anchors([result] if result else []), locale)
+    found = by_call.get(call_id)
+    if found is None:
+        head = _PLACEHOLDER_UNKNOWN[locale].format(tool=tool, call_id=call_id)
+        return fence(head, source=f"tool:{tool}")
+    ordinal, result = found
+    head = _PLACEHOLDER[locale].format(tool=tool, call_id=call_id, ordinal=ordinal)
+    anchors = format_anchors(extract_anchors([result]), locale)
     body = f"{head}\n{anchors}" if anchors else head
     # 锚点源自工具结果，与原工具消息同等对待：照常围栏（A11）。
     return fence(body, source=f"tool:{tool}")

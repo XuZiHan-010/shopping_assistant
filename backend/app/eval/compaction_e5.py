@@ -34,6 +34,7 @@ from app.agent.loop.compaction import (
     CompactionOutcome,
     CompactionStrategy,
     estimate_tokens,
+    min_prunable_chars,
 )
 from app.agent.loop.compaction.pruning import prune_tool_results
 from app.agent.loop.compaction.summarization import SUMMARY_NOTICE, summarize_early_context
@@ -48,6 +49,8 @@ from app.tools.types import ToolDisplay, ToolOutcome, ToolResult
 DATASET: Final = Path(__file__).parent / "datasets/compaction/n4_e5_compaction.yaml"
 DEFAULT_TRIGGER_TOKENS: Final[int] = Settings.model_fields["compaction_trigger_tokens"].default
 KEEP_RECENT_ROUNDS: Final = DEFAULT_KEEP_RECENT_ROUNDS
+#: 与生产一致：不超过触发阈值四分之一的工具结果不清理。
+MIN_PRUNABLE_CHARS: Final = min_prunable_chars(DEFAULT_TRIGGER_TOKENS)
 #: 最坏情况的 Fake 摘要：什么都没保留。锚点若还在，只能是回填的功劳。
 DROP_EVERYTHING_SUMMARY: Final = "早期对话。"
 
@@ -166,12 +169,13 @@ async def evaluate(
             compacted_cases += 1
         text = _visible_text(out.messages)
         ratios.append(estimate_tokens(out.messages) / estimate_tokens(built.messages))
+        kept = kept_verbatim(built, out)
 
         deps = [(i, case["rounds"][i]) for i in case["depends_on"]]
-        ok_identity = not any(secret in text for secret in built.secrets)
-        ok_source = all(_source_kept(text, i, spec) for i, spec in deps)
+        ok_identity = not any(secret in written_text(built, out) for secret in built.secrets)
+        ok_source = all(f"c{i + 1}" in kept or _source_kept(text, i, spec) for i, spec in deps)
         draft_deps = [(i, spec) for i, spec in deps if str(spec["tool"]).startswith("draft_")]
-        ok_draft = all(_draft_kept(text, spec) for _i, spec in draft_deps)
+        ok_draft = all(f"c{i + 1}" in kept or _draft_kept(text, spec) for i, spec in draft_deps)
         ok_safety = _safety_kept(built, out)
         identity += ok_identity
         sources += ok_source
@@ -210,6 +214,7 @@ async def _compact(built: BuiltCase, strategy: CompactionStrategy) -> Compaction
             built.results,
             locale=built.locale,
             keep_recent_rounds=KEEP_RECENT_ROUNDS,
+            min_prunable_chars=MIN_PRUNABLE_CHARS,
         )
     fake = FakeLlmClient(
         turns=[
@@ -224,7 +229,29 @@ async def _compact(built: BuiltCase, strategy: CompactionStrategy) -> Compaction
         locale=built.locale,
         remaining_calls=1,
         keep_recent_rounds=KEEP_RECENT_ROUNDS,
+        min_prunable_chars=MIN_PRUNABLE_CHARS,
     )
+
+
+def kept_verbatim(built: BuiltCase, out: CompactionOutcome) -> frozenset[str]:
+    """压缩后仍逐字保留的工具结果（调用 ID）：小结果不清理，它的来源与草稿版本就在原文里。"""
+
+    original = {m.tool_call_id: m.content for m in built.messages if m.role == "tool"}
+    return frozenset(
+        m.tool_call_id
+        for m in out.messages
+        if m.role == "tool" and m.tool_call_id and original.get(m.tool_call_id) == m.content
+    )
+
+
+def written_text(built: BuiltCase, out: CompactionOutcome) -> str:
+    """压缩**新写入**的文字（占位、锚点、摘要）。身份陷阱只查这里（口径 v3）：
+
+    原样保留的原消息本来就在上下文里，保留它不构成新的泄露；要防的是压缩把身份字段抄进它自己
+    写的内容。
+    """
+
+    return _visible_text([m for m in out.messages if m not in built.messages])
 
 
 def _visible_text(messages: Sequence[LlmMessage]) -> str:

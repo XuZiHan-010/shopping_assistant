@@ -34,6 +34,17 @@ class CompactionStrategy(StrEnum):
 #: 最近几轮的工具结果原样保留：模型下一步通常就要消费它们。
 DEFAULT_KEEP_RECENT_ROUNDS = 2
 
+#: 小结果的界线 = 触发阈值 / 这个数。占位加锚点本身就有三四百字，清掉一条一两千字的结果
+#: 省不下多少，却会丢掉实体详情这类后续步骤要用的事实（2026-10-07 售后回合：详情被清理后
+#: 模型无法起草决定）。单回合最多 `max_tool_calls` 条结果，多保留的总量因此有界。
+MIN_PRUNABLE_DIVISOR: Final = 4
+
+
+def min_prunable_chars(trigger_tokens: int) -> int:
+    """不超过这个长度的工具结果不清理（按字符计，与 `estimate_tokens` 同口径）。"""
+
+    return trigger_tokens // MIN_PRUNABLE_DIVISOR
+
 
 @dataclass(frozen=True)
 class CompactionPolicy:
@@ -47,6 +58,10 @@ class CompactionPolicy:
     trigger_tokens: int
     max_calls: int
     keep_recent_rounds: int = DEFAULT_KEEP_RECENT_ROUNDS
+
+    @property
+    def min_prunable_chars(self) -> int:
+        return min_prunable_chars(self.trigger_tokens)
 
     def __post_init__(self) -> None:
         if self.trigger_tokens <= 0:

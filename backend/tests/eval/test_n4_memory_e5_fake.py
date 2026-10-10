@@ -72,3 +72,39 @@ async def test_e5_aggregate_report_uses_all_cases_without_real_calls() -> None:
     assert len(evidence) == 40
     assert sum(len(row["accepted"]) for row in evidence) == 20
     assert all("candidates" in row and "filters" in row for row in evidence)
+
+
+@pytest.mark.asyncio
+async def test_mem_016_real_model_candidates_no_longer_write_the_historical_value() -> None:
+    """回放 2026-10-05 真实运行里模型对 MEM-016 的原始输出（错误写入 2/40 全部出自它）。
+
+    模型把「这次我要彩色款」和「以前喜欢素色」各抽成一条同键候选，当时两条都被写入。
+    之后加入的历史分句判定应只留下当前那一条；这里固定模型输出，不依赖模型是否再犯。
+    """
+
+    cases = yaml.safe_load(DATASET.read_text(encoding="utf-8"))
+    case = next(item for item in cases if item["id"] == "MEM-016")
+    recorded = {
+        "facts": [
+            {
+                "category": "偏好", "key": "颜色偏好", "value": "彩色款",
+                "source_index": 0, "evidence": "这次我要彩色款",
+            },
+            {
+                "category": "偏好", "key": "颜色偏好", "value": "以前喜欢素色",
+                "source_index": 0, "evidence": "以前喜欢素色",
+            },
+        ]
+    }
+    accepted: list[dict[str, object]] = []
+
+    report = await evaluate(
+        [case],
+        llm_for_case=lambda _case_id: FakeLlmClient(
+            responses=[json.dumps(recorded, ensure_ascii=False)]
+        ),
+        on_case=lambda row: accepted.extend(row["accepted"]),
+    )
+
+    assert report["wrong_writes"] == 0 and report["correct_writes"] == 1
+    assert [item["value"] for item in accepted] == ["彩色款"]

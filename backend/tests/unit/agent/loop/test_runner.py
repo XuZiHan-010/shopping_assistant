@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 
 import pytest
 
@@ -215,9 +216,116 @@ async def test_stops_at_max_turns_and_discloses() -> None:
     assert out.degraded is True
     assert out.degraded_reason is DegradeReason.LIMIT
     assert out.quality_notes  # 披露写进了用户可见的说明
-    assert len(llm.converse_calls) == 3
+    # 3 轮决策 + 1 次不带工具的收尾；收尾里模型仍只想调工具，没有正文可给。
+    assert len(llm.converse_calls) == 4
+    assert llm.converse_calls[-1].tools == []
+    assert "未能完成回答" in out.answer and "以下" not in out.answer
     # 最后一轮请求的工具不执行：没有后续轮次会消费它的结果，只剩副作用。
     assert len(PROBE.started) == 2
+
+
+# --- 触顶收尾：工具调用或轮数触顶时，用剩余预算做一次不带工具的作答 ------------------------
+
+
+def _tool_calls_answered(messages: Sequence[LlmMessage]) -> bool:
+    """每个 `tool_call` 之后都有对应的工具消息（两种协议适配器的结构要求）。"""
+
+    answered = {m.tool_call_id for m in messages if m.role == "tool"}
+    return all(c.call_id in answered for m in messages for c in m.tool_calls or ())
+
+
+async def test_tool_limit_wrap_up_answers_from_gathered_results() -> None:
+    over_limit = call("slow_read", label="c")
+    llm = FakeLlmClient(
+        turns=[
+            tool_use_turn(call("slow_read", label="a"), call("slow_read", label="b")),
+            tool_use_turn(over_limit),
+            end_turn("已查到的两项都正常，第三项还没来得及查。"),
+        ]
+    )
+    events: list[LoopEvent] = []
+
+    async def sink(event: LoopEvent) -> None:
+        events.append(event)
+
+    out = await _run(llm, limits=limits(max_tool_calls=2), on_event=sink)
+
+    assert out.stop_reason == "MAX_TOOL_CALLS"
+    assert out.degraded is True and out.degraded_reason is DegradeReason.LIMIT
+    assert out.quality_status is QualityStatus.DEGRADED
+    assert out.answer.endswith("已查到的两项都正常，第三项还没来得及查。")
+    assert out.answer.startswith("已达到本次处理的步骤上限，以下回答仅基于已查到的部分结果")
+    assert out.quality_notes[-1] in out.answer
+    wrap_up = llm.converse_calls[-1]
+    assert wrap_up.tools == []  # 收尾不给工具
+    assert "【收尾】" in wrap_up.messages[0].content
+    assert "【收尾】" not in llm.converse_calls[0].messages[0].content
+    assert _tool_calls_answered(wrap_up.messages)
+    not_executed = next(m for m in wrap_up.messages if m.tool_call_id == over_limit.call_id)
+    assert "未执行" in not_executed.content
+    # 未执行的调用不计数、不发事件、不进结果列表。
+    assert "c" not in PROBE.started
+    assert len(out.tool_calls) == len(out.tool_results) == 2
+    assert over_limit.call_id not in {
+        e.call_id for e in events if isinstance(e, ToolCallStarted)
+    }
+
+
+async def test_turn_limit_wrap_up_answers_from_gathered_results() -> None:
+    llm = FakeLlmClient(turns=[tool_use_turn(), tool_use_turn(), end_turn("目前只查到这些。")])
+
+    out = await _run(llm, limits=limits(max_turns=2))
+
+    assert out.stop_reason == "MAX_TURNS"
+    assert out.degraded_reason is DegradeReason.LIMIT
+    assert out.answer.endswith("目前只查到这些。")
+    assert len(PROBE.started) == 1  # 最后一轮请求的工具没有执行
+    assert _tool_calls_answered(llm.converse_calls[-1].messages)
+
+
+async def test_wrap_up_answer_still_passes_the_deterministic_checks() -> None:
+    llm = FakeLlmClient(
+        turns=[
+            tool_use_turn(call("slow_read", label="a")),
+            tool_use_turn(call("slow_read", label="b")),
+            end_turn("一共 98765 件"),  # 工具结果里没有这个数
+            end_turn("一共 87654 件"),
+        ]
+    )
+
+    out = await _run(llm, limits=limits(max_tool_calls=1))
+
+    assert out.stop_reason == "MAX_TOOL_CALLS"
+    assert out.degraded_reason is DegradeReason.VALIDATION
+    assert "98765" not in out.answer and "87654" not in out.answer
+
+
+async def test_wrap_up_without_budget_falls_back_to_an_honest_note() -> None:
+    llm = FakeLlmClient(turns=[tool_use_turn(), tool_use_turn(), end_turn("来不及了")])
+
+    out = await _run(llm, limits=limits(max_turns=2, max_llm_calls=2))
+
+    assert out.stop_reason == "MAX_TURNS"
+    assert out.degraded_reason is DegradeReason.LIMIT
+    assert out.answer == out.quality_notes[-1]
+    assert "未能完成回答" in out.answer and "来不及了" not in out.answer
+    assert len(llm.converse_calls) == 2  # 收尾调用没有发出
+
+
+async def test_wrap_up_english_note_precedes_the_answer() -> None:
+    request = LoopRequest(
+        context=customer_request().context,
+        system_prompt="You are the Borough shop assistant.",
+        user_message="plan an outfit",
+        locale=SupportedLocale.EN_US,
+    )
+    llm = FakeLlmClient(turns=[tool_use_turn(), tool_use_turn(), end_turn("Here is what I found.")])
+
+    out = await _run(llm, request, limits=limits(max_turns=2))
+
+    assert out.answer.startswith("This request reached its step limit. The answer below")
+    assert out.answer.endswith("Here is what I found.")
+    assert "[Wrap-up]" in llm.converse_calls[-1].messages[0].content
 
 
 async def test_answer_on_exactly_last_turn_completes() -> None:
@@ -1018,3 +1126,16 @@ def test_memory_recall_tools_never_ground_numbers() -> None:
 
     assert {s.name for s in specs} == {"recall_preferences", "recall_merchant_preferences"}
     assert all(spec.grounds_numbers is False for spec in specs)
+
+
+async def test_regeneration_prompt_tells_the_model_not_to_mention_the_earlier_draft() -> None:
+    """2026-10-10 真实评测 QLT-N5-003：重写稿开头向顾客道歉并解释「上一条」，而顾客从没见过它。"""
+
+    llm = FakeLlmClient(turns=[end_turn("一共 98765 件"), end_turn("目前没有可核对的数量。")])
+
+    out = await _run(llm)
+
+    assert out.answer == "目前没有可核对的数量。"
+    revise = llm.converse_calls[-1].messages[-1]
+    assert revise.role == "user"
+    assert "对方没有看到上面那一版" in revise.content and "不要道歉" in revise.content
