@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import Database
+from app.knowledge.borough_rules import AFTER_SALE_RULES_PATH, BOROUGH_RULE_DOCUMENTS
 from app.knowledge.wiki_seed import seed_wiki_documents
 from app.models.knowledge import KnowledgeDocument
 from app.repositories.knowledge import KnowledgeRepository
@@ -102,7 +103,16 @@ async def test_insert_if_absent_preserves_admin_edited_document(
 async def test_image_seed_is_idempotent_and_preserves_admin_edits(
     integration_database: Database,
 ) -> None:
-    assert await seed_wiki_documents(integration_database) == 21
+    # 镜像种子 21 篇 + Borough 自有的成文规则（2026-10-10 起一并落库）。
+    assert await seed_wiki_documents(integration_database) == 21 + len(BOROUGH_RULE_DOCUMENTS)
+
+    async with integration_database.session() as session:
+        rules = await session.scalar(
+            select(KnowledgeDocument).where(
+                KnowledgeDocument.source_path == AFTER_SALE_RULES_PATH
+            )
+        )
+        assert rules is not None and rules.is_complete is True and rules.category == "REFUND"
 
     async with integration_database.session() as session:
         document = await session.scalar(

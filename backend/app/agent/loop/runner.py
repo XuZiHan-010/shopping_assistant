@@ -4,7 +4,9 @@
 再（可选）交独立 Reviewer 复核，不通过则在同一份预算内重新生成。规则逐条对应测试：
 
 1. 五项上限任一触顶即停，按 `stop_reason` 如实披露，不静默截断；
-2. 触顶返回已获得的部分结果 + 降级标注（R7），不伪装成完整回答；
+2. 工具调用或轮数触顶时，超限的那批调用不执行，用回合剩余预算做一次**不带工具**的收尾作答：
+   模型只依据已拿到的结果回答，回答照常过确定性校验，并带降级标注与说明（R7）。收尾走不完
+   （预算、时间、上游异常）或其他上限触顶时没有正文可给，说明如实写「未能完成回答」；
 3. `FatalToolError` 立即终止整个回合：原样抛出，不重试、不降级、不进 Reviewer；
 4. 只有 `READ_ONLY` 且 `parallelizable` 的调用并行；含写操作的批次强制串行，且写操作一旦开始
    不被墙钟或断开打断（半途取消会留下「不知道是否已提交」的事务）；
@@ -33,7 +35,7 @@ import re
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from contextlib import suppress
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Final, Literal, Protocol
 
 from app.agent.loop.checks import DEFAULT_CHECKS, DeterministicCheck
@@ -74,6 +76,7 @@ from app.tools.types import (
     ToolOutcome,
     ToolResult,
     WritePolicy,
+    display_tool_name,
 )
 
 logger = logging.getLogger(__name__)
@@ -101,19 +104,24 @@ _STOP_DEGRADE: Final[dict[StopReason, DegradeReason]] = {
 #: 降级时写进 `quality_notes`、并在没有部分结果时作为回答正文的可见说明（R7）。
 _DEGRADE_NOTES: Final[dict[DegradeReason, dict[SupportedLocale, str]]] = {
     DegradeReason.LIMIT: {
-        SupportedLocale.ZH_CN: "已达到本次处理的步骤上限，以下仅为已获得的部分结果。",
+        SupportedLocale.ZH_CN: (
+            "已达到本次处理的步骤上限，本次未能完成回答。请缩小问题范围后再试。"
+        ),
         SupportedLocale.EN_US: (
-            "This request reached its step limit; only partial results are shown."
+            "This request reached its step limit before an answer could be completed. "
+            "Please try a narrower question."
         ),
     },
     DegradeReason.TIMEOUT: {
-        SupportedLocale.ZH_CN: "处理时间已达上限，以下仅为已获得的部分结果。",
-        SupportedLocale.EN_US: "This request ran out of time; only partial results are shown.",
+        SupportedLocale.ZH_CN: "处理时间已达上限，本次未能完成回答。",
+        SupportedLocale.EN_US: (
+            "This request ran out of time before an answer could be completed."
+        ),
     },
     DegradeReason.BUDGET: {
-        SupportedLocale.ZH_CN: "本次请求的模型预算已达上限，以下仅为已获得的部分结果。",
+        SupportedLocale.ZH_CN: "本次请求的模型预算已达上限，本次未能完成回答。",
         SupportedLocale.EN_US: (
-            "The model budget for this request is used up; only partial results are shown."
+            "The model budget for this request is used up; no answer could be completed."
         ),
     },
     DegradeReason.UPSTREAM: {
@@ -134,6 +142,36 @@ _DEGRADE_NOTES: Final[dict[DegradeReason, dict[SupportedLocale, str]]] = {
     },
 }
 
+#: 触顶收尾成功时放在回答正文之前的说明：后面确实跟着模型基于部分结果写的内容。
+_PARTIAL_ANSWER_NOTES: Final[dict[SupportedLocale, str]] = {
+    SupportedLocale.ZH_CN: (
+        "已达到本次处理的步骤上限，以下回答仅基于已查到的部分结果，可能不完整。"
+    ),
+    SupportedLocale.EN_US: (
+        "This request reached its step limit. The answer below is based only on the results "
+        "gathered so far and may be incomplete."
+    ),
+}
+
+#: 收尾调用临时追加在系统提示末尾的说明（只这一次调用可见，不写回 `self.messages`）。
+_WRAP_UP_NOTICE: Final[dict[SupportedLocale, str]] = {
+    SupportedLocale.ZH_CN: (
+        "【收尾】本回合的工具调用已达上限，不能再调用任何工具，也不要输出工具调用。"
+        "请只依据上面已经拿到的工具结果直接回答：先给出已经能确定的内容，"
+        "再说明哪些部分还没来得及查、需要对方再问一次。没有查到的信息不要编造。"
+    ),
+    SupportedLocale.EN_US: (
+        "[Wrap-up] This turn has reached its tool-call limit. No further tools are available; "
+        "do not emit tool calls. Answer directly from the tool results already above: state "
+        "what is established first, then say what could not be checked and needs a follow-up "
+        "question. Do not invent anything that was not retrieved."
+    ),
+}
+
+#: 交还模型的「未执行」结果：超限批次里的每个调用都要有对应的工具消息（两种协议的结构要求）。
+_NOT_EXECUTED_SUMMARY: Final = "未执行：本回合的工具调用已达上限。"
+_CALL_ID: Final = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
 _DAILY_BUDGET_NOTES: Final[dict[SupportedLocale, str]] = {
     SupportedLocale.ZH_CN: "每日模型费用预算已用尽，本次未能完成回答。",
     SupportedLocale.EN_US: (
@@ -144,10 +182,16 @@ _DAILY_BUDGET_NOTES: Final[dict[SupportedLocale, str]] = {
 _REVISE_PROMPT: Final[dict[SupportedLocale, str]] = {
     SupportedLocale.ZH_CN: (
         "上面的回答未通过校验：{issues}。请只依据已有的工具结果重写回答，不要编造数字。"
+        # 2026-10-10 真实评测 QLT-N5-003：重写稿开头是「抱歉，我上一条里自己算了总价…重写如下」。
+        # 对方从没见过上一稿，这句话对他没有意义，还把内部校验过程写给了顾客。
+        "对方没有看到上面那一版：直接给出重写后的完整回答，不要道歉，"
+        "不要提到上一版、重写或校验。"
     ),
     SupportedLocale.EN_US: (
         "The answer above failed validation: {issues}. Rewrite it using only the tool results "
-        "already provided, without inventing numbers."
+        "already provided, without inventing numbers. The user never saw that draft: give the "
+        "complete rewritten answer directly, with no apology and no mention of a previous "
+        "version, a rewrite, or validation."
     ),
 }
 
@@ -340,6 +384,8 @@ class _Run:
         self.skill_limit_hit = False
         self.compactions: list[CompactionStrategy] = []
         self.compaction_calls = 0
+        #: 触顶后收尾作答成功时记下触顶原因；结局据此标降级，而不是当作正常完成。
+        self.limit_hit: StopReason | None = None
 
     # --- 工具轮 ------------------------------------------------------------------
 
@@ -364,11 +410,59 @@ class _Run:
             )
             if turn_number == self.limits.max_turns:
                 # 没有下一轮来消费这批工具的结果，执行它们只剩副作用。
-                raise _Stop("MAX_TURNS")
+                return await self.wrap_up(turn.tool_calls, "MAX_TURNS")
             if self.tool_count + len(turn.tool_calls) > self.limits.max_tool_calls:
-                raise _Stop("MAX_TOOL_CALLS")
+                return await self.wrap_up(turn.tool_calls, "MAX_TOOL_CALLS")
             await self.run_batch(turn.tool_calls)
         raise _Stop("MAX_TURNS")  # pragma: no cover - 循环体已覆盖所有出口
+
+    async def wrap_up(self, calls: Sequence[LlmToolCall], reason: StopReason) -> str:
+        """触顶收尾：超限的调用不执行，让模型不带工具、只凭已有结果作答一次。
+
+        只用回合剩余的预算与时间，不改预算公式；任何一步走不完都回到触顶原因本身
+        （`_Stop(reason)`，只给如实的说明）。未执行的调用不计数、不发事件、不进结果列表。
+        """
+
+        ids = [c.call_id for c in calls]
+        if (
+            any(_CALL_ID.fullmatch(i) is None for i in ids)
+            or len(set(ids)) != len(ids)
+            or self.seen_call_ids.intersection(ids)
+        ):
+            raise _Stop(reason)  # 调用 ID 不可用就无法合法地回工具消息
+        body = json.dumps(
+            {
+                "ok": False,
+                "outcome": ToolOutcome.REJECTED.value,
+                "summary": _NOT_EXECUTED_SUMMARY,
+                "data": None,
+            },
+            ensure_ascii=False,
+        )
+        for c in calls:
+            self.messages.append(
+                LlmMessage(
+                    role="tool",
+                    content=fence(body, source=f"tool:{display_tool_name(c.tool_name)}"),
+                    tool_call_id=c.call_id,
+                )
+            )
+        system = self.messages[0]
+        notice = _WRAP_UP_NOTICE[self.request.locale]
+        try:
+            turn = await self.converse(
+                [],
+                messages=[
+                    replace(system, content=f"{system.content}\n\n{notice}"),
+                    *self.messages[1:],
+                ],
+            )
+        except _Stop:
+            raise _Stop(reason) from None
+        if turn.stop_reason != "END_TURN" or not (turn.text or "").strip():
+            raise _Stop(reason)
+        self.limit_hit = reason
+        return turn.text or ""
 
     async def maybe_compact(self) -> None:
         policy = self.limits.compaction
@@ -386,6 +480,7 @@ class _Run:
                     locale=locale,
                     remaining_calls=policy.max_calls - self.compaction_calls,
                     keep_recent_rounds=policy.keep_recent_rounds,
+                    min_prunable_chars=policy.min_prunable_chars,
                 )
             )
         else:
@@ -394,6 +489,7 @@ class _Run:
                 self.results,
                 locale=locale,
                 keep_recent_rounds=policy.keep_recent_rounds,
+                min_prunable_chars=policy.min_prunable_chars,
             )
         self.compaction_calls += outcome.llm_calls
         if not outcome.changed:
@@ -402,10 +498,16 @@ class _Run:
         self.compactions.append(outcome.strategy_used)
         await self.emit(ContextCompacted(strategy=outcome.strategy_used))
 
-    async def converse(self, tools: list[ToolSchema]) -> LlmTurn:
+    async def converse(
+        self, tools: list[ToolSchema], *, messages: Sequence[LlmMessage] | None = None
+    ) -> LlmTurn:
         try:
             turn = await self.guard(
-                self.llm.converse(messages=list(self.messages), tools=tools, budget=self.budget)
+                self.llm.converse(
+                    messages=list(self.messages if messages is None else messages),
+                    tools=tools,
+                    budget=self.budget,
+                )
             )
         except LlmDailyBudgetExceededError:
             self.daily_budget_exhausted = True
@@ -428,7 +530,7 @@ class _Run:
     async def run_batch(self, calls: Sequence[LlmToolCall]) -> None:
         ctx = self.request.context
         # 上游 ID 会进入 SSE 与最终响应；整批先校验，避免先发事件或执行部分工具。
-        if any(re.fullmatch(r"[A-Za-z0-9_-]{1,64}", c.call_id) is None for c in calls):
+        if any(_CALL_ID.fullmatch(c.call_id) is None for c in calls):
             raise _Stop("UPSTREAM")
         ids = [c.call_id for c in calls]
         if len(set(ids)) != len(ids) or self.seen_call_ids.intersection(ids):
@@ -542,18 +644,18 @@ class _Run:
                 if not verdict.passed:
                     issues = list(verdict.notes) or [_REVIEW_FALLBACK_NOTE[locale]]
             if not issues:
-                return self.outcome(
-                    answer,
-                    "COMPLETED",
-                    None,
-                    QualityStatus.PASSED if reviewed else QualityStatus.NOT_RUN,
+                return self.answered(
+                    answer, QualityStatus.PASSED if reviewed else QualityStatus.NOT_RUN
                 )
             self.quality_notes.extend(issues)
             if self.quality_attempts >= self.limits.quality_max_attempts:
                 note = _DEGRADE_NOTES[DegradeReason.VALIDATION][locale]
                 self.quality_notes.append(note)
                 return self.outcome(
-                    note, "COMPLETED", DegradeReason.VALIDATION, QualityStatus.DEGRADED
+                    note,
+                    self.limit_hit or "COMPLETED",
+                    DegradeReason.VALIDATION,
+                    QualityStatus.DEGRADED,
                 )
             answer = await self.regenerate(answer, issues)
 
@@ -588,6 +690,17 @@ class _Run:
         return turn.text or ""
 
     # --- 结局 --------------------------------------------------------------------
+
+    def answered(self, answer: str, status: QualityStatus) -> LoopOutcome:
+        """通过校验的回答。触顶收尾得到的是部分结果：照常展示，但标降级并在正文前说明（R7）。"""
+
+        if self.limit_hit is None:
+            return self.outcome(answer, "COMPLETED", None, status)
+        note = _PARTIAL_ANSWER_NOTES[self.request.locale]
+        self.quality_notes.append(note)
+        return self.outcome(
+            f"{note}\n\n{answer}", self.limit_hit, DegradeReason.LIMIT, QualityStatus.DEGRADED
+        )
 
     def stopped(self, reason: StopReason) -> LoopOutcome:
         degrade = _STOP_DEGRADE[reason]

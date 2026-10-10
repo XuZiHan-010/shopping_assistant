@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from app.db.session import Database
+from app.knowledge.borough_rules import BOROUGH_RULE_DOCUMENTS, RULES_SOURCE
 from app.repositories.knowledge import KnowledgeRepository
 
 _SEED_FILE = Path(__file__).with_name("wiki_seed.json")
@@ -35,10 +36,26 @@ def load_wiki_seed_entries(path: Path = _SEED_FILE) -> list[WikiSeedEntry]:
         raise RuntimeError("知识种子字段无效") from error
 
 
-async def seed_wiki_documents(database: Database) -> int:
-    """以 insert-if-absent 语义补齐镜像中新增的团队知识。"""
+def load_borough_rule_entries() -> list[WikiSeedEntry]:
+    """Borough 自有的成文规则（`borough_rules.py`）；不属于镜像种子，也不进 RAG 评测语料。"""
 
-    entries = load_wiki_seed_entries()
+    return [
+        WikiSeedEntry(
+            source_path=document.source_path,
+            category=document.category,
+            title=document.title,
+            content=document.content,
+            is_complete=True,
+            source=RULES_SOURCE,
+        )
+        for document in BOROUGH_RULE_DOCUMENTS
+    ]
+
+
+async def seed_wiki_documents(database: Database) -> int:
+    """以 insert-if-absent 语义补齐镜像中新增的团队知识与 Borough 自有规则。"""
+
+    entries = [*load_wiki_seed_entries(), *load_borough_rule_entries()]
     created = 0
     async with database.session() as session:
         repository = KnowledgeRepository(session)

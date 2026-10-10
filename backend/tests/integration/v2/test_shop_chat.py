@@ -203,6 +203,7 @@ async def test_customer_surface_contains_guide_and_after_sale_preview_tools(
 
     assert names == {
         "search_products", "get_product", "get_product_attribute", "get_shop_policy",
+        "estimate_bundle_total",
         "set_cart_item", "get_my_order", "check_after_sale_eligibility", "prepare_after_sale",
         "recall_preferences", "load_skill",
     }
@@ -247,6 +248,133 @@ async def test_agent_can_search_then_add_to_cart_without_reserving_stock(
     assert str(pid) in seen and "price_cents" in seen and "stock_band" in seen
     for leak in QUANTITY_KEYS:
         assert leak not in seen
+
+
+@pytest.mark.asyncio
+async def test_english_keyword_finds_chinese_named_products(
+    postgres_app: FastAPI, postgres_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """QLT-N5-007：商品名称只有中文，英文关键词经固定词表对应过去，不调用模型翻译。"""
+
+    database = database_of(postgres_app)
+    shoes = await seed_product(database, MERCHANT_ONE_ID, title="复古德训运动鞋", on_hand=5)
+    await seed_product(database, MERCHANT_ONE_ID, title="羊毛围巾", on_hand=5)
+    fake = _patch_llm(
+        monkeypatch,
+        [_call("search_products", "c1", query="Shoes"), _answer("We have one pair in stock.")],
+    )
+    headers = await _guest(postgres_client)
+
+    resp = await _chat(postgres_client, headers, "any shoes for commuting?")
+
+    assert resp.status_code == 200, resp.text
+    assert [p["product_id"] for p in _tool_data(fake)["products"]] == [str(shoes)]
+
+
+@pytest.mark.asyncio
+async def test_unknown_english_keyword_tells_the_model_to_retry_in_chinese(
+    postgres_app: FastAPI, postgres_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = database_of(postgres_app)
+    await seed_product(database, MERCHANT_ONE_ID, title="复古德训运动鞋", on_hand=5)
+    fake = _patch_llm(
+        monkeypatch,
+        [_call("search_products", "c1", query="zyzzyva"), _answer("Nothing matched yet.")],
+    )
+    headers = await _guest(postgres_client)
+
+    resp = await _chat(postgres_client, headers, "do you sell zyzzyva?")
+
+    assert resp.status_code == 200, resp.text
+    result = json.loads(_tool_messages(fake)[-1].splitlines()[2])
+    assert result["data"] == {"products": []}
+    assert "中文关键词" in result["summary"]
+
+
+@pytest.mark.asyncio
+async def test_bundle_total_is_computed_by_the_backend_and_grounds_the_answer(
+    postgres_app: FastAPI, postgres_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """QLT-N5-003：模型不许自己做加法，「一千元以内搭一套」的合计与预算差额由后端算。"""
+
+    from decimal import Decimal
+
+    database = database_of(postgres_app)
+    jacket = await seed_product(database, MERCHANT_ONE_ID, title="水洗帆布工装夹克")
+    shirt = await seed_product(database, MERCHANT_ONE_ID, title="牛津纺长袖衬衫")
+    jeans = await seed_product(database, MERCHANT_ONE_ID, title="高腰直筒牛仔裤")
+    await set_product(database, jacket, price=Decimal("459.00"))
+    await set_product(database, shirt, price=Decimal("239.00"))
+    await set_product(database, jeans, price=Decimal("299.00"))
+    ids = [str(jacket), str(shirt), str(jeans)]
+    fake = _patch_llm(
+        monkeypatch,
+        [
+            _call("estimate_bundle_total", "c1", product_ids=ids, budget_yuan=1000),
+            _answer("这三件合计 ¥997.00，在 ¥1000.00 预算内，还剩 ¥3.00。"),
+        ],
+    )
+    headers = await _guest(postgres_client)
+
+    resp = await _chat(postgres_client, headers, "预算 1000 元，帮我搭一套")
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["degraded"] is False  # 合计来自工具结果，数字校验放行
+    assert body["answer"].startswith("这三件合计 ¥997.00")
+    data = _tool_data(fake)
+    assert data["total"] == "¥997.00" and data["total_cents"] == 99700
+    assert data["within_budget"] is True and data["remaining"] == "¥3.00"
+    assert [item["product_id"] for item in data["items"]] == ids  # 按传入顺序
+
+
+@pytest.mark.asyncio
+async def test_bundle_total_rejects_duplicate_or_empty_product_lists() -> None:
+    from app.tools.customer.catalog import EstimateBundleTotalArgs
+
+    with pytest.raises(ValueError, match="不得重复"):
+        EstimateBundleTotalArgs(product_ids=["a", "a"])
+    with pytest.raises(ValueError):
+        EstimateBundleTotalArgs(product_ids=[])
+
+
+@pytest.mark.asyncio
+async def test_bundle_total_over_budget_and_foreign_product(
+    postgres_app: FastAPI, postgres_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from decimal import Decimal
+
+    database = database_of(postgres_app)
+    mine = await seed_product(database, MERCHANT_ONE_ID, title="手工缝线切尔西靴")
+    other = await seed_product(database, MERCHANT_ONE_ID, title="防泼水徒步短靴")
+    foreign = await seed_product(database, MERCHANT_TWO_ID, title="别家的鞋")
+    await set_product(database, mine, price=Decimal("699.00"))
+    await set_product(database, other, price=Decimal("629.00"))
+    fake = _patch_llm(
+        monkeypatch,
+        [
+            _call(
+                "estimate_bundle_total", "c1", product_ids=[str(mine), str(other)], budget_yuan=1000
+            ),
+            _answer("这两双合计 ¥1328.00，超出 ¥1000.00 预算 ¥328.00。"),
+        ],
+    )
+    headers = await _guest(postgres_client)
+
+    resp = await _chat(postgres_client, headers, "两双靴子一千块够吗")
+
+    assert resp.status_code == 200, resp.text
+    data = _tool_data(fake)
+    assert data["within_budget"] is False and data["over_by"] == "¥328.00"
+    assert "remaining" not in data
+
+    # 别家店铺的商品：与商品详情同一口径，中性 403，不泄露存在性（R5）。
+    _patch_llm(
+        monkeypatch, [_call("estimate_bundle_total", "c2", product_ids=[str(mine), str(foreign)])]
+    )
+    denied = await _chat(postgres_client, headers, "再加上这件呢", crid="chat-2")
+    assert denied.status_code == 403
+    assert denied.json()["code"] == "RESOURCE_FORBIDDEN"
 
 
 @pytest.mark.asyncio

@@ -7,7 +7,7 @@ source: vendor/anthropic-commerce-agents@fd4d592 shopping-agent/skills/planning-
 
 # 本店目标规划
 
-把顾客目标拆成少量步骤，逐步用 `search_products` 找本店商品，用 `get_product` 核对关键属性。预算只按工具返回的价格计算，不编造数字。
+把顾客目标拆成少量步骤，逐步用 `search_products` 找本店商品，用 `get_product` 核对关键属性。预算分配只引用工具返回的价格，不编造数字；不要自己计算合计或差额——选好一组商品后用 `estimate_bundle_total` 让后端算出合计与预算差额，只把它确认在预算内的组合作为方案给出，超出预算的组合要明说超出多少。
 
 - 计划只涉及本店在售商品；缺货或未找到的步骤标为缺口，不填入虚构替代品。
 - 顾客未给预算或人数时写明假设，允许其修正；不要把假设描述成事实。

@@ -117,3 +117,17 @@ def test_english_fallback_memory_uses_an_english_updated_at_label() -> None:
     )
     assert "Updated at" in fallback
     assert "更新时间" not in fallback
+
+
+def test_v2_system_prompts_carry_no_digits_that_could_ground_fabricated_numbers() -> None:
+    """系统提示词是数字校验的来源之一：里面的示例数字会给回答里同样的数字作证。"""
+
+    import re
+
+    from app.services.v2.merchant_chat import SYSTEM_PROMPT as MERCHANT_PROMPT
+    from app.services.v2.shop_chat import SYSTEM_PROMPT as SHOP_PROMPT
+
+    for prompt in (SHOP_PROMPT, MERCHANT_PROMPT):
+        assert re.search(r"\d{2,}", prompt) is None
+        assert "不要写「分」" in prompt and "$" in prompt
+    assert "不要自己计算合计" in SHOP_PROMPT and "不要向顾客提及工具名称" in SHOP_PROMPT

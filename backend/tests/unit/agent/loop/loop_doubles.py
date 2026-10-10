@@ -72,6 +72,15 @@ async def slow_read(ctx: ToolContext, args: LabelArgs) -> ToolOutput:
     return ToolOutput(payload={"label": args.label, "value": 4321}, summary="慢速读取")
 
 
+BULK_TEXT = "规" * 2_500
+
+
+async def bulk_read(ctx: ToolContext, args: LabelArgs) -> ToolOutput:
+    """结果很长的只读工具（如规则检索）：用来把上下文撑过压缩阈值。"""
+
+    return ToolOutput(payload={"label": args.label, "text": BULK_TEXT}, summary="长篇读取")
+
+
 async def slow_write(ctx: ToolContext, args: LabelArgs) -> ToolOutput:
     PROBE.enter(args.label)
     await asyncio.sleep(SLOW_TOOL_SECONDS)
@@ -95,6 +104,15 @@ LOOP_SPECS = (
         parallelizable=True,
         description="慢速只读工具",
         executor=slow_read,
+    ),
+    ToolSpec(
+        name="bulk_read",
+        roles=frozenset({ToolRole.CUSTOMER, ToolRole.MERCHANT}),
+        args_model=LabelArgs,
+        write_policy=WritePolicy.READ_ONLY,
+        parallelizable=True,
+        description="结果很长的只读工具",
+        executor=bulk_read,
     ),
     ToolSpec(
         name="slow_write",

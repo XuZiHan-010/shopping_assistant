@@ -84,15 +84,24 @@ async def summarize_early_context(
     locale: SupportedLocale,
     remaining_calls: int,
     keep_recent_rounds: int = DEFAULT_KEEP_RECENT_ROUNDS,
+    min_prunable_chars: int = 0,
 ) -> CompactionOutcome:
     prefix, rounds = split_rounds(messages)
     system, history, current = prefix[0], prefix[1:-1], prefix[-1]
     cutoff = max(len(rounds) - keep_recent_rounds, 0)
     skills = trusted_skill_calls(results)
-    # 含受信 Skill 的较早轮整轮原样保留（不交给摘要模型转述，也不改变其受信身份）。
-    kept_rounds = [
-        r for r in rounds[:cutoff] if any(m.tool_call_id in skills for m in r if m.role == "tool")
-    ]
+
+    def kept_verbatim(round_messages: Sequence[LlmMessage]) -> bool:
+        tool_messages = [m for m in round_messages if m.role == "tool"]
+        # 含受信 Skill 的较早轮整轮原样保留（不交给摘要模型转述，也不改变其受信身份）。
+        if any(m.tool_call_id in skills for m in tool_messages):
+            return True
+        # 工具结果都很小的轮同样原样保留，与清理策略同一条规则（`min_prunable_chars`）。
+        return bool(tool_messages) and all(
+            len(m.content) <= min_prunable_chars for m in tool_messages
+        )
+
+    kept_rounds = [r for r in rounds[:cutoff] if kept_verbatim(r)]
     old_rounds = [r for r in rounds[:cutoff] if r not in kept_rounds]
     recent_rounds = rounds[cutoff:]
     if not history and not old_rounds:
@@ -105,7 +114,11 @@ async def summarize_early_context(
 
     def fallback(llm_calls: int) -> CompactionOutcome:
         pruned = prune_tool_results(
-            messages, results, locale=locale, keep_recent_rounds=keep_recent_rounds
+            messages,
+            results,
+            locale=locale,
+            keep_recent_rounds=keep_recent_rounds,
+            min_prunable_chars=min_prunable_chars,
         )
         return replace(pruned, llm_calls=llm_calls)
 
