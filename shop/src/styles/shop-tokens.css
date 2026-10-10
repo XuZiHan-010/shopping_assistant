@@ -4,8 +4,10 @@
   --shop-active-text: #fffdf8;
   --shop-active-icon: var(--gilt);
 
-  --font-display: var(--font-fraunces), var(--font-noto-serif), Georgia, serif;
-  --font-body: var(--font-instrument), var(--font-noto-sans), system-ui, sans-serif;
+  /* 英文字体由 next/font 注入变量；中文字体在浏览器运行时加载（见 app/layout.tsx），
+     取不到时回退到系统自带的宋体 / 黑体。 */
+  --font-display: var(--font-fraunces), 'Noto Serif SC', 'Songti SC', 'STSong', Georgia, serif;
+  --font-body: var(--font-instrument), 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
   --shop-serif: var(--font-display);
   --shop-font-title: 1.75rem;
   --shop-font-lead: 1.0625rem;
