@@ -117,7 +117,7 @@ export function briefPayload(
         rank: 1,
         kind: 'INVENTORY_ALERT',
         title: '已售罄：测试商品',
-        evidence: '商品 p-1：在库 0',
+        evidence: '商品「测试商品」：在库 0',
         amount_cents: null,
         next_action_prompt: '给「测试商品」起草一份补货草稿',
       },

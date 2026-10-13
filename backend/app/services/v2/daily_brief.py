@@ -158,7 +158,7 @@ def _alert_evidence(alert: InventoryAlert) -> str:
         else f"近 30 天售出 {alert.sold_last_30d} 件，约可支撑 {alert.days_of_supply} 天"
     )
     return (
-        f"商品 {alert.product_id}：在库 {alert.stock_on_hand}、占用 {alert.stock_reserved}、"
+        f"商品「{alert.product_name}」：在库 {alert.stock_on_hand}、占用 {alert.stock_reserved}、"
         f"可售 {alert.stock_available}（阈值 {alert.low_stock_threshold}）；{supply}"
     )
 

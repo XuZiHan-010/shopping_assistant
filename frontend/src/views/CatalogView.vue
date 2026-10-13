@@ -176,7 +176,6 @@ function askDraft(product: MerchantProductContent): void {
                   <ProductThumb :image-url="product.imageUrl" />
                   <div class="product__text">
                     <strong class="name">{{ product.title }}</strong>
-                    <span class="ws-sub ws-mono" translate="no">{{ product.id }}</span>
                   </div>
                 </div>
               </td>
