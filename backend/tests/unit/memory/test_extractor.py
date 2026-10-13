@@ -125,7 +125,7 @@ async def test_explicit_confirmation_of_assistant_question_is_grounded_in_user_r
 @pytest.mark.parametrize(
     ("source", "old", "current"),
     [
-        ("这次我要彩色款，以前喜欢素色", "喜欢素色", "我要彩色款"),
+        ("现在我一直喜欢彩色款，以前喜欢素色", "喜欢素色", "喜欢彩色款"),
         ("以前喜欢素色，现在我要彩色款", "喜欢素色", "我要彩色款"),
         ("以前喜欢素色但现在我要彩色款", "喜欢素色", "我要彩色款"),
         (

@@ -53,6 +53,20 @@ Chat BI 汇总及本地化表继续保留。`agent_sessions` 与来源状态表�
 
 outbox 领取使用 `FOR UPDATE SKIP LOCKED`；任务租约到期后允许重新领取，完成写入以消息 ID 幂等。180 天顾客记忆过期在读取路径判断，清理 Cron 迟跑不能延长可召回期限。
 
+### 2026-10-13 记忆升级
+
+迁移 `20261013_0052` 增加内部字段，不改变公共 API：
+
+| 字段 | 用途 |
+| --- | --- |
+| `memory_extraction_jobs.source_order` | BIGINT Identity、唯一；旧任务按消息时间排序回填，新任务在主体锁内分配 |
+| `memory_extraction_jobs.memory_generation` | 入队时的主体记忆版本；旧任务默认 0 |
+| `customer_memories.source_order`、`merchant_memory_facts.source_order` | 最近写入来源序号，旧事实默认 0；与用户消息时间共同比较，防止迟到任务回滚新偏好 |
+| `merchant_memory_facts.key` | 可空规范键；新抽取同类同键更新当前事实并重建总结；旧记录保留 NULL，不猜测归并 |
+| `customer_memory_preferences.memory_generation`、`merchants.memory_generation` | 默认 0；顾客删除/开关改变、商家删除事实时递增，与写入共用主体行锁 |
+
+删除一条事实也会使本主体此前所有未完成的记忆任务失效，是保守的主体级屏障；之后的新回合可重新表达偏好。过期不依赖后台及时清理，抽取完成与重试不延长确认时间。迁移顺序为先单独升级数据库，再发布 Backend/Cron；本次未执行生产迁移。
+
 ## N4 C 知识索引版本
 
 迁移 `20261002_0047` 启用 `vector` 扩展（`CREATE EXTENSION IF NOT EXISTS vector`；外部 Neon 与本地

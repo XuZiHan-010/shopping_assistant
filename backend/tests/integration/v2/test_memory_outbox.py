@@ -283,11 +283,13 @@ async def test_merchant_drain_builds_fact_and_summary_in_one_completion(
     from app.memory.pipeline import enqueue_turn
 
     message, context = await _turn(db_session, buyer_key=None, role=SessionRole.MERCHANT)
+    message.content = "回复语气正式"
+    await db_session.flush()
     await enqueue_turn(db_session, message=message, ctx=context)
     await db_session.commit()
     fake = FakeLlmClient(responses=[
-        '{"facts":[{"category":"tone","key":"style","value":"喜欢素色",'
-        '"source_index":0,"evidence":"我喜欢素色"}]}'
+        '{"facts":[{"category":"tone","key":"style","value":"回复语气正式",'
+        '"source_index":0,"evidence":"回复语气正式"}]}'
     ])
     assert await drain_once(
         integration_database, now=NOW, llm_for_job=lambda *_: fake,

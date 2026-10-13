@@ -38,13 +38,15 @@ async def _claim_next(
         async with database.session() as session:
             row = await session.scalar(
                 select(MemoryExtractionJob)
-                .where(or_(
-                    MemoryExtractionJob.status == "PENDING",
-                    and_(
-                        MemoryExtractionJob.status == "PROCESSING",
-                        MemoryExtractionJob.lease_until <= now,
-                    ),
-                ))
+                .where(
+                    or_(
+                        MemoryExtractionJob.status == "PENDING",
+                        and_(
+                            MemoryExtractionJob.status == "PROCESSING",
+                            MemoryExtractionJob.lease_until <= now,
+                        ),
+                    )
+                )
                 # 本次排空里已处理过的任务不再领（复核 Minor-B）：失败退回 PENDING 的留给
                 # 下一次排空，暂时性错误不会在同一轮里紧接着耗尽全部重试次数。
                 .where(MemoryExtractionJob.id.not_in(skip) if skip else true())
@@ -80,10 +82,14 @@ async def _read_turn(
         conversation = await session.get(Conversation, message.conversation_id) if message else None
         agent = (
             await session.get(AgentSession, message.session_record_id)
-            if message and message.session_record_id else None
+            if message and message.session_record_id
+            else None
         )
         if (
-            job is None or message is None or conversation is None or agent is None
+            job is None
+            or message is None
+            or conversation is None
+            or agent is None
             or message.role != "USER"
             or message.merchant_id != conversation.merchant_id
             or agent.merchant_id != conversation.merchant_id
@@ -110,15 +116,20 @@ async def _read_turn(
 
 
 async def _finish(
-    database: Database, *, job_id: UUID, attempt: int, now: datetime,
-    merchant_id: UUID, role: str, buyer_key: str | None, message_id: UUID,
+    database: Database,
+    *,
+    job_id: UUID,
+    attempt: int,
+    now: datetime,
+    merchant_id: UUID,
+    role: str,
+    buyer_key: str | None,
+    message_id: UUID,
     candidates: list[MemoryCandidate],
 ) -> None:
     async with database.session() as session:
         job = await session.scalar(
-            select(MemoryExtractionJob)
-            .where(MemoryExtractionJob.id == job_id)
-            .with_for_update()
+            select(MemoryExtractionJob).where(MemoryExtractionJob.id == job_id).with_for_update()
         )
         if job is None or job.status != "PROCESSING" or job.attempts != attempt:
             return
@@ -135,7 +146,12 @@ async def _finish(
             )
             for candidate in candidates:
                 await store.write(
-                    category=candidate.category, key=candidate.key, value=candidate.value, at=now,
+                    category=candidate.category,
+                    key=candidate.key,
+                    value=candidate.value,
+                    at=message.created_at,
+                    source_order=job.source_order,
+                    expected_generation=job.memory_generation,
                 )
         else:
             merchant_store = MerchantMemoryStore(
@@ -146,7 +162,11 @@ async def _finish(
                 fact = await merchant_store.add_fact(
                     category=candidate.category,
                     content=candidate.value,
-                    source_ref=f"{message.conversation_id}:{message.id}", at=now,
+                    source_ref=f"{message.conversation_id}:{message.id}",
+                    at=message.created_at,
+                    key=candidate.key,
+                    source_order=job.source_order,
+                    expected_generation=job.memory_generation,
                 )
                 changed = changed or fact is not None
             if changed:
@@ -157,14 +177,16 @@ async def _finish(
 
 
 async def _fail(
-    database: Database, *, job_id: UUID, attempt: int,
-    max_attempts: int, error: Exception,
+    database: Database,
+    *,
+    job_id: UUID,
+    attempt: int,
+    max_attempts: int,
+    error: Exception,
 ) -> None:
     async with database.session() as session:
         job = await session.scalar(
-            select(MemoryExtractionJob)
-            .where(MemoryExtractionJob.id == job_id)
-            .with_for_update()
+            select(MemoryExtractionJob).where(MemoryExtractionJob.id == job_id).with_for_update()
         )
         if job is None or job.status != "PROCESSING" or job.attempts != attempt:
             return
@@ -176,8 +198,14 @@ async def _fail(
 
 
 async def drain_once(
-    database: Database, *, now: datetime, llm_for_job: LlmFactory,
-    max_calls: int, max_tokens: int, max_attempts: int = 2, limit: int = 20,
+    database: Database,
+    *,
+    now: datetime,
+    llm_for_job: LlmFactory,
+    max_calls: int,
+    max_tokens: int,
+    max_attempts: int = 2,
+    limit: int = 20,
     clock: Callable[[], datetime] | None = None,
 ) -> int:
     """逐个领取至多 `limit` 项，模型失败只影响该任务；调用方须提供带每日费用守卫的 LLM。"""
@@ -209,23 +237,39 @@ async def drain_once(
             merchant_id, role, buyer_key, message_id, dialogue = await _read_turn(database, job_id)
             llm = llm_for_job(merchant_id, SessionRole(role), job_id)
             candidates = await extractor.extract(
-                dialogue, llm=llm, budget=LlmBudget(max_calls=max_calls, max_tokens=max_tokens)
+                dialogue,
+                llm=llm,
+                budget=LlmBudget(max_calls=max_calls, max_tokens=max_tokens),
+                role=SessionRole(role),
             )
             await _finish(
-                database, job_id=job_id, attempt=attempt, now=claimed_at,
-                merchant_id=merchant_id, role=role, buyer_key=buyer_key,
-                message_id=message_id, candidates=candidates,
+                database,
+                job_id=job_id,
+                attempt=attempt,
+                now=claimed_at,
+                merchant_id=merchant_id,
+                role=role,
+                buyer_key=buyer_key,
+                message_id=message_id,
+                candidates=candidates,
             )
         except Exception as exc:
             await _fail(
-                database, job_id=job_id, attempt=attempt,
-                max_attempts=max_attempts, error=exc,
+                database,
+                job_id=job_id,
+                attempt=attempt,
+                max_attempts=max_attempts,
+                error=exc,
             )
     return processed
 
 
 async def drain_configured_once(
-    database: Database, *, settings: Settings, now: datetime, limit: int = 20,
+    database: Database,
+    *,
+    settings: Settings,
+    now: datetime,
+    limit: int = 20,
 ) -> int:
     """生产入口：独立单任务额度，且每次调用必经全局每日预算与用量审计。"""
     from app.api.dependencies import build_guarded_llm
@@ -233,11 +277,16 @@ async def drain_configured_once(
     if not settings.llm_api_key:
         raise ValueError("未配置抽取模型，不领取 outbox 任务")
     return await drain_once(
-        database, now=now,
+        database,
+        now=now,
         # 记忆抽取按所属角色与店铺计入三级预算（PRD §10.2），单任务额度只是另一层上限。
         llm_for_job=lambda merchant_id, role, job_id: build_guarded_llm(
-            settings, database, request_id=f"memory:{job_id}",
-            merchant_id=merchant_id, role=role, purpose="MEMORY",
+            settings,
+            database,
+            request_id=f"memory:{job_id}",
+            merchant_id=merchant_id,
+            role=role,
+            purpose="MEMORY",
         ),
         max_calls=settings.memory_extraction_max_calls,
         max_tokens=settings.memory_extraction_max_tokens,

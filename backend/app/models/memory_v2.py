@@ -7,11 +7,13 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     Date,
     DateTime,
     ForeignKey,
+    Identity,
     Index,
     Integer,
     String,
@@ -41,6 +43,7 @@ class CustomerMemory(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
     value: Mapped[str] = mapped_column(String(2000), nullable=False)
     category: Mapped[str] = mapped_column(String(64), nullable=False)
     last_confirmed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    source_order: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
 
 
 class MerchantMemoryFact(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
@@ -51,6 +54,8 @@ class MerchantMemoryFact(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
         PG_UUID(as_uuid=True), ForeignKey("merchants.id", ondelete="CASCADE"), nullable=False
     )
     content: Mapped[str] = mapped_column(String(4000), nullable=False)
+    key: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    source_order: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
     source_ref: Mapped[str] = mapped_column(String(256), nullable=False)
     category: Mapped[str] = mapped_column(String(64), nullable=False)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -79,12 +84,16 @@ class CustomerMemoryPreference(Base):
     __tablename__ = "customer_memory_preferences"
 
     merchant_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("merchants.id", ondelete="CASCADE"),
+        PG_UUID(as_uuid=True),
+        ForeignKey("merchants.id", ondelete="CASCADE"),
         primary_key=True,
     )
     buyer_key: Mapped[str] = mapped_column(String(64), primary_key=True)
     memory_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("true")
+    )
+    memory_generation: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
     )
 
 
@@ -92,6 +101,7 @@ class MemoryExtractionJob(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
     __tablename__ = "memory_extraction_jobs"
     __table_args__ = (
         UniqueConstraint("message_id", name="uq_memory_extraction_jobs_message"),
+        UniqueConstraint("source_order", name="uq_memory_extraction_jobs_source_order"),
         CheckConstraint(
             "status IN ('PENDING','PROCESSING','DONE','FAILED')",
             name="ck_memory_extraction_jobs_status",
@@ -102,6 +112,10 @@ class MemoryExtractionJob(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
 
     message_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("messages.id", ondelete="CASCADE"), nullable=False
+    )
+    source_order: Mapped[int] = mapped_column(BigInteger, Identity(), nullable=False)
+    memory_generation: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
     )
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, server_default=text("'PENDING'")
@@ -121,8 +135,12 @@ class CustomerSignal(UuidPrimaryKeyMixin, CreatedAtMixin, Base):
         CheckConstraint("count > 0", name="ck_customer_signals_count"),
         Index("ix_customer_signals_merchant_date", "merchant_id", "signal_date"),
         Index(
-            "uq_customer_signals_daily_product", "merchant_id", "kind", "product_id",
-            "signal_date", unique=True,
+            "uq_customer_signals_daily_product",
+            "merchant_id",
+            "kind",
+            "product_id",
+            "signal_date",
+            unique=True,
             postgresql_where=text("product_id IS NOT NULL"),
         ),
     )

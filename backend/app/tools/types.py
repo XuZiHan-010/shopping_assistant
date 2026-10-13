@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Final, cast
 
@@ -114,6 +114,10 @@ class ToolContext:
     request_digest: str | None = None
     principal_digest: str | None = None
     tool_call_id: str | None = None
+    #: 服务端本回合已经注入的记忆 ID；不允许模型参数覆盖。
+    memory_excluded_ids: tuple[str, ...] = ()
+    #: 只在本回合内共享，记录工具已加载的 ID；并行工具返回前复检以免重复。
+    memory_seen_ids: set[str] = field(default_factory=set, compare=False, repr=False)
 
 
 @dataclass(frozen=True)

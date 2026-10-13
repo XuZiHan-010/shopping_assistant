@@ -2,11 +2,23 @@
 
 本手册只描述部署操作；不会在本地或 Railway 自动写入真实密钥。
 
-> **状态说明（2026-10-08）**：现网是 Railway 上的 `Frontend`（商家端）与 `Backend` 两个服务，主库是**外部
-> Neon PostgreSQL**，跑的仍是 v1 时代的代码（见「只更新现有两个服务」一节的探测结果）。目标拓扑是 Railway 四服务
-> （`shop`、`merchant`、`backend`、`cron`）+ 外部 Neon；其中 `shop` 与 `cron` **尚未创建**，`Frontend` 尚未改名为 `merchant`。
-> 用户 2026-10-08 裁定先沿用现有两个服务更新，`shop` 与 `cron` 暂不创建。N5 的代码与配置已在仓库备好
-> （统一 Cron 分发器、三级预算、MCP 只读入口、单入口演示）。
+> **状态说明（2026-10-11，只读核对）**：现网四个 Railway 服务都已部署 `main` 的 `7270b39`（2026-10-10 09:11 UTC，
+> GitHub 部署记录四个均为 success），主库是**外部 Neon PostgreSQL**：
+>
+> | Railway 服务名 | 对应本手册 | 现状 |
+> | --- | --- | --- |
+> | `shopping assistant frontend` | `merchant`（未改名） | 已上线，<https://shoppingassistant-production-001.up.railway.app> |
+> | `shopping assistant backend` | `backend` | 已上线，<https://shoppingassistantbackend-production.up.railway.app>；`/api/health`、`/api/ready` 200，OpenAPI 78 个操作、v2 53 个 |
+> | `shopping-assistant-data-cron` | `cron` | 已部署；分发器任务报告未在 Railway 日志核对 |
+> | `shopping assistant schedule` | 旧的 Chat BI 汇总 Cron | 配置文件已随合并删除；2026-10-10 09:57 UTC 出现一条旧提交 `a648c33`（PR #11 的合并提交）的部署记录，状态 inactive。服务是否已删除未核实，应在控制台确认并删除 |
+> | `shopping assistant customer`（创建时的自动名为 `proactive-art`） | `shop` | 2026-10-08 晚创建并上线，<https://shoppingassistant-customer.up.railway.app>；`1473222` 因构建期下载中文字体分片失败，`7270b39`（中文字体改为运行时加载）部署成功，线上页面已带运行时字体链接；三家演示店铺页面均 200。09:12 UTC 另有一条 `0c15320` 的部署记录，状态 inactive，来源未核实 |
+>
+> **这些服务跟踪的是 `main` 分支**：每次推送 `main` 后两秒内 Railway 即创建部署；把 `main` 合并进 GitHub 默认分支
+> `feature/f2-mock-conversation`（PR #19、#20）不触发部署。此前「现网对应默认分支」的判断是错的——v2 代码自 2026-09-27
+> 起没有上线，是因为那天 `685ab3f` 的 Backend 部署失败（商家端同一提交部署成功），旧版本一直在服务。
+>
+> 以上来自 GitHub 的部署记录与对公开端点、演示商家只读端点的探测；没有 Railway 控制台或 CLI 权限，变量取值
+> （是否已配真实 `LLM_API_KEY`、`EMBEDDING_MODEL` 等）未核实。公开部署前置条件验收仍未做。
 >
 > **本手册写的是「怎么做」，不代表已经做了。** 每一项 Railway 控制台操作、对 Neon 的写操作、线上签发 MCP 凭证，
 > 以及把真实 `LLM_API_KEY` 配到公网实例，都要逐项取得同意后才执行（`AGENTS.md` §三、R3）；
@@ -16,10 +28,10 @@
 
 | Service | 位置 / Root Directory | 当前状态 |
 | --- | --- | --- |
-| `shop` | Railway `/shop` | Next.js 顾客端；镜像与配置已在仓库（`shop/Dockerfile`、`shop/railway.json`），**服务尚未创建** |
-| `merchant` | Railway `/frontend` | Vue 商家端；现网服务名为 `Frontend`，**尚未改名**；N5 新增构建变量 `VITE_SHOP_BASE_URL` |
-| `backend` | Railway `/backend` | FastAPI；发布阶段由 `preDeployCommand` 执行一次数据库迁移 |
-| `cron` | Railway `/backend` | `backend/railway.cron.json`：每 5 分钟运行统一分发器；**服务尚未创建** |
+| `shop` | Railway `/shop` | Next.js 顾客端；镜像与配置在 `shop/Dockerfile`、`shop/railway.json`；2026-10-08 已创建并上线 |
+| `merchant` | Railway `/frontend` | Vue 商家端；现网服务名为 `shopping assistant frontend`，**尚未改名**；N5 新增构建变量 `VITE_SHOP_BASE_URL`（现网已配置） |
+| `backend` | Railway `/backend` | FastAPI；发布阶段由 `preDeployCommand` 执行一次数据库迁移；现网服务名为 `shopping assistant backend` |
+| `cron` | Railway `/backend` | `backend/railway.cron.json`：每 5 分钟运行统一分发器；现网由既有服务 `shopping-assistant-data-cron` 承担 |
 | `postgres` | **外部 Neon**（不在 Railway 内） | 现网主库（数据库 `neondb`）；backend 与 cron 经 `DATABASE_URL` 连接 |
 
 不建通用 Worker、Redis 或对象存储。Backend 公开，浏览器直连；`shop` 与 `merchant` 各用一个精确 Origin，
@@ -35,7 +47,7 @@ CORS 允许头至少包含 `Authorization`、`Accept`、`Content-Type`、`X-Requ
 - **数据库**：生产库是外部 **Neon**（不是 Railway Postgres），`vector` 扩展可用（0.8.6，与本地一致）。
   迁移 `20261002_0047` 执行 `CREATE EXTENSION IF NOT EXISTS vector` 并建三张索引表；由 `backend/railway.json`
   的 `preDeployCommand`（`alembic upgrade head`）随部署自动执行。Neon 允许库所有者角色执行该语句，
-  但线上尚未实际跑过这次迁移——首次部署时留意 preDeploy 日志里 `20261002_0047` 是否成功。
+  2026-10-08 新版 Backend 部署成功，迁移已随发布执行（v2 端点与分发器状态表可用）。
 - **本地与 CI**：`docker-compose.yml` 与 `.github/workflows/n1-checks.yml` 使用 `pgvector/pgvector:pg16`
   （PostgreSQL 16，`vector` 0.8.6）。新镜像基于 Debian，与原 `postgres:16-alpine` 排序规则不同，本地改用新数据卷
   `borough_postgres_pgvector_data`，旧卷 `borough_postgres_data` 保留未删。
@@ -154,11 +166,25 @@ Origin 或预先绑定好的前端域名，等 `merchant` 的实际域名确定�
 ## 只更新现有两个服务（`Frontend` + `Backend`，2026-10-08）
 
 用户 2026-10-08 裁定：线上先沿用现有的 `Frontend` 与 `Backend` 两个服务，不新建 `shop` 与 `cron`。
-本节是这条路径的最小步骤；四服务的完整拓扑仍按上一节。
+本节是这条路径的最小步骤；四服务的完整拓扑仍按上一节。**同日晚顾客端已另行创建，现网已是四服务**（见文首），
+本节保留为只有两个服务时的操作记录。
 
-**现网基线（2026-10-08 只读探测）**：现网 Backend 的 OpenAPI 只有 v1 的 20 条路径，`/api/v2/*` 全部 404，
-与 GitHub 默认分支 `feature/f2-mock-conversation`（提交 `c286eca`，迁移 head `20260831_0016`）一致。
-也就是说 `main` 上自 2026-09-27 起的 v2 代码**从未部署过**，Neon 仍在 `0016`。
+**执行结果（2026-10-08 晚）**：这条路径已走完，现网状态见文首表格。只读核对到的结果：
+
+- Backend `/api/health`、`/api/ready` 200；OpenAPI 共 78 个操作，v2 53 个（顾客 27、商家 26）；v1 端点仍可用。
+- CORS 只放行商家端的精确 Origin，其他 Origin 的预检返回 400；商家端域名下 `/api/health` 是 404（Caddy 不代理 `/api`）。
+- 演示商家可建会话并读取工作台数据：经营概览实时取数，数据到 2026-10-08；商品 24 件都有图片地址；库存告警 1 条。
+  商家会话访问顾客端点返回 403。
+- **线上没有预置的 v2 订单、草稿和售后单**（顾客端上线前核对，演示商家 100 三项均为 0）：场景种子 `seed_demo_scenarios`
+  只能在本机运行。商家端的订单、草稿审批、售后页面要等有人在顾客端实际下单、申请售后，或商家让助手起草之后才有内容。
+- **顾客端随后上线**（同日晚）：新建 `shop` 服务、商家端配 `VITE_SHOP_BASE_URL`、Backend 配 `SHOP_ORIGIN` 三步都已生效——
+  商家端构建产物里已有顾客端地址，Backend 对顾客端 Origin 的预检返回 200，三家店铺页面（`/borough-demo-100`～`102`）
+  服务端渲染出店铺与商品、无错误提示，演示图片 200。中途出现过一次「暂时无法连接服务」，原因是 `SHOP_ORIGIN` 尚未生效。
+  顾客端根路径只有一个「进入演示店铺」入口（`NEXT_PUBLIC_DEFAULT_SHOP_SLUG=borough-demo-100`），另外两家店要从各自商家的
+  「顾客视角」或直接输入地址进入。下单、绑定演示顾客与对话未实测。
+
+**更新前的基线（2026-10-08 早，只读探测）**：当时现网 Backend 的 OpenAPI 只有 v1 的 20 条路径，`/api/v2/*` 全部 404，
+对应提交 `c286eca`（迁移 head `20260831_0016`）——即最后一次部署成功的 Backend 版本。
 
 **升级演练（本地，2026-10-08）**：用现网那版代码在 `pgvector/pgvector:pg16`（`vector` 0.8.6）上建库到 `0016`、灌 v1 演示数据并产生
 对话行，再用新代码按 `APP_ENV=production` 执行发布迁移与分发器，脚本化地重复了两遍：
@@ -180,7 +206,7 @@ Origin 或预先绑定好的前端域名，等 `merchant` 的实际域名确定�
 2. 顺手核对 `Backend` 的几个旧值（默认值变了不会覆盖已设置的变量）：`LLM_MODEL` 若还是 `deepseek-v4-flash` 或 `deepseek-chat`
    须改为 `deepseek-flash`；`MAX_LLM_TOKENS_PER_REQUEST` 若显式设成了 `25000` 须删掉或改为 `120000`，否则多步回合在第三次模型调用被拒；
    `LLM_DAILY_BUDGET_TOKENS` 若显式设成了 `500000` 须删掉，让三级预算取新默认值。
-3. 让 Railway 两个服务跟踪的分支拿到 `main` 的提交（合并 `main` 到该分支，或把两个服务改为跟踪 `main`），触发重新部署。
+3. 推送 `main`（Railway 的服务跟踪 `main`，推送即触发部署；合并到 GitHub 默认分支不触发）。
    看 `Backend` 的 preDeploy 日志：35 条迁移逐条成功，其中 `20261002_0047` 建 `vector` 扩展。
 4. 核对 `/api/health`、`/api/ready`，打开商家端确认能进入工作台。
 
@@ -188,9 +214,10 @@ Origin 或预先绑定好的前端域名，等 `merchant` 的实际域名确定�
 
 | 能力 | 现象 | 补上的办法 |
 | --- | --- | --- |
-| 顾客端 | 没有 `shop` 服务；`VITE_SHOP_BASE_URL` 未配置时侧栏不显示「顾客视角」，商品缩略图显示占位 | 建 `shop` 服务（上一节步骤 3–5） |
-| 演示数据刷新 | 没有 `cron` 服务就没有任何进程执行滚动任务：商品仍是「演示商品 NN」、库存为 0、经营数据停在上次灌数那天 | 见下 |
-| 其余定时任务 | 超时订单关闭、草稿过期、记忆抽取、Chat BI 汇总不自动执行；业务读写路径仍按截止时间判定，结果不变，只是不清理 | 建 `cron` 服务 |
+| 顾客端 | 没有 `shop` 服务；`VITE_SHOP_BASE_URL` 未配置时侧栏不显示「顾客视角」，商品缩略图显示占位。**现网已建并配置** | 建 `shop` 服务（上一节步骤 3–5） |
+| 订单、草稿、售后演示数据 | 场景种子只能在本机运行，没有顾客端时线上三项都是空的 | 建 `shop` 服务后由顾客端实际操作产生（现网已建）；或另行裁定是否提供线上场景种子 |
+| 演示数据刷新 | 没有 Cron 进程时商品仍是「演示商品 NN」、库存为 0、经营数据停在上次灌数那天。**现网已由 `shopping-assistant-data-cron` 承担**，数据已到当前业务日 | 无 Cron 时见下 |
+| 其余定时任务 | 没有 Cron 进程时超时订单关闭、草稿过期、记忆抽取、Chat BI 汇总不自动执行；业务读写路径仍按截止时间判定，结果不变，只是不清理 | 同上 |
 | 混合检索 | 未设 `EMBEDDING_MODEL` 时规则检索按关键词运行，来源标注降级 | 设 `EMBEDDING_MODEL=BAAI/bge-small-zh-v1.5` 并重新部署 |
 
 **刷新演示数据**：`ALLOW_DEMO_DATA_REFRESH` 按 `AGENTS.md` R6 只给独立的 Cron 进程，**不要**配到 `Backend` 这个 Web 服务上。
@@ -262,7 +289,9 @@ uv run python -m app.jobs.run_scheduled
 
 PRD §10.7 定义**一个** `cron` 服务。`backend/railway.cron.json` 每 5 分钟（`*/5 * * * *`，UTC）运行
 `python -m app.jobs.run_scheduled`，分发器按下表依次检查每个任务在当前时间片是否已成功跑过，没跑过就执行。
-原先的三份 Cron 配置（演示数据滚动、Chat BI 汇总、访客来源状态清理）已合并进来，都没有在 Railway 创建过。
+原先的三份 Cron 配置（演示数据滚动、Chat BI 汇总、访客来源状态清理）已合并进来。其中前两份此前在 Railway 上各有一个服务
+（`shopping-assistant-data-cron`、`shopping assistant schedule`）：前者沿用 `railway.cron.json` 这个文件名，新版部署后跑的应是统一分发器（经营数据已到当日，与此相符；Railway 日志未核对）；
+后者对应的 `railway.chatbi-cron.json` 已删除，服务应在 Railway 上删除。
 
 | 任务 | 频率 | 说明 | 启用条件 |
 | --- | --- | --- | --- |
@@ -341,7 +370,8 @@ Railway Cron 按 UTC 调度、不保证精确到秒、上一次没结束时可�
 
 任务本身不跑 Alembic 迁移：启用前先确认同环境 Backend 已迁移到位并通过 `/api/ready`，缺表时任务必须失败退出而不是自动修库。Railway Cron 按 UTC 调度、不保证精确到秒，上一次未结束时可能跳过本次，因此漏跑追赶是正确性要求而非容错优化。
 
-调度配置与创建步骤见上一节「cron 服务：统一分发器」。**Cron Service 尚未创建**；创建并手工触发首次执行后，按本节护栏逐条核对。
+调度配置与创建步骤见上一节「cron 服务：统一分发器」。现网由 `shopping-assistant-data-cron` 执行，2026-10-08 核对经营数据已到当日；
+分发器每次运行的任务报告（是否有 `FAILED`）只能在 Railway 日志里看，尚未核对。
 
 ## Chat BI 汇总的每日滚动
 

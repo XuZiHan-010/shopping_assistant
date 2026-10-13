@@ -412,8 +412,12 @@ Configuration as code lives in each directory's `railway.json` and in `backend/r
 variables are in [`docs/deployment.md`](docs/deployment.md) (in Chinese). Before a real model key goes onto a public
 deployment, rate limiting, the per-request cap and the daily budget breaker are verified on the public domain.
 
-Running only `merchant` and `backend` also works: the merchant workspace is fully usable, the "Customer view" entry is
-hidden, and scheduled jobs do not run on their own.
+**Live demo (2026-10-08)**: the merchant workspace is at <https://shoppingassistant-production-001.up.railway.app>.
+All four services are live. From the merchant workspace, the "Customer view" entry in the sidebar opens that shop's
+storefront in a new tab (<https://shoppingassistant-customer.up.railway.app/borough-demo-100> and two more demo shops). Both sides share one backend and one
+database: orders and after-sales requests placed by a customer show up on the merchant side. Sales metrics, products and
+stock are rolled forward daily by the scheduled job; orders, draft approvals and after-sales start empty and fill in as
+you use the demo.
 
 ## Repository layout
 
