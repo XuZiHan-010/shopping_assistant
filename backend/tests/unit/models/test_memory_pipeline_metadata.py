@@ -48,3 +48,15 @@ def test_merchant_fact_tombstone_supports_idempotent_delete() -> None:
         constraint.name == "uq_merchant_memory_summaries_category"
         for constraint in summaries.constraints
     )
+
+
+def test_job_records_owner_generation_and_order_for_stale_write_guard() -> None:
+    jobs = Base.metadata.tables["memory_extraction_jobs"]
+    assert {"source_order", "memory_generation"} <= set(jobs.c.keys())
+    assert not jobs.c.source_order.nullable
+    assert jobs.c.source_order.identity is not None
+    for name in ("customer_memories", "merchant_memory_facts"):
+        assert "source_order" in Base.metadata.tables[name].c
+    assert "key" in Base.metadata.tables["merchant_memory_facts"].c
+    for name in ("merchants", "customer_memory_preferences"):
+        assert "memory_generation" in Base.metadata.tables[name].c

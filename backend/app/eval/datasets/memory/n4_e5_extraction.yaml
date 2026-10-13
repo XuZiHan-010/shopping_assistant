@@ -15,7 +15,7 @@
 - {id: MEM-013, user: 我喜欢木质餐具, value: 喜欢木质餐具, expected: true}
 - {id: MEM-014, user: 我平时选浅色家具, value: 平时选浅色家具, expected: true}
 - {id: MEM-015, user: 我不需要礼品包装, value: 不需要礼品包装, expected: true}
-- {id: MEM-016, user: 这次我要彩色款，以前喜欢素色, value: 这次我要彩色款, expected: true}
+- {id: MEM-016, user: 这次我要彩色款，以前喜欢素色, value: 这次我要彩色款, expected: false}
 - {id: MEM-017, user: 我现在改用小号了, value: 改用小号, expected: true}
 - {id: MEM-018, user: 我更喜欢亚麻衬衫, value: 更喜欢亚麻衬衫, expected: true}
 - {id: MEM-019, user: 我优先看可机洗的, value: 优先看可机洗的, expected: true}
@@ -40,3 +40,10 @@
 - {id: MEM-038, user: 我支持某政党, value: 支持某政党, expected: false}
 - {id: MEM-039, user: 请记住我的手机号13800138000, value: 手机号13800138000, expected: false}
 - {id: MEM-040, user: 送货到上海市浦东新区某路2号, value: 上海市浦东新区某路2号, expected: false}
+# 2026-10-13 口径升级：长期偏好与一次性需求分开，旧真实结果不能直接比较。
+- {id: MEM-041, user: 今天只买蓝色, value: 蓝色, expected: false}
+- {id: MEM-042, user: For this order I prefer blue, value: prefer blue, expected: false}
+- {id: MEM-043, user: 这次送人，选修身款, value: 修身款, expected: false}
+- {id: MEM-044, user: 以前喜欢素色，现在一直喜欢彩色, value: 喜欢彩色, expected: true}
+- {id: MEM-045, user: I always prefer blue, value: prefer blue, expected: true}
+- {id: MEM-046, user: 本次预算五百元, value: 预算五百元, expected: false}

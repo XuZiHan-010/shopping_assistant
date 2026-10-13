@@ -8,8 +8,7 @@
 from __future__ import annotations
 
 import asyncio
-import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Final
 from uuid import UUID, uuid4
@@ -17,7 +16,6 @@ from uuid import UUID, uuid4
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.loop.compaction import compaction_step
-from app.agent.loop.fencing import fence
 from app.agent.loop.limits import LoopLimits
 from app.agent.loop.runner import EventSink, LoopOutcome, LoopRequest, run_loop
 from app.analytics.dates import business_today
@@ -26,6 +24,7 @@ from app.core.metrics import OperationalMetrics
 from app.core.session import SessionContext, principal_digest
 from app.llm.client import ConversationalLlmClient
 from app.localization.locales import SupportedLocale
+from app.memory.context import build_context
 from app.memory.merchant_store import MerchantMemoryStore
 from app.memory.owners import MerchantMemoryOwner
 from app.models.conversation import Conversation
@@ -123,6 +122,7 @@ class MerchantChatService:
         self._locale = locale
         self._principal_secret = principal_secret
         self._system_prompt = build_system_prompt(skills)
+        self._memory_excluded_ids: tuple[str, ...] = ()
 
     async def run(
         self,
@@ -176,10 +176,9 @@ class MerchantChatService:
                 ctx=self._ctx,
             )
             return MerchantTurn(response=response, conversation_id=conversation.id)
-        history = await load_history(
-            self._session, conversation, max_turns=self._history_turns
-        )
+        history = await load_history(self._session, conversation, max_turns=self._history_turns)
         memory_context = await self._memory_context()
+        tool_ctx = replace(tool_ctx, memory_excluded_ids=self._memory_excluded_ids)
         try:
             outcome = await run_loop(
                 LoopRequest(
@@ -189,9 +188,7 @@ class MerchantChatService:
                     history=history,
                     locale=self._locale,
                     memory_context=memory_context,
-                    turn_context=business_date_context(
-                        started, timezone=self._business_timezone
-                    ),
+                    turn_context=business_date_context(started, timezone=self._business_timezone),
                 ),
                 llm=self._llm,
                 gates=self._gates,
@@ -221,28 +218,18 @@ class MerchantChatService:
         return MerchantTurn(response=response, conversation_id=conversation.id)
 
     async def _memory_context(self) -> str:
-        """只注入本商家的事实和非陈旧总结；经 `memory_context` 传入，不进数字来源（M11）。"""
+        """有界类别目录与少量事实；总结在记忆面板展示，不重复注入（M11）。"""
 
         owner = MerchantMemoryOwner.from_session(self._ctx)
         if owner is None:
             return ""
         store = MerchantMemoryStore(self._session, owner)
-        facts = (await store.facts())[:3]
-        summaries = (await store.active_summaries())[:3]
-        if not facts and not summaries:
+        facts = await store.facts(limit=20)
+        directory = await store.directory()
+        if not facts and not directory:
             return ""
-        payload = {
-            "facts": [
-                {"category": row.category, "content": row.content} for row in facts
-            ],
-            "summaries": [
-                {"category": row.category, "content": row.content} for row in summaries
-            ],
-        }
-        return (
-            "以下偏好只影响语气与呈现，不能回答规则、替代知识库或作为经营数字来源。\n"
-            + fence(json.dumps(payload, ensure_ascii=False), source="merchant_memory")
-        )
+        text, self._memory_excluded_ids = build_context(facts, directory, source="merchant_memory")
+        return text
 
     def _recovered_response(
         self, marker: dict[str, object], conversation_id: UUID
@@ -342,9 +329,7 @@ class MerchantChatService:
 
     def _to_response(self, outcome: LoopOutcome, conversation_id: UUID) -> MerchantChatResponse:
         # 加载 Skill 只是取做法，不是查数据：不据此判定模式或来源（不为凑数编造来源）。
-        used_tools = any(
-            display.tool_name != LOAD_SKILL_TOOL for display in outcome.tool_calls
-        )
+        used_tools = any(display.tool_name != LOAD_SKILL_TOOL for display in outcome.tool_calls)
         mode = MerchantAnswerMode.METRIC if used_tools else MerchantAnswerMode.CHAT
         suggested = merchant_suggestions(mode, self._locale)
         return MerchantChatResponse(

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Boolean, CheckConstraint, String, text
+from sqlalchemy import Boolean, CheckConstraint, Integer, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import (
@@ -24,6 +24,9 @@ class Merchant(UuidPrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, Base):
 
     merchant_code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     display_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    memory_generation: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
     # 英文显示名，可选；缺失时英语界面回退到 `display_name` 本身。不参与语言
     # 分类回填——它是独立维护的人工字段，不是从既有内容检测出来的。
     display_name_en: Mapped[str | None] = mapped_column(String(120), nullable=True)

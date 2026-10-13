@@ -9,7 +9,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.agent.loop.fencing import fence
+from app.core.session import SessionRole
 from app.llm.client import STRUCTURED_CALL_OPTIONS, LlmBudget, LlmClient, LlmMessage
+from app.memory.policy import canonical_identity, is_long_term, value_matches_preference
 
 
 @dataclass(frozen=True)
@@ -34,6 +36,8 @@ _SYSTEM = (
     "仅抽取当前事实；以前、曾经、used to 等历史偏好不能写成当前偏好。"
     "更正以用户明确的当前陈述为准，不按候选排列顺序取舍；证据须保留时间与否定上下文。"
     "普通应答、犹豫、助手猜测、工具结果和敏感推断都不抽取。没有事实时返回空数组。"
+    "只保存跨会话稳定偏好；这次、今天、送人等一次性需求不抽取。"
+    "可附 scope=LONG_TERM 或 SESSION，SESSION 不保存；不得编造偏好原因。"
 )
 _NON_CONFIRMATIONS = frozenset(
     {"嗯", "嗯嗯", "嗯我看看", "我看看", "好", "好的", "再看看", "我再想想", "谢谢", "你好", "ok"}
@@ -142,15 +146,22 @@ def _value_support_score(value: str, evidence: str) -> float:
 
 
 def _candidate(
-    raw: Any, messages: Sequence[LlmMessage], *, check_support: bool = True
+    raw: Any,
+    messages: Sequence[LlmMessage],
+    *,
+    check_support: bool = True,
+    role: SessionRole = SessionRole.CUSTOMER,
 ) -> MemoryCandidate | None:
-    if not isinstance(raw, dict) or set(raw) != {
+    required = {
         "category",
         "key",
         "value",
         "source_index",
         "evidence",
-    }:
+    }
+    if not isinstance(raw, dict) or not required <= set(raw) <= required | {"scope"}:
+        return None
+    if raw.get("scope", "LONG_TERM") != "LONG_TERM":
         return None
     category, key, value, index, evidence = (
         raw["category"],
@@ -177,7 +188,21 @@ def _candidate(
         and not _confirms_previous_question(value, reply, index, messages)
     ):
         return None
-    return MemoryCandidate(category.strip(), key.strip(), value.strip(), index, evidence)
+    identity = canonical_identity(category, key, role)
+    if identity is None:
+        return None
+    if check_support:
+        if not value_matches_preference(identity[1], value, role):
+            return None
+        # 明确确认须同时复检助手问题里的任务限定，不能把「这次要蓝色吗？是的」记成长期偏好。
+        grounding = source.content
+        quote = evidence
+        if reply in _CONFIRMATIONS and index > 0:
+            grounding = messages[index - 1].content
+            quote = grounding
+        if not is_long_term(value, quote, grounding, supports=_supports_value):
+            return None
+    return MemoryCandidate(*identity, value.strip(), index, evidence)
 
 
 def _confirms_previous_question(
@@ -200,6 +225,7 @@ class MemoryExtractor:
         *,
         llm: LlmClient,
         budget: LlmBudget,
+        role: SessionRole = SessionRole.CUSTOMER,
     ) -> list[MemoryCandidate]:
         """只发送 user/assistant 正文；预算由异步管线独立创建并传入。"""
         dialogue = [
@@ -210,7 +236,14 @@ class MemoryExtractor:
         if not any(item["role"] == "user" for item in dialogue):
             return []
         result = await llm.complete(
-            system=_SYSTEM,
+            system=_SYSTEM
+            + (
+                "商家仅使用 presentation: tone/detail/structure/language。"
+                if role is SessionRole.MERCHANT
+                else "顾客使用 appearance: color/style；sizing: fit/size；purchase: "
+                "material/packaging/fragrance/durability/availability；"
+                "usage: maintenance/habit/appliance。"
+            ),
             # 对话是不可信外部文本：按 A11 围栏后再进提示词（台账 M7）；原话核对仍用未围栏的原文。
             user=fence(
                 json.dumps({"messages": dialogue}, ensure_ascii=False), source="memory_dialogue"
@@ -234,11 +267,11 @@ class MemoryExtractor:
         facts = []
         latest_sources: dict[tuple[str, str], int] = {}
         for raw in payload["facts"][:20]:
-            grounded = _candidate(raw, messages, check_support=False)
+            grounded = _candidate(raw, messages, check_support=False, role=role)
             if grounded is not None:
                 key = (grounded.category, grounded.key)
                 latest_sources[key] = max(latest_sources.get(key, -1), grounded.source_index)
-            candidate = _candidate(raw, messages)
+            candidate = _candidate(raw, messages, role=role)
             if candidate is not None:
                 facts.append(candidate)
         # 同键同一发言多值无法确定是并列还是矛盾，全部丢弃，不能 last wins。

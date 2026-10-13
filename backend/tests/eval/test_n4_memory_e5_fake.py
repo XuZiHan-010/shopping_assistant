@@ -65,12 +65,12 @@ async def test_e5_aggregate_report_uses_all_cases_without_real_calls() -> None:
     evidence = []
     report = await evaluate(cases, llm_for_case=lambda case_id: responses[case_id],
                             on_case=evidence.append)
-    assert report["cases"] == 40
-    assert report["correct_writes"] == 20
+    assert report["cases"] == 46
+    assert report["correct_writes"] == 21
     assert report["wrong_writes"] == 0
     assert report["missed"] == 0
-    assert len(evidence) == 40
-    assert sum(len(row["accepted"]) for row in evidence) == 20
+    assert len(evidence) == 46
+    assert sum(len(row["accepted"]) for row in evidence) == 21
     assert all("candidates" in row and "filters" in row for row in evidence)
 
 
@@ -79,7 +79,7 @@ async def test_mem_016_real_model_candidates_no_longer_write_the_historical_valu
     """回放 2026-10-05 真实运行里模型对 MEM-016 的原始输出（错误写入 2/40 全部出自它）。
 
     模型把「这次我要彩色款」和「以前喜欢素色」各抽成一条同键候选，当时两条都被写入。
-    之后加入的历史分句判定应只留下当前那一条；这里固定模型输出，不依赖模型是否再犯。
+    长期性升级后两条都不应保存：第一条是一次性需求，第二条是历史偏好。
     """
 
     cases = yaml.safe_load(DATASET.read_text(encoding="utf-8"))
@@ -106,5 +106,5 @@ async def test_mem_016_real_model_candidates_no_longer_write_the_historical_valu
         on_case=lambda row: accepted.extend(row["accepted"]),
     )
 
-    assert report["wrong_writes"] == 0 and report["correct_writes"] == 1
-    assert [item["value"] for item in accepted] == ["彩色款"]
+    assert report["wrong_writes"] == 0 and report["missed"] == 0
+    assert accepted == []

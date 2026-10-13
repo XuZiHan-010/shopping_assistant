@@ -366,7 +366,7 @@ load_context → retrieve_knowledge_index → prefilter_question
 | `backend/app/tools/` | **已创建（N2 模块 A）**：`types.py`（`ToolSpec` / `ToolResult` / `ToolDisplay` / `ToolContext` 等）、`registry.py`（注册自检、按角色出工具面、`build_tool_registry()` 在 `create_app()` 调用）、`gates.py`（工具面 → 身份参数 → 参数校验 → 来源 / 选项 / 护栏 / 审批闸门管线，`DatabaseProvenanceStore` 与审计适配器）、`errors.py`（`FatalToolError` / `GuardrailRejection`）；尚无业务工具 | §6.9 | N2 |
 | `backend/app/agent/loop/` | **已创建（N2 模块 A）**：`limits.py`（`LoopLimits`）、`runner.py`（`run_loop()` 主循环、确定性校验、`LoopOutcome`）、`fencing.py`（外部文本围栏 A11）；预算公式 `agent_loop_llm_call_floor()` 在 `app/core/config.py`；尚未接 v2 Chat 路由 | §6.10 | N2 |
 | `backend/app/skills/` | **已创建（N3 阶段 A–C）**：`spec.py`、`loader.py`、`registry.py`、`tool.py` 负责安全加载与受信通道；`app/eval/skill_cases.py` 校验用例。`customer/` 有 4 个导购/售后 Skill，`merchant/` 有经营 Skill 和 `customer-service-replies`；记忆 Skill 归 N4 | §6.11 | N3 |
-| `backend/app/memory/` | 双端记忆抽取、双重过滤、事实层 / 总结层 | §6.13 | N4 |
+| `backend/app/memory/` | 双端记忆抽取、双重过滤、事实层 / 总结层；2026-10-13 增加 `policy.py`（角色规范键/长期性/呈现值准入）、`context.py`（有界目录、时间与去重），迁移 `20261013_0052` | §6.13；`plans/2026-10-13-memory-upgrade.md` | N4 / 记忆升级 |
 | `backend/app/eval/` | 评测集、三层评分与关键安全集硬门禁 | §6.15 | N1 起 |
 | `backend/app/knowledge/`（扩展） | **已创建（N4-C）**：`embedding.py`（本地嵌入协议与 fastembed 懒加载实现）、`index_versions.py`（§7.6 索引版本状态机、单条 SQL 向量查询、验证探针 Recall 闸门）、`fusion.py`（RRF）、`probes/n4_e5_rag.yaml`（E5 评测集兼切换验证探针）；`retrieval.py` 的 `search_documents` 接受向量排名做融合；构建任务 `app/jobs/build_index.py` | §6.14 | N4 |
 
@@ -701,6 +701,8 @@ MVP 从 0 到 1 按以下顺序建成。**这是历史记录，不是待办清�
 | `docs/history/eval/n1-n4-acceptance-2026-10-04.md` | 执行防护整改、跨日批次预算、真实评测命令与待复核边界 |
 | `docs/history/eval/n1-n4-acceptance-2026-10-04.sha256.json` / `n1-n4-acceptance-source-2026-10-04.zip` | 新版候选冻结与源码快照；须完成末次补丁独立复核后才能用于真实评测 |
 | `backend/app/eval/n3_quality_acceptance.py` | Skill 首次选择与随单摘要人工质量验收，真实模式须 R3 授权 |
+| `backend/app/eval/intent_accuracy.py` / `datasets/intent/v1_intent_cases.yaml` | v1 两阶段意图识别准确率评测（80 条标注问题集，只调用冻结基线的 `IntentService`），真实模式须 R3 授权；Fake 结构校验在 `tests/eval/test_intent_accuracy_fake.py` |
+| `docs/history/eval/intent-accuracy-real-2026-10-08.md` | 意图识别首次真实评测报告：严格/宽松两种口径、失败用例归因与限制 |
 | `backend/app/localization/after_sales.py` | 顾客/商家售后工具确定性双语文案 |
 
 出现以下情况更新本文件：创建或删除一级目录；移动关键入口文件；新增数据库或外部服务；

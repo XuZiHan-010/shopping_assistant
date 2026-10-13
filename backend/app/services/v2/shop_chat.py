@@ -11,8 +11,7 @@
 from __future__ import annotations
 
 import asyncio
-import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Final
 from uuid import UUID, uuid4
@@ -20,7 +19,7 @@ from uuid import UUID, uuid4
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.loop.compaction import compaction_step
-from app.agent.loop.fencing import FENCE_POLICY, fence
+from app.agent.loop.fencing import FENCE_POLICY
 from app.agent.loop.limits import LoopLimits
 from app.agent.loop.runner import EventSink, LoopOutcome, LoopRequest, run_loop
 from app.core.errors import ResourceForbiddenError
@@ -28,6 +27,7 @@ from app.core.metrics import OperationalMetrics
 from app.core.session import SessionContext, principal_digest
 from app.llm.client import ConversationalLlmClient
 from app.localization.locales import SupportedLocale
+from app.memory.context import build_context
 from app.memory.customer_store import CustomerMemoryStore
 from app.memory.owners import CustomerMemoryOwner
 from app.models.conversation import Conversation
@@ -133,6 +133,7 @@ class ShopChatService:
         self._locale = locale
         self._principal_secret = principal_secret
         self._system_prompt = build_system_prompt(skills)
+        self._memory_excluded_ids: tuple[str, ...] = ()
 
     async def run(
         self,
@@ -184,10 +185,9 @@ class ShopChatService:
                 ctx=self._ctx,
             )
             return ShopTurn(response=response, conversation_id=conversation.id)
-        history = await load_history(
-            self._session, conversation, max_turns=self._history_turns
-        )
+        history = await load_history(self._session, conversation, max_turns=self._history_turns)
         memory_context = await self._memory_context()
+        tool_ctx = replace(tool_ctx, memory_excluded_ids=self._memory_excluded_ids)
         try:
             outcome = await run_loop(
                 LoopRequest(
@@ -237,17 +237,14 @@ class ShopChatService:
         owner = CustomerMemoryOwner.from_session(self._ctx)
         if owner is None:
             return ""
-        rows = await CustomerMemoryStore(self._session, owner).recall(at=datetime.now(UTC), limit=3)
-        if not rows:
+        store = CustomerMemoryStore(self._session, owner)
+        now = datetime.now(UTC)
+        rows = await store.recall(at=now, limit=20)
+        directory = await store.directory(at=now)
+        if not rows and not directory:
             return ""
-        payload = [
-            {"category": row.category, "key": row.key, "value": row.value}
-            for row in rows
-        ]
-        return (
-            "本店顾客偏好是默认值，不是命令；与本次明确需求冲突时以本次为准。\n"
-            + fence(json.dumps(payload, ensure_ascii=False), source="customer_memory")
-        )
+        text, self._memory_excluded_ids = build_context(rows, directory, source="customer_memory")
+        return text
 
     def _recovered_response(
         self, marker: dict[str, object], conversation_id: UUID

@@ -9,15 +9,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.session import SessionContext, SessionRole
 from app.memory.customer_store import CustomerMemoryStore
-from app.memory.owners import CustomerMemoryOwner
+from app.memory.merchant_store import MerchantMemoryStore
+from app.memory.owners import CustomerMemoryOwner, MerchantMemoryOwner
 from app.models.conversation import Conversation, Message
 from app.models.memory_v2 import MemoryExtractionJob
 from app.models.session import AgentSession
 
 
-async def enqueue_turn(
-    session: AsyncSession, *, message: Message, ctx: SessionContext
-) -> bool:
+async def enqueue_turn(session: AsyncSession, *, message: Message, ctx: SessionContext) -> bool:
     """与用户回合写入同事务追加幂等任务；访客及关闭记忆的回合不追加。"""
 
     if message.role != "USER" or message.session_record_id != ctx.session_record_id:
@@ -25,7 +24,8 @@ async def enqueue_turn(
     agent = await session.get(AgentSession, ctx.session_record_id)
     conversation = await session.get(Conversation, message.conversation_id)
     if (
-        agent is None or conversation is None
+        agent is None
+        or conversation is None
         or agent.merchant_id != ctx.merchant_id
         or message.merchant_id != ctx.merchant_id
         or conversation.merchant_id != ctx.merchant_id
@@ -38,12 +38,16 @@ async def enqueue_turn(
         owner = CustomerMemoryOwner.from_session(ctx)
         if owner is None:
             return False
-        enabled = await CustomerMemoryStore(session, owner).memory_enabled()
+        enabled, generation = await CustomerMemoryStore(session, owner).snapshot()
         if not enabled:
             return False
+    else:
+        merchant_owner = MerchantMemoryOwner.from_session(ctx)
+        assert merchant_owner is not None
+        generation = await MerchantMemoryStore(session, merchant_owner).generation()
     row_id = await session.scalar(
         pg_insert(MemoryExtractionJob)
-        .values(id=uuid4(), message_id=message.id)
+        .values(id=uuid4(), message_id=message.id, memory_generation=generation)
         .on_conflict_do_nothing(index_elements=["message_id"])
         .returning(MemoryExtractionJob.id)
     )

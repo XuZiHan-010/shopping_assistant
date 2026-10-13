@@ -391,7 +391,10 @@ v2 共 53 条路径，与 PRD 逐条对账（`backend/scripts/audit_routes.py`�
 配置即代码在各目录的 `railway.json` 与 `backend/railway.cron.json`，步骤与环境变量见
 [`docs/deployment.md`](docs/deployment.md)。公开部署真实模型 Key 之前，限流、单请求上限与每日预算熔断三项要先在公网域名上验收。
 
-只部署 `merchant` 与 `backend` 两个服务也能运行：商家工作台完整可用，侧栏不显示「顾客视角」入口，定时任务不自动执行。
+**线上演示（2026-10-08）**：四个服务均已上线。从商家工作台 <https://shoppingassistant-production-001.up.railway.app> 进入，
+侧栏的「顾客视角」会在新标签页打开本店的顾客端（<https://shoppingassistant-customer.up.railway.app/borough-demo-100> 等三家演示店铺）。
+两端共用同一个后端与数据库：顾客下的订单和售后申请会出现在商家端。经营指标、商品与库存数据由定时任务每日滚动；
+订单、草稿审批与售后没有预置数据，需要实际操作后才有内容。
 
 ## 目录结构
 

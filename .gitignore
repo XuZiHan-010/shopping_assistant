@@ -50,6 +50,7 @@ Thumbs.db
 
 # ── 个人求职资料：只留在本地 ──────────────────────────
 interview/
+docs/interview-practice/
 
 # ── 评测运行的本地副本 ────────────────────────────────
 # 根目录的 n1x-*.json 是评测脚本的落盘副本，归档件在 docs/history/eval/。

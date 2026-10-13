@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 
-from sqlalchemy import delete, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -55,75 +55,141 @@ class CustomerMemoryStore:
         )
         return result is not False
 
+    async def snapshot(self) -> tuple[bool, int]:
+        row = await self._locked_preference()
+        return row.memory_enabled, row.memory_generation
+
     async def write(
-        self, *, category: str, key: str, value: str, at: datetime,
+        self,
+        *,
+        category: str,
+        key: str,
+        value: str,
+        at: datetime,
+        source_order: int = 0,
+        expected_generation: int | None = None,
     ) -> CustomerMemory | None:
         fact = SimpleNamespace(category=category, key=key, value=value)
         if not category or not key or not value or filter_candidate(fact).rejected:
             return None
         preference = await self._locked_preference()
-        if not preference.memory_enabled:
+        if not preference.memory_enabled or (
+            expected_generation is not None and preference.memory_generation != expected_generation
+        ):
             return None
         if filter_persisted(fact).rejected:
             return None
         row_id = await self._session.scalar(
             pg_insert(CustomerMemory)
             .values(
-                id=uuid4(), merchant_id=self._owner.merchant_id,
-                buyer_key=self._owner.buyer_key, category=category, key=key, value=value,
+                id=uuid4(),
+                merchant_id=self._owner.merchant_id,
+                buyer_key=self._owner.buyer_key,
+                category=category,
+                key=key,
+                value=value,
                 last_confirmed_at=at,
+                source_order=source_order,
             )
             .on_conflict_do_update(
                 constraint="uq_customer_memories_owner_key",
                 # 唯一键含 category（迁移 20261001_0046）：同类同 key 才视为同一事实并更新。
-                set_={"value": value, "last_confirmed_at": at},
+                set_={"value": value, "last_confirmed_at": at, "source_order": source_order},
+                where=or_(
+                    CustomerMemory.last_confirmed_at < at,
+                    and_(
+                        CustomerMemory.last_confirmed_at == at,
+                        CustomerMemory.source_order <= source_order
+                        if source_order == 0
+                        else CustomerMemory.source_order < source_order,
+                    ),
+                ),
             )
             .returning(CustomerMemory.id)
         )
-        assert row_id is not None
+        if row_id is None:
+            return None
         row = await self._session.get(CustomerMemory, row_id)
         assert row is not None
         await self._session.refresh(row)
         return row
 
     async def recall(
-        self, *, at: datetime, limit: int = 20, category: str | None = None,
+        self,
+        *,
+        at: datetime,
+        limit: int = 20,
+        category: str | None = None,
+        exclude_ids: tuple[str, ...] = (),
     ) -> list[CustomerMemory]:
         if not await self.memory_enabled():
             return []
         statement = select(CustomerMemory).where(
+            CustomerMemory.merchant_id == self._owner.merchant_id,
+            CustomerMemory.buyer_key == self._owner.buyer_key,
+            CustomerMemory.last_confirmed_at > at - RETENTION,
+        )
+        if category is not None:
+            statement = statement.where(CustomerMemory.category == category)
+        if exclude_ids:
+            statement = statement.where(CustomerMemory.id.not_in([UUID(i) for i in exclude_ids]))
+        rows = await self._session.scalars(
+            statement.order_by(
+                CustomerMemory.last_confirmed_at.desc(), CustomerMemory.id.desc()
+            ).limit(limit)
+        )
+        return list(rows.all())
+
+    async def directory(self, *, at: datetime) -> list[dict[str, object]]:
+        if not await self.memory_enabled():
+            return []
+        rows = await self._session.execute(
+            select(CustomerMemory.category, func.max(CustomerMemory.last_confirmed_at).label("at"))
+            .where(
                 CustomerMemory.merchant_id == self._owner.merchant_id,
                 CustomerMemory.buyer_key == self._owner.buyer_key,
                 CustomerMemory.last_confirmed_at > at - RETENTION,
             )
-        if category is not None:
-            statement = statement.where(CustomerMemory.category == category)
-        rows = await self._session.scalars(
-            statement.order_by(CustomerMemory.last_confirmed_at.desc(), CustomerMemory.id.desc())
-            .limit(limit)
+            .group_by(CustomerMemory.category)
+            .order_by(func.max(CustomerMemory.last_confirmed_at).desc(), CustomerMemory.category)
+            .limit(21)
         )
-        return list(rows.all())
+        return [
+            {"category": category, "last_confirmed_at": confirmed.isoformat()}
+            for category, confirmed in rows
+        ]
 
     async def delete(self, *, memory_id: UUID) -> bool:
+        preference = await self._locked_preference()
         result = await self._session.execute(
-            delete(CustomerMemory).where(
+            delete(CustomerMemory)
+            .where(
                 CustomerMemory.id == memory_id,
                 CustomerMemory.merchant_id == self._owner.merchant_id,
                 CustomerMemory.buyer_key == self._owner.buyer_key,
-            ).returning(CustomerMemory.id)
+            )
+            .returning(CustomerMemory.id)
         )
-        return result.scalar_one_or_none() is not None
+        deleted = result.scalar_one_or_none() is not None
+        if deleted:
+            preference.memory_generation += 1
+            await self._session.flush()
+        return deleted
 
     async def set_preference(self, *, enabled: bool) -> int:
         preference = await self._locked_preference()
+        if preference.memory_enabled != enabled:
+            preference.memory_generation += 1
         preference.memory_enabled = enabled
         purged = 0
         if not enabled:
             result = await self._session.execute(
-                delete(CustomerMemory).where(
+                delete(CustomerMemory)
+                .where(
                     CustomerMemory.merchant_id == self._owner.merchant_id,
                     CustomerMemory.buyer_key == self._owner.buyer_key,
-                ).returning(CustomerMemory.id)
+                )
+                .returning(CustomerMemory.id)
             )
             purged = len(result.scalars().all())
         await self._session.flush()
