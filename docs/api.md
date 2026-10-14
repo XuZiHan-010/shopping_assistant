@@ -11042,7 +11042,8 @@
           "CONTENT_CHANGE",
           "PRICE_CHANGE",
           "COUPON",
-          "AFTER_SALE_DECISION"
+          "AFTER_SALE_DECISION",
+          "LISTING_STATUS"
         ],
         "title": "DraftKind"
       },

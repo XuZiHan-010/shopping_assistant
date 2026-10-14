@@ -37,6 +37,8 @@ from app.tools.types import DraftProposal, ToolContext
 DRAFT_TTL: Final = timedelta(days=7)
 #: 起草者标签；账本按它区分「Agent 起草、商家批准」（§8.13.1 `LedgerActor`）。
 AGENT_ACTOR: Final = "AGENT"
+#: 上下架草稿的 `target_version`：起草时状态编码（ONLINE=1、OFFLINE=0），与处理器的并发比对一致。
+LISTING_STATUS_VERSION: Final = {"ONLINE": 1, "OFFLINE": 0}
 
 
 @dataclass(frozen=True)
@@ -105,6 +107,8 @@ class DatabaseDraftSink:
             return await self._stage_content_change(ctx, proposal)
         if kind is DraftKind.AFTER_SALE_DECISION:
             return await self._stage_after_sale(ctx, proposal)
+        if kind is DraftKind.LISTING_STATUS:
+            return await self._stage_listing_status(ctx, proposal)
         # 其余种类归阶段 B / 后续版本；缺省实现会让它们静默落成空草案。
         raise NotImplementedError(f"暂不支持的草稿种类：{kind.value}")
 
@@ -223,6 +227,43 @@ class DatabaseDraftSink:
             await session.commit()
         return draft_id
 
+    async def _stage_listing_status(self, ctx: ToolContext, proposal: DraftProposal) -> str:
+        """上下架起草；`target_version` 编码起草时状态（ONLINE=1、OFFLINE=0）。"""
+
+        merchant_id = ctx.session.merchant_id
+        product_id = UUID(proposal.target.object_id)
+        action = str(proposal.changes["action"])
+        async with self._database.session() as session:
+            product = await _owned_product(session, merchant_id, product_id)
+            if product.status not in LISTING_STATUS_VERSION:
+                raise LookupError("商品当前状态不可上下架")
+            new_status = "OFFLINE" if action == "PAUSE" else "ONLINE"
+            from app.services.v2.chat_write_marker import mark_committed_write
+
+            await mark_committed_write(session, ctx, tool_name="draft_listing_status")
+            draft = await DraftRepository(session).stage(
+                merchant_id=merchant_id,
+                kind=DraftKind.LISTING_STATUS,
+                title=(
+                    f"下架：{product.title}" if action == "PAUSE" else f"重新上架：{product.title}"
+                ),
+                target_type="PRODUCT",
+                target_id=product_id,
+                target_version=LISTING_STATUS_VERSION[product.status],
+                payload={
+                    "action": action,
+                    "base_status": product.status,
+                    "new_status": new_status,
+                    "product_title": product.title,
+                },
+                guardrail_snapshot=_snapshot_of(proposal),
+                created_by=AGENT_ACTOR,
+                now=datetime.now(UTC),
+            )
+            draft_id = str(draft.id)
+            await session.commit()
+        return draft_id
+
     async def _stage_after_sale(self, ctx: ToolContext, proposal: DraftProposal) -> str:
         from app.services.v2.draft_handlers.after_sale_decision import DecisionPayload
 
@@ -297,6 +338,10 @@ def content_change_entry_id(draft: Draft) -> str:
     return f"{draft.id}:content"
 
 
+def listing_status_entry_id(draft: Draft) -> str:
+    return f"{draft.id}:status"
+
+
 def after_sale_entry_id(draft: Draft) -> str:
     return f"{draft.id}:decision"
 
@@ -313,6 +358,8 @@ def to_diff(draft: Draft) -> DraftDiff:
         return _after_sale_diff(draft)
     if kind is DraftKind.CONTENT_CHANGE:
         return _content_change_diff(draft)
+    if kind is DraftKind.LISTING_STATUS:
+        return _listing_status_diff(draft)
     raise AssertionError(f"to_diff 未实现的草稿种类：{kind.value}")
 
 
@@ -351,6 +398,24 @@ def _price_change_diff(draft: Draft) -> DraftDiff:
                 unit=DiffUnit.CENTS,
                 before=base_cents,
                 after=new_cents,
+                is_preview=False,
+            )
+        ]
+    )
+
+
+def _listing_status_diff(draft: Draft) -> DraftDiff:
+    payload = draft.payload
+    return DraftDiff(
+        entries=[
+            DraftDiffEntry(
+                entry_id=listing_status_entry_id(draft),
+                target_type="PRODUCT",
+                target_id=str(draft.target_id),
+                field="status",
+                unit=DiffUnit.TEXT,
+                before=str(payload["base_status"]),
+                after=str(payload["new_status"]),
                 is_preview=False,
             )
         ]

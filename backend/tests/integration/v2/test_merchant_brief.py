@@ -17,6 +17,7 @@ from httpx import AsyncClient
 from app.db.session import Database
 from app.models.drafts import Draft
 from app.schemas.v2.drafts import DraftKind, DraftState
+from app.services.seed_service import default_merchants, seed_demo_merchants
 from app.services.v2.drafts import AGENT_ACTOR, DRAFT_TTL
 from tests.conftest import MERCHANT_ONE_AUTH, MERCHANT_ONE_ID, MERCHANT_TWO_ID
 from tests.support.merchant_v2 import merchant_session_headers, seed_paid_order, seed_product
@@ -95,8 +96,62 @@ async def test_brief_items_trace_back_to_alerts_and_drafts(
     kinds = [item["kind"] for item in body["items"]]
     evidence = " ".join(item["evidence"] for item in body["items"])
     assert "INVENTORY_ALERT" in kinds and "PENDING_DRAFT" in kinds
-    assert str(out_of_stock) in evidence
+    assert "售罄商品" in evidence
+    assert str(out_of_stock) not in evidence
     assert str(draft) in evidence
+
+
+@pytest.mark.asyncio
+async def test_product_names_are_scoped_for_every_demo_and_new_merchant(
+    postgres_app: FastAPI, postgres_client: AsyncClient,
+) -> None:
+    """三家演示商家与新增商家共用名称展示，缓存/重生成也不能串店。"""
+
+    database = _database(postgres_app)
+    merchants = default_merchants(merchant_count=4)
+    async with database.session() as session:
+        await seed_demo_merchants(session, merchants)
+        await session.commit()
+
+    names = ["粗陶手作咖啡杯", "轻量通勤夹克", "复古帆布鞋", "山野百花蜜"]
+    products = []
+    for merchant, name in zip(merchants, names, strict=True):
+        products.append(await seed_product(database, merchant.id, title=name, on_hand=2))
+
+    for merchant, name, product in zip(merchants, names, products, strict=True):
+        token = f"product-name-test-{merchant.merchant_code}"
+        postgres_app.state.settings.demo_merchant_tokens[token] = merchant.id
+        headers = await merchant_session_headers(
+            postgres_client, {"Authorization": f"Bearer {token}"},
+        )
+        first = await _brief(postgres_client, headers)
+        cached = await _brief(postgres_client, headers)
+        regenerated = await postgres_client.post(
+            f"{BRIEF_PATH}/regenerate", headers=headers,
+            json={"client_request_id": "same-request-across-merchants"},
+        )
+        assert regenerated.status_code == 200, regenerated.text
+        assert cached == first
+        assert regenerated.json()["brief_version"] == 2
+        for body in (first, cached, regenerated.json()):
+            [item] = body["items"]
+            assert name in item["title"] and name in item["evidence"]
+            assert name in item["next_action_prompt"]
+            assert "可售 2" in item["evidence"]
+            assert all(str(pid) not in str(body) for pid in products)
+            assert all(other not in str(body) for other in names if other != name)
+
+        alerts = await postgres_client.get(
+            "/api/v2/merchant/inventory/alerts", headers=headers,
+        )
+        catalog = await postgres_client.get(
+            "/api/v2/merchant/products/content", headers=headers,
+        )
+        assert alerts.status_code == catalog.status_code == 200
+        [alert] = alerts.json()["items"]
+        [content] = catalog.json()["items"]
+        assert alert["product_name"] == content["title"] == name
+        assert alert["product_id"] == content["id"] == str(product)
 
 
 @pytest.mark.asyncio

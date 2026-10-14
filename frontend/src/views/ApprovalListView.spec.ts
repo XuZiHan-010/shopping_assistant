@@ -111,6 +111,16 @@ afterEach(() => {
 })
 
 describe('ApprovalListView', () => {
+  it('LISTING_STATUS 种类显示本地化标签「上下架」', async () => {
+    const { wrapper } = await mountList({
+      items: [draftSummary({ kind: 'LISTING_STATUS', title: '下架：测试商品' })],
+      next_cursor: null,
+      has_more: false,
+    })
+    expect(wrapper.text()).toContain('上下架')
+    expect(wrapper.text()).not.toContain('LISTING_STATUS')
+  })
+
   it('按 batchId 分组展示；同批次的子草稿归在一个分组标题下', async () => {
     const { wrapper } = await mountList({
       items: [

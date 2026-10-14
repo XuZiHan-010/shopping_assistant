@@ -73,9 +73,9 @@ describe('merchantOps adapter', () => {
   })
 
   it('fetchInventoryAlerts 转成领域类型并带上会话头', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse({ items: [alert()], next_cursor: 'cur-1', has_more: true }),
-    )
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ items: [alert()], next_cursor: 'cur-1', has_more: true }))
     vi.stubGlobal('fetch', fetchMock)
 
     const page = await fetchInventoryAlerts(SESSION, { limit: 20 })
@@ -331,7 +331,7 @@ describe('merchantOps adapter', () => {
               rank: 1,
               kind: 'INVENTORY_ALERT',
               title: '已售罄：测试商品',
-              evidence: '商品 p-1：在库 0',
+              evidence: '商品「测试商品」：在库 0',
               amount_cents: null,
               next_action_prompt: '给「测试商品」起草一份补货草稿',
             },

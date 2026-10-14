@@ -13,6 +13,8 @@ from __future__ import annotations
 from datetime import UTC, date, datetime, timedelta
 from uuid import uuid4
 
+import pytest
+
 from app.models.drafts import Draft
 from app.models.memory_v2 import CustomerSignal as SignalRow
 from app.schemas.v2.merchant_ops import (
@@ -24,6 +26,7 @@ from app.services.v2.daily_brief import (
     REGENERATE_COOLDOWN_SECONDS,
     BriefCandidate,
     build_full_brief,
+    build_minimal_brief,
     is_in_regenerate_cooldown,
     rank_brief_items,
 )
@@ -134,6 +137,26 @@ def test_build_full_brief_combines_three_sources() -> None:
         DailyBriefItemKind.INVENTORY_ALERT, DailyBriefItemKind.PENDING_DRAFT,
         DailyBriefItemKind.CUSTOMER_SIGNAL,
     }
+
+
+@pytest.mark.parametrize("kind", list(InventoryAlertKind))
+@pytest.mark.parametrize("full", [False, True])
+def test_inventory_evidence_identifies_product_by_name(
+    kind: InventoryAlertKind, full: bool,
+) -> None:
+    """商家需从数字依据识别商品，不应读到内部商品编码。"""
+
+    alert = _alert("粗陶手作咖啡杯（两只装）").model_copy(update={"kind": kind})
+    if full:
+        brief = build_full_brief(alerts=[alert], drafts=[], signals=[], now=NOW)
+    else:
+        brief = build_minimal_brief(alerts=[alert], drafts=[], now=NOW)
+
+    [item] = brief.items
+    assert alert.product_name in item.evidence
+    assert alert.product_id not in brief.model_dump_json()
+    assert "在库 3、占用 0、可售 3（阈值 5）" in item.evidence
+    assert "近 30 天售出 10 件，约可支撑 9 天" in item.evidence
 
 
 def test_build_full_brief_collapses_beyond_six_items() -> None:

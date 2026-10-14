@@ -1,5 +1,15 @@
 # 项目进度快照
 
+> **2026-10-14：补齐 PRD M5「下架进审批」，本地已实现，尚未提交或部署。** 新增草稿种类 `LISTING_STATUS` 与商家工具 `draft_listing_status`（`PAUSE` 下架 / `ACTIVATE` 重新上架，仅 `ONLINE ↔ OFFLINE`），商家在审批界面批准后生效；应用时按当前状态复检护栏，状态被并发改动返回 409；不开放给 MCP，无迁移。库存运营 Skill 文案、PRD M5、契约 §8.13、OpenAPI 与两端生成类型已同步；审批列表/详情显示「上下架」「在售 / 已下架」。方案见 `plans/2026-10-14-listing-status-draft.md`。
+>
+> **验证**：Fake LLM、空 Key、一次性 pgvector 容器（已删除）。后端 Ruff、mypy（329 文件）通过；相关单测 1490 passed，相关集成 68 passed；全量 4877 passed / 5 skipped / 10 errors，10 个 error 是运行时误加 `-p no:logging` 使 `caplog` 不可用，去掉该参数重跑涉及的 6 个文件 160 passed，**没有单次完整绿跑**。商家端 798 passed、typecheck、改动文件 ESLint、构建、codegen:check 通过；顾客端 141 passed、tsc、codegen:check 通过。两份语言文件的 Prettier 不一致是记忆面板段落既有问题，本次未改。未跑浏览器 E2E，未调用真实 LLM。
+>
+> **限制**：库存告警只列在售商品，商家端也没有按名称搜索商品的工具，已下架商品要先经 `get_product_content` 产出引用才能起草重新上架；真实聊天里模型未必拿得到该商品 ID。
+
+> **2026-10-13：商家商品名称展示修复与多商家验证完成；线上部署结果待核实。** 今日简报的库存数字依据改用商品名称；商品列表移除名称下方的内部商品 ID。内部标识仍用于请求与操作，接口字段不变。阶段与既有验收限制不变。
+>
+> **验证**：先复现简报 6 项、商品列表 1 项失败；补充多商家回归后，后端简报/库存单测与真实 PostgreSQL API 集成测试 **66 passed / 0 skipped**（独占一次性 pgvector 测试容器），前端商品页/首页/需要处理事项/Adapter **67 passed**。覆盖商家100、101、102及新增商家103：首次生成、缓存读取、重新生成、库存告警与商品列表均显示本店商品名称，不串店；共用逻辑没有商家100专用分支。同步纠正旧集成测试中期待简报包含商品 UUID 的断言。Ruff、前端 typecheck、改动文件 ESLint / Prettier 与 `git diff --check` 通过。未调用真实 LLM，未跑浏览器 E2E；测试容器已移除。上线后，各商家已缓存的当日旧简报需点击「重新生成」更新；下一步仍是下述记忆升级与 N5 的待验收事项。
+
 > **2026-10-13：双端记忆升级已在本地实现，尚未提交或部署；N5 整体验收仍未完成。** 沿用可信主体、PostgreSQL/outbox 和既有 API；新增稳定偏好准入、角色规范键、商家同键更正、（用户消息时间，来源序号）防迟到覆盖、删除/开关的主体版本屏障、有界类别目录、带时间的按需召回与同回合去重。商家总结保留在记忆面板，不重复注入。迁移为 `20261013_0052`，旧记录不猜测归并。设计/主计划见 `docs/specs/2026-10-13-memory-upgrade.md`、`plans/2026-10-13-memory-upgrade.md`；证据见 `docs/history/eval/memory-upgrade-2026-10-13.md`。
 >
 > **验证**：全部 Fake LLM、空 Key、独占可丢弃 PostgreSQL 16.15 / pgvector 0.8.6；后端全量 **4865 passed / 5 skipped / 0 failed**（22 分 49 秒；跳过 3 项 Windows 符号链接权限、2 项时序哨兵，后者另行独占运行 **2 passed**）。Ruff、mypy（328 文件）、两端 codegen:check 通过；商家记忆面板/Adapter 2 项、顾客记忆 Adapter 1 项通过。独立审查的临时限定优先级、规则/订单伪装偏好、数量截断三项已先红后绿整改并复核，无剩余 Critical/Important。原 Docker WSL 磁盘只读，未修复或改动，另建临时测试环境；全量运行约四分之一处关闭该临时实例 fsync 减少磁盘等待，未验证断电恢复。

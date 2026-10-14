@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { i18n } from '@/i18n'
 import { setLocaleProvider } from '@/api/credentials'
 import { useLocaleStore } from '@/stores/locale'
+import { useAuthStore } from '@/stores/auth'
 import { useOpsChatStore } from '@/stores/opsChat'
 import { useRailStore } from '@/stores/rail'
 import {
@@ -26,8 +27,15 @@ import CatalogView from './CatalogView.vue'
 
 const CONTENT = '/api/v2/merchant/products/content'
 
-async function mountCatalog(handler: RouteHandler) {
-  const pinia = pinnedSessionPinia()
+async function mountCatalog(handler: RouteHandler, merchantNumber = 100) {
+  const pinia = pinnedSessionPinia(`Borough商家${merchantNumber}`)
+  const auth = useAuthStore(pinia)
+  auth.selected = {
+    merchantId: `merchant-${merchantNumber}`,
+    displayName: `Borough商家${merchantNumber}`,
+    token: `test-token-${merchantNumber}`,
+  }
+  auth.sessionId = `catalog-${merchantNumber}`.padEnd(43, '0')
   const fetchMock = vi.fn(routeFetch([[CONTENT, handler]]))
   vi.stubGlobal('fetch', fetchMock)
   const wrapper = mount(CatalogView, {
@@ -75,17 +83,28 @@ describe('CatalogView', () => {
     expect(new URL(String(fetchMock.mock.calls[1]![0])).searchParams.get('cursor')).toBeNull()
     wrapper.unmount()
   })
-  it('请求 products/content 第一页，每行显示商品、类目、可售与状态', async () => {
+  it.each([
+    [100, '轻量通勤夹克'],
+    [101, '粗陶手作咖啡杯'],
+    [102, '复古帆布鞋'],
+    [103, '山野百花蜜'],
+  ])('商家 %i 的商品行显示名称 %s、类目、可售与状态，不显示编码', async (merchantNumber, title) => {
+    const productId = `product-${merchantNumber}`
     const { wrapper, fetchMock } = await mountCatalog(
-      json(page([productContent('p-1', { title: '轻量通勤夹克', stock_available: 7 })])),
+      json(page([productContent(productId, { title, stock_available: 7 })])),
+      merchantNumber,
     )
     const url = new URL(String(fetchMock.mock.calls[0]![0]))
     expect(url.pathname).toBe(CONTENT)
     expect(url.searchParams.get('cursor')).toBeNull()
+    expect(new Headers(fetchMock.mock.calls[0]![1]?.headers).get('X-Session-Id')).toBe(
+      `catalog-${merchantNumber}`.padEnd(43, '0'),
+    )
 
     expect(wrapper.get('h1').text()).toBe('商品')
     const row = wrapper.get('[data-test=product-row]')
-    expect(row.text()).toContain('轻量通勤夹克')
+    expect(row.text()).toContain(title)
+    expect(row.text()).not.toContain(productId)
     expect(row.text()).toContain('男装')
     expect(row.text()).toContain('7')
     expect(row.text()).toContain('在售')

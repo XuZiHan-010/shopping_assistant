@@ -41,7 +41,9 @@ source: vendor/anthropic-commerce-agents@fd4d592 merchant-agent/skills/inventory
 - 把决定所需的数字放在一起：还剩多少、当前销售速度、临期日期（如有）、边际（如需要降价则需要定价 Skill 的数据）；
 - 说明数字指向哪个方向：有明确临期日期且时间不多，倾向降价；耐存放且占用成本低，倾向维持；
   任何允许价位都卖不掉的，倾向下架；
-- 库存暂停、下架属于本 Skill 的起草范围；降价促销要交给定价与促销 Skill 处理，不在本 Skill 代做。
+- 下架与重新上架属于本 Skill 的起草范围：用 `draft_listing_status` 起草，`action` 取 `PAUSE`（下架，
+  仅限当前在售商品）或 `ACTIVATE`（重新上架，仅限当前已下架商品）；同样只能起草，**不能自批、不能自动应用**，
+  起草成功后要明确告诉商家需要去审批界面确认；降价促销要交给定价与促销 Skill 处理，不在本 Skill 代做。
 
 ### 交接
 
