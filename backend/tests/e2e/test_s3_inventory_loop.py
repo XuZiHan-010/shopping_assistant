@@ -107,9 +107,12 @@ async def test_s3_low_stock_to_restock_and_stock_band_recovery(
         )
     ).json()
     alert_items = [item for item in brief["items"] if item["kind"] == "INVENTORY_ALERT"]
-    assert any(
-        str(product) in item["evidence"] and "库存偏低" in item["title"] for item in alert_items
-    )
+    [alert_item] = alert_items
+    assert "库存偏低" in alert_item["title"]
+    assert "库存告警测试商品" in alert_item["title"]
+    assert "库存告警测试商品" in alert_item["evidence"]
+    assert "可售 4" in alert_item["evidence"]
+    assert str(product) not in alert_item["evidence"]
 
     # 3. 商家 Agent 起草补货：先看告警（来源闸门产出这个商品的引用），再起草——
     #    工具只写 `drafts` 表，起草不改库存。
@@ -141,6 +144,7 @@ async def test_s3_low_stock_to_restock_and_stock_band_recovery(
             .one()
         )
     assert draft.state == "STAGED"
+    assert draft.target_id == product
     assert draft.payload["delta"] == 60 and draft.payload["base_on_hand"] == 4
 
     # 4. 商家在审批界面批准：证据只从 `GET /drafts/{id}` 签发，Agent 拿不到（D9①）。
