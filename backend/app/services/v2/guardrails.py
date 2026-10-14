@@ -34,6 +34,7 @@ MIN_PRICE_UNCONFIGURED_CODE: Final = "MIN_PRICE_UNCONFIGURED"
 PRICE_BELOW_FLOOR_CODE: Final = "PRICE_BELOW_FLOOR"
 PRICE_CHANGE_RATE_EXCEEDS_LIMIT_CODE: Final = "PRICE_CHANGE_RATE_EXCEEDS_LIMIT"
 DISCOUNT_RATE_EXCEEDS_LIMIT_CODE: Final = "DISCOUNT_RATE_EXCEEDS_LIMIT"
+LISTING_STATUS_NOT_TOGGLEABLE_CODE: Final = "LISTING_STATUS_NOT_TOGGLEABLE"
 
 
 @dataclass(frozen=True)
@@ -254,3 +255,56 @@ def _discount_remediation_text(rate: Decimal, locale: SupportedLocale) -> str:
     if locale is SupportedLocale.EN_US:
         return f"Reduce the discount to {percent}% or less."
     return f"把优惠幅度降到 {percent}% 以内"
+
+
+def check_listing_status(
+    *,
+    action: str,
+    current_status: str,
+    locale: SupportedLocale = SupportedLocale.ZH_CN,
+) -> list[GuardrailCheckResult]:
+    """上下架护栏：下架（PAUSE）要求当前 ONLINE，重新上架（ACTIVATE）要求当前 OFFLINE。
+
+    起草预检与应用复检共用本函数（D9②）；不读数据库，当前状态由调用方在判定那一刻读出。
+    AUDITING / REJECTED 由平台审核流程决定，草稿无权切换。
+    """
+
+    required = "ONLINE" if action == "PAUSE" else "OFFLINE"
+    if current_status == required:
+        return [
+            GuardrailCheckResult(
+                code=LISTING_STATUS_NOT_TOGGLEABLE_CODE,
+                passed=True,
+                current_limit=None,
+                remediation=None,
+            )
+        ]
+    return [
+        GuardrailCheckResult(
+            code=LISTING_STATUS_NOT_TOGGLEABLE_CODE,
+            passed=False,
+            current_limit=_listing_limit_text(action, current_status, locale),
+            remediation=_listing_remediation_text(action, locale),
+        )
+    ]
+
+
+def _listing_limit_text(action: str, current_status: str, locale: SupportedLocale) -> str:
+    if locale is SupportedLocale.EN_US:
+        if action == "PAUSE":
+            return f"Only an online product can be taken offline; its status is {current_status}."
+        return f"Only an offline product can be relisted; its status is {current_status}."
+    if action == "PAUSE":
+        return f"只有在售的商品才能下架；当前状态为 {current_status}"
+    return f"只有已下架的商品才能重新上架；当前状态为 {current_status}"
+
+
+def _listing_remediation_text(action: str, locale: SupportedLocale) -> str:
+    if locale is SupportedLocale.EN_US:
+        target = "online" if action == "PAUSE" else "offline"
+        return (
+            f"Pick a product that is currently {target}; "
+            "products under review or rejected cannot be toggled."
+        )
+    target = "在售" if action == "PAUSE" else "已下架"
+    return f"请选择当前{target}的商品；审核中或被驳回的商品不能通过草稿上下架"

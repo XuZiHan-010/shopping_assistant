@@ -9,7 +9,12 @@ from __future__ import annotations
 from decimal import Decimal
 
 from app.localization.locales import SupportedLocale
-from app.services.v2.guardrails import GuardrailLimits, check_coupon, check_price_change
+from app.services.v2.guardrails import (
+    GuardrailLimits,
+    check_coupon,
+    check_listing_status,
+    check_price_change,
+)
 
 
 def _limits(
@@ -159,3 +164,36 @@ def test_guardrail_texts_localized_for_english() -> None:
     failed = next(check for check in checks if not check.passed)
     assert failed.current_limit is not None
     assert all(ord(ch) < 128 for ch in failed.current_limit)
+
+
+# --- 上下架护栏 -----------------------------------------------------------------------
+
+
+def test_pause_requires_online_product() -> None:
+    [check] = check_listing_status(action="PAUSE", current_status="ONLINE")
+    assert check.passed and check.code == "LISTING_STATUS_NOT_TOGGLEABLE"
+
+
+def test_activate_requires_offline_product() -> None:
+    [check] = check_listing_status(action="ACTIVATE", current_status="OFFLINE")
+    assert check.passed
+
+
+def test_listing_status_rejects_every_other_combination_with_bilingual_reason() -> None:
+    for action, status in [
+        ("PAUSE", "OFFLINE"),
+        ("PAUSE", "AUDITING"),
+        ("PAUSE", "REJECTED"),
+        ("ACTIVATE", "ONLINE"),
+        ("ACTIVATE", "AUDITING"),
+        ("ACTIVATE", "REJECTED"),
+    ]:
+        zh = check_listing_status(action=action, current_status=status)[0]
+        en = check_listing_status(
+            action=action, current_status=status, locale=SupportedLocale.EN_US
+        )[0]
+        assert not zh.passed and zh.code == "LISTING_STATUS_NOT_TOGGLEABLE"
+        assert zh.current_limit and zh.remediation and status in zh.current_limit
+        assert en.current_limit and en.remediation
+        assert en.current_limit != zh.current_limit
+        assert not any("一" <= ch <= "鿿" for ch in en.current_limit + en.remediation)

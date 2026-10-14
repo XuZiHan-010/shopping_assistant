@@ -34,6 +34,7 @@ ENABLED_DRAFT_KINDS: Final = frozenset(
         DraftKind.COUPON,
         DraftKind.AFTER_SALE_DECISION,
         DraftKind.CONTENT_CHANGE,
+        DraftKind.LISTING_STATUS,
     }
 )
 
@@ -114,6 +115,7 @@ def default_handlers() -> tuple[DraftHandler, ...]:
     from app.services.v2.draft_handlers.after_sale_decision import AfterSaleDecisionHandler
     from app.services.v2.draft_handlers.content_change import ContentChangeHandler
     from app.services.v2.draft_handlers.coupon import CouponHandler
+    from app.services.v2.draft_handlers.listing_status import ListingStatusHandler
     from app.services.v2.draft_handlers.price_change import PriceChangeHandler
     from app.services.v2.draft_handlers.restock import RestockHandler
 
@@ -123,6 +125,7 @@ def default_handlers() -> tuple[DraftHandler, ...]:
         CouponHandler(),
         AfterSaleDecisionHandler(),
         ContentChangeHandler(),
+        ListingStatusHandler(),
     )
 
 

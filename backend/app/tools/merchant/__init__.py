@@ -3,8 +3,8 @@
 写策略是这个模块的全部要点：
 
 - `get_inventory_alerts`、`query_metrics`、`attribute_change`：`READ_ONLY`，可并行；
-- `draft_restock`：`MERCHANT_DRAFT`，**在类型层面**只能返回 `DraftProposal`——
-  它写不出「直接改库存」这条路径（注册表自检 `_RETURN_TYPE`）。
+- `draft_restock`、`draft_listing_status`：`MERCHANT_DRAFT`，**在类型层面**只能返回
+  `DraftProposal`——  它们写不出「直接改库存 / 直接上下架」这条路径（注册表自检 `_RETURN_TYPE`）。
 
 没有「应用草稿」或「批准草稿」的工具：批准只能来自审批界面（D9①、§8.13.2 不变量 6），
 Agent 连证据都拿不到。

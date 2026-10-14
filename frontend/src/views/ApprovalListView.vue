@@ -50,6 +50,7 @@ const KNOWN_KINDS: readonly DraftKind[] = [
   'RESTOCK',
   'CONTENT_CHANGE',
   'PRICE_CHANGE',
+  'LISTING_STATUS',
   'COUPON',
   'AFTER_SALE_DECISION',
 ]

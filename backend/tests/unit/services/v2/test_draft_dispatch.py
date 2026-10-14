@@ -45,6 +45,11 @@ def test_restock_price_change_and_coupon_are_enabled() -> None:
     assert {DraftKind.RESTOCK, DraftKind.PRICE_CHANGE, DraftKind.COUPON} <= ENABLED_DRAFT_KINDS
 
 
+def test_listing_status_is_enabled_with_a_handler() -> None:
+    assert DraftKind.LISTING_STATUS in ENABLED_DRAFT_KINDS
+    assert DraftKind.LISTING_STATUS in default_handler_table()
+
+
 def test_apply_service_uses_the_self_checked_default_table() -> None:
     assert set(draft_apply.HANDLERS) == set(default_handler_table())
     assert isinstance(draft_apply.HANDLERS[DraftKind.RESTOCK], RestockHandler)

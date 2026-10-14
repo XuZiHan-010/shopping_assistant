@@ -4,7 +4,8 @@
 且流必须以 `turn_complete` 或 `error` 之一收尾。工具展示里只有固定短句，
 工具参数、结果行与 Prompt 全文一律进不去（§8.7.5 的模型结构上就不接受）。
 
-**这条路由没有批准能力**：商家工具面只有 `get_inventory_alerts` 与 `draft_restock`，
+**这条路由没有批准能力**：商家工具面里的写工具（`draft_restock`、`draft_listing_status`、调价、促销券、
+商品内容、售后决定）都只起草，
 模型即使声称已经批准，草稿也仍是 `STAGED`（D9①）。
 """
 

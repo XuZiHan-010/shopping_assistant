@@ -103,6 +103,28 @@ afterEach(() => {
 })
 
 describe('ApprovalView', () => {
+  it('status 差异的 ONLINE/OFFLINE 显示本地化文案，其他值保持原样', async () => {
+    const entry = (id: string, before: string, after: string) => ({
+      entry_id: id,
+      target_type: 'PRODUCT',
+      target_id: 'p-1',
+      field: 'status',
+      unit: 'TEXT',
+      before,
+      after,
+      is_preview: false,
+    })
+    const { wrapper } = await mountApproval({
+      kind: 'LISTING_STATUS',
+      diff: {
+        entries: [entry('d-1:status', 'ONLINE', 'OFFLINE'), entry('d-2:status', 'DRAFT', 'ONLINE')],
+      },
+    })
+    const rows = wrapper.findAll('[data-test=diff-row]')
+    expect(rows[0]!.findAll('td').map((c) => c.text())).toEqual(['status', '在售', '已下架'])
+    expect(rows[1]!.findAll('td').map((c) => c.text())).toEqual(['status', 'DRAFT', '在售'])
+  })
+
   it('展示完整 diff、草案版本、目标版本与护栏预检说明', async () => {
     const { wrapper } = await mountApproval()
 

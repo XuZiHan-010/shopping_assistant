@@ -45,6 +45,7 @@ class DraftKind(StrEnum):
     PRICE_CHANGE = "PRICE_CHANGE"
     COUPON = "COUPON"
     AFTER_SALE_DECISION = "AFTER_SALE_DECISION"
+    LISTING_STATUS = "LISTING_STATUS"
 
 
 class DraftSummary(DraftModel):

@@ -2464,7 +2464,7 @@ export interface components {
          * DraftKind
          * @enum {string}
          */
-        DraftKind: "RESTOCK" | "CONTENT_CHANGE" | "PRICE_CHANGE" | "COUPON" | "AFTER_SALE_DECISION";
+        DraftKind: "RESTOCK" | "CONTENT_CHANGE" | "PRICE_CHANGE" | "COUPON" | "AFTER_SALE_DECISION" | "LISTING_STATUS";
         /**
          * DraftState
          * @enum {string}

@@ -92,6 +92,7 @@ def test_draft_kind_is_closed() -> None:
         "PRICE_CHANGE",
         "COUPON",
         "AFTER_SALE_DECISION",
+        "LISTING_STATUS",
     }
 
 

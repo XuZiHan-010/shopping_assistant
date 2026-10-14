@@ -2915,8 +2915,8 @@ SSE 逐事件使用 §8.7.5；turn_complete 携带唯一完整 MerchantChatRespo
 | 模型 | 字段、类型与范围 |
 | --- | --- |
 | `DraftState` | `STAGED / APPLIED / DISCARDED / EXPIRED`。**没有 `APPROVED`**（PRD §7.3 不变量 1）：批准是 apply 事务的入参，不是可被后续请求复用的持久状态 |
-| `DraftKind` | `RESTOCK / CONTENT_CHANGE / PRICE_CHANGE / COUPON / AFTER_SALE_DECISION` |
-| `DraftSummary` | `id: PublicId`；`kind: DraftKind`；`state: DraftState`；`title: string[1..200]`；`draft_version: int≥1`（草案内容变更即递增）；`target_version: int≥0`（目标对象版本：库存为当前在库量基数，商品内容为内容版本号，售后为售后记录版本，新建优惠券为 0）；`batch_id: PublicId或null`（N3 阶段 C 新增：商品内容批量起草时，同一批次的各子草稿共享同一个值；**仅 `CONTENT_CHANGE` 可非空**，其余 `DraftKind` 恒为 null）；`created_at / updated_at: UTC datetime`；`expires_at: UTC datetime`（创建后 7 天）。约束：`updated_at ≥ created_at`；`expires_at > created_at` |
+| `DraftKind` | `RESTOCK / CONTENT_CHANGE / PRICE_CHANGE / COUPON / AFTER_SALE_DECISION / LISTING_STATUS` |
+| `DraftSummary` | `id: PublicId`；`kind: DraftKind`；`state: DraftState`；`title: string[1..200]`；`draft_version: int≥1`（草案内容变更即递增）；`target_version: int≥0`（目标对象版本：库存为当前在库量基数，商品内容为内容版本号，售后为售后记录版本，新建优惠券为 0，上下架为起草时状态编码：`ONLINE=1`、`OFFLINE=0`）；`batch_id: PublicId或null`（N3 阶段 C 新增：商品内容批量起草时，同一批次的各子草稿共享同一个值；**仅 `CONTENT_CHANGE` 可非空**，其余 `DraftKind` 恒为 null）；`created_at / updated_at: UTC datetime`；`expires_at: UTC datetime`（创建后 7 天）。约束：`updated_at ≥ created_at`；`expires_at > created_at` |
 | `DiffUnit` | `TEXT / COUNT / CENTS / BPS / BOOL` |
 | `DraftDiffEntry` | `entry_id: PublicId`；`target_type: PRODUCT / COUPON / AFTER_SALE`；`target_id: PublicId`；`field: string[1..100]`；`unit: DiffUnit`；`before: 值或null`；`after: 值或null`（值类型必须与 `unit` 一致：`TEXT` 为长度 ≤2000 的字符串，`COUNT / CENTS / BPS` 为非负整数（`CENTS` 不超过 §8.7.8 上界），`BOOL` 为布尔；均不接受 float 与隐式转换）；`is_preview: bool`（该值是应用时才计算的预览，以应用结果为准） |
 | `DraftDiff` | `entries: DraftDiffEntry[]`（1–100 项，`entry_id` 不重复） |
@@ -2962,7 +2962,7 @@ applied_entry_ids, ledger_result)`；构造时即核对：`ledger_result` 只能
 accepted_entry_ids)`，结构上拿不到证据；不得提交事务、不得推进草稿状态或写账本，失败即整体回滚（证据消费随之回滚）。
 分派表在导入期构建并自检：同一种类重复注册、`ENABLED_DRAFT_KINDS` 中的种类缺处理器都让服务起不来；运行期遇到未注册种类是
 部署缺陷，在消费证据前抛出并返回 `500 INTERNAL_ERROR`，不是 409/422。当前已开放 `RESTOCK`、`PRICE_CHANGE`、`COUPON`
-（N3 阶段 C）；B 注册 `AFTER_SALE_DECISION`、C 注册 `CONTENT_CHANGE` 时同步加入 `ENABLED_DRAFT_KINDS`。
+（N3 阶段 C）与 `LISTING_STATUS`（上下架，PRD M5：`draft_listing_status` 工具起草，仅 `ONLINE` ↔ `OFFLINE`，护栏原因码 `LISTING_STATUS_NOT_TOGGLEABLE`，差异条目 `{draft_id}:status`）；B 注册 `AFTER_SALE_DECISION`、C 注册 `CONTENT_CHANGE` 时同步加入 `ENABLED_DRAFT_KINDS`。
 
 过期由业务路径自检 `expires_at` 决定：读取或 apply 时 `now ≥ expires_at` 一律按 `EXPIRED` 处理，不依赖 Cron 是否已清理；
 对已过期草稿 apply 返回 `409 DRAFT_EXPIRED`。

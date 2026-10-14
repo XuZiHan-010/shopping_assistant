@@ -63,6 +63,9 @@ function formatDiffValue(entry: DraftDiffEntry, value: string | number | boolean
     return `${(value / 100).toFixed(2)}%`
   }
   if (entry.unit === 'BOOL') return value ? 'true' : 'false'
+  if (entry.field === 'status' && (value === 'ONLINE' || value === 'OFFLINE')) {
+    return t(`approvalView.listingStatus.${value}`)
+  }
   return String(value)
 }
 
