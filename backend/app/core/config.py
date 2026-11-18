@@ -63,6 +63,7 @@ class Settings(BaseSettings):
     app_env: AppEnvironment = AppEnvironment.DEVELOPMENT
     app_version: str = "0.1.0"
     database_url: str
+    database_storage_limit_bytes: int | None = Field(default=None, gt=0)
     frontend_origin: AnyHttpUrl
     # 顾客端（shop）的精确 Origin。可选：未配置时只放行商家端；与 FRONTEND_ORIGIN 同样禁止 `*`。
     shop_origin: AnyHttpUrl | None = None
@@ -259,6 +260,11 @@ class Settings(BaseSettings):
     @classmethod
     def normalize_database_url(cls, value: Any) -> Any:
         return normalize_postgres_url(value)
+
+    @field_validator("database_storage_limit_bytes", mode="before")
+    @classmethod
+    def blank_database_storage_limit_is_unset(cls, value: object) -> object:
+        return None if isinstance(value, str) and not value.strip() else value
 
     @property
     def cors_allowed_origins(self) -> list[str]:

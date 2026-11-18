@@ -1131,7 +1131,7 @@ npm run test:e2e
 13. N2 另建 Next.js 顾客端计划与工程，不在 Vue 商家端内混建；
 14. N4 新增商家记忆最小面板 `MerchantMemoryView.vue`（PRD M11，D-N4-3，第一个可砍项），顾客记忆页在 `shop/`；
 15. N5 新建只读运维看板 `OpsStatusView.vue`，取代已下线的 `OpsDashboardView.vue`（PRD §14，D-N5-1），不提供写操作入口。
-    W 完成后，它放在侧栏「管理」分组，复用 `AdminGate`。
+    W 完成后，它放在侧栏「管理」分组，复用 `AdminGate`。管理员手动刷新时，数据库卡片按后端计划 §9 B7 展示用量与积压。未配置容量上限时省略百分比，采集失败时显示原因。
 16. **W · 商家工作台界面重设计**（PRD M1、§15「W」，2026-09-28 用户裁定，插在 N4 剩余前端任务之前）——**已实施（2026-09-30，Task 0–11）**：
     - 外壳 `layouts/MerchantShell.vue`：侧栏四个分组（工作区 / 运营 / 运营助手 / 管理，无「对话记录」）、默认收起的助手栏 `AssistantRail`（`Ctrl/⌘ + J`、「问助手」只预填不发送，1100px 以下为抽屉）、偏好设置（主题、字号、语言）、「管理」分组的 `AdminGate` 令牌关卡；
     - 视觉 token 换为「市集大厅」色板（`assets/tokens.css`，浅色与两份深色），`frontend/src` 与 `shop/src` 旧变量名引用清零，兼容映射已删除（两端各有防回归测试）；

@@ -13,7 +13,12 @@ import type { SupportedLocale } from '@/i18n'
 import { buildAuthHeaders, resolveRequestLocale } from '../credentials'
 import type { ChatTransport, TransportRequest } from '../transport'
 import { CHAT_FIXTURES, type ChatFixtureKey } from './fixtures.generated'
-import { MOCK_MERCHANTS, matchScenario, mockEnglishMerchantName, mockEnglishText } from './scenarios'
+import {
+  MOCK_MERCHANTS,
+  matchScenario,
+  mockEnglishMerchantName,
+  mockEnglishText,
+} from './scenarios'
 import { BUSINESS_SECTIONS } from '@/utils/knowledgeTree'
 
 type MockKnowledgeDocument = { content: string; read_only: boolean; version: string }
@@ -218,17 +223,27 @@ function toEnglishFixture(fixture: RawChatResponse): RawChatResponse {
   return {
     ...fixture,
     answer: fixture.answer ? mockEnglishText(fixture.answer) : fixture.answer,
-    degraded_reason: fixture.degraded_reason ? mockEnglishText(fixture.degraded_reason) : fixture.degraded_reason,
+    degraded_reason: fixture.degraded_reason
+      ? mockEnglishText(fixture.degraded_reason)
+      : fixture.degraded_reason,
     quality_notes: (fixture.quality_notes ?? []).map(mockEnglishText),
     suggestions: (fixture.suggestions ?? []).map(mockEnglishText),
-    suggestion_alternates: (fixture.suggestion_alternates ?? []).map((group) => group.map(mockEnglishText)),
+    suggestion_alternates: (fixture.suggestion_alternates ?? []).map((group) =>
+      group.map(mockEnglishText),
+    ),
     thinking_steps: (fixture.thinking_steps ?? []).map((step) => ({
       ...step,
       label: mockEnglishText(step.label),
     })),
-    metric_display_name: fixture.metric_display_name ? mockEnglishText(fixture.metric_display_name) : fixture.metric_display_name,
-    metric_definition: fixture.metric_definition ? mockEnglishText(fixture.metric_definition) : fixture.metric_definition,
-    metric_notice: fixture.metric_notice ? mockEnglishText(fixture.metric_notice) : fixture.metric_notice,
+    metric_display_name: fixture.metric_display_name
+      ? mockEnglishText(fixture.metric_display_name)
+      : fixture.metric_display_name,
+    metric_definition: fixture.metric_definition
+      ? mockEnglishText(fixture.metric_definition)
+      : fixture.metric_definition,
+    metric_notice: fixture.metric_notice
+      ? mockEnglishText(fixture.metric_notice)
+      : fixture.metric_notice,
     recommendations: fixture.recommendations
       ? fixture.recommendations.map((item) => ({
           title: mockEnglishText(item.title),
@@ -275,7 +290,9 @@ function localizeConversationMessage(
             label: mockEnglishText(step.label),
           })),
           quality_notes: (payload.quality_notes ?? []).map(mockEnglishText),
-          degraded_reason: payload.degraded_reason ? mockEnglishText(payload.degraded_reason) : payload.degraded_reason,
+          degraded_reason: payload.degraded_reason
+            ? mockEnglishText(payload.degraded_reason)
+            : payload.degraded_reason,
         }
       : payload,
   }
@@ -524,7 +541,9 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
       const merchants = MOCK_MERCHANTS.map((merchant) => ({
         ...merchant,
         display_name:
-          locale === 'en-US' ? mockEnglishMerchantName(merchant.display_name) : merchant.display_name,
+          locale === 'en-US'
+            ? mockEnglishMerchantName(merchant.display_name)
+            : merchant.display_name,
       }))
       return jsonResponse({
         merchants,
@@ -543,7 +562,9 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
           unit: mockEnglishText(metric.unit),
         })),
         suggestions: report.suggestions.map(mockEnglishText),
-        degraded_reason: report.degraded_reason ? mockEnglishText(report.degraded_reason) : report.degraded_reason,
+        degraded_reason: report.degraded_reason
+          ? mockEnglishText(report.degraded_reason)
+          : report.degraded_reason,
       } satisfies components['schemas']['DailyReportResponse'])
     }
 
@@ -564,10 +585,34 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
         agent_node_average_ms: {},
         demo_deployment_mode: true,
         budget_levels: [
-          { level: 'GLOBAL', scope: 'GLOBAL', budget_tokens: 500_000, used_tokens: 1_200, remaining_tokens: 498_800 },
-          { level: 'ROLE', scope: 'ROLE:CUSTOMER', budget_tokens: 200_000, used_tokens: 200, remaining_tokens: 199_800 },
-          { level: 'ROLE', scope: 'ROLE:MERCHANT', budget_tokens: 300_000, used_tokens: 1_000, remaining_tokens: 299_000 },
-          { level: 'SHOP', scope: 'SHOP:MERCHANT:1a2b3c4d', budget_tokens: 100_000, used_tokens: 1_000, remaining_tokens: 99_000 },
+          {
+            level: 'GLOBAL',
+            scope: 'GLOBAL',
+            budget_tokens: 500_000,
+            used_tokens: 1_200,
+            remaining_tokens: 498_800,
+          },
+          {
+            level: 'ROLE',
+            scope: 'ROLE:CUSTOMER',
+            budget_tokens: 200_000,
+            used_tokens: 200,
+            remaining_tokens: 199_800,
+          },
+          {
+            level: 'ROLE',
+            scope: 'ROLE:MERCHANT',
+            budget_tokens: 300_000,
+            used_tokens: 1_000,
+            remaining_tokens: 299_000,
+          },
+          {
+            level: 'SHOP',
+            scope: 'SHOP:MERCHANT:1a2b3c4d',
+            budget_tokens: 100_000,
+            used_tokens: 1_000,
+            remaining_tokens: 99_000,
+          },
         ],
         llm_cost_today: [{ currency: 'USD', amount: '0.00075000' }],
         unpriced_calls_today: 0,
@@ -582,6 +627,24 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
         avg_turn_elapsed_ms_today: 2_250,
         degraded_reason_counts: { BUDGET: 1 },
         source_degraded_counts: { KNOWLEDGE: 2 },
+        database_usage: {
+          collected_at: '2026-11-19T00:00:00Z',
+          database_size_bytes: 896 * 1024 ** 2,
+          storage_limit_bytes: 1024 ** 3,
+          storage_used_ratio: 0.875,
+          max_connections: 100,
+          connections_total: 7,
+          connections_active: 2,
+          top_tables: [{ table_name: 'messages', total_bytes: 2048, estimated_rows: 16 }],
+          memory_outbox: {
+            pending: 2,
+            processing: 1,
+            failed: 0,
+            done: 13,
+            oldest_pending_age_seconds: 240,
+          },
+        },
+        database_usage_error: null,
       } satisfies components['schemas']['OpsStatusResponse'])
     }
 
@@ -843,7 +906,11 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
         // is_source_version=false：保存一份人工译文，源文档与版本都不动。
         if (payload.is_source_version === false) {
           if (!payload.content_locale) {
-            return errorResponse('INVALID_REQUEST', 'is_source_version=false 时必须提供 content_locale', 422)
+            return errorResponse(
+              'INVALID_REQUEST',
+              'is_source_version=false 时必须提供 content_locale',
+              422,
+            )
           }
           const table = translationsByPath.get(path) ?? new Map<SupportedLocale, string>()
           table.set(payload.content_locale, payload.content)
@@ -862,7 +929,11 @@ export function createMockTransport(options: MockOptions = {}): ChatTransport {
         // 源正文变了，所有已保存的人工译文都视为过期——直接清空而不是标记
         // STALE：mock 不模拟内容哈希比对，效果上同样是"不把过期译文当成
         // 当前内容返回"。
-        const updated = { ...document, content: payload.content, version: String(Number(document.version) + 1) }
+        const updated = {
+          ...document,
+          content: payload.content,
+          version: String(Number(document.version) + 1),
+        }
         knowledgeDocuments.set(path, updated)
         translationsByPath.delete(path)
         return jsonResponse({

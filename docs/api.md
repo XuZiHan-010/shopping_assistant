@@ -10646,6 +10646,83 @@
         ],
         "title": "DailyReportResponse"
       },
+      "DatabaseUsage": {
+        "properties": {
+          "collected_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Collected At"
+          },
+          "database_size_bytes": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Database Size Bytes"
+          },
+          "storage_limit_bytes": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storage Limit Bytes"
+          },
+          "storage_used_ratio": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storage Used Ratio"
+          },
+          "max_connections": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Max Connections"
+          },
+          "connections_total": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Connections Total"
+          },
+          "connections_active": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Connections Active"
+          },
+          "top_tables": {
+            "items": {
+              "$ref": "#/components/schemas/TableUsage"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "title": "Top Tables"
+          },
+          "memory_outbox": {
+            "$ref": "#/components/schemas/MemoryOutboxStatus"
+          }
+        },
+        "type": "object",
+        "required": [
+          "collected_at",
+          "database_size_bytes",
+          "storage_limit_bytes",
+          "storage_used_ratio",
+          "max_connections",
+          "connections_total",
+          "connections_active",
+          "top_tables",
+          "memory_outbox"
+        ],
+        "title": "DatabaseUsage"
+      },
       "DemoCustomerBindRequest": {
         "properties": {},
         "additionalProperties": false,
@@ -11929,6 +12006,51 @@
           "SUMMARY"
         ],
         "title": "MemoryLayer"
+      },
+      "MemoryOutboxStatus": {
+        "properties": {
+          "pending": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Pending"
+          },
+          "processing": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Processing"
+          },
+          "failed": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Failed"
+          },
+          "done": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Done"
+          },
+          "oldest_pending_age_seconds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oldest Pending Age Seconds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "pending",
+          "processing",
+          "failed",
+          "done",
+          "oldest_pending_age_seconds"
+        ],
+        "title": "MemoryOutboxStatus"
       },
       "MemoryPreferenceRequest": {
         "properties": {
@@ -13457,6 +13579,31 @@
             },
             "type": "object",
             "title": "Source Degraded Counts"
+          },
+          "database_usage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DatabaseUsage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "database_usage_error": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "TIMEOUT",
+                  "UNAVAILABLE"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Database Usage Error"
           }
         },
         "type": "object",
@@ -13482,7 +13629,9 @@
           "avg_cost_per_turn_today",
           "avg_turn_elapsed_ms_today",
           "degraded_reason_counts",
-          "source_degraded_counts"
+          "source_degraded_counts",
+          "database_usage",
+          "database_usage_error"
         ],
         "title": "OpsStatusResponse",
         "description": "系统级聚合快照，不含商家标识、Token 明文或 Prompt 内容。"
@@ -14976,6 +15125,38 @@
         ],
         "title": "SupportedLocale",
         "description": "API 响应可渲染的显示语言。"
+      },
+      "TableUsage": {
+        "properties": {
+          "table_name": {
+            "type": "string",
+            "title": "Table Name"
+          },
+          "total_bytes": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Total Bytes"
+          },
+          "estimated_rows": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Rows"
+          }
+        },
+        "type": "object",
+        "required": [
+          "table_name",
+          "total_bytes",
+          "estimated_rows"
+        ],
+        "title": "TableUsage"
       },
       "ThinkingStep": {
         "properties": {

@@ -3660,6 +3660,21 @@ PostgreSQL 钉住的一条（`test_return_count_reads_returns_not_refunds`）。
 
 禁止返回项不变：响应中不得出现任何 Token、Prompt、经营数据、完整请求正文与连接串；店铺级只给脱敏标识，不给商家 ID 或名称。
 
+**2026-11-19 扩展（PRD §10.4）。** 管理员手动刷新时，以只读事务采集当前数据库的用量。成功时返回 `database_usage: DatabaseUsage` 和 `database_usage_error: null`。采集超时或不可用时分别返回 `database_usage_error: "TIMEOUT" | "UNAVAILABLE"` 和 `database_usage: null`，其他运维数据照常返回。端点只允许管理员访问。
+
+| DatabaseUsage 字段 | 类型 | 语义 |
+| --- | --- | --- |
+| `collected_at` | datetime | UTC 采集时刻 |
+| `database_size_bytes` | int≥0 | 当前数据库逻辑大小（字节） |
+| `storage_limit_bytes` | int>0 或 null | 可选配置 `DATABASE_STORAGE_LIMIT_BYTES` |
+| `storage_used_ratio` | number 或 null | 逻辑大小除以上限，可超过 1。无上限时为 null |
+| `max_connections` | int≥0 | PostgreSQL 实例的连接上限 |
+| `connections_total`、`connections_active` | int≥0 | 本库在计算节点上的后端连接总数与活跃数 |
+| `top_tables` | TableUsage[] | public 普通表按总大小降序取前十。`table_name: str`，`total_bytes: int≥0` 含索引与 TOAST，`estimated_rows: int≥0 或 null` 来自 reltuples，负估值返回 null |
+| `memory_outbox` | MemoryOutboxStatus | `pending`、`processing`、`failed`、`done` 均为非负整数，`oldest_pending_age_seconds` 为非负整数，无待处理任务时为 null |
+
+连接活动仅计数。响应禁止包含连接串、主机、端口、用户名、数据库名、客户端地址、活动 SQL 和表内行内容。
+
 ### 可观测性
 
 - [x] request ID（`main.py::request_id_middleware`，响应头回写 `X-Request-Id`）；

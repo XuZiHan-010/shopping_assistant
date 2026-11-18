@@ -9,15 +9,19 @@ import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
+from sqlalchemy.engine import make_url
 
 from app.core.config import AppEnvironment, Settings
 from app.db.session import Database
 from app.main import create_app
+from app.repositories.database_usage import DatabaseUsageCollectionError, DatabaseUsageRepository
 from app.repositories.llm_budget import DailyBudgetSnapshot, LlmOpsOverview, TurnStats
+from app.schemas.ops import DatabaseUsage, DatabaseUsageError
 from tests.conftest import MERCHANT_ONE_TOKEN
 from tests.postgres import truncate_all_tables
 
 ADMIN_TOKEN = "test-only-admin-token-value"
+VIEWER_TOKEN = "test-only-viewer-token-value"
 
 OPS_STATUS_FIELDS = {
     "llm_tokens_used_today",
@@ -44,6 +48,8 @@ OPS_STATUS_FIELDS = {
     "avg_turn_elapsed_ms_today",
     "degraded_reason_counts",
     "source_degraded_counts",
+    "database_usage",
+    "database_usage_error",
 }
 
 
@@ -78,7 +84,12 @@ def _ops_status_app(monkeypatch: pytest.MonkeyPatch, *, demo_deployment_mode: bo
         llm_daily_budget_tokens=5_000,
         demo_deployment_mode=demo_deployment_mode,
     )
+
+    async def unavailable(self: DatabaseUsageRepository, limit_bytes: int | None) -> DatabaseUsage:
+        raise DatabaseUsageCollectionError("UNAVAILABLE")
+
     monkeypatch.setattr("app.api.routes.admin.LlmBudgetRepository", FakeLlmBudgetRepository)
+    monkeypatch.setattr(DatabaseUsageRepository, "collect", unavailable)
     return create_app(settings)
 
 
@@ -96,6 +107,7 @@ def _settings_with_admin_token() -> Settings:
         database_url="postgresql+psycopg://user:pass@localhost/test",
         frontend_origin="http://localhost:5173",
         admin_token=ADMIN_TOKEN,
+        viewer_token=VIEWER_TOKEN,
     )
 
 
@@ -177,6 +189,15 @@ async def test_correct_token_returns_200_with_safe_payload(admin_app: FastAPI) -
     assert "postgresql" not in response.text.lower()
     assert MERCHANT_ONE_TOKEN not in response.text
     assert body["demo_deployment_mode"] is False
+    assert body["database_usage_error"] is None
+    usage = body["database_usage"]
+    assert usage["database_size_bytes"] > 0
+    assert usage["storage_limit_bytes"] is None
+    assert usage["storage_used_ratio"] is None
+    url = make_url(admin_app.state.settings.database_url)
+    for value in (url.host, url.username, url.database):
+        assert value is not None
+        assert value not in response.text
 
 
 @pytest.mark.asyncio
@@ -371,3 +392,59 @@ async def test_ops_status_per_turn_fields_are_null_not_zero_without_turns(
     assert body["avg_turn_elapsed_ms_today"] is None
     assert body["degraded_reason_counts"] == {}
     assert body["source_degraded_counts"] == {}
+
+
+@pytest.mark.asyncio
+async def test_viewer_token_returns_403() -> None:
+    app = create_app(_settings_with_admin_token())
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        response = await client.get(
+            "/api/admin/ops/status", headers={"X-Admin-Token": VIEWER_TOKEN}
+        )
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason", ["TIMEOUT", "UNAVAILABLE"])
+async def test_ops_status_preserves_budget_when_database_usage_fails(
+    admin_app: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+    reason: DatabaseUsageError,
+) -> None:
+    async def fail_collect(self: DatabaseUsageRepository, limit_bytes: int | None) -> DatabaseUsage:
+        raise DatabaseUsageCollectionError(reason)
+
+    monkeypatch.setattr(DatabaseUsageRepository, "collect", fail_collect)
+    async with AsyncClient(
+        transport=ASGITransport(app=admin_app), base_url="http://testserver"
+    ) as client:
+        response = await client.get("/api/admin/ops/status", headers={"X-Admin-Token": ADMIN_TOKEN})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body) == OPS_STATUS_FIELDS
+    assert body["database_usage"] is None
+    assert body["database_usage_error"] == reason
+    assert body["llm_tokens_remaining_today"] == 5_000
+
+
+@pytest.mark.asyncio
+async def test_ops_status_calculates_database_storage_ratio(
+    admin_app: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    limit = 100_000_000
+    monkeypatch.setattr(admin_app.state.settings, "database_storage_limit_bytes", limit)
+    async with AsyncClient(
+        transport=ASGITransport(app=admin_app), base_url="http://testserver"
+    ) as client:
+        response = await client.get("/api/admin/ops/status", headers={"X-Admin-Token": ADMIN_TOKEN})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["database_usage_error"] is None
+    usage = body["database_usage"]
+    assert usage["storage_limit_bytes"] == limit
+    assert usage["storage_used_ratio"] == pytest.approx(usage["database_size_bytes"] / limit)

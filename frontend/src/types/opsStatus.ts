@@ -37,6 +37,32 @@ export interface SourceDegradationCount {
   count: number
 }
 
+export interface TableUsage {
+  tableName: string
+  totalBytes: number
+  estimatedRows: number | null
+}
+
+export interface MemoryOutboxStatus {
+  pending: number
+  processing: number
+  failed: number
+  done: number
+  oldestPendingAgeSeconds: number | null
+}
+
+export interface DatabaseUsage {
+  collectedAt: string
+  databaseSizeBytes: number
+  storageLimitBytes: number | null
+  storageUsedRatio: number | null
+  maxConnections: number
+  connectionsTotal: number
+  connectionsActive: number
+  topTables: TableUsage[]
+  memoryOutbox: MemoryOutboxStatus
+}
+
 export interface OpsStatus {
   tokensUsedToday: number
   tokensRemainingToday: number
@@ -64,6 +90,8 @@ export interface OpsStatus {
   /** 回答没有整轮降级、但某个来源降级的次数，按来源。 */
   sourceDegradations: SourceDegradationCount[]
   demoDeploymentMode: boolean
+  databaseUsage: DatabaseUsage | null
+  databaseUsageError: 'TIMEOUT' | 'UNAVAILABLE' | null
 }
 
 export interface ChatBiDaily {

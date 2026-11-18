@@ -242,6 +242,7 @@ uv run python -m app.jobs.run_scheduled
 | --- | --- |
 | `APP_ENV=production` | 生产环境默认自动关闭演示商家端点；仅当显式设置 `DEMO_DEPLOYMENT_MODE=true` 时例外。 |
 | `DATABASE_URL` | 外部 Neon 的连接串，只写进 Railway Variables。backend 与 cron 用同一个库。 |
+| `DATABASE_STORAGE_LIMIT_BYTES` | backend 可选。按 Neon 控制台所示套餐上限填写正整数（字节）。留空时看板仅显示逻辑大小。有上限时额外显示使用比例。Neon 计费存储还会计入历史与分支。 |
 | `FRONTEND_ORIGIN` | 商家端（`merchant`）的精确 Origin；不得为 `*` 或含路径、查询、凭据。 |
 | `SHOP_ORIGIN` | 顾客端（`shop`）的精确 Origin，约束同上。上线 `shop` 后必填，否则顾客端的请求被 CORS 拒绝。 |
 | `DEMO_DEPLOYMENT_MODE=true` | 对外演示时必填；显式允许生产环境访问 `/api/demo/merchants`。非演示生产部署不设置或设为 `false`，端点保持关闭。 |

@@ -3,11 +3,16 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { components } from '@/api/generated'
 import { setChatTransport } from '@/api/transport'
 
-import { chatBiOverviewWindow, fetchChatBiOverview, toChatBiOverview, toOpsStatus } from './adminOps'
+import {
+  chatBiOverviewWindow,
+  fetchChatBiOverview,
+  toChatBiOverview,
+  toOpsStatus,
+} from './adminOps'
 
 type S = components['schemas']
 
-const RAW_STATUS: S['OpsStatusResponse'] = {
+const LEGACY_RAW_STATUS = {
   llm_tokens_used_today: 1200,
   llm_tokens_remaining_today: 3800,
   llm_calls_today: 4,
@@ -17,8 +22,20 @@ const RAW_STATUS: S['OpsStatusResponse'] = {
   agent_node_average_ms: { understand: 12.5 },
   demo_deployment_mode: true,
   budget_levels: [
-    { level: 'GLOBAL', scope: 'GLOBAL', budget_tokens: 5000, used_tokens: 1200, remaining_tokens: 3800 },
-    { level: 'SHOP', scope: 'SHOP:MERCHANT:1a2b3c4d', budget_tokens: 1000, used_tokens: 1000, remaining_tokens: 0 },
+    {
+      level: 'GLOBAL',
+      scope: 'GLOBAL',
+      budget_tokens: 5000,
+      used_tokens: 1200,
+      remaining_tokens: 3800,
+    },
+    {
+      level: 'SHOP',
+      scope: 'SHOP:MERCHANT:1a2b3c4d',
+      budget_tokens: 1000,
+      used_tokens: 1000,
+      remaining_tokens: 0,
+    },
   ],
   llm_cost_today: [{ currency: 'USD', amount: '0.75000000' }],
   unpriced_calls_today: 1,
@@ -33,14 +50,81 @@ const RAW_STATUS: S['OpsStatusResponse'] = {
   avg_turn_elapsed_ms_today: 2000,
   degraded_reason_counts: { BUDGET: 2, LIMIT: 5 },
   source_degraded_counts: { KNOWLEDGE: 1 },
+} satisfies Omit<S['OpsStatusResponse'], 'database_usage' | 'database_usage_error'>
+
+const RAW_STATUS: S['OpsStatusResponse'] = {
+  ...LEGACY_RAW_STATUS,
+  database_usage: null,
+  database_usage_error: null,
 }
 
 describe('toOpsStatus', () => {
+  it('maps the database sample without formatting bytes or replacing unknown values', () => {
+    const status = toOpsStatus({
+      ...RAW_STATUS,
+      database_usage: {
+        collected_at: '2026-11-19T00:00:00Z',
+        database_size_bytes: 123456789,
+        storage_limit_bytes: null,
+        storage_used_ratio: null,
+        max_connections: 50,
+        connections_total: 4,
+        connections_active: 2,
+        top_tables: [{ table_name: 'memory_outbox', total_bytes: 10000, estimated_rows: null }],
+        memory_outbox: {
+          pending: 0,
+          processing: 1,
+          failed: 2,
+          done: 3,
+          oldest_pending_age_seconds: null,
+        },
+      },
+    })
+
+    expect(status.databaseUsage).toEqual({
+      collectedAt: '2026-11-19T00:00:00Z',
+      databaseSizeBytes: 123456789,
+      storageLimitBytes: null,
+      storageUsedRatio: null,
+      maxConnections: 50,
+      connectionsTotal: 4,
+      connectionsActive: 2,
+      topTables: [{ tableName: 'memory_outbox', totalBytes: 10000, estimatedRows: null }],
+      memoryOutbox: {
+        pending: 0,
+        processing: 1,
+        failed: 2,
+        done: 3,
+        oldestPendingAgeSeconds: null,
+      },
+    })
+    expect(status.databaseUsageError).toBeNull()
+  })
+
+  it.each(['TIMEOUT', 'UNAVAILABLE'] as const)(
+    'passes through a null database sample with %s',
+    (error) => {
+      const status = toOpsStatus({ ...RAW_STATUS, database_usage_error: error })
+      expect(status.databaseUsage).toBeNull()
+      expect(status.databaseUsageError).toBe(error)
+    },
+  )
+
+  it('normalizes a legacy response without database fields', () => {
+    const status = toOpsStatus(LEGACY_RAW_STATUS)
+    expect(status.databaseUsage).toBeNull()
+    expect(status.databaseUsageError).toBeNull()
+  })
+
   it('maps the ops snapshot and derives the tool error rate', () => {
     const status = toOpsStatus(RAW_STATUS)
 
     expect(status.budgetLevels[1]).toEqual({
-      level: 'SHOP', scope: 'SHOP:MERCHANT:1a2b3c4d', budgetTokens: 1000, usedTokens: 1000, remainingTokens: 0,
+      level: 'SHOP',
+      scope: 'SHOP:MERCHANT:1a2b3c4d',
+      budgetTokens: 1000,
+      usedTokens: 1000,
+      remainingTokens: 0,
     })
     expect(status.costToday).toEqual([{ currency: 'USD', amount: '0.75000000' }])
     expect(status.toolErrorRate).toBeCloseTo(0.1)
@@ -51,7 +135,10 @@ describe('toOpsStatus', () => {
   it('sorts routes by p95 descending and has no error rate before any tool call', () => {
     const status = toOpsStatus({ ...RAW_STATUS, tool_calls_total: 0, tool_errors_total: 0 })
 
-    expect(status.routeP95.map((row) => row.route)).toEqual(['/api/v2/merchant/chat', '/api/health'])
+    expect(status.routeP95.map((row) => row.route)).toEqual([
+      '/api/v2/merchant/chat',
+      '/api/health',
+    ])
     expect(status.toolErrorRate).toBeNull()
   })
 
@@ -94,17 +181,38 @@ describe('toOpsStatus', () => {
 describe('toChatBiOverview', () => {
   it('maps rates and keeps nulls as missing data', () => {
     const overview = toChatBiOverview({
-      start_date: '2026-09-27', end_date: '2026-10-03', answer_total: 18, business_question_total: 15,
-      feedback_total: 7, thinking_sample_count: 16, adoption_rate: null, user_accuracy_rate: 0.75,
-      system_accuracy_rate: 0.875, avg_thinking_ms: 2250, hit_rate: 0.8, failure_rate: 0.05,
-      daily: [{
-        stat_date: '2026-10-03', answer_total: 11, adoption_rate: null, user_accuracy_rate: 0.75,
-        system_accuracy_rate: 0.8, avg_thinking_ms: 2400, hit_rate: null, failure_rate: 0.1,
-      }],
+      start_date: '2026-09-27',
+      end_date: '2026-10-03',
+      answer_total: 18,
+      business_question_total: 15,
+      feedback_total: 7,
+      thinking_sample_count: 16,
+      adoption_rate: null,
+      user_accuracy_rate: 0.75,
+      system_accuracy_rate: 0.875,
+      avg_thinking_ms: 2250,
+      hit_rate: 0.8,
+      failure_rate: 0.05,
+      daily: [
+        {
+          stat_date: '2026-10-03',
+          answer_total: 11,
+          adoption_rate: null,
+          user_accuracy_rate: 0.75,
+          system_accuracy_rate: 0.8,
+          avg_thinking_ms: 2400,
+          hit_rate: null,
+          failure_rate: 0.1,
+        },
+      ],
     })
 
     expect(overview.adoptionRate).toBeNull()
-    expect(overview.daily[0]).toMatchObject({ statDate: '2026-10-03', answerTotal: 11, hitRate: null })
+    expect(overview.daily[0]).toMatchObject({
+      statDate: '2026-10-03',
+      answerTotal: 11,
+      hitRate: null,
+    })
   })
 })
 
@@ -135,9 +243,19 @@ describe('fetchChatBiOverview', () => {
     setChatTransport(async (request) => {
       paths.push(request.path)
       return Response.json({
-        start_date: '2026-10-01', end_date: '2026-10-07', answer_total: 0, business_question_total: 0,
-        feedback_total: 0, thinking_sample_count: 0, adoption_rate: null, user_accuracy_rate: null,
-        system_accuracy_rate: null, avg_thinking_ms: null, hit_rate: null, failure_rate: null, daily: [],
+        start_date: '2026-10-01',
+        end_date: '2026-10-07',
+        answer_total: 0,
+        business_question_total: 0,
+        feedback_total: 0,
+        thinking_sample_count: 0,
+        adoption_rate: null,
+        user_accuracy_rate: null,
+        system_accuracy_rate: null,
+        avg_thinking_ms: null,
+        hit_rate: null,
+        failure_rate: null,
+        daily: [],
       } satisfies S['ChatBiOverviewResponse'])
     })
 

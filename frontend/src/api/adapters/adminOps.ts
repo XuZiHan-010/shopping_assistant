@@ -1,16 +1,44 @@
 import type { components } from '@/api/generated'
-import type { ChatBiOverview, OpsStatus } from '@/types/opsStatus'
+import type { ChatBiOverview, DatabaseUsage, OpsStatus } from '@/types/opsStatus'
 
 import { resolveTransport } from '../transport'
 
 type S = components['schemas']
+
+// 滚动部署期间，旧后端可能尚未返回数据库用量字段。
+type OpsStatusPayload = Omit<S['OpsStatusResponse'], 'database_usage' | 'database_usage_error'> &
+  Partial<Pick<S['OpsStatusResponse'], 'database_usage' | 'database_usage_error'>>
+
+function toDatabaseUsage(raw: S['DatabaseUsage']): DatabaseUsage {
+  return {
+    collectedAt: raw.collected_at,
+    databaseSizeBytes: raw.database_size_bytes,
+    storageLimitBytes: raw.storage_limit_bytes ?? null,
+    storageUsedRatio: raw.storage_used_ratio ?? null,
+    maxConnections: raw.max_connections,
+    connectionsTotal: raw.connections_total,
+    connectionsActive: raw.connections_active,
+    topTables: raw.top_tables.map((row) => ({
+      tableName: row.table_name,
+      totalBytes: row.total_bytes,
+      estimatedRows: row.estimated_rows ?? null,
+    })),
+    memoryOutbox: {
+      pending: raw.memory_outbox.pending,
+      processing: raw.memory_outbox.processing,
+      failed: raw.memory_outbox.failed,
+      done: raw.memory_outbox.done,
+      oldestPendingAgeSeconds: raw.memory_outbox.oldest_pending_age_seconds ?? null,
+    },
+  }
+}
 
 /**
  * 运维看板的 Adapter（N5 B Task 3，D-N5-1）：`/api/admin/ops/status` 与 Chat BI 概览。
  * 两者都走管理员令牌（`X-Admin-Token`）；只读令牌能读 Chat BI，读不了 ops/status（R6）。
  * 内部节点耗时（`agent_node_average_ms`）不进领域模型。
  */
-export function toOpsStatus(raw: S['OpsStatusResponse']): OpsStatus {
+export function toOpsStatus(raw: OpsStatusPayload): OpsStatus {
   return {
     tokensUsedToday: raw.llm_tokens_used_today,
     tokensRemainingToday: raw.llm_tokens_remaining_today,
@@ -36,6 +64,8 @@ export function toOpsStatus(raw: S['OpsStatusResponse']): OpsStatus {
       .map(([route, p95Ms]) => ({ route, p95Ms }))
       .sort((a, b) => b.p95Ms - a.p95Ms),
     demoDeploymentMode: raw.demo_deployment_mode,
+    databaseUsage: raw.database_usage ? toDatabaseUsage(raw.database_usage) : null,
+    databaseUsageError: raw.database_usage_error ?? null,
     turnsToday: raw.turns_today,
     avgTokensPerTurnToday: raw.avg_tokens_per_turn_today ?? null,
     avgCostPerTurnToday: raw.avg_cost_per_turn_today.map((row) => ({
@@ -77,8 +107,11 @@ export function toChatBiOverview(raw: S['ChatBiOverviewResponse']): ChatBiOvervi
 
 export async function fetchOpsStatus(signal: AbortSignal): Promise<OpsStatus> {
   const transport = await resolveTransport()
-  const response = await transport({ path: '/api/admin/ops/status', method: 'GET', auth: 'admin' }, signal)
-  return toOpsStatus((await response.json()) as S['OpsStatusResponse'])
+  const response = await transport(
+    { path: '/api/admin/ops/status', method: 'GET', auth: 'admin' },
+    signal,
+  )
+  return toOpsStatus((await response.json()) as OpsStatusPayload)
 }
 
 /** 运维看板上 Chat BI 概览的统计窗口长度（含今天）。 */
@@ -94,8 +127,15 @@ function toDateParam(date: Date): string {
  * 截至 `today` 的最近 7 天（含当天），按浏览器本地日期取。
  * 看板显示的起止日期以后端回显为准，这里只负责给出必填的请求窗口。
  */
-export function chatBiOverviewWindow(today: Date = new Date()): { startDate: string; endDate: string } {
-  const start = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (CHATBI_OVERVIEW_DAYS - 1))
+export function chatBiOverviewWindow(today: Date = new Date()): {
+  startDate: string
+  endDate: string
+} {
+  const start = new Date(
+    today.getFullYear(),
+    today.getMonth(),
+    today.getDate() - (CHATBI_OVERVIEW_DAYS - 1),
+  )
   return { startDate: toDateParam(start), endDate: toDateParam(today) }
 }
 
@@ -108,7 +148,11 @@ export async function fetchChatBiOverview(
   const window = chatBiOverviewWindow(today)
   const query = new URLSearchParams({ start_date: window.startDate, end_date: window.endDate })
   const response = await transport(
-    { path: `/api/admin/analytics/chatbi/overview?${query.toString()}`, method: 'GET', auth: 'admin' },
+    {
+      path: `/api/admin/analytics/chatbi/overview?${query.toString()}`,
+      method: 'GET',
+      auth: 'admin',
+    },
     signal,
   )
   return toChatBiOverview((await response.json()) as S['ChatBiOverviewResponse'])

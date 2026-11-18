@@ -12,6 +12,9 @@ import { expectNoHorizontalOverflow } from './support/overflow'
 const ADMIN_TOKEN = 'mock-admin-token'
 
 async function enterWithAdminToken(page: import('@playwright/test').Page): Promise<void> {
+  const viewerToggle = page.getByTestId('use-viewer-token')
+  await expect(page.getByLabel('管理员令牌')).toBeVisible()
+  if (await viewerToggle.count()) await viewerToggle.uncheck()
   await page.getByLabel('管理员令牌').fill(ADMIN_TOKEN)
   await page.getByRole('button', { name: '进入后台' }).click()
   await expect(page.getByRole('heading', { name: '运维看板' })).toBeVisible()
@@ -43,6 +46,9 @@ test('运维看板需要管理员令牌，展示三级预算、成本、运行�
   await expect(page.getByTestId('ops-degraded-reasons')).toContainText('每日预算耗尽')
   await expect(page.getByTestId('ops-source-degradations')).toContainText('KNOWLEDGE')
   await expect(page.getByTestId('ops-runtime')).toContainText('10%')
+  const database = page.getByTestId('ops-database')
+  await expect(database.getByRole('table')).toBeVisible()
+  await expect(database).toContainText('messages')
   await expect(page.getByTestId('ops-routes')).toContainText('/api/v2/merchant/chat')
   await expect(page.getByTestId('chatbi-overview')).toContainText('2026-08-17 至 2026-08-23')
   await expect(page.getByTestId('chatbi-daily').locator('tbody tr')).toHaveCount(2)
@@ -71,6 +77,9 @@ test('英语下页头与分区标题为英语', async ({ page }) => {
 
   await expect(page.getByRole('heading', { name: 'Operations status' })).toBeVisible()
   await expect(page.getByTestId('ops-budget')).toContainText("Today's budget")
+  await expect(
+    page.getByTestId('ops-database').getByRole('heading', { name: 'Database', exact: true }),
+  ).toBeVisible()
   await expect(page.locator('main#main').getByRole('button')).toHaveText(['Refresh'])
 })
 

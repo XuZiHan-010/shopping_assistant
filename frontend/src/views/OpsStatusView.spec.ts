@@ -11,6 +11,18 @@ import type { ChatBiOverview, OpsStatus } from '@/types/opsStatus'
 
 import OpsStatusView from './OpsStatusView.vue'
 
+const DATABASE_USAGE = {
+  collectedAt: '2026-11-19T00:00:00Z',
+  databaseSizeBytes: 256 * 1024 ** 2,
+  storageLimitBytes: null,
+  storageUsedRatio: null,
+  maxConnections: 100,
+  connectionsTotal: 7,
+  connectionsActive: 2,
+  topTables: [{ tableName: 'memory_outbox', totalBytes: 2048, estimatedRows: null }],
+  memoryOutbox: { pending: 3, processing: 4, failed: 0, done: 5, oldestPendingAgeSeconds: 1800 },
+}
+
 const adapter = vi.hoisted(() => ({
   fetchOpsStatus: vi.fn(),
   fetchChatBiOverview: vi.fn(),
@@ -25,9 +37,27 @@ const STATUS: OpsStatus = {
   degradedCount: 1,
   errorCodeCounts: { RATE_LIMITED: 2 },
   budgetLevels: [
-    { level: 'GLOBAL', scope: 'GLOBAL', budgetTokens: 5000, usedTokens: 1200, remainingTokens: 3800 },
-    { level: 'ROLE', scope: 'ROLE:CUSTOMER', budgetTokens: 2000, usedTokens: 200, remainingTokens: 1800 },
-    { level: 'SHOP', scope: 'SHOP:MERCHANT:1a2b3c4d', budgetTokens: 1000, usedTokens: 1000, remainingTokens: 0 },
+    {
+      level: 'GLOBAL',
+      scope: 'GLOBAL',
+      budgetTokens: 5000,
+      usedTokens: 1200,
+      remainingTokens: 3800,
+    },
+    {
+      level: 'ROLE',
+      scope: 'ROLE:CUSTOMER',
+      budgetTokens: 2000,
+      usedTokens: 200,
+      remainingTokens: 1800,
+    },
+    {
+      level: 'SHOP',
+      scope: 'SHOP:MERCHANT:1a2b3c4d',
+      budgetTokens: 1000,
+      usedTokens: 1000,
+      remainingTokens: 0,
+    },
   ],
   costToday: [{ currency: 'USD', amount: '0.75000000' }],
   unpricedCallsToday: 1,
@@ -44,6 +74,8 @@ const STATUS: OpsStatus = {
   avgTurnElapsedMsToday: 2000,
   degradedReasons: [{ reason: 'BUDGET', count: 1 }],
   sourceDegradations: [{ source: 'KNOWLEDGE', count: 3 }],
+  databaseUsage: DATABASE_USAGE,
+  databaseUsageError: null,
 }
 
 const OVERVIEW: ChatBiOverview = {
@@ -58,8 +90,13 @@ const OVERVIEW: ChatBiOverview = {
   failureRate: 0.05,
   daily: [
     {
-      statDate: '2026-10-03', answerTotal: 11, adoptionRate: null, systemAccuracyRate: 0.8,
-      hitRate: null, failureRate: 0.1, avgThinkingMs: 2400,
+      statDate: '2026-10-03',
+      answerTotal: 11,
+      adoptionRate: null,
+      systemAccuracyRate: 0.8,
+      hitRate: null,
+      failureRate: 0.1,
+      avgThinkingMs: 2400,
     },
   ],
 }
@@ -95,8 +132,13 @@ describe('OpsStatusView 与真实令牌闸门', () => {
       Response.json({
         roots: [],
         index_status: {
-          retrieval_mode: 'KEYWORD_ONLY', active_version: null, embedding_model: null,
-          configured_model: null, stale: false, stale_reason: null, building: false,
+          retrieval_mode: 'KEYWORD_ONLY',
+          active_version: null,
+          embedding_model: null,
+          configured_model: null,
+          stale: false,
+          stale_reason: null,
+          building: false,
           last_failure_reason: null,
         },
       }),
@@ -121,6 +163,85 @@ describe('OpsStatusView 与真实令牌闸门', () => {
 })
 
 describe('OpsStatusView', () => {
+  it('显示数据库表、连接数和待办箱，未配置存储上限时不显示进度', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    const database = wrapper.get('[data-testid="ops-database"]')
+    expect(database.text()).toContain('256 MB')
+    expect(database.text()).toContain('2 / 7 / 100')
+    expect(database.get('tbody tr').text()).toMatch(/memory_outbox.*2 KB.*暂无/)
+    expect(database.get('[role="region"]').attributes()).toMatchObject({
+      'aria-labelledby': 'ops-database-tables-title',
+      tabindex: '0',
+    })
+    expect(database.get('#ops-database-connections-hint').text()).toContain('PostgreSQL 后端连接')
+    expect(database.text()).toContain('未配置')
+    expect(database.find('progress').exists()).toBe(false)
+    expect(database.find('.ops__outbox-alert').exists()).toBe(false)
+  })
+
+  it.each([
+    [0.79, null],
+    [0.8, 'warn'],
+    [0.95, 'danger'],
+    [1.02, 'danger'],
+  ])('按实际使用比例 %s 显示存储进度与状态', async (ratio, severity) => {
+    adapter.fetchOpsStatus.mockResolvedValue({
+      ...STATUS,
+      databaseUsage: {
+        ...DATABASE_USAGE,
+        storageLimitBytes: 1024 ** 3,
+        storageUsedRatio: ratio,
+      },
+    })
+    const wrapper = mountView()
+    await flushPromises()
+
+    const database = wrapper.get('[data-testid="ops-database"]')
+    expect(database.text()).toContain(`${Math.round(ratio * 100)}%`)
+    const progress = database.get('progress')
+    expect(progress.attributes('value')).toBe(String(Math.min(ratio, 1)))
+    expect(progress.attributes('data-severity')).toBe(severity ?? undefined)
+  })
+
+  it.each([
+    { failed: 1, oldestPendingAgeSeconds: null },
+    { failed: 0, oldestPendingAgeSeconds: 1801 },
+  ])('高亮有失败任务或积压超过 30 分钟的待办箱', async (outbox) => {
+    adapter.fetchOpsStatus.mockResolvedValue({
+      ...STATUS,
+      databaseUsage: {
+        ...DATABASE_USAGE,
+        memoryOutbox: { ...DATABASE_USAGE.memoryOutbox, ...outbox },
+      },
+    })
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.get('.ops__outbox-alert').text()).toContain('记忆待办箱需要关注')
+  })
+
+  it.each([
+    ['TIMEOUT', 'zh-CN', '数据库用量读取失败（超时）'],
+    ['UNAVAILABLE', 'en-US', 'Could not read database usage (unavailable)'],
+    [null, 'zh-CN', '数据库用量读取失败（不可用）'],
+  ] as const)('显示数据库读取失败原因 %s，保留运行状态', async (error, locale, expected) => {
+    i18n.global.locale.value = locale
+    adapter.fetchOpsStatus.mockResolvedValue({
+      ...STATUS,
+      databaseUsage: null,
+      databaseUsageError: error,
+    })
+    const wrapper = mountView()
+    await flushPromises()
+
+    const database = wrapper.get('[data-testid="ops-database"]')
+    expect(database.get('[role="status"]').text()).toBe(expected)
+    expect(database.find('progress').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="ops-runtime"]').exists()).toBe(true)
+  })
+
   it('shows the three budget levels, cost, cache, tool errors, p95 and Chat BI', async () => {
     const wrapper = mountView()
     await flushPromises()
@@ -177,7 +298,9 @@ describe('OpsStatusView', () => {
   })
 
   it('a read-only token still sees Chat BI and is told ops status needs the admin token', async () => {
-    adapter.fetchOpsStatus.mockRejectedValue(new AppError('FORBIDDEN', 'forbidden', { status: 403 }))
+    adapter.fetchOpsStatus.mockRejectedValue(
+      new AppError('FORBIDDEN', 'forbidden', { status: 403 }),
+    )
     const wrapper = mountView()
     await flushPromises()
 

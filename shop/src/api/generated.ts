@@ -2327,6 +2327,29 @@ export interface components {
             /** Degraded Reason */
             degraded_reason?: string | null;
         };
+        /** DatabaseUsage */
+        DatabaseUsage: {
+            /**
+             * Collected At
+             * Format: date-time
+             */
+            collected_at: string;
+            /** Database Size Bytes */
+            database_size_bytes: number;
+            /** Storage Limit Bytes */
+            storage_limit_bytes: number | null;
+            /** Storage Used Ratio */
+            storage_used_ratio: number | null;
+            /** Max Connections */
+            max_connections: number;
+            /** Connections Total */
+            connections_total: number;
+            /** Connections Active */
+            connections_active: number;
+            /** Top Tables */
+            top_tables: components["schemas"]["TableUsage"][];
+            memory_outbox: components["schemas"]["MemoryOutboxStatus"];
+        };
         /** DemoCustomerBindRequest */
         DemoCustomerBindRequest: Record<string, never>;
         /** DemoCustomerBindResponse */
@@ -2810,6 +2833,19 @@ export interface components {
          * @enum {string}
          */
         MemoryLayer: "FACT" | "SUMMARY";
+        /** MemoryOutboxStatus */
+        MemoryOutboxStatus: {
+            /** Pending */
+            pending: number;
+            /** Processing */
+            processing: number;
+            /** Failed */
+            failed: number;
+            /** Done */
+            done: number;
+            /** Oldest Pending Age Seconds */
+            oldest_pending_age_seconds: number | null;
+        };
         /**
          * MemoryPreferenceRequest
          * @description 关闭记忆须显式确认：条件必填，不是无条件必填。设置绝对状态，天然幂等。
@@ -3336,6 +3372,9 @@ export interface components {
             source_degraded_counts: {
                 [key: string]: number;
             };
+            database_usage: components["schemas"]["DatabaseUsage"] | null;
+            /** Database Usage Error */
+            database_usage_error: ("TIMEOUT" | "UNAVAILABLE") | null;
         };
         /**
          * OrderAfterSaleProjection
@@ -3867,6 +3906,15 @@ export interface components {
          * @enum {string}
          */
         SupportedLocale: "zh-CN" | "en-US";
+        /** TableUsage */
+        TableUsage: {
+            /** Table Name */
+            table_name: string;
+            /** Total Bytes */
+            total_bytes: number;
+            /** Estimated Rows */
+            estimated_rows: number | null;
+        };
         /** ThinkingStep */
         ThinkingStep: {
             /** Label */

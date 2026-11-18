@@ -486,6 +486,7 @@ N1 需要为会话、角色、订单/售后事件、库存、草稿审批与索�
 | `backend/app/localization/error_messages.py` | 稳定错误 `code` → 双语 `message` 的唯一渲染点 |
 | `backend/app/services/localization_service.py` | 受费用保护的批量本地化：按源语言等于目标 / 仅含受保护 token / 词典命中 / 人工译文命中 / 机器缓存命中 / LLM 批量调用级联；超预算降级为目标语言占位，不回落源语言 |
 | `backend/app/repositories/localization.py` | 机器译文缓存与资源级人工译文的纯数据访问，按 `merchant_id`/`GLOBAL` 强制隔离 |
+| `backend/app/repositories/database_usage.py` | 管理员运维看板的 PostgreSQL 只读采集，汇总逻辑大小、主要表、连接数及记忆待办箱状态 |
 | `backend/app/models/localization.py` | 两张隔离表的 ORM |
 | `backend/app/prompts/localization.py` | 批量翻译系统提示词，JSON-only，抵御源文本注入；`LOCALIZATION_PROMPT_VERSION` 是缓存键的一部分 |
 
@@ -616,6 +617,7 @@ Playwright glob 里 `?` 是单字符通配，查询串路由写 `conversations*`
 
 | 计划入口 | 当前用途 |
 | --- | --- |
+| `plans/2026-11-19-ops-database-usage.md` | 运维看板数据库用量。A 层使用 PostgreSQL 系统目录与待办箱聚合，B 层 Neon 管理 API 留待另行决定 |
 | `plans/2026-09-21-n1-module-roadmap.md` | **N1 总览**：模块 A–E 的划分、框架层、难度、依赖、出口标准与进度快照；不含实施步骤 |
 | `plans/2026-09-22-n2-module-roadmap.md` | **N2 总览**：模块 0 与 A–F（工具循环、交易闭环、草稿与库存、会话目录与反馈、商家端 Vue 迁移、顾客端 Next.js）的划分、依赖、难度、出口标准与已知缺口；不含实施步骤 |
 | `plans/2026-09-24-n3-module-roadmap.md` | **N3 总览**：阶段 0 与 A–C（A Skill 底座：加载器、`load_skill` 受信通道、草稿按种类分派；B 售后闭环与顾客 Skill，收口 S4；C 商家经营 Skill，收口 S2、S5、S6、S7）的划分、依赖、难度与出口标准；三份 N3 实施计划 `n3-skill-loader` / `n3-customer-skills-and-after-sales` / `n3-merchant-skills` 分别对应 A / B / C；不含实施步骤 |
@@ -655,7 +657,7 @@ N1 审查整改记录：`plans/2026-09-22-n1-review-remediation.md`。自动验�
 安全评测语言传递与真实错误响应验证见 `backend/tests/eval/test_security_locale.py`；
 实际被测对象登记、阶段配额和端点分层的反向验证见 `backend/tests/eval/test_security_gate_guards.py`。
 
-`plans/` **不是空目录**，当前有 54 份计划，其中 N1–N5 新路线实施计划 21 份（不含总览；含 2026-10-02 新增的 N5 阶段 E `2026-10-02-n5-single-entry.md`），W（商家工作台界面重设计）与 WS（顾客端店面重设计）实施计划各 1 份，另有 N1 总览 `2026-09-21-n1-module-roadmap.md`、N2 总览 `2026-09-22-n2-module-roadmap.md`、N3 总览 `2026-09-24-n3-module-roadmap.md`、N4 总览 `2026-09-27-n4-module-roadmap.md`、N5 总览 `2026-09-27-n5-module-roadmap.md`、N2 分工与审查排期 `2026-09-22-n2-assignment-and-review.md`、N3 分工与审查排期 `2026-09-24-n3-assignment-and-review.md`、N4 分工与审查排期 `2026-09-27-n4-assignment-and-review.md`、N5 分工与审查排期 `2026-09-27-n5-assignment-and-review.md` 各 1 份、
+`plans/` **不是空目录**，当前有 57 份计划，其中 N1–N5 新路线实施计划 21 份（不含总览；含 2026-10-02 新增的 N5 阶段 E `2026-10-02-n5-single-entry.md`），W（商家工作台界面重设计）与 WS（顾客端店面重设计）实施计划各 1 份，另有 N1 总览 `2026-09-21-n1-module-roadmap.md`、N2 总览 `2026-09-22-n2-module-roadmap.md`、N3 总览 `2026-09-24-n3-module-roadmap.md`、N4 总览 `2026-09-27-n4-module-roadmap.md`、N5 总览 `2026-09-27-n5-module-roadmap.md`、N2 分工与审查排期 `2026-09-22-n2-assignment-and-review.md`、N3 分工与审查排期 `2026-09-24-n3-assignment-and-review.md`、N4 分工与审查排期 `2026-09-27-n4-assignment-and-review.md`、N5 分工与审查排期 `2026-09-27-n5-assignment-and-review.md` 各 1 份、
 跨阶段审查清单 `2026-09-22-astra-checklist.md` 1 份；执行顺序与依赖见该总览与 `docs/project-progress.md` §四。其余为已完成或已登记状态的历史计划。开工前先查是否已有覆盖同一范围的计划。
 
 ---

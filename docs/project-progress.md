@@ -1,5 +1,11 @@
 # 项目进度快照
 
+> **2026-11-19 · N5 运维看板数据库用量已在本地完成。** 管理员打开或手动刷新看板时，可查看 PostgreSQL 逻辑大小、最大的十张公共表、连接数和记忆待办箱。配置 `DATABASE_STORAGE_LIMIT_BYTES` 后显示比例和 80% / 95% 两档告警。数据库用量采集失败时保留其他已取得的运维指标，卡片注明超时或不可用。计划见 `plans/2026-11-19-ops-database-usage.md`。
+>
+> **验证**：一次性本地 pgvector 库已回收。后端相关测试共 91 项通过（配置、管理员 API、权限及仓库集成 76 项，OpenAPI 契约 15 项），含真实锁等待超时、敏感字段及只读令牌拒绝。Ruff 与 mypy（356 个源文件）通过，未运行后端全量 pytest。商家端全量 Vitest 816 项通过（3 个 worker），运维页 Mock Chromium E2E 3 项通过，含英文切换及 375px 窄屏。商家端类型检查、构建、改动源码和 E2E 的 ESLint / Prettier、两端 codegen:check 均通过。
+>
+> **上线后待核对**：按需配置套餐上限，并在管理员看板与 Neon 控制台核对口径。逻辑大小与计费存储的统计范围不同，手动刷新可能唤醒休眠计算节点。本次未访问线上库、调用真实 LLM 或部署，N5 生产验收仍待完成。
+
 > **2026-10-14：补齐 PRD M5「下架进审批」，本地已实现，尚未提交或部署。** 新增草稿种类 `LISTING_STATUS` 与商家工具 `draft_listing_status`（`PAUSE` 下架 / `ACTIVATE` 重新上架，仅 `ONLINE ↔ OFFLINE`），商家在审批界面批准后生效；应用时按当前状态复检护栏，状态被并发改动返回 409；不开放给 MCP，无迁移。库存运营 Skill 文案、PRD M5、契约 §8.13、OpenAPI 与两端生成类型已同步；审批列表/详情显示「上下架」「在售 / 已下架」。方案见 `plans/2026-10-14-listing-status-draft.md`。
 >
 > **验证**：Fake LLM、空 Key、一次性 pgvector 容器（已删除）。后端 Ruff、mypy（329 文件）通过；相关单测 1490 passed，相关集成 68 passed；全量 4877 passed / 5 skipped / 10 errors，10 个 error 是运行时误加 `-p no:logging` 使 `caplog` 不可用，去掉该参数重跑涉及的 6 个文件 160 passed，**没有单次完整绿跑**。商家端 798 passed、typecheck、改动文件 ESLint、构建、codegen:check 通过；顾客端 141 passed、tsc、codegen:check 通过。两份语言文件的 Prettier 不一致是记忆面板段落既有问题，本次未改。未跑浏览器 E2E，未调用真实 LLM。

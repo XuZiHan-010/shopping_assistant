@@ -308,3 +308,17 @@ def test_blank_shop_origin_means_unset() -> None:
     settings = make_settings(shop_origin="  ")
     assert settings.shop_origin is None
     assert settings.cors_allowed_origins == [str(settings.frontend_origin).rstrip("/")]
+
+
+def test_database_storage_limit_defaults_to_none() -> None:
+    assert make_settings().database_storage_limit_bytes is None
+
+
+@pytest.mark.parametrize("limit", ["0", "-1"])
+def test_database_storage_limit_rejects_nonpositive_values(limit: str) -> None:
+    with pytest.raises(ValidationError, match="database_storage_limit_bytes"):
+        make_settings(database_storage_limit_bytes=limit)
+
+
+def test_blank_database_storage_limit_means_unset() -> None:
+    assert make_settings(database_storage_limit_bytes="").database_storage_limit_bytes is None

@@ -15,7 +15,9 @@ from app.api.dependencies import get_app_settings, get_database, require_admin_t
 from app.core.config import Settings
 from app.core.errors import error_responses
 from app.db.session import Database
+from app.repositories.database_usage import DatabaseUsageCollectionError, DatabaseUsageRepository
 from app.repositories.llm_budget import LlmBudgetRepository
+from app.schemas.ops import DatabaseUsage, DatabaseUsageError
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -62,6 +64,8 @@ class OpsStatusResponse(BaseModel):
     avg_turn_elapsed_ms_today: float | None
     degraded_reason_counts: dict[str, int]
     source_degraded_counts: dict[str, int]
+    database_usage: DatabaseUsage | None
+    database_usage_error: DatabaseUsageError | None
 
 
 _SHOP_LEVEL_LIMIT = 20
@@ -129,6 +133,15 @@ async def ops_status(
     turns = await repository.turn_stats(
         usage_date=usage_date, day_start=day_start, day_end=day_start + timedelta(days=1)
     )
+    database_usage_error: DatabaseUsageError | None = None
+    storage_limit = settings.database_storage_limit_bytes
+    try:
+        database_usage = await DatabaseUsageRepository(database).collect(storage_limit)
+        if storage_limit is not None:
+            database_usage.storage_used_ratio = database_usage.database_size_bytes / storage_limit
+    except DatabaseUsageCollectionError as exc:
+        database_usage = None
+        database_usage_error = exc.reason
     metrics = request.app.state.metrics
     return OpsStatusResponse(
         llm_tokens_used_today=snapshot.consumed_tokens,
@@ -168,4 +181,6 @@ async def ops_status(
         avg_turn_elapsed_ms_today=turns.avg_elapsed_ms,
         degraded_reason_counts=metrics.degraded_reason_counts,
         source_degraded_counts=metrics.source_degraded_counts,
+        database_usage=database_usage,
+        database_usage_error=database_usage_error,
     )
