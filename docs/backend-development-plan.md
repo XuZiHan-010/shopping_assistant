@@ -3666,7 +3666,7 @@ PostgreSQL 钉住的一条（`test_return_count_reads_returns_not_refunds`）。
 | --- | --- | --- |
 | `collected_at` | datetime | UTC 采集时刻 |
 | `database_size_bytes` | int≥0 | 当前数据库逻辑大小（字节） |
-| `storage_limit_bytes` | int>0 或 null | 可选配置 `DATABASE_STORAGE_LIMIT_BYTES` |
+| `storage_limit_bytes` | int>0 或 null | 可选配置 `DATABASE_STORAGE_LIMIT_BYTES`，默认 1073741824（看板按 1024 进制表示 1 GB），未设置或空白时使用默认值 |
 | `storage_used_ratio` | number 或 null | 逻辑大小除以上限，可超过 1。无上限时为 null |
 | `max_connections` | int≥0 | PostgreSQL 实例的连接上限 |
 | `connections_total`、`connections_active` | int≥0 | 本库在计算节点上的后端连接总数与活跃数 |

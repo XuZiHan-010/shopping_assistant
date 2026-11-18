@@ -32,7 +32,7 @@
 | --- | --- | --- |
 | D1 | 是否做 B 层（Neon API） | **先不做**。先确认 Neon 账号的套餐：免费套餐拿不到 v2 用量接口，做了也没有数据 |
 | D2 | 新开一个端点，还是扩展 `ops/status` | **扩展 `ops/status`**，只新增字段。新开路径要先改 PRD §11 与 AGENTS §8.1，代价更大 |
-| D3 | 存储上限从哪来 | 新增**可选**配置 `DATABASE_STORAGE_LIMIT_BYTES`（非密钥），按 Neon 套餐手填；不配置时只显示大小，不显示百分比 |
+| D3 | 存储上限从哪来 | 可选配置 `DATABASE_STORAGE_LIMIT_BYTES`（非密钥），按用户最新要求默认 1 GB（1073741824 字节，沿用看板 1024 进制），未设置或空白均使用默认值，可按套餐覆盖 |
 | D4 | 是否顺带显示记忆待办箱积压 | **显示**。查询便宜，而且是唯一能看出后台抽取是否卡住的地方 |
 
 下面按推荐方案写。裁定结果不同时，改对应任务即可。
@@ -55,7 +55,7 @@
 | --- | --- | --- |
 | `collected_at` | `datetime` | 采集时刻（UTC） |
 | `database_size_bytes` | `int≥0` | `pg_database_size(current_database())`，逻辑大小 |
-| `storage_limit_bytes` | `int>0 \| null` | 取自 `DATABASE_STORAGE_LIMIT_BYTES`，未配置时为 `null` |
+| `storage_limit_bytes` | `int>0 \| null` | 取自 `DATABASE_STORAGE_LIMIT_BYTES`，默认 1073741824；未设置或空白均使用默认值 |
 | `storage_used_ratio` | `number \| null` | `database_size_bytes / storage_limit_bytes`；没有上限时为 `null`，不显示成 0% |
 | `max_connections` | `int≥0` | `current_setting('max_connections')` |
 | `connections_total` / `connections_active` | `int≥0` | `pg_stat_activity` 中本库的连接总数与 `state='active'` 的连接数 |
@@ -85,9 +85,9 @@
 
 ### Task 2 · 后端配置
 
-- `backend/app/core/config.py`：新增 `database_storage_limit_bytes: int | None = Field(default=None, gt=0)`；
+- `backend/app/core/config.py`：新增 `database_storage_limit_bytes: int | None = Field(default=1024**3, gt=0)`；
 - `.env.example` 加占位注释（非密钥，可留空）；
-- 单测：未配置时为 `None`；配置成 0 或负数时启动失败。
+- 单测：未配置或空白时为 1073741824；支持正整数覆盖；配置成 0 或负数时启动失败。
 
 ### Task 3 · 后端仓库层
 

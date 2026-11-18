@@ -192,8 +192,8 @@ async def test_correct_token_returns_200_with_safe_payload(admin_app: FastAPI) -
     assert body["database_usage_error"] is None
     usage = body["database_usage"]
     assert usage["database_size_bytes"] > 0
-    assert usage["storage_limit_bytes"] is None
-    assert usage["storage_used_ratio"] is None
+    assert usage["storage_limit_bytes"] == 1024**3
+    assert usage["storage_used_ratio"] == pytest.approx(usage["database_size_bytes"] / 1024**3)
     url = make_url(admin_app.state.settings.database_url)
     for value in (url.host, url.username, url.database):
         assert value is not None

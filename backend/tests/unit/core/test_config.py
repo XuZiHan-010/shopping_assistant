@@ -310,8 +310,8 @@ def test_blank_shop_origin_means_unset() -> None:
     assert settings.cors_allowed_origins == [str(settings.frontend_origin).rstrip("/")]
 
 
-def test_database_storage_limit_defaults_to_none() -> None:
-    assert make_settings().database_storage_limit_bytes is None
+def test_database_storage_limit_defaults_to_one_gb() -> None:
+    assert make_settings().database_storage_limit_bytes == 1024**3
 
 
 @pytest.mark.parametrize("limit", ["0", "-1"])
@@ -320,5 +320,13 @@ def test_database_storage_limit_rejects_nonpositive_values(limit: str) -> None:
         make_settings(database_storage_limit_bytes=limit)
 
 
-def test_blank_database_storage_limit_means_unset() -> None:
-    assert make_settings(database_storage_limit_bytes="").database_storage_limit_bytes is None
+@pytest.mark.parametrize("value", ["", "  "])
+def test_blank_database_storage_limit_uses_default(value: str) -> None:
+    assert make_settings(database_storage_limit_bytes=value).database_storage_limit_bytes == 1024**3
+
+
+def test_database_storage_limit_can_be_overridden() -> None:
+    assert (
+        make_settings(database_storage_limit_bytes="2000000000").database_storage_limit_bytes
+        == 2_000_000_000
+    )
