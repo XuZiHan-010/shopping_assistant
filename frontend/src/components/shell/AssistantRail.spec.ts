@@ -229,6 +229,23 @@ describe('AssistantRail 助手栏', () => {
     expect(wrapper.get('.ops-view__log').text()).toContain('回答')
   })
 
+  it('助手回答里的 Markdown 表格渲染成表格；用户消息保持纯文本', async () => {
+    const { wrapper } = await mountRail({
+      [CHAT]: () =>
+        turnStream('c-1', '告警如下：\n\n| 商品 | 可售 |\n|---|---|\n| 粗陶手作咖啡杯 | 3 |'),
+      [LIST]: () => json(page([])),
+    })
+
+    await ask(wrapper, '**加粗**的提问 | a |')
+
+    const [userBubble, answerBubble] = wrapper.findAll('.ops-view__bubble')
+    expect(userBubble.find('strong').exists()).toBe(false)
+    expect(userBubble.text()).toContain('**加粗**的提问 | a |')
+    expect(answerBubble.find('table').exists()).toBe(true)
+    expect(answerBubble.text()).not.toContain('|---|')
+    expect(answerBubble.findAll('td').map((cell) => cell.text())).toEqual(['粗陶手作咖啡杯', '3'])
+  })
+
   it('头部「收起」按钮关闭助手栏', async () => {
     const { wrapper } = await mountRail({ [LIST]: () => json(page([])) })
 

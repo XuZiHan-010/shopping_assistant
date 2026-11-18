@@ -7,6 +7,7 @@
  * - 工具行只显示工具名与状态摘要；参数与结果不会出现在事件里，也不会渲染；
  * - 降级原因随回答展示，来源级降级逐条列出（R7）；
  * - 页面上的「问助手」、简报预填与「猜你想问」都只填入输入框，不代为发送（D18④）；
+ * - 助手回答按受控 Markdown 子集渲染（`AssistantMarkdown`，不用 `v-html`）；用户消息保持纯文本；
  * - 对话历史在头部「历史」面板里（新建、浏览、打开、删除），侧栏不放对话记录；
  * - 会话目录在第一次打开助手栏、且外壳已恢复出当前商家后才拉取——收起时不发请求，
  *   也不会在商家恢复之前抢着建会话；换商家后目录被会话态重置清空，打开着就重新拉。
@@ -19,6 +20,7 @@ import { computed, defineAsyncComponent, nextTick, onMounted, ref, watch } from 
 import { useI18n } from 'vue-i18n'
 
 import { MAX_HISTORY_MESSAGES } from '@/api/adapters/merchantConversations'
+import AssistantMarkdown from '@/components/opsChat/AssistantMarkdown.vue'
 import OpsConversationList from '@/components/opsChat/OpsConversationList.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useOpsChatStore } from '@/stores/opsChat'
@@ -244,7 +246,11 @@ watch(
             >
               {{ call.toolName }} · {{ call.summary }}
             </div>
-            <div v-if="message.text">{{ message.text }}</div>
+            <AssistantMarkdown
+              v-if="message.text && message.role === 'assistant'"
+              :text="message.text"
+            />
+            <div v-else-if="message.text">{{ message.text }}</div>
             <p v-if="message.turn?.envelope.degraded" class="ops-view__degraded" role="note">
               {{
                 t('opsAssistant.degraded', {
