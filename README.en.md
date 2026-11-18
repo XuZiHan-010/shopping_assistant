@@ -58,11 +58,11 @@ an MCP entry point, and an **evaluation suite that is layered and reports its fa
 | Topic | Approach | Evidence |
 | --- | --- | --- |
 | Agent loop | A purpose-built tool loop with hard caps on turns, tool calls, model calls and tokens; hitting a cap produces a visible degradation | At most 8 decision rounds / 16 tool calls / 12 model calls per turn |
-| Tools and skills | 26 tools split into role-specific tool surfaces; 12 skills (5 shopper, 7 merchant) loaded on demand instead of living in the prompt | First skill choice correct in 46/48 (real model) |
+| Tools and skills | 28 tools (10 shopper, 18 merchant) split into role-specific tool surfaces; 12 skills (5 shopper, 7 merchant) loaded on demand instead of living in the prompt | First skill choice correct in 46/48 (real model) |
 | Writes | Every merchant write starts as a **draft**, is approved by a person in the approval screen, and is re-checked against current state when applied; saying "approve" in chat does nothing | Concurrent approvals have one winner; repeat approvals have no second effect (deterministic tests) |
-| Retrieval | Keyword + vector (pgvector, local `bge-small-zh-v1.5`) fused with RRF; versioned index, atomic switch, no switch if quality regresses | Recall@5 0.759 → **0.907**; citation accuracy 85.19% → **90.74%** |
+| Retrieval | Keyword + vector (pgvector, local `bge-small-zh-v1.5`) fused with RRF; versioned index, atomic switch, no switch if quality regresses | Same-version Recall@5: keyword 0.833 → hybrid **0.907**; citation accuracy 85.19% → **90.74%** |
 | Memory | Extracted asynchronously through an outbox after the turn; shopper and merchant memory are isolated, and memory **cannot** ground a number in an answer | 5% wrong-write rate (2/40); 0 leaks across 10 sensitive-information lures |
-| Context compaction | Two strategies (tool-result pruning, summarisation) with identity, sources, draft versions and safety constraints kept as anchors | 100% structural retention (scripted model); with a real model only 13/24 kept their sources — **below target** |
+| Context compaction | Two strategies (tool-result pruning, summarisation) with identity, sources, draft versions and safety constraints kept as anchors | 100% structural retention (scripted model); with a real model, sources kept in 10/12 (default strategy) and 12/12 (summarisation) under grading v3; whether this meets the target is still open |
 | MCP | Read-only MCP server with its own short-lived, revocable credential scoped to one store and a set of tools | Integration test with a standard MCP client |
 | Security | 79 security cases as a hard gate: cross-tenant access, identity forgery, SQL injection, prompt injection, model self-approval | 79/79; a skipped case does not count as a pass |
 | Cost | Daily budgets at three levels (global / role / store), checked before the request is sent; versioned prices, cost recorded at write time | Zero upstream requests once a budget is exhausted |
@@ -243,13 +243,14 @@ Real-model results (DeepSeek `deepseek-flash`, October 2026):
 
 | Item | Result | Notes |
 | --- | --- | --- |
-| Hybrid retrieval Recall@5 / MRR | 0.759 → **0.907** / 0.639 → **0.802** | Against the keyword baseline; refusal rate unchanged at 0.90. Embeddings run locally at no model cost |
+| Retrieval Recall@5 / MRR | keyword 0.833 → hybrid **0.907** / 0.755 → **0.802** | Same-version comparison on 64 questions; refusal rate 0.90 for both. The original retrieval path was restricted to a single business domain and scored 0.093; the corrected keyword implementation scored 0.759. Thresholds were tuned on the same set. Embeddings run locally at no model cost |
 | RAG citation accuracy | 85.19% → **90.74%** | Faithfulness 98.15%, honest refusal 100%; 7 of the 9 failures are a retrieval miss followed by an honest refusal |
 | New loop vs frozen baseline | **6/6** vs 1/6 | Both generations on the six legacy capabilities they share |
 | First skill choice | 46/48 | Two cases asked a clarifying question first |
+| Intent recognition (frozen baseline) | 74/80 (92.5%) | Lenient grading; strict grading 70/80 (87.5%). 80 questions, single run; this measures the frozen baseline, not the new loop ([report](docs/history/eval/intent-accuracy-real-2026-10-08.md), in Chinese) |
 | Memory wrong-write rate | 5% (2/40) | Both from one multi-sentence correction case; 0 leaks across 10 sensitive lures |
-| v2 quality scenarios | **16/19** | 15/19 on a case-by-case human read, 16/19 after fixes and a targeted re-run; the automated judge also said 16/19, but two of the cases it passed were actually wrong |
-| Source retention after compaction | 13/24 | **Below target**: after compaction neither strategy fully restores source, as-of time and definition version |
+| v2 quality scenarios | judge 14/19 · review **18/19** | Re-run after the 2026-10-10 fixes, reviewed case by case (not an independent blind review). Of the 4 cases the judge got wrong, 2 were because every tool in the final response showed as "in progress" and 2 treated a guest using the cart as a privilege violation. The one real failure, a ¥1,000 outfit, passed a targeted re-run after a totals tool was added (single sample) ([report](docs/history/eval/real-retest-2026-10-10.md), in Chinese) |
+| Source retention after compaction | 10/12 · 12/12 | Grading v3, default pruning / summarisation; the 2 misses are turns where the model did not answer. Grading changed, so this is not comparable with the earlier 13/24; whether it meets the target is still open |
 
 Things the evaluation taught:
 
@@ -259,7 +260,12 @@ Things the evaluation taught:
   tells the model what to produce is invisible to automated tests. Prompt changes therefore come with a contract test that
   derives its expectations from the schema;
 - **A real model fails differently.** It did not know today's date, it treated the English duration "30 days" as an
-  ungrounded number, and a free-string tool argument with a wrong value silently returned zero rows.
+  ungrounded number, and a free-string tool argument with a wrong value silently returned zero rows;
+- **When the judge is wrong, check its evidence first.** Two answers were marked "dishonest about actions" because every
+  tool in the final response showed as "in progress"; the answers themselves were right;
+- **What a prompt cannot fix goes into code.** The outfit skill asked the model to budget by price, while the number check
+  rejects any number not found in tool results, so the model computed, got blocked and rewrote every time. With prompt
+  changes alone it still recommended an over-budget set; a read-only tool that computes totals in the backend fixed it.
 
 Reports and raw records are in [`docs/history/eval/`](docs/history/eval/) (in Chinese); the summary is
 [`n5-full-report.md`](docs/history/eval/n5-full-report.md).
@@ -408,16 +414,18 @@ The target topology is four Railway services plus an external PostgreSQL:
 | `shop` | `/shop` | Next.js standalone |
 | `cron` | `/backend` | Runs the dispatcher every 5 minutes: order timeouts, draft expiry, memory extraction, index rebuilds, demo data rolling |
 
-Configuration as code lives in each directory's `railway.json` and in `backend/railway.cron.json`; steps and environment
-variables are in [`docs/deployment.md`](docs/deployment.md) (in Chinese). Before a real model key goes onto a public
-deployment, rate limiting, the per-request cap and the daily budget breaker are verified on the public domain.
+Railway no longer enables configuration as code for newly created services, so the health checks, pre-deploy migration
+and cron schedule of the four current services are set in the console; each directory's `railway.json` and
+`backend/railway.cron.json` are for reference only. Steps and environment variables are in
+[`docs/deployment.md`](docs/deployment.md) (in Chinese). Before a real model key goes onto a public deployment, rate
+limiting, the per-request cap and the daily budget breaker are verified on the public domain.
 
-**Live demo (2026-10-08)**: the merchant workspace is at <https://shoppingassistant-production-001.up.railway.app>.
+**Live demo (2026-11-10)**: the merchant workspace is at <https://shoppingassistant-production-001.up.railway.app>.
 All four services are live. From the merchant workspace, the "Customer view" entry in the sidebar opens that shop's
-storefront in a new tab (<https://shoppingassistant-customer.up.railway.app/borough-demo-100> and two more demo shops). Both sides share one backend and one
+storefront in a new tab (<https://shop-production-ec76.up.railway.app/borough-demo-100> and two more demo shops). Both sides share one backend and one
 database: orders and after-sales requests placed by a customer show up on the merchant side. Sales metrics, products and
 stock are rolled forward daily by the scheduled job; orders, draft approvals and after-sales start empty and fill in as
-you use the demo.
+you use the demo. The assistants need a model key configured on the backend; without one they show a visible degraded notice.
 
 ## Repository layout
 
@@ -450,15 +458,18 @@ you use the demo.
 The project is delivered in five milestones, N1–N5. Acceptance checks for N1–N4 are complete (with open defects); N5 is
 implemented locally and its overall acceptance is not yet closed. Known and unresolved:
 
-- **The after-sales scenario has not yet run end to end with a real model**: the default compaction strategy prunes tool
-  results that are still needed later in the same turn;
-- An answer can come back empty when the tool-call cap is reached;
-- Shopper product search is not cross-lingual: English keywords do not find Chinese products;
-- Memory extraction mis-extracts a superseded fragment in one phrasing, the multi-sentence correction;
-- The after-sales documents in the platform rules library are thin, which limits what rule answers can cite;
+- Real-model evaluation samples are small and most were run once; an independent blind review and judge-versus-human
+  calibration have not been done;
+- The memory upgrade of 2026-10-13 (including the fix for mis-extracting a superseded fragment in a multi-sentence
+  correction) has been verified only with a scripted model and by replaying raw outputs from real runs, not re-tested
+  with a real model;
+- Every tool in the final response shows as "in progress", which affects both the UI and judge grading;
+- English shopper search relies on a fixed English-to-Chinese term list; English words outside the list still do not find Chinese products;
+- The "review criteria" chapter of the platform after-sales rules is a guideline written for the demo;
 - The budget breaker reserves a conservative estimate, so a single call can still slightly exceed the daily cap when
   upstream usage is higher than the reservation;
-- Performance benchmarks, confidence intervals for a randomised attack set, and judge-versus-human calibration have not been run.
+- Rate limiting, the per-request cap and the daily budget breaker have not been verified on the public domain, and
+  performance benchmarks and confidence intervals for a randomised attack set have not been run.
 
 Demo boundaries: the demo merchant and shopper are not real logins; payment and refund are simulated; attachments, OCR, a
 real user system, product variants and MCP write tools are out of scope for this version.
